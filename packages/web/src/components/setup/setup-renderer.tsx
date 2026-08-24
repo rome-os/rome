@@ -8,6 +8,7 @@
  */
 
 import { useId, useState, type ComponentType, type ReactElement } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { isElectronShell } from "@/lib/electron-shell";
+import { isInternalHref, toInternalPath } from "@/lib/internal-href";
 import type { SetupState, SetupView, SetupViewLink, SetupViewStep } from "@/lib/setup-api";
 
 /** Everything a renderer (standard or custom) needs. */
@@ -238,21 +241,37 @@ function StepList({ steps }: { steps?: SetupViewStep[] }): ReactElement | null {
   );
 }
 
-/** Labeled external links — shared by presented views and prompt-form preambles. */
+const SETUP_LINK_CLASS = "text-info-fg underline underline-offset-2";
+
+/**
+ * Labeled links — shared by presented views and prompt-form preambles.
+ *
+ * Payloads mix destinations: Telegram sends the guardian to t.me, LinkedIn to
+ * `/desktop`, this dashboard's own view of the browser Rome signs in through.
+ * A new tab is right for the first and right for the second in a browser, where
+ * the panel stays readable in the tab behind it.
+ *
+ * The Mac app has no tabs, and its shell hands every new-window request to
+ * Safari, which holds no Rome session — so there a link home arrives at a
+ * sign-in wall. Only that shell switches to in-app routing; a browser keeps the
+ * new tab it already opens.
+ */
 function LinkList({ links }: { links?: SetupViewLink[] }): ReactElement | null {
   if (!links || links.length === 0) return null;
+  const keepInApp = isElectronShell();
   return (
     <ul className="space-y-1 text-aux">
       {links.map((link) => (
         <li key={link.url}>
-          <a
-            href={link.url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-info-fg underline underline-offset-2"
-          >
-            {link.label}
-          </a>
+          {keepInApp && isInternalHref(link.url) ? (
+            <Link to={toInternalPath(link.url)} className={SETUP_LINK_CLASS}>
+              {link.label}
+            </Link>
+          ) : (
+            <a href={link.url} target="_blank" rel="noreferrer" className={SETUP_LINK_CLASS}>
+              {link.label}
+            </a>
+          )}
         </li>
       ))}
     </ul>

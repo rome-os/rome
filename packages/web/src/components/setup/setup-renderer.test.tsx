@@ -6,6 +6,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { SetupRenderer, type SetupRenderProps } from "@/components/setup/setup-renderer";
 import type { SetupState } from "@/lib/setup-api";
 
@@ -17,7 +18,15 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => {};
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  delete window.rome;
+});
+
+/** What `isElectronShell` reads: the desktop preload's bridge, absent in a browser. */
+function asDesktopApp() {
+  window.rome = {};
+}
 
 function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
   const props: SetupRenderProps = {
@@ -30,7 +39,13 @@ function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
     onRetry: vi.fn(),
     ...over,
   };
-  render(<SetupRenderer {...props} />);
+  // Both call sites live inside the dashboard's router, and an in-app setup
+  // link renders as a <Link>, which needs one.
+  render(
+    <MemoryRouter>
+      <SetupRenderer {...props} />
+    </MemoryRouter>,
+  );
   return props;
 }
 
@@ -165,5 +180,43 @@ describe("SetupRenderer custom registry", () => {
     );
     expect(screen.getByText("custom-discord-presenting")).toBeTruthy();
     expect(screen.queryByText("std")).toBeNull();
+  });
+});
+
+describe("setup view links", () => {
+  const view = {
+    title: "Sign in to LinkedIn in Rome's browser",
+    links: [
+      { label: "Open Rome's browser", url: "/desktop" },
+      { label: "Open @BotFather", url: "https://t.me/BotFather" },
+    ],
+  };
+
+  // Safari holds no Rome session, so a link home arrives at a sign-in wall.
+  it("routes an in-app link inside the Mac app instead of opening a tab", () => {
+    asDesktopApp();
+    renderState({ status: "presenting", view });
+
+    const link = screen.getByRole("link", { name: "Open Rome's browser" });
+    expect(link.getAttribute("target")).toBeNull();
+    expect(link.getAttribute("href")).toBe("/desktop");
+  });
+
+  it("still hands a remote link to the browser inside the Mac app", () => {
+    asDesktopApp();
+    renderState({ status: "presenting", view });
+
+    const link = screen.getByRole("link", { name: "Open @BotFather" });
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("href")).toBe("https://t.me/BotFather");
+  });
+
+  // A browser has tabs, and the panel stays readable in the one behind.
+  it("leaves both kinds opening a new tab in a browser", () => {
+    renderState({ status: "presenting", view });
+
+    for (const name of ["Open Rome's browser", "Open @BotFather"]) {
+      expect(screen.getByRole("link", { name }).getAttribute("target")).toBe("_blank");
+    }
   });
 });

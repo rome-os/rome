@@ -10,6 +10,7 @@ import {
   type MarkdownTheme,
 } from "@rome-os/ui/markdown";
 import { useTheme } from "../hooks/use-theme";
+import { isInternalHref, toInternalPath } from "../lib/internal-href";
 import type { ResolvedTheme, ThemeName } from "../lib/theme";
 
 export { MARKDOWN_LINK_CLASS };
@@ -92,31 +93,6 @@ export function getBuiltinMermaidTheme(
 ): MarkdownTheme | undefined {
   if (theme !== "ember" && theme !== "ash" && theme !== "slate") return undefined;
   return BUILTIN_MERMAID_THEMES[theme][resolved];
-}
-
-function isInternalHref(href: string | undefined): href is string {
-  if (!href) return false;
-  if (href.startsWith("/") && !href.startsWith("//")) return true;
-  if (href.startsWith("#") || href.startsWith("?")) return true;
-  if (typeof window !== "undefined") {
-    try {
-      const url = new URL(href, window.location.href);
-      return url.origin === window.location.origin;
-    } catch {
-      return false;
-    }
-  }
-  return false;
-}
-
-function toInternalPath(href: string): string {
-  if (href.startsWith("/") || href.startsWith("#") || href.startsWith("?")) return href;
-  try {
-    const url = new URL(href, window.location.href);
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return href;
-  }
 }
 
 // Web-dashboard Markdown uses the shared renderer, but keeps in-app hrefs on
