@@ -192,6 +192,14 @@ class UpdateManager {
   }
 
   async installUpdate(): Promise<UpdateStatus> {
+    // The state check alone does not make this idempotent: the first call
+    // leaves the state at "downloaded", so a second would reach
+    // quitAndInstall again. There are two ways in now — the automatic prompt
+    // and the menu's — and both can be on screen for one download.
+    if (this.installRequested) {
+      return this.getStatus();
+    }
+
     if (this.status.state !== "downloaded") {
       return this.setStatus({
         state: this.status.state,
@@ -310,17 +318,30 @@ class UpdateManager {
     });
   }
 
+  /**
+   * Visible, or nothing. A sheet is attached to a window, and this app hides
+   * its windows rather than closing them — so "a window exists" is a poor
+   * proxy for "the user can see the sheet". Falling through to a windowless
+   * dialog is the honest answer when everything is in the tray.
+   */
   private getDialogWindow(): BrowserWindow | undefined {
     const focused = BrowserWindow.getFocusedWindow();
-    if (focused && !focused.isDestroyed()) {
+    if (focused && !focused.isDestroyed() && focused.isVisible()) {
       return focused;
     }
-    return BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
+    return BrowserWindow.getAllWindows().find(
+      (window) => !window.isDestroyed() && window.isVisible(),
+    );
   }
 
   private showDialog(options: MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
     const window = this.getDialogWindow();
     return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  }
+
+  /** The menu's "Check for Updates…" reporting what a manual check found. */
+  showStatusDialog(options: MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+    return this.showDialog(options);
   }
 
   private refreshAutoUpdateSetting(): boolean {

@@ -126,10 +126,11 @@ export function setupTray(options: SetupTrayOptions): Tray {
       },
       { type: "separator" },
       {
-        // Accelerator is informational only — tray menus don't register
-        // global shortcuts. The real ⌘⇧Q binding lives in the app menu.
+        // No accelerator: tray menus cannot register shortcuts of their own,
+        // so one printed here only advertises a key. ⌘⇧Q used to be that key
+        // and no longer exists — the app menu's ⌘Q is the one quit, and it
+        // stops the agent on its way out.
         label: stopping ? "Stopping agent…" : "Stop agent and quit",
-        accelerator: "Shift+CmdOrCtrl+Q",
         enabled: !stopping,
         click: () => {
           if (tray) {

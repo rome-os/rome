@@ -11,6 +11,7 @@ import {
 import { registerIpcHandlers } from "./ipc";
 import { isQuitting, setupLifecycle } from "./lifecycle";
 import { setupUpdater, updateManager } from "./updater";
+import { RESTART_BUTTON, updateDialogFor } from "./update-dialog";
 import { setupTray } from "./tray";
 import { setupApplicationMenu } from "./menu";
 import { shouldReturnToDashboard } from "./startup-surface";
@@ -96,7 +97,16 @@ async function bootstrap() {
         }
       },
       () => createSettingsWindow(),
-      () => updateManager.checkForUpdates("manual"),
+      // The check only broadcasts a status, which nothing renders unless the
+      // settings window happens to be open — so from a menu the common
+      // "already up to date" answer arrived as silence.
+      async () => {
+        const status = await updateManager.checkForUpdates("manual");
+        const { response } = await updateManager.showStatusDialog(updateDialogFor(status));
+        if (status.state === "downloaded" && response === RESTART_BUTTON) {
+          await updateManager.installUpdate();
+        }
+      },
     );
     setupTray({
       getMainWindow: () => mainWindow,

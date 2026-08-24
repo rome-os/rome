@@ -110,9 +110,9 @@ export function setupLifecycle(options: SetupLifecycleOptions): void {
 }
 
 /**
- * Called from UI surfaces (Cmd+Q/app-menu Quit, tray "Stop agent and quit",
- * ⌘⇧Q accelerator) to start the full shutdown path. Idempotent — the
- * before-quit handler runs the actual shutdown.
+ * Called from UI surfaces (⌘Q / app-menu Quit, tray "Stop agent and quit") to
+ * start the full shutdown path. Idempotent — the before-quit handler runs the
+ * actual shutdown.
  */
 export function requestStopAndQuit(): void {
   quitting = true;

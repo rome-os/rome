@@ -1,5 +1,7 @@
-import { app, Menu, BrowserWindow } from "electron";
+import { app, Menu, BrowserWindow, shell } from "electron";
 import { requestStopAndQuit } from "./lifecycle";
+
+const DOCS_URL = "https://romeos.cc/docs/rome";
 
 export function setupApplicationMenu(
   showDashboard: () => void,
@@ -8,77 +10,80 @@ export function setupApplicationMenu(
 ): void {
   const isMac = process.platform === "darwin";
 
-  // Tray-resident model: red dot / ⌘W only hide windows. Cmd+Q and the
-  // explicit "Stop agent and quit" surfaces go through the real shutdown
-  // path. Closing the focused window invokes its `close` handler, which
-  // window.ts intercepts to hide unless lifecycle.isQuitting() is true.
-  const hideFocusedWindow = (): void => {
-    const focused = BrowserWindow.getFocusedWindow();
-    if (focused && !focused.isDestroyed()) {
-      focused.close();
-    }
-  };
-
-  const stopAndQuitItem: Electron.MenuItemConstructorOptions = {
-    label: "Stop agent and quit",
-    accelerator: "Shift+CmdOrCtrl+Q",
-    click: () => requestStopAndQuit(),
-  };
-
-  const hideWindowItem: Electron.MenuItemConstructorOptions = {
-    label: isMac ? "Close Window" : "Close",
-    accelerator: "CmdOrCtrl+W",
-    click: hideFocusedWindow,
-  };
-
+  // Tray-resident model: ⌘Q is the only quit, and it stops the agent on its
+  // way out. `role: "close"` closes the focused window, which window.ts
+  // intercepts and turns into a hide unless lifecycle.isQuitting() is true.
   const quitItem: Electron.MenuItemConstructorOptions = {
     label: "Quit Rome",
     accelerator: "CmdOrCtrl+Q",
     click: () => requestStopAndQuit(),
   };
 
+  const settingsItem: Electron.MenuItemConstructorOptions = {
+    label: "Settings…",
+    accelerator: "CmdOrCtrl+,",
+    click: () => openSettings(),
+  };
+
+  const checkForUpdatesItem: Electron.MenuItemConstructorOptions = {
+    label: "Check for Updates…",
+    click: () => {
+      void checkForUpdates();
+    },
+  };
+
   const template: Electron.MenuItemConstructorOptions[] = [
-    // App menu (macOS only)
+    // App menu (macOS only). Everything about the application itself: its
+    // version, its updates, and its own preferences — which is the desktop
+    // shell's settings window, not the dashboard's Settings page. The sidebar
+    // owns that one, and it is user-customisable, so no menu mirrors it.
     ...(isMac
       ? [
           {
             label: app.name,
             submenu: [
               { role: "about" as const },
+              checkForUpdatesItem,
               { type: "separator" as const },
-              {
-                label: "Settings…",
-                accelerator: "CmdOrCtrl+,",
-                click: () => openSettings(),
-              },
+              settingsItem,
+              { type: "separator" as const },
+              { role: "services" as const },
               { type: "separator" as const },
               { role: "hide" as const },
               { role: "hideOthers" as const },
               { role: "unhide" as const },
               { type: "separator" as const },
               quitItem,
-              stopAndQuitItem,
             ],
           } as Electron.MenuItemConstructorOptions,
         ]
       : []),
 
-    // File menu
+    // File menu. On macOS this is Electron's own `fileMenu` role spelled out:
+    // one Close. Not the role itself, because its non-mac branch is
+    // `role: "quit"`, which calls app.quit() directly and would skip stopping
+    // the runtime.
+    //
+    // Windows and Linux have no app menu, so what lives there on a Mac hangs
+    // here — unchanged from before this commit, since nothing builds for them.
     {
       label: "File",
       submenu: [
-        {
-          label: "Settings…",
-          accelerator: isMac ? undefined : "CmdOrCtrl+,",
-          click: () => openSettings(),
-        },
-        { type: "separator" },
-        hideWindowItem,
-        ...(isMac ? [] : [stopAndQuitItem]),
+        { role: "close" },
+        ...(isMac
+          ? []
+          : [
+              { type: "separator" as const },
+              settingsItem,
+              {
+                label: "Stop agent and quit",
+                accelerator: "Shift+CmdOrCtrl+Q",
+                click: () => requestStopAndQuit(),
+              } as Electron.MenuItemConstructorOptions,
+            ]),
       ],
     },
 
-    // Edit menu (standard copy/paste support)
     {
       label: "Edit",
       submenu: [
@@ -88,59 +93,52 @@ export function setupApplicationMenu(
         { role: "cut" },
         { role: "copy" },
         { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
         { role: "selectAll" },
       ],
     },
 
-    // View menu
+    // View menu. The dashboard entry is here rather than under Window because
+    // it navigates content — and because it is the only way back when a
+    // provider's OAuth page has taken over this frameless window.
     {
       label: "View",
       submenu: [
+        {
+          label: "Show Rome Dashboard",
+          accelerator: "CmdOrCtrl+Shift+D",
+          click: () => showDashboard(),
+        },
+        { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },
-        { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
         { role: "zoomOut" },
         { type: "separator" },
         { role: "togglefullscreen" },
-      ],
-    },
-
-    // Window menu
-    {
-      label: "Window",
-      submenu: [
-        { role: "minimize" },
-        { role: "zoom" },
         { type: "separator" },
-        // Carries an accelerator because this is the only way back when a
-        // provider's OAuth page has taken over the window: there is no back
-        // affordance to reach for, and a menu nobody thinks to open is not one.
-        {
-          label: "Web Dashboard",
-          accelerator: "CmdOrCtrl+Shift+D",
-          click: () => showDashboard(),
-        },
-        {
-          label: "Settings",
-          click: () => openSettings(),
-        },
-        ...(isMac ? [{ type: "separator" as const }, { role: "front" as const }] : []),
+        { role: "toggleDevTools" },
       ],
     },
 
-    // Help menu
+    // The role is what makes AppKit list the open windows; a hand-rolled
+    // Window menu gets minimize and zoom but never the list.
+    { role: "windowMenu" },
+
     {
-      label: "Help",
+      role: "help",
       submenu: [
         {
-          label: "Update Rome",
+          label: "Rome Help",
           click: () => {
-            void checkForUpdates();
+            void shell.openExternal(DOCS_URL);
           },
         },
+        // Updates move to the app menu on a Mac; without one they stay here.
+        ...(isMac ? [] : [checkForUpdatesItem]),
       ],
     },
   ];
