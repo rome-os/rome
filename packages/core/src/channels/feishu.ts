@@ -225,7 +225,8 @@ export class FeishuAdapter implements ProviderAdapter {
 
     // MVP: text-bearing messages only. Media-only messages arrive with empty
     // content and are dropped until attachment support lands.
-    const text = resolveMentions(m.content ?? "", m.mentions);
+    const resolvedText = resolveMentions(m.content ?? "", m.mentions);
+    const text = resolvedText || (m.rawContentType === "text" && m.mentionedBot ? "hello" : "");
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
     if (threadType === "group") {
