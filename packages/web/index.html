@@ -48,6 +48,40 @@
       }
     </style>
     <title>Rome</title>
+    <!-- Social card for links that leave the instance. `/share/:token` is a
+         login-free page built to be handed to people without accounts, and its
+         URL is the instance's own origin (ShareBar composes
+         `window.location.origin + share.url`) — so a shared chat pasted into a
+         chat app or a timeline is a link to `<slug>.romeos.cc`, which without
+         these renders as bare text.
+
+         Static, and identical on every instance: crawlers do not run the SPA, so
+         nothing React sets here would ever be seen, and per-chat titles would
+         have to be rendered server-side. The card carries Rome's own name and
+         nothing about the instance or its contents. The host is not repeated in
+         the title because every platform already renders it beside the card.
+
+         The image is the marketing site's, by absolute URL — instances have no
+         1200x630 asset of their own and copying one here would be a second
+         place to forget. It is datestamped, and rome-cloud renames it on every
+         swap so caches refetch, which makes this a link that a swap over there
+         breaks. A dead image costs the picture, not the card.
+
+         Each tag stays on ONE line even where that runs long. Rsbuild drops a
+         `<meta>` split across lines from the emitted HTML — the two description
+         tags vanished from dist/index.html that way, and nothing failed. Biome
+         ignores this file, so no formatter will rewrap them; a person might. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Rome" />
+    <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />
+    <meta property="og:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Rome OS - Enjoy your life with Rome" />
+    <meta name="twitter:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta name="twitter:image" content="https://romeos.cc/public-og-20260825.jpg" />
     <!-- Per-deployment browser config. Referenced unconditionally:
          the committed public/ copy is an empty stub for dev servers and host
          runs; the container-boot script overwrites it in the web root, which is
