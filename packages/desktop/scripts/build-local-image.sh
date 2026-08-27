@@ -27,6 +27,11 @@ docker build --platform "linux/$(uname -m | sed s/x86_64/amd64/)" \
   --build-arg "ROME_BUILD_SHA=$BUILD_SHA" \
   --build-arg "ROME_BUILD_TIME=$BUILD_TIME" \
   -t "$TAG" "$REPO_ROOT"
-docker save "$TAG" | "$LIMACTL" shell --workdir=/ rome nerdctl --namespace=rome load
+# `sudo`, because containerd in the guest runs as root under OpenRC. Without it
+# nerdctl takes the rootless path, looks for a socket under $XDG_RUNTIME_DIR
+# that is never there, and exits with "rootless containerd not running?" — after
+# the image has already built, so the failure costs a full rebuild to retry.
+# Every nerdctl call the app itself makes is sudo'd (runtime/providers/lima.ts).
+docker save "$TAG" | "$LIMACTL" shell --workdir=/ rome sudo nerdctl --namespace=rome load
 
 ROME_DESKTOP_IMAGE="$TAG" pnpm dev --filter=rome-desktop
