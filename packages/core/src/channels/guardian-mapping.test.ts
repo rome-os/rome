@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import {
@@ -18,7 +18,7 @@ describe("guardian channel mapping", () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     testDb.close();
   });
 
@@ -87,7 +87,7 @@ describe("guardian channel mapping", () => {
   it("maps the incoming account when the one it would re-canonicalize is gone", async () => {
     // The guardian read reports an account the database no longer holds — the
     // window between that read and the write, where a link write runs.
-    vi.spyOn(repo, "findByBondLevel").mockResolvedValue([
+    rs.spyOn(repo, "findByBondLevel").mockResolvedValue([
       { id: "guardian", channelMappings: [{ channel: "telegram", channelUserId: "tg-gone" }] },
     ] as unknown as Awaited<ReturnType<PersonMappingRepository["findByBondLevel"]>>);
 

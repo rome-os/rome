@@ -3,7 +3,7 @@
  * Pinned here as a pure function of (guardian row, env/instance inputs); the SPA
  * gate is a `switch (phase)` over its output, so this table is the contract.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { resolveBootstrapState, type BootstrapInputs } from "./bootstrap-state.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "./guardian-auth-state.js";
 import { guardianAuth } from "../db/schema.js";

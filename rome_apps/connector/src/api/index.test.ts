@@ -1,29 +1,31 @@
 import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as composioClientModule from "./composio-client.js" with { rstest: "importActual" };
+import * as composioLoginModule from "./composio-login.js" with { rstest: "importActual" };
+import * as composioWebhookModule from "./composio-webhook.js" with { rstest: "importActual" };
 
-const mocks = vi.hoisted(() => ({
-  ensureWebhookRegistered: vi.fn(),
-  readSessionApiKey: vi.fn(),
+const mocks = rs.hoisted(() => ({
+  ensureWebhookRegistered: rs.fn(),
+  readSessionApiKey: rs.fn(),
   client: {
-    ensureAuthConfig: vi.fn(),
-    ensureConnection: vi.fn(),
+    ensureAuthConfig: rs.fn(),
+    ensureConnection: rs.fn(),
   },
 }));
 
-vi.mock("./composio-login.js", async (importActual) => ({
-  ...(await importActual<typeof import("./composio-login.js")>()),
+rs.mock("./composio-login.js", () => ({
+  ...composioLoginModule,
   readSessionApiKey: mocks.readSessionApiKey,
 }));
 
-vi.mock("./composio-webhook.js", async (importActual) => ({
-  ...(await importActual<typeof import("./composio-webhook.js")>()),
+rs.mock("./composio-webhook.js", () => ({
+  ...composioWebhookModule,
   ensureComposioWebhookRegistered: mocks.ensureWebhookRegistered,
 }));
 
-vi.mock("./composio-client.js", async (importActual) => {
-  const actual = await importActual<typeof import("./composio-client.js")>();
+rs.mock("./composio-client.js", () => {
   return {
-    ...actual,
+    ...composioClientModule,
     ComposioClient: class {
       constructor() {
         return mocks.client;
@@ -36,7 +38,7 @@ import { createApiHandler } from "./index.js";
 
 describe("connector API webhook self-healing", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    rs.resetAllMocks();
     mocks.readSessionApiKey.mockResolvedValue("test-api-key");
     mocks.ensureWebhookRegistered.mockRejectedValue(new Error("relay unavailable"));
     mocks.client.ensureAuthConfig.mockResolvedValue("auth-config-1");
@@ -47,11 +49,11 @@ describe("connector API webhook self-healing", () => {
   });
 
   it("continues the OAuth connection when webhook self-healing fails", async () => {
-    const warn = vi.fn();
+    const warn = rs.fn();
     const ctx = {
       db: {},
       repositories: { settings: {} },
-      log: { warn, error: vi.fn(), info: vi.fn() },
+      log: { warn, error: rs.fn(), info: rs.fn() },
     } as unknown as RomeAppContext;
     const request = {
       method: "POST",

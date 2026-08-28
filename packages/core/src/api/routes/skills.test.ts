@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { Hono } from "hono";
 import { skillsRoutes } from "./skills.js";
 import { createTestDb, buildTestDeps } from "../../test/helpers.js";

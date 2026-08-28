@@ -11,7 +11,7 @@
 //      degrades the inbox grant (renew-once via setup-driven "re-confer").
 
 import { createHmac } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -54,7 +54,7 @@ function makeProvider(overrides: Partial<MailProvider> = {}): MailProvider & {
   const sent: SendMailInput[] = [];
   return {
     sent,
-    provision: vi.fn(async () => ({ address: ADDRESS, inboundSecret: INBOUND_SECRET })),
+    provision: rs.fn(async () => ({ address: ADDRESS, inboundSecret: INBOUND_SECRET })),
     send: async (input: SendMailInput): Promise<SendMailResult> => {
       sent.push(input);
       return { messageId: "m_out", threadId: "t_out" };

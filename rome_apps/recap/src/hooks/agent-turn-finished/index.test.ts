@@ -2,7 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   AgentMessage,
   AgentTurnFinishedEvent,
@@ -23,7 +23,7 @@ import {
 const ttsCalls: string[] = [];
 const ttsConfigs: Record<string, unknown>[] = [];
 
-vi.mock("node-edge-tts", () => {
+rs.mock("node-edge-tts", () => {
   return {
     EdgeTTS: class {
       constructor(config: Record<string, unknown>) {
@@ -131,7 +131,7 @@ describe("recap agent-turn-finished hook", () => {
     ttsCalls.length = 0;
     ttsConfigs.length = 0;
     tempDir = mkdtempSync(join(tmpdir(), "rome-recap-test-"));
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   afterEach(async () => {
@@ -230,13 +230,13 @@ describe("recap agent-turn-finished hook", () => {
       agentRunner: runner,
       webchatRecapRepo: repo,
       settingsRepo: {
-        get: vi.fn(async (key: string) => {
+        get: rs.fn(async (key: string) => {
           if (key === "recap.createAudio") return false;
           if (key === "recap.audioSpeed") return "normal";
           return "medium";
         }),
       },
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
     });
 
     await hook.onAgentTurnFinished(createEvent());
@@ -271,13 +271,13 @@ describe("recap agent-turn-finished hook", () => {
       agentRunner: runner,
       webchatRecapRepo: repo,
       settingsRepo: {
-        get: vi.fn(async (key: string) => {
+        get: rs.fn(async (key: string) => {
           if (key === "recap.createAudio") return false;
           if (key === "recap.audioSpeed") return "normal";
           return "medium";
         }),
       },
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
     });
 
     await hook.onAgentTurnFinished(
@@ -309,13 +309,13 @@ describe("recap agent-turn-finished hook", () => {
       agentRunner: createRunner(),
       webchatRecapRepo: repo,
       settingsRepo: {
-        get: vi.fn(async (key: string) => {
+        get: rs.fn(async (key: string) => {
           if (key === "recap.createAudio") return true;
           if (key === "recap.audioSpeed") return "faster";
           return "medium";
         }),
       },
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
     });
 
     await hook.onAgentTurnFinished(
@@ -352,13 +352,13 @@ describe("recap agent-turn-finished hook", () => {
       agentRunner: createRunner(),
       webchatRecapRepo: repo,
       settingsRepo: {
-        get: vi.fn(async (key: string) => {
+        get: rs.fn(async (key: string) => {
           if (key === "recap.createAudio") return true;
           if (key === "recap.audioSpeed") return "fastest";
           return "medium";
         }),
       },
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      logger: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
     });
 
     await hook.onAgentTurnFinished(

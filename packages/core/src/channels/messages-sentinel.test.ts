@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
 import { romeSessions, sentinelLog } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";

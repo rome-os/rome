@@ -1,5 +1,5 @@
 import { MessageReferenceType, MessageType } from "discord.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { resolveDiscordReplyToMessageId } from "./discord.js";
 
 describe("resolveDiscordReplyToMessageId", () => {

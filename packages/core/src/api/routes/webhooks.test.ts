@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { webhookRoutes } from "./webhooks.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
@@ -36,7 +36,7 @@ function buildApp(
   const apiKey = options.useDefault ? API_KEY : options.apiKey;
   const actionEngine = {
     ...deps.actionEngine,
-    run: vi.fn(async (name: string, args: Record<string, unknown>) => runImpl(name, args)),
+    run: rs.fn(async (name: string, args: Record<string, unknown>) => runImpl(name, args)),
   } as unknown as ApiDeps["actionEngine"];
 
   const app = new Hono();
@@ -65,7 +65,7 @@ describe("Webhooks API", () => {
 
   afterEach(() => {
     testDb.close();
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   describe("auth", () => {
@@ -140,7 +140,7 @@ describe("Webhooks API", () => {
     });
 
     it("accepts a valid invocation, persists it, and runs the action", async () => {
-      const runImpl = vi.fn(async () => ({ status: "ok", data: { echo: "ok" } }) as ActionResult);
+      const runImpl = rs.fn(async () => ({ status: "ok", data: { echo: "ok" } }) as ActionResult);
       const app = buildApp(baseDeps, runImpl);
 
       const res = await app.request("/webhooks/send_message", {
@@ -177,7 +177,7 @@ describe("Webhooks API", () => {
       // simulated here by driving the request inside a session-actor scope.
       const ambient: SessionActor = { kind: "guardian", userId: "seat-1", via: "cookie" };
       const capturedInRun: Promise<SessionActor | undefined>[] = [];
-      const runImpl = vi.fn(async () => {
+      const runImpl = rs.fn(async () => {
         capturedInRun.push(currentSessionActor());
         return { status: "ok" } as ActionResult;
       });

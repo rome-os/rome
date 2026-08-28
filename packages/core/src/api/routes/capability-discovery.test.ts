@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import {
   capabilityDiscoveryRoutes,
@@ -37,15 +37,15 @@ const EMPTY_PAYLOAD = { peers: [], desktopDetected: false, cdpRunning: false };
 
 describe("Capability-discovery API", () => {
   let app: Hono;
-  let fetchSpy: ReturnType<typeof vi.fn>;
+  let fetchSpy: ReturnType<typeof rs.fn>;
 
   beforeEach(() => {
     app = new Hono().route("/", capabilityDiscoveryRoutes(stubSource()));
-    fetchSpy = vi.spyOn(globalThis, "fetch") as unknown as ReturnType<typeof vi.fn>;
+    fetchSpy = rs.spyOn(globalThis, "fetch") as unknown as ReturnType<typeof rs.fn>;
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   describe("GET /capability-discovery", () => {

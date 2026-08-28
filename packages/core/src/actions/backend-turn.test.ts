@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ConversationRepository, TalkRouter } from "@rome-os/app-runtime";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
@@ -16,7 +16,7 @@ describe("backend turn delivery", () => {
         { type: "result", content: "The deferred check is complete." },
       ],
     ]);
-    const send = vi.fn(async (_connectionId, conversationId) => ({
+    const send = rs.fn(async (_connectionId, conversationId) => ({
       messageId: "wechat-message-1",
       conversationId,
     }));
@@ -26,11 +26,11 @@ describe("backend turn delivery", () => {
       subscribe: () => () => {},
       feature: () => null,
     };
-    const ensureChannelConversation = vi.fn(async () => ({
+    const ensureChannelConversation = rs.fn(async () => ({
       id: "channel:wechat:wechat-thread-1",
       agentName: null,
     }));
-    const recordOutboundMessage = vi.fn(async () => {});
+    const recordOutboundMessage = rs.fn(async () => {});
     const conversations = {
       ensureChannelConversation,
       recordOutboundMessage,

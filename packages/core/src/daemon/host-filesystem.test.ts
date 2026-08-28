@@ -1,26 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 
-const mkdirMock = vi.fn(async () => undefined);
-const readFileMock = vi.fn(async (_path: string, _encoding: string) => "");
-const writeFileMock = vi.fn(async () => undefined);
-const chmodMock = vi.fn(async () => undefined);
-const rmMock = vi.fn(async () => undefined);
-const symlinkMock = vi.fn(async () => undefined);
-const lstatMock = vi.fn(
+const mkdirMock = rs.fn(async () => undefined);
+const readFileMock = rs.fn(async (_path: string, _encoding: string) => "");
+const writeFileMock = rs.fn(async () => undefined);
+const chmodMock = rs.fn(async () => undefined);
+const rmMock = rs.fn(async () => undefined);
+const symlinkMock = rs.fn(async () => undefined);
+const lstatMock = rs.fn(
   async (_path: string): Promise<{ isSymbolicLink: () => boolean; isFile: () => boolean }> => ({
     isSymbolicLink: () => false,
     isFile: () => false,
   }),
 );
-const statMock = vi.fn(
+const statMock = rs.fn(
   async (_path: string): Promise<{ uid: number; gid: number }> => ({ uid: 1000, gid: 1000 }),
 );
-const unlinkMock = vi.fn(async () => undefined);
-const lchownMock = vi.fn(async () => undefined);
-const readlinkMock = vi.fn(async (_path: string) => "");
-const existsSyncMock = vi.fn((path: string) => path === "/home/rome/.rome/host-filesystem.json");
+const unlinkMock = rs.fn(async () => undefined);
+const lchownMock = rs.fn(async () => undefined);
+const readlinkMock = rs.fn(async (_path: string) => "");
+const existsSyncMock = rs.fn((path: string) => path === "/home/rome/.rome/host-filesystem.json");
 
-vi.mock("node:fs/promises", () => ({
+rs.mock("node:fs/promises", () => ({
   mkdir: mkdirMock,
   readFile: readFileMock,
   writeFile: writeFileMock,
@@ -34,13 +34,18 @@ vi.mock("node:fs/promises", () => ({
   readlink: readlinkMock,
 }));
 
-vi.mock("node:fs", () => ({
+rs.mock("node:fs", () => ({
   existsSync: existsSyncMock,
 }));
 
-vi.mock("node:os", () => ({
+rs.mock("node:os", () => ({
   homedir: () => "/home/rome",
 }));
+
+interface HostFilesystemManagerPrivateMethods {
+  runCommand(...args: unknown[]): Promise<void>;
+  isMounted(...args: unknown[]): Promise<boolean>;
+}
 
 describe("HostFilesystemManager", () => {
   const persistedConfig = {
@@ -62,8 +67,8 @@ describe("HostFilesystemManager", () => {
   };
 
   beforeEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
+    rs.resetModules();
+    rs.clearAllMocks();
 
     existsSyncMock.mockImplementation(
       (path: string) => path === "/home/rome/.rome/host-filesystem.json",
@@ -93,8 +98,10 @@ describe("HostFilesystemManager", () => {
 
   it("keeps an existing alias symlink when restore sees the expected mount target", async () => {
     const { HostFilesystemManager } = await import("./host-filesystem.js");
-    vi.spyOn(HostFilesystemManager.prototype as never, "runCommand").mockResolvedValue(undefined);
-    vi.spyOn(HostFilesystemManager.prototype as never, "isMounted").mockResolvedValue(false);
+    const prototype =
+      HostFilesystemManager.prototype as unknown as HostFilesystemManagerPrivateMethods;
+    rs.spyOn(prototype, "runCommand").mockResolvedValue(undefined);
+    rs.spyOn(prototype, "isMounted").mockResolvedValue(false);
 
     const manager = new HostFilesystemManager();
     await manager.restore();
@@ -114,8 +121,10 @@ describe("HostFilesystemManager", () => {
 
   it("preserves retained alias symlinks when reapplying the same config", async () => {
     const { HostFilesystemManager } = await import("./host-filesystem.js");
-    vi.spyOn(HostFilesystemManager.prototype as never, "runCommand").mockResolvedValue(undefined);
-    vi.spyOn(HostFilesystemManager.prototype as never, "isMounted").mockResolvedValue(false);
+    const prototype =
+      HostFilesystemManager.prototype as unknown as HostFilesystemManagerPrivateMethods;
+    rs.spyOn(prototype, "runCommand").mockResolvedValue(undefined);
+    rs.spyOn(prototype, "isMounted").mockResolvedValue(false);
 
     const manager = new HostFilesystemManager();
     await manager.restore();

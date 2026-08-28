@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { settingsRoutes } from "./settings.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
@@ -126,7 +126,7 @@ describe("Settings API", () => {
   // A guardianTimezone change must re-target floating routines.
   describe("guardianTimezone change re-activates floating routines", () => {
     it("re-activates when the timezone value actually changes", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
       await deps.settingsRepo.set(GUARDIAN_TIMEZONE_SETTING_KEY, "America/Los_Angeles");
 
       const res = await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "Asia/Tokyo" });
@@ -137,7 +137,7 @@ describe("Settings API", () => {
     });
 
     it("does not re-activate when the same timezone is re-saved", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
       await deps.settingsRepo.set(GUARDIAN_TIMEZONE_SETTING_KEY, "Asia/Tokyo");
 
       const res = await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "Asia/Tokyo" });
@@ -147,7 +147,7 @@ describe("Settings API", () => {
     });
 
     it("does not re-activate when an unrelated setting changes", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await putSettings(app, { theme: "dark" });
 
@@ -156,7 +156,7 @@ describe("Settings API", () => {
     });
 
     it("rejects an invalid guardianTimezone with 400, persisting nothing and not reactivating", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await putSettings(app, {
         [GUARDIAN_TIMEZONE_SETTING_KEY]: "Pacific Time",
@@ -171,7 +171,7 @@ describe("Settings API", () => {
     });
 
     it("trims and canonicalizes a valid guardianTimezone before persisting", async () => {
-      vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "  Asia/Tokyo  " });
 
@@ -180,7 +180,7 @@ describe("Settings API", () => {
     });
 
     it("clears guardianTimezone on a blank value, deleting the setting and reactivating", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
       await deps.settingsRepo.set(GUARDIAN_TIMEZONE_SETTING_KEY, "Asia/Tokyo");
 
       const res = await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "" });
@@ -192,7 +192,7 @@ describe("Settings API", () => {
     });
 
     it("clearing an already-unset guardianTimezone is a no-op", async () => {
-      const spy = vi.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+      const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: null });
 

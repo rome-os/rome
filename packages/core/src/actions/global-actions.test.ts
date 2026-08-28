@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { ActionRegistryImpl } from "./registry.js";
 import { validateGlobalActions } from "./global-actions.js";
 import type { Action } from "./types.js";

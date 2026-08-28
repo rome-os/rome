@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { AppServerClientOptions } from "./app-server-client.js";
 import {
   CodexAppServerManager,
@@ -177,7 +177,7 @@ describe("CodexAppServerManager", () => {
         return client;
       },
     });
-    const loginCompleted = vi.fn();
+    const loginCompleted = rs.fn();
     const unsubscribe = manager.onNotification("account/login/completed", loginCompleted);
 
     await Promise.all([
@@ -225,7 +225,7 @@ describe("CodexAppServerManager", () => {
       },
     });
     const callbacks = binding("source");
-    const globalExit = vi.fn();
+    const globalExit = rs.fn();
     manager.onExit(globalExit);
     const threadId = await manager.openThread(config("rome_source"), callbacks);
 

@@ -1,10 +1,11 @@
 import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as progressModule from "../db/repositories/progress.js" with { rstest: "importActual" };
 
-const mocks = vi.hoisted(() => ({ reset: vi.fn() }));
+const mocks = rs.hoisted(() => ({ reset: rs.fn() }));
 
-vi.mock("../db/repositories/progress.js", async (importActual) => ({
-  ...(await importActual<typeof import("../db/repositories/progress.js")>()),
+rs.mock("../db/repositories/progress.js", () => ({
+  ...progressModule,
   createProgressRepository: () => ({ reset: mocks.reset }),
 }));
 
@@ -15,10 +16,10 @@ function createContext(): RomeAppContext {
     app: { id: "welcome-to-rome", version: "0.1.0", description: "Welcome" },
     controller: {},
     db: {} as never,
-    log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    repositories: { settings: { get: vi.fn(), set: vi.fn(async () => undefined) } },
-    runAction: vi.fn(),
-    listRoutines: vi.fn(),
+    log: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
+    repositories: { settings: { get: rs.fn(), set: rs.fn(async () => undefined) } },
+    runAction: rs.fn(),
+    listRoutines: rs.fn(),
   };
 }
 

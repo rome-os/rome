@@ -12,7 +12,7 @@
 // mutation lands its write last and wins, contradicting later-issued-wins /
 // splits memory from the ledger) and green with it.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import type { GrantLedger, GrantRecord } from "./ledger.js";

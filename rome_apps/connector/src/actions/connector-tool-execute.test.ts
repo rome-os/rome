@@ -1,16 +1,17 @@
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
+import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
 // Composio is the external system here; fake the connector client so the
 // tool-result mapping can be exercised as a black box (given a provider
 // response, assert the action result), without a live Composio account.
-const loadConnectorClient = vi.fn();
+const loadConnectorClient = rs.fn();
 // Keep the real shared helpers (ROME_USER_ID, isRomeManagedToolkit,
 // romeManagedConnectHint, …) and fake only the Composio client — so the action's
 // real Rome-managed routing is exercised and adding a shared export can't silently
 // leave it undefined here.
-vi.mock("../shared.js", async (importActual) => ({
-  ...(await importActual<typeof import("../shared.js")>()),
+rs.mock("../shared.js", () => ({
+  ...sharedModule,
   loadConnectorClient: () => loadConnectorClient(),
 }));
 

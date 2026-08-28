@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { feedbackRoutes } from "./feedback.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
@@ -17,9 +17,9 @@ describe("POST /api/feedback", () => {
   const relayCalls: RelayCall[] = [];
 
   function stubRelay(impl: (call: RelayCall) => Response | Promise<Response>) {
-    vi.stubGlobal(
+    rs.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const call: RelayCall = {
           url: String(input),
           headers: new Headers(init?.headers),
@@ -42,7 +42,7 @@ describe("POST /api/feedback", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     setInstanceTokenInMemory(null);
     delete process.env.PANTHEON_BASE_ORIGIN;
     testDb.close();

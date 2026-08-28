@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import {
   upgradeWebSocket,
   type RomeAppApiRequest,
@@ -26,7 +26,7 @@ describe("upgradeWebSocket", () => {
 
   it("delegates to the host-injected accept bridge and returns its response", () => {
     const sentinel = new Response(null, { status: 200 });
-    const accept = vi.fn((_h: RomeAppWebSocketHandlers) => sentinel);
+    const accept = rs.fn((_h: RomeAppWebSocketHandlers) => sentinel);
     const handlers: RomeAppWebSocketHandlers = { message() {} };
 
     const res = upgradeWebSocket(makeRequest({ [WS_UPGRADE_ACCEPT]: accept }), handlers);

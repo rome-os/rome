@@ -79,7 +79,7 @@ shell therefore do not silently affect tests.
 
 The wrapper preserves only `PATH`, `HOME`, and the platform temporary-directory
 variables. It fixes `NODE_ENV=test`, `TZ=UTC`, and the locale to `C`. It also
-preserves the presence of `CI` and `GITHUB_ACTIONS`, which Vitest uses to reject
+preserves the presence of `CI` and `GITHUB_ACTIONS`, which test runners use to reject
 focused tests and emit workflow annotations. Non-interactive output is fixed to
 no-color mode; interactive watch runs retain their terminal presentation.
 Additions to this allowlist should be explicit and covered by
@@ -95,7 +95,7 @@ To provide configuration to a deliberately environment-backed test, set it
 inside the scrubbed process rather than on the outer `pnpm` command:
 
 ```bash
-scripts/test-env.sh env TEST_DATABASE_URL=postgres://... pnpm exec vitest run path/to/example.integration.test.ts
+scripts/test-env.sh env TEST_DATABASE_URL=postgres://... pnpm exec rstest -c packages/core/rstest.config.ts path/to/example.integration.test.ts
 ```
 
 The launcher requires a POSIX shell and supports the project's macOS and Linux

@@ -1,14 +1,14 @@
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 // Mock the process + fs surface composio-cli.ts touches so the login/logout
 // ceremony can be driven deterministically. (Kept in a separate file from
 // composio-cli.test.ts, whose executableExistsOnPath test needs the real fs.)
-const cp = vi.hoisted(() => ({ spawn: vi.fn(), execFile: vi.fn() }));
-vi.mock("node:child_process", () => ({ spawn: cp.spawn, execFile: cp.execFile }));
+const cp = rs.hoisted(() => ({ spawn: rs.fn(), execFile: rs.fn() }));
+rs.mock("node:child_process", () => ({ spawn: cp.spawn, execFile: cp.execFile }));
 
-const fsp = vi.hoisted(() => ({ readFile: vi.fn(), stat: vi.fn(), access: vi.fn() }));
-vi.mock("node:fs/promises", () => ({
+const fsp = rs.hoisted(() => ({ readFile: rs.fn(), stat: rs.fn(), access: rs.fn() }));
+rs.mock("node:fs/promises", () => ({
   readFile: fsp.readFile,
   stat: fsp.stat,
   access: fsp.access,
@@ -21,7 +21,7 @@ const LOGIN_URL = "https://dashboard.composio.dev/?cliKey=abc-00000000-0000-4000
 interface FakeChild extends EventEmitter {
   stdout: EventEmitter;
   stderr: EventEmitter;
-  kill: ReturnType<typeof vi.fn>;
+  kill: ReturnType<typeof rs.fn>;
 }
 
 function makeChild(): FakeChild {
@@ -29,7 +29,7 @@ function makeChild(): FakeChild {
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   // Killing a child (how logout tears the ceremony down) makes it exit.
-  child.kill = vi.fn(() => {
+  child.kill = rs.fn(() => {
     queueMicrotask(() => child.emit("exit", null));
     return true;
   });

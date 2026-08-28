@@ -6,7 +6,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BufferJSON, initAuthCreds } from "@whiskeysockets/baileys";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   createWhatsAppAuthState,
   readWhatsAppAuthStateFromDirectory,

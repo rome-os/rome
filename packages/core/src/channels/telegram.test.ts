@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { InputFile } from "grammy";
 import { TelegramAdapter } from "./telegram.js";
 import { FakeTelegramApi } from "../test/kit/fake-telegram.js";
@@ -22,17 +22,17 @@ describe("TelegramAdapter", () => {
   let sandboxHome: string;
 
   beforeEach(async () => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     sandboxHome = await mkdtemp(join(tmpdir(), "rome-telegram-"));
-    vi.stubEnv("HOME", sandboxHome);
-    vi.stubEnv("ROME_PROFILE", "telegram-test");
+    rs.stubEnv("HOME", sandboxHome);
+    rs.stubEnv("ROME_PROFILE", "telegram-test");
     telegram = new FakeTelegramApi();
     adapter = new TelegramAdapter({ botToken: "test-token" }, telegram.createBot);
   });
 
   afterEach(async () => {
     await adapter.stop().catch(() => {});
-    vi.unstubAllEnvs();
+    rs.unstubAllEnvs();
     await rm(sandboxHome, { recursive: true, force: true });
   });
 
@@ -321,9 +321,9 @@ describe("TelegramAdapter", () => {
     it("downloads Telegram bot attachments through the size-limited reader", async () => {
       const body = Buffer.from("image-data");
       telegram.addFile("file-id", "photos/photo.jpg");
-      vi.stubGlobal(
+      rs.stubGlobal(
         "fetch",
-        vi.fn(async () => {
+        rs.fn(async () => {
           return new Response(body, {
             status: 200,
             headers: { "content-type": "image/jpeg" },

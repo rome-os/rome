@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { appsRoutes, deriveAppProjectPath } from "./apps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
@@ -409,7 +409,7 @@ describe("GET /apps/events", () => {
 
       const sse = sseReader(res);
       // The handler subscribes asynchronously once the stream callback runs.
-      await vi.waitFor(() => expect(subscriberCount()).toBe(1));
+      await rs.waitFor(() => expect(subscriberCount()).toBe(1));
 
       // Fire a change whose `current` carries full resolved manifest/asset data
       // to prove none of it reaches the wire — only { appId, change } does.
@@ -453,11 +453,11 @@ describe("GET /apps/events", () => {
         headers: { Cookie: guardianCookie() },
       });
       const sse = sseReader(res);
-      await vi.waitFor(() => expect(subscriberCount()).toBe(1));
+      await rs.waitFor(() => expect(subscriberCount()).toBe(1));
 
       await sse.cancel();
 
-      await vi.waitFor(() => expect(subscriberCount()).toBe(0));
+      await rs.waitFor(() => expect(subscriberCount()).toBe(0));
     } finally {
       testDb.close();
     }

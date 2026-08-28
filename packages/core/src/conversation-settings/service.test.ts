@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ConversationDescriptor,
   ConversationId,
@@ -54,7 +54,7 @@ describe("ConversationSettingsService", () => {
 
   afterEach(() => testDb?.close());
 
-  async function setup(onChanged = vi.fn()) {
+  async function setup(onChanged = rs.fn()) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(
@@ -492,7 +492,7 @@ describe("ConversationSettingsService", () => {
 
   it("serializes concurrent writers per conversation", async () => {
     let releaseFirst!: () => void;
-    const onChanged = vi.fn(
+    const onChanged = rs.fn(
       () =>
         new Promise<void>((resolve) => {
           if (onChanged.mock.calls.length === 1) releaseFirst = resolve;
@@ -507,7 +507,7 @@ describe("ConversationSettingsService", () => {
       clear: [],
       actor: { kind: "guardian", id: "first" },
     });
-    await vi.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    await rs.waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     const second = service.update({
       ref: parent,
       set: { enabled: true },
@@ -591,8 +591,8 @@ describe("ConversationSettingsService", () => {
       },
       { settings: null, agentName: null },
     );
-    const find = vi.spyOn(repository, "find");
-    const listKnown = vi.spyOn(repository, "listKnown");
+    const find = rs.spyOn(repository, "find");
+    const listKnown = rs.spyOn(repository, "listKnown");
     const service = new ConversationSettingsService({
       repository,
       connections: registry,

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { normalizeAskQuestionForCard, buildFacadeBundle } from "./mcp-facade.js";
 
 const single = (options: unknown) => ({

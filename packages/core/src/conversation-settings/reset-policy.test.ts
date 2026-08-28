@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { assertProviderSessionResetPolicy, evaluateProviderSessionReset } from "./reset-policy.js";
 
 describe("provider session reset policy", () => {

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 // getBuildInfo caches at module scope, so each case re-imports the module fresh
 // after setting the environment it should observe.
 async function freshGetBuildInfo() {
-  vi.resetModules();
+  rs.resetModules();
   const mod = await import("./build-info.js");
   return mod.getBuildInfo();
 }

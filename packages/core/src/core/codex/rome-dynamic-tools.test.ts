@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeMcpGroup, RomeMcpServer } from "../mcp/server.js";
 import { createRomeDynamicToolsFromServer } from "./rome-dynamic-tools.js";
 
@@ -11,7 +11,7 @@ function fakeServer(definitions: Partial<Record<RomeMcpGroup, readonly string[]>
         inputSchema: { type: "object", properties: {} },
       }));
     },
-    callTool: vi.fn(async (_group, name) => ({
+    callTool: rs.fn(async (_group, name) => ({
       content: [{ type: "text" as const, text: `${name} result` }],
       isError: name === "submit_output",
     })),

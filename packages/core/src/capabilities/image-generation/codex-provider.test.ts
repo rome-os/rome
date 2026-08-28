@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { AgentMessage, AgentRunnerInterface } from "@rome-os/app-runtime";
 import {
   createCodexImageGenerationProvider,
@@ -11,11 +11,11 @@ const PNG_BASE64 =
 
 function makeRunner(
   messages: AgentMessage[],
-): AgentRunnerInterface & { run: ReturnType<typeof vi.fn> } {
-  const run = vi.fn(async function* () {
+): AgentRunnerInterface & { run: ReturnType<typeof rs.fn> } {
+  const run = rs.fn(async function* () {
     for (const message of messages) yield message;
   });
-  return { run } as unknown as AgentRunnerInterface & { run: ReturnType<typeof vi.fn> };
+  return { run } as unknown as AgentRunnerInterface & { run: ReturnType<typeof rs.fn> };
 }
 
 function imageResult(output: unknown): AgentMessage {
@@ -212,7 +212,7 @@ describe("createCodexImageGenerationProvider", () => {
     });
 
     it("maps a thrown resolution failure to an unavailable result", async () => {
-      const run = vi.fn(async function* (): AsyncGenerator<AgentMessage> {
+      const run = rs.fn(async function* (): AsyncGenerator<AgentMessage> {
         throw new Error("Selected model provider is unavailable: Codex (ChatGPT)");
       });
       const provider = createCodexImageGenerationProvider({
@@ -226,7 +226,7 @@ describe("createCodexImageGenerationProvider", () => {
     });
 
     it("maps an unrelated thrown error to a failed result", async () => {
-      const run = vi.fn(async function* (): AsyncGenerator<AgentMessage> {
+      const run = rs.fn(async function* (): AsyncGenerator<AgentMessage> {
         throw new Error("worker crashed");
       });
       const provider = createCodexImageGenerationProvider({

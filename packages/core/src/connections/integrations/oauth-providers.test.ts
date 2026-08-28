@@ -13,20 +13,20 @@
 //      refresh exchange yet), so the grant degrades until the guardian
 //      reconnects.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The descriptor's custody hook writes the tmpfs token file + spawns `gh` off
 // every authorized/revoke transition. These tests exercise grant state, not
 // custody, so stub both custody libs to keep them off the real disk / `gh`
 // binary (which would clobber a developer's real gh auth on revoke). Custody
 // firing itself is covered in registry-lifecycle.test.ts.
-vi.mock("../../lib/github-shell-integration.js", () => ({
-  syncGithubShellIntegrationForProvider: vi.fn(async () => {}),
-  clearGithubShellIntegrationForProvider: vi.fn(async () => {}),
+rs.mock("../../lib/github-shell-integration.js", () => ({
+  syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
+  clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-vi.mock("../../lib/provider-token-files.js", () => ({
-  syncProviderTokenFile: vi.fn(async () => {}),
-  clearProviderTokenFile: vi.fn(async () => {}),
+rs.mock("../../lib/provider-token-files.js", () => ({
+  syncProviderTokenFile: rs.fn(async () => {}),
+  clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
@@ -139,7 +139,7 @@ describe.each(
   CASES,
 )("OAuth connection-state descriptor [%s, drizzle ledger]", (provider, grant, material) => {
   afterEach(() => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     while (openDbs.length) openDbs.pop()?.();
   });
 

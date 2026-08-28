@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { visitorAuthRoutes, type VisitorAuthSeams } from "./visitor-auth.js";
 import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../lib/auth.js";

@@ -8,7 +8,7 @@
 // to this generic surface.
 
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
@@ -32,8 +32,8 @@ afterEach(() => {
 
 function fakePersonMappingRepo(): PersonMappingRepository {
   return {
-    deleteGuardianChannelMappings: vi.fn(),
-    writeDeleteGuardianChannelMappings: vi.fn(),
+    deleteGuardianChannelMappings: rs.fn(),
+    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
 
@@ -438,7 +438,7 @@ describe("DELETE /connections/:id", () => {
     const fixture = makePasteTalkWithProfile();
     const personMappingRepo = fakePersonMappingRepo();
     (
-      personMappingRepo.writeDeleteGuardianChannelMappings as ReturnType<typeof vi.fn>
+      personMappingRepo.writeDeleteGuardianChannelMappings as ReturnType<typeof rs.fn>
     ).mockImplementation(() => {
       throw new Error("mapping cleanup boom");
     });

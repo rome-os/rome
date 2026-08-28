@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { createFetchRecorder } from "../test/kit/index.js";
 import { createRomeCloudListingClient } from "./rome-cloud-listing-client.js";
 

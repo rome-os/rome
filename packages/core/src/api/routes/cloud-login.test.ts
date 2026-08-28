@@ -24,7 +24,7 @@
  *   - flag off: start and callback both 404.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import jwt from "jsonwebtoken";
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";

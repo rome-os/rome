@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 import { createModelResolver, ENABLE_FABLE_SETTING_KEY } from "./model-resolver.js";
@@ -207,7 +207,7 @@ describe("ModelResolver", () => {
       claude: { loggedIn: true, quotaExhausted: false },
     };
     let finishRefresh!: () => void;
-    const refresh = vi.fn(
+    const refresh = rs.fn(
       () =>
         new Promise<AIToolStateValue>((resolve) => {
           finishRefresh = () => resolve(value);
@@ -319,7 +319,7 @@ describe("ModelResolver", () => {
       // The other provider is fully usable — an exact request must not substitute it.
       claude: { loggedIn: true, quotaExhausted: false },
     };
-    const refresh = vi.fn(async () => value);
+    const refresh = rs.fn(async () => value);
     const r = createModelResolver({
       providers: [claude, codex],
       aiToolState: { get: () => value, refresh },

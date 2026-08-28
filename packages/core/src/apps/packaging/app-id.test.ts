@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { appIdToPathSegment, assertValidAppId, isValidAppId } from "./app-id.js";
 import { parseAppManifest, requireManifestId } from "./manifest.js";
 

@@ -3,7 +3,7 @@
 // `setup(interact, ctx)` coroutine and observing the poll-able state. No test
 // reaches into the pump's internals.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "./session.js";
 import type { SetupConferral, SetupFn } from "./types.js";
 
@@ -47,7 +47,7 @@ describe("SetupSession", () => {
       seen.push(answers);
       return { credential: CRED };
     };
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
     await session.started();
     const outcome = await session.provideInput({ token: "abc" });
@@ -105,7 +105,7 @@ describe("SetupSession", () => {
 
   it("runs commit exactly once with the returned conferral, and only then reports done", async () => {
     const commitGate = deferred<void>();
-    const commit = vi.fn(async (_conferral: SetupConferral, _signal: AbortSignal) => {
+    const commit = rs.fn(async (_conferral: SetupConferral, _signal: AbortSignal) => {
       await commitGate.promise;
     });
     const conferral: SetupConferral = {
@@ -137,7 +137,7 @@ describe("SetupSession", () => {
   });
 
   it("interrupts an in-flight ctx.step wait on cancel and runs no commit", async () => {
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     let stepSignal: AbortSignal | undefined;
     const neverResolves = deferred<void>();
     const fn: SetupFn = async (interact, ctx) => {
@@ -161,7 +161,7 @@ describe("SetupSession", () => {
   });
 
   it("cancels a coroutine suspended at prompt, running no commit", async () => {
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const fn: SetupFn = async (interact) => {
       await interact.prompt({ fields: [{ name: "token", label: "Token", secret: true }] });
       return { credential: CRED };
@@ -187,7 +187,7 @@ describe("SetupSession", () => {
   });
 
   it("fails the setup (no cancelled state) when commit throws", async () => {
-    const commit = vi.fn(async () => {
+    const commit = rs.fn(async () => {
       throw new Error("ledger write failed");
     });
     const fn: SetupFn = async (interact) => {

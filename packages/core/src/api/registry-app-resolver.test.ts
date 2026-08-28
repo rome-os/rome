@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { createRegistryAppResolver } from "./registry-app-resolver.js";

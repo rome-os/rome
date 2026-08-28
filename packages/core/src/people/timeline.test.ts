@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { latestDynamic, parseTimelineCursor, type TimelineEntry } from "@rome/api-types/people";
 import { memoryMessages } from "../channels/messages-memory.js";
 import type { MessageAccount, Messages } from "../channels/messages.js";

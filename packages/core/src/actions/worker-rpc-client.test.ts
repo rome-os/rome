@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   getWorkerRpc,
   setWorkerRpcInProcessDispatcher,
@@ -7,7 +7,7 @@ import {
 } from "./worker-rpc-client.js";
 
 // These tests force the "no parent IPC channel" branch (`process.send`
-// undefined) to exercise the main-process in-process fallback. The vitest
+// undefined) to exercise the main-process in-process fallback. The Rstest
 // runner may itself be a forked child (where `process.send` exists), so we
 // override it per-test and restore afterwards.
 describe("WorkerRpc in-process fallback", () => {
@@ -20,7 +20,7 @@ describe("WorkerRpc in-process fallback", () => {
 
   it("dispatches in-process when no IPC channel exists and a dispatcher is registered", async () => {
     process.send = undefined;
-    const dispatcher = vi.fn(async () => ({ ok: true }));
+    const dispatcher = rs.fn(async () => ({ ok: true }));
     setWorkerRpcInProcessDispatcher(dispatcher);
 
     const result = await getWorkerRpc().call("channels.discord.reloadConfig", { a: 1 });
@@ -58,7 +58,7 @@ describe("WorkerRpc in-process fallback", () => {
   });
 
   it("shares the dispatcher across module copies via a Symbol.for global", () => {
-    const dispatcher = vi.fn(async () => undefined);
+    const dispatcher = rs.fn(async () => undefined);
     setWorkerRpcInProcessDispatcher(dispatcher);
 
     // A second physical copy of this module would read the same global slot.

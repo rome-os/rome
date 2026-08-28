@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import {

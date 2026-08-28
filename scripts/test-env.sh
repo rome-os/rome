@@ -26,8 +26,8 @@ test_env=(
   "LC_ALL=C"
 )
 
-# Preserve runner context, not arbitrary application configuration. Vitest uses
-# CI to reject `.only`, and GITHUB_ACTIONS to emit workflow annotations.
+# Preserve runner context, not arbitrary application configuration. Test runners
+# use CI to reject `.only`, and GITHUB_ACTIONS to emit workflow annotations.
 [ -n "${CI:-}" ] && test_env+=("CI=true")
 [ -n "${GITHUB_ACTIONS:-}" ] && test_env+=("GITHUB_ACTIONS=true")
 

@@ -3,7 +3,7 @@
 // the descriptor's wiring — kit.persist write-through, fault mapping, deps
 // threading, migration — without a real Baileys socket.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
 import type { WhatsAppAdapter, WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
@@ -186,7 +186,7 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
   it("persists the session material when the adapter's auth state mutates", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const persist = vi.fn(async (_grant: string, _material: SecretRecord) => {});
+    const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
     const kit = runtimeKit(persist);
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
       { session: sessionCred() },
@@ -214,7 +214,7 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
   it("flush()es the final rotation on stop (no loss)", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const persist = vi.fn(async (_grant: string, _material: SecretRecord) => {});
+    const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
       { session: sessionCred() },
       runtimeKit(persist),

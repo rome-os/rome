@@ -3,7 +3,7 @@
 // an entry its pages never show, so the law is asserted once here rather than
 // re-tested per adapter.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import {
   compareTimelineEntries,
   isAfterTimelineCursor,

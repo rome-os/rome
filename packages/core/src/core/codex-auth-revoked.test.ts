@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-revoked.js";
 
 describe("isCodexAuthRevokedError", () => {

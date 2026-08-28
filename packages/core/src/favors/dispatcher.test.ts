@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { FavorDispatchRunner } from "./dispatcher.js";
 import type { FavorActionRequestView, FavorService } from "./types.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -40,19 +40,19 @@ function requestView(overrides: Partial<FavorActionRequestView> = {}): FavorActi
 
 function favorService(overrides: Partial<FavorService> = {}): FavorService {
   return {
-    getBalance: vi.fn(),
-    listLedger: vi.fn(),
-    getActionRequest: vi.fn(),
-    listActionRequests: vi.fn(),
-    requestAction: vi.fn(),
-    resolveActionRequest: vi.fn(),
-    createRechargeCheckout: vi.fn(),
-    syncActionRequirements: vi.fn(),
-    syncActionRequests: vi.fn(async () => ({
+    getBalance: rs.fn(),
+    listLedger: rs.fn(),
+    getActionRequest: rs.fn(),
+    listActionRequests: rs.fn(),
+    requestAction: rs.fn(),
+    resolveActionRequest: rs.fn(),
+    createRechargeCheckout: rs.fn(),
+    syncActionRequirements: rs.fn(),
+    syncActionRequests: rs.fn(async () => ({
       requests: [requestView()],
       nextCursor: "cursor-2",
     })),
-    claimDispatch: vi.fn(
+    claimDispatch: rs.fn(
       async () =>
         ({
           status: "claimed",
@@ -70,9 +70,9 @@ function favorService(overrides: Partial<FavorService> = {}): FavorService {
           displayPayload: {},
         }) as const,
     ),
-    renewDispatchClaim: vi.fn(),
-    reportDispatchResult: vi.fn(async () => {}),
-    listRechargePacks: vi.fn(async () => ({ packs: [] })),
+    renewDispatchClaim: rs.fn(),
+    reportDispatchResult: rs.fn(async () => {}),
+    listRechargePacks: rs.fn(async () => ({ packs: [] })),
     ...overrides,
   };
 }
@@ -80,7 +80,7 @@ function favorService(overrides: Partial<FavorService> = {}): FavorService {
 describe("FavorDispatchRunner", () => {
   it("does not contact Rome Cloud when instance enrollment is unavailable", async () => {
     const service = favorService();
-    const run = vi.fn();
+    const run = rs.fn();
     const runner = new FavorDispatchRunner({
       favorService: service,
       actionEngine: { run } as unknown as ActionEngine,
@@ -95,7 +95,7 @@ describe("FavorDispatchRunner", () => {
 
   it("claims settled favor requests, runs the referenced action, and reports success", async () => {
     const service = favorService();
-    const run = vi.fn(async () => ({ status: "ok", data: { archived: true } as const }));
+    const run = rs.fn(async () => ({ status: "ok", data: { archived: true } as const }));
     const runner = new FavorDispatchRunner({
       favorService: service,
       actionEngine: { run } as unknown as ActionEngine,
@@ -103,7 +103,7 @@ describe("FavorDispatchRunner", () => {
 
     await runner.runOnce();
 
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(service.reportDispatchResult).toHaveBeenCalledOnce();
     });
     expect(run).toHaveBeenCalledWith(
@@ -131,7 +131,7 @@ describe("FavorDispatchRunner", () => {
 
   it("reports an action failure when the local action returns an error envelope", async () => {
     const service = favorService();
-    const run = vi.fn(async () => ({ status: "error", error: "document missing" }));
+    const run = rs.fn(async () => ({ status: "error", error: "document missing" }));
     const runner = new FavorDispatchRunner({
       favorService: service,
       actionEngine: { run } as unknown as ActionEngine,
@@ -139,7 +139,7 @@ describe("FavorDispatchRunner", () => {
 
     await runner.runOnce();
 
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(service.reportDispatchResult).toHaveBeenCalledOnce();
     });
     expect(service.reportDispatchResult).toHaveBeenCalledWith("favor-request-1", {

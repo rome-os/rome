@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { installFirstPartyAppsAtBoot, shouldReinstallFirstPartyAppAtBoot } from "./boot-upgrade.js";
 import { hashArtifact, packArtifact } from "./packaging/index.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";

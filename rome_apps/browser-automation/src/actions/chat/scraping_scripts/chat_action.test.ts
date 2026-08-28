@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
 const scriptSource = readFileSync(new URL("./chat_action.js", import.meta.url), "utf8");
 
@@ -18,8 +18,8 @@ function loadScript(
   },
 ) {
   const window = {
-    scrollTo: vi.fn(),
-    getComputedStyle: vi.fn(() => ({
+    scrollTo: rs.fn(),
+    getComputedStyle: rs.fn(() => ({
       overflowY: "auto",
       overflow: "auto",
     })),
@@ -28,7 +28,7 @@ function loadScript(
     scrollingElement: scrollRoot,
     documentElement: scrollRoot,
     body: scrollRoot,
-    querySelector: vi.fn((selector: string) => {
+    querySelector: rs.fn((selector: string) => {
       if (options?.querySelectorMap?.[selector] !== undefined) {
         return options.querySelectorMap[selector];
       }
@@ -39,7 +39,7 @@ function loadScript(
 
       return null;
     }),
-    querySelectorAll: vi.fn(() => []),
+    querySelectorAll: rs.fn(() => []),
   };
   const context = {
     console,
@@ -119,7 +119,7 @@ describe("chat_action polling scroll", () => {
       scrollHeight: 4000,
       clientHeight: 1000,
       parentElement: null,
-      scrollTo: vi.fn(),
+      scrollTo: rs.fn(),
     };
     const { context, window } = loadScript(scrollRoot, { main });
 

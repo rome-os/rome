@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createSendUserMessageAction } from "./index.js";
 
@@ -13,12 +13,12 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function makeFetch(...responses: Response[]) {
-  const impl = vi.fn<typeof fetch>();
+  const impl = rs.fn<typeof fetch>();
   for (const res of responses) impl.mockResolvedValueOnce(res);
   return impl;
 }
 
-function requestBody(impl: ReturnType<typeof vi.fn>, call: number): Record<string, unknown> {
+function requestBody(impl: ReturnType<typeof rs.fn>, call: number): Record<string, unknown> {
   const init = impl.mock.calls[call][1] as RequestInit;
   return JSON.parse(init.body as string);
 }

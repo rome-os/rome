@@ -12,7 +12,7 @@
 //     service-agnostic, not telegram-special-cased in the importer)
 //   CHANNEL_SETTINGS_IMPORT_TABLE shape
 
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";

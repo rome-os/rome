@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import {
   LinkedInInboxPoller,
@@ -178,7 +178,7 @@ describe("threadNeedsSnapshot", () => {
 describe("LinkedInInboxPoller.pollOnce", () => {
   it("snapshots a new thread and records its messages", async () => {
     const sink = new FakeSink();
-    const run = vi.fn(async (args: string[]) => {
+    const run = rs.fn(async (args: string[]) => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
       return ok([snapshotRow("t1", "m1"), snapshotRow("t1", "m2")]);
     });
@@ -208,7 +208,7 @@ describe("LinkedInInboxPoller.pollOnce", () => {
       lastMessagePreview: "hello",
       lastSyncedAt: new Date(),
     });
-    const run = vi.fn(async (args: string[]) => {
+    const run = rs.fn(async (args: string[]) => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
       throw new Error("thread-snapshot must not run for a fresh thread");
     });
@@ -223,7 +223,7 @@ describe("LinkedInInboxPoller.pollOnce", () => {
   it("caps snapshots per tick, most recent threads first", async () => {
     const sink = new FakeSink();
     const snapshotted: string[] = [];
-    const run = vi.fn(async (args: string[]) => {
+    const run = rs.fn(async (args: string[]) => {
       if (args[1] === "inbox") {
         return ok([
           { ...inboxRow("t1", "2026-08-19T20:00:00.000Z"), rank: 1 },
@@ -248,7 +248,7 @@ describe("LinkedInInboxPoller.pollOnce", () => {
 describe("LinkedInInboxPoller participant sync", () => {
   /** inbox → snapshot → thread-participants, with the participant payload swappable. */
   function participantRun(payloads: () => unknown[]) {
-    return vi.fn(async (args: string[]) => {
+    return rs.fn(async (args: string[]) => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
       if (args[1] === "thread-participants") return ok(payloads());
       return ok([snapshotRow("t1", "m1")]);
@@ -343,7 +343,7 @@ describe("LinkedInInboxPoller participant sync", () => {
 
   it("a failed participant read leaves the message snapshot standing", async () => {
     const sink = new ParticipantSink();
-    const run = vi.fn(async (args: string[]): Promise<OpencliResult> => {
+    const run = rs.fn(async (args: string[]): Promise<OpencliResult> => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
       if (args[1] === "thread-participants") {
         return { code: 1, stdout: "", stderr: "LinkedIn returned no participant data" };
@@ -362,7 +362,7 @@ describe("LinkedInInboxPoller participant sync", () => {
 
   it("an auth wall during the participant read still fails the tick", async () => {
     const sink = new ParticipantSink();
-    const run = vi.fn(async (args: string[]): Promise<OpencliResult> => {
+    const run = rs.fn(async (args: string[]): Promise<OpencliResult> => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
       if (args[1] === "thread-participants") {
         return { code: 69, stdout: "ok: false\nerror:\n  code: AUTH_REQUIRED", stderr: "" };
@@ -395,7 +395,7 @@ describe("LinkedInInboxPoller participant sync", () => {
 describe("LinkedInInboxPoller fault handling", () => {
   it("routes an auth failure to onAuthRejected", async () => {
     const sink = new FakeSink();
-    const run = vi.fn(
+    const run = rs.fn(
       async (): Promise<OpencliResult> => ({
         code: 69,
         stdout: "ok: false\nerror:\n  code: AUTH_REQUIRED",
@@ -403,10 +403,10 @@ describe("LinkedInInboxPoller fault handling", () => {
       }),
     );
     const poller = makePoller(sink, run);
-    const onAuthRejected = vi.fn();
+    const onAuthRejected = rs.fn();
 
     poller.start({ onAuthRejected });
-    await vi.waitFor(() => expect(onAuthRejected).toHaveBeenCalledTimes(1));
+    await rs.waitFor(() => expect(onAuthRejected).toHaveBeenCalledTimes(1));
     poller.stop();
     expect(poller.getRuntimeDegradation()).toBeNull();
   });
@@ -414,21 +414,21 @@ describe("LinkedInInboxPoller fault handling", () => {
   it("reports a runtime degradation after two consecutive transient failures, and clears it on success", async () => {
     const sink = new FakeSink();
     let failing = true;
-    const run = vi.fn(async (args: string[]): Promise<OpencliResult> => {
+    const run = rs.fn(async (args: string[]): Promise<OpencliResult> => {
       if (failing) return { code: 1, stdout: "", stderr: "cdp unreachable" };
       if (args[1] === "inbox") return ok([]);
       return ok([]);
     });
     const poller = makePoller(sink, run, { minIntervalMs: 1, maxIntervalMs: 2 });
-    const onAuthRejected = vi.fn();
+    const onAuthRejected = rs.fn();
 
     poller.start({ onAuthRejected });
-    await vi.waitFor(() => expect(poller.getRuntimeDegradation()).not.toBeNull());
+    await rs.waitFor(() => expect(poller.getRuntimeDegradation()).not.toBeNull());
     expect(poller.getRuntimeDegradation()?.reason).toContain("failed");
     expect(onAuthRejected).not.toHaveBeenCalled();
 
     failing = false;
-    await vi.waitFor(() => expect(poller.getRuntimeDegradation()).toBeNull());
+    await rs.waitFor(() => expect(poller.getRuntimeDegradation()).toBeNull());
     poller.stop();
   });
 });
@@ -447,7 +447,7 @@ describe("LinkedInInboxPoller and the person graph", () => {
     const testDb = createTestDb();
     try {
       const store = new LinkedInStoreRepository(testDb.db);
-      const run = vi.fn(async (args: string[]) => {
+      const run = rs.fn(async (args: string[]) => {
         if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
         if (args[1] === "thread-participants") return ok([participantRow("t1", "ACoAAAda0001")]);
         return ok([snapshotRow("t1", "m1")]);

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { openTelegramUserLogin } from "./telegram-user.js";
 
 // The GramJS client is the process edge: its signInWithPassword call shape is
@@ -20,7 +20,7 @@ describe("TelegramUserLogin.submitPassword", () => {
     const passwordError = new Error("PASSWORD_HASH_INVALID");
     let onErrorResult: unknown;
     const client = {
-      signInWithPassword: vi
+      signInWithPassword: rs
         .fn()
         .mockImplementation(async (_config: unknown, callbacks: PasswordCallbacks) => {
           expect(await callbacks.password()).toBe("bad-password");

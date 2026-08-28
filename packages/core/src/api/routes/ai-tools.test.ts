@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { normalizeUsageStatus, parseUsageText, readLiveOrCachedUsage } from "./ai-tools.js";
@@ -9,6 +9,9 @@ import { aiToolsRoutes } from "./ai-tools.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { settings } from "../../db/schema.js";
+import * as anthropicLoginModule from "../../lib/anthropic-login.js" with {
+  rstest: "importActual",
+};
 
 const {
   isAnthropicAuthRevokedMock,
@@ -17,30 +20,27 @@ const {
   clearStoredAnthropicCompatibleAuthRevokedMock,
   closeAuthTabsMock,
   openServerBrowserTabMock,
-} = vi.hoisted(() => ({
-  isAnthropicAuthRevokedMock: vi.fn(),
-  isAnthropicCompatibleAuthRevokedMock: vi.fn(),
-  clearClaudeAuthRevokedMock: vi.fn(),
-  clearStoredAnthropicCompatibleAuthRevokedMock: vi.fn(),
-  closeAuthTabsMock: vi.fn(),
-  openServerBrowserTabMock: vi.fn(),
+} = rs.hoisted(() => ({
+  isAnthropicAuthRevokedMock: rs.fn(),
+  isAnthropicCompatibleAuthRevokedMock: rs.fn(),
+  clearClaudeAuthRevokedMock: rs.fn(),
+  clearStoredAnthropicCompatibleAuthRevokedMock: rs.fn(),
+  closeAuthTabsMock: rs.fn(),
+  openServerBrowserTabMock: rs.fn(),
 }));
 
-vi.mock("./desktop.js", () => ({
+rs.mock("./desktop.js", () => ({
   closeAuthTabs: closeAuthTabsMock,
   openServerBrowserTab: openServerBrowserTabMock,
 }));
 
-vi.mock("../../lib/anthropic-login.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/anthropic-login.js")>();
-  return {
-    ...actual,
-    clearClaudeAuthRevoked: clearClaudeAuthRevokedMock,
-    clearStoredAnthropicCompatibleAuthRevoked: clearStoredAnthropicCompatibleAuthRevokedMock,
-    isAnthropicAuthRevoked: isAnthropicAuthRevokedMock,
-    isAnthropicCompatibleAuthRevoked: isAnthropicCompatibleAuthRevokedMock,
-  };
-});
+rs.mock("../../lib/anthropic-login.js", () => ({
+  ...anthropicLoginModule,
+  clearClaudeAuthRevoked: clearClaudeAuthRevokedMock,
+  clearStoredAnthropicCompatibleAuthRevoked: clearStoredAnthropicCompatibleAuthRevokedMock,
+  isAnthropicAuthRevoked: isAnthropicAuthRevokedMock,
+  isAnthropicCompatibleAuthRevoked: isAnthropicCompatibleAuthRevokedMock,
+}));
 
 beforeEach(() => {
   isAnthropicAuthRevokedMock.mockReset();
@@ -354,7 +354,7 @@ describe("AI tools status API", () => {
         },
         claude: { loggedIn: false, quotaExhausted: false },
       };
-      const refresh = vi.spyOn(deps.aiToolState, "refresh").mockResolvedValue(refreshed);
+      const refresh = rs.spyOn(deps.aiToolState, "refresh").mockResolvedValue(refreshed);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const res = await app.request("/ai-tools/refresh", { method: "POST" });
@@ -559,9 +559,9 @@ describe("Codex device-code login API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startDeviceLogin = vi.spyOn(deps.codexAccountService, "startDeviceLogin");
-      const cancelLogin = vi.spyOn(deps.codexAccountService, "cancelLogin");
-      vi.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      const startDeviceLogin = rs.spyOn(deps.codexAccountService, "startDeviceLogin");
+      const cancelLogin = rs.spyOn(deps.codexAccountService, "cancelLogin");
+      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
         running: true,
         mode: "device",
         userCode: "TEST-CODE",
@@ -601,7 +601,7 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      vi.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
+      rs.spyOn(deps.codexAccountService, "getLoginState").mockReturnValue({
         running: false,
         mode: null,
         userCode: null,
@@ -628,7 +628,7 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const startBrowserLogin = vi.spyOn(deps.codexAccountService, "startBrowserLogin");
+      const startBrowserLogin = rs.spyOn(deps.codexAccountService, "startBrowserLogin");
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/login/start", { method: "POST" });
@@ -647,8 +647,8 @@ describe("Codex shared account routes", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const logout = vi.spyOn(deps.codexAccountService, "logout");
-      const refresh = vi
+      const logout = rs.spyOn(deps.codexAccountService, "logout");
+      const refresh = rs
         .spyOn(deps.aiToolState, "refresh")
         .mockResolvedValue(deps.aiToolState.get());
       const app = new Hono().route("/", aiToolsRoutes(deps));
@@ -813,7 +813,7 @@ describe("AI tools Anthropic-compatible credentials API", () => {
     const gate = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    vi.spyOn(deps.aiToolState, "refresh").mockImplementation(async (provider) => {
+    rs.spyOn(deps.aiToolState, "refresh").mockImplementation(async (provider) => {
       expect(provider).toBe("anthropic");
       refreshStarted();
       await gate;
@@ -860,7 +860,7 @@ describe("AI tools Anthropic-compatible credentials API", () => {
       .where(eq(settings.key, ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING));
     expect(stored).toBeUndefined();
     expect(clearStoredAnthropicCompatibleAuthRevokedMock).toHaveBeenCalledTimes(1);
-  });
+  }, 15_000);
 });
 
 describe("Claude logout API", () => {
@@ -888,7 +888,7 @@ describe("Claude logout API", () => {
       const refreshGate = new Promise<void>((resolve) => {
         releaseRefresh = resolve;
       });
-      const refreshSpy = vi.spyOn(deps.aiToolState, "refresh").mockImplementation(async () => {
+      const refreshSpy = rs.spyOn(deps.aiToolState, "refresh").mockImplementation(async () => {
         await refreshGate;
         return deps.aiToolState.get();
       });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { buildTopic, PROVIDER_EVENT_PREFIX } from "./topic.js";
 
 describe("buildTopic", () => {

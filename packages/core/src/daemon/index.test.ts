@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
-const spawnMock = vi.fn();
+const spawnMock = rs.fn();
 
-vi.mock("node:child_process", () => ({
+rs.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
@@ -28,7 +28,7 @@ describe("HealthCheckDaemon", () => {
   const originalDockerAppCodeMode = process.env.ROME_DOCKER_APP_CODE_MODE;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     process.env.ROME_DOCKER_APP_CODE_MODE = "source";
     let nextPid = 100;
     spawnMock.mockImplementation(() => new MockChildProcess(nextPid++));
@@ -40,11 +40,11 @@ describe("HealthCheckDaemon", () => {
     } else {
       process.env.ROME_DOCKER_APP_CODE_MODE = originalDockerAppCodeMode;
     }
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   it("restarts rome and resumes the session after the new process becomes healthy", async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = rs.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url =
         typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
@@ -71,11 +71,11 @@ describe("HealthCheckDaemon", () => {
 
       return originalFetch(input, init);
     });
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const { HealthCheckDaemon } = await import("./index.js");
     const { HostFilesystemManager } = await import("./host-filesystem.js");
-    vi.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+    rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
 
     const daemon = new HealthCheckDaemon({
       appDir: "/tmp/rome",
@@ -127,14 +127,14 @@ describe("HealthCheckDaemon", () => {
 
   it("starts the compiled core entrypoint when compiled Docker mode is enabled", async () => {
     process.env.ROME_DOCKER_APP_CODE_MODE = "compiled";
-    vi.stubGlobal(
+    rs.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 })),
+      rs.fn(async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 })),
     );
 
     const { HealthCheckDaemon } = await import("./index.js");
     const { HostFilesystemManager } = await import("./host-filesystem.js");
-    vi.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+    rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
 
     const daemon = new HealthCheckDaemon({
       appDir: "/tmp/rome",

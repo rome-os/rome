@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
 import { validateRemixInstallIsolation } from "./remix-install-validation.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createLinkedInDescriptor } from "./linkedin.js";

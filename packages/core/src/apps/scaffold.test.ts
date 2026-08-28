@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { getAppTemplateDir, type AppTemplateKind } from "../paths.js";
 import { scaffoldDevApp } from "./scaffold.js";
 
@@ -63,7 +63,7 @@ describe("scaffoldDevApp", () => {
   });
 
   afterEach(() => {
-    // Cleanup is best-effort; vitest tears the tmp dirs eventually.
+    // Cleanup is best-effort; Rstest tears the tmp dirs eventually.
   });
 
   it("materialises the template at the caller-supplied rootPath with placeholders applied", async () => {

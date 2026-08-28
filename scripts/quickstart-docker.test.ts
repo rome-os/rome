@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 
 const execFileAsync = promisify(execFile);
 const script = fileURLToPath(new URL("./quickstart-docker.sh", import.meta.url));
@@ -43,7 +43,7 @@ describe("quickstart-docker.sh container env", () => {
     args: string[] = [],
   ): Promise<string[]> {
     // The vars under test must come only from the per-case `env`, not leak in
-    // from the host shell that happens to run vitest.
+    // from the host shell that happens to run the test runner.
     const base = { ...process.env };
     delete base.PANTHEON_BASE_ORIGIN;
     delete base.ROME_LOOPBACK_CALLBACK_ORIGIN;

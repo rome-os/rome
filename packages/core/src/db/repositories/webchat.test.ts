@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
@@ -40,7 +40,7 @@ describe("WebChatRepository", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
   });
 
@@ -922,7 +922,7 @@ describe("WebChatRepository", () => {
       // id read and the deletes. Reading the ids first leaves this session
       // pointing at a project that no longer exists.
       const original = testDb.db.transaction.bind(testDb.db);
-      const spy = vi
+      const spy = rs
         .spyOn(testDb.db, "transaction")
         .mockImplementation((cb: Parameters<typeof original>[0]) => {
           const now = new Date();
@@ -960,13 +960,13 @@ describe("WebChatRepository", () => {
   });
 
   it("pages project sessions by latest chat activity", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
     await repo.createSession("sess-old", "Old Chat", undefined, "alpha", null, "alpha");
     await repo.createSession("sess-new", "New Chat", undefined, "alpha", null, "alpha");
-    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await repo.addMessage("msg-old", "sess-old", "user", "[]");
-    vi.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:01.000Z"));
     await repo.addMessage("msg-old-latest", "sess-old", "assistant", "[]");
 
     const firstPage = await repo.listSessionsByProjectPath("alpha", { limit: 1 });
@@ -983,16 +983,16 @@ describe("WebChatRepository", () => {
   });
 
   it("pages all sessions by latest chat activity including null project paths", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
     await repo.createSession("sess-alpha", "Alpha Chat", undefined, "alpha", null, "alpha");
     await repo.createSession("sess-null", "Legacy Chat", undefined, "legacy", null, null);
     await repo.createSession("sess-other", "Other Chat", undefined, "other", null, "other");
-    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await repo.addMessage("msg-alpha", "sess-alpha", "user", "[]");
-    vi.setSystemTime(new Date("2030-01-03T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-03T00:00:00.000Z"));
     await repo.addMessage("msg-null", "sess-null", "user", "[]");
-    vi.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-02T00:00:00.000Z"));
     await repo.addMessage("msg-other", "sess-other", "assistant", "[]");
 
     const firstPage = await repo.listSessionsPage({ limit: 2 });
@@ -1014,15 +1014,15 @@ describe("WebChatRepository", () => {
   });
 
   it("tracks unread state from session activity", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
     await repo.createSession("sess-read", "Read Chat");
     await expect(repo.getSession("sess-read")).resolves.toMatchObject({
       activityAt: new Date("2029-01-01T00:00:00.000Z"),
       lastSeenActivityAt: new Date("2029-01-01T00:00:00.000Z"),
     });
 
-    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await repo.addMessage("msg-read", "sess-read", "assistant", "[]");
     let sessions = await repo.listSessions();
     expect(sessions.find((session) => session.id === "sess-read")).toMatchObject({
@@ -1129,11 +1129,11 @@ describe("WebChatRepository", () => {
   });
 
   it("does not advance chat activity for trace-only writes", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
     await repo.createSession("sess-trace", "Trace Chat");
 
-    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await repo.addMessage("trace-only", "sess-trace", "trace", "[]");
 
     await expect(repo.getSession("sess-trace")).resolves.toMatchObject({
@@ -1930,7 +1930,7 @@ describe("WebChatRepository", () => {
       await repo.addMessage("msg-1", "sess-fb", "user", "[]", "turn-1");
 
       const original = testDb.db.transaction.bind(testDb.db);
-      const spy = vi
+      const spy = rs
         .spyOn(testDb.db, "transaction")
         .mockImplementation((cb: Parameters<typeof original>[0]) =>
           original((tx) => {

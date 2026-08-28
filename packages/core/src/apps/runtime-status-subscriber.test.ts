@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { AppCatalog } from "./catalog.js";
 import type { AppView } from "./state.js";
 import { createRuntimeStatusFailureTracker } from "./runtime-status-subscriber.js";

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { SqliteExec } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";

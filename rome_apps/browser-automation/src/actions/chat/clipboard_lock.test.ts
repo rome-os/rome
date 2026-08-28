@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { acquireChatGPTClipboardLock } from "./clipboard_lock.js";
 
 const tempDirs: string[] = [];

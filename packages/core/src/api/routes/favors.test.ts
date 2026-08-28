@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { VISITOR_COOKIE_NAME, createVisitorSession } from "../../lib/auth.js";
 import type { FavorService } from "../../favors/types.js";
 import type { ApiDeps } from "../deps.js";
@@ -11,8 +11,8 @@ function buildApp(deps: Partial<ApiDeps>) {
 
 describe("Favor routes", () => {
   it("refuses browser favor-action creation without trusting a caller-supplied app id", async () => {
-    const requestAction = vi.fn();
-    const appCatalogGet = vi.fn();
+    const requestAction = rs.fn();
+    const appCatalogGet = rs.fn();
     const app = buildApp({
       appCatalog: { get: appCatalogGet } as unknown as ApiDeps["appCatalog"],
       favorService: { requestAction } as unknown as FavorService,

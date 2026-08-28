@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 import { createApiHandler } from "./index.js";
 import {
@@ -17,22 +17,22 @@ function createContext(
   } = {},
 ): RomeAppContext {
   const settings = {
-    get: vi.fn(async (key: string) => {
+    get: rs.fn(async (key: string) => {
       if (key === RECAP_CREATE_AUDIO_SETTING) return values.createAudio ?? null;
       if (key === RECAP_THRESHOLD_SETTING) return values.threshold ?? null;
       if (key === RECAP_AUDIO_SPEED_SETTING) return values.audioSpeed ?? null;
       return null;
     }),
-    set: vi.fn(async () => undefined),
+    set: rs.fn(async () => undefined),
   };
   return {
     app: { id: "recap", version: "0.1.0", description: "Recap" },
     controller: {},
     db: {} as never,
-    log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    log: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
     repositories: { settings },
-    runAction: vi.fn(async () => ({ status: "ok" as const })),
-    listRoutines: vi.fn(async () => []),
+    runAction: rs.fn(async () => ({ status: "ok" as const })),
+    listRoutines: rs.fn(async () => []),
   };
 }
 

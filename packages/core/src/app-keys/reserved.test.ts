@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { appKeyNameError } from "@rome/api-types/app-keys";
 
 describe("appKeyNameError", () => {

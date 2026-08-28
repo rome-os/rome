@@ -9,7 +9,7 @@ import {
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import { AgentInputQueue } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
@@ -44,7 +44,7 @@ describe("Webchat API", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
     rmSync(projectsRoot, { recursive: true, force: true });
     if (originalProjectsRoot === undefined) {
@@ -59,8 +59,8 @@ describe("Webchat API", () => {
     const terminal = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    const steerUserInput = vi.fn().mockResolvedValue("accepted" as const);
-    const start = vi.fn(
+    const steerUserInput = rs.fn().mockResolvedValue("accepted" as const);
+    const start = rs.fn(
       (): AgentTurnHandle => ({
         turnId: "input-turn",
         turnContext: otelContext.active(),
@@ -92,7 +92,7 @@ describe("Webchat API", () => {
       getSubmittedOutput: () => undefined,
     };
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => agent),
+      acquire: rs.fn(async () => agent),
       peek: () => agent,
       shutdown: async () => {},
     };
@@ -121,7 +121,7 @@ describe("Webchat API", () => {
         turnId: "input-turn",
         disposition: "steering",
       });
-      await vi.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
+      await rs.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
       await queue.observe({ type: "input_status", inputId: b, state: "consumed" }, "input-turn");
       expect((await post(b, "second")).status).toBe(200);
       expect(steerUserInput).toHaveBeenCalledOnce();
@@ -143,7 +143,7 @@ describe("Webchat API", () => {
   it("refuses a queued turn's Stop without interrupting the active turn", async () => {
     const finishers: (() => void)[] = [];
     let sequence = 0;
-    const interrupt = vi.fn(async () => {});
+    const interrupt = rs.fn(async () => {});
     const agent: AgentSession = {
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
@@ -171,7 +171,7 @@ describe("Webchat API", () => {
       getSubmittedOutput: () => undefined,
     };
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => agent),
+      acquire: rs.fn(async () => agent),
       peek: () => agent,
       shutdown: async () => {},
     };
@@ -366,8 +366,8 @@ describe("Webchat API", () => {
       parentTurnId,
     );
     const app = createWebchatRuntime(deps).routes;
-    const getTraceContentsByTurns = vi.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
-    const getTraceContentByTurn = vi.spyOn(deps.webchatRepo, "getTraceContentByTurn");
+    const getTraceContentsByTurns = rs.spyOn(deps.webchatRepo, "getTraceContentsByTurns");
+    const getTraceContentByTurn = rs.spyOn(deps.webchatRepo, "getTraceContentByTurn");
 
     const response = await app.request(`/chat/sessions/${parentSessionId}/messages`);
     expect(response.status).toBe(200);
@@ -842,8 +842,8 @@ describe("Webchat API", () => {
   });
 
   it("returns activity and unread state for chat sessions and marks them read", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2029-01-01T00:00:00.000Z"));
     const app = createWebchatRuntime(deps).routes;
 
     const createRes = await app.request("/chat/sessions", {
@@ -862,7 +862,7 @@ describe("Webchat API", () => {
     expect(created.lastSeenActivityAt).toBe("2029-01-01T00:00:00.000Z");
     expect(created.unread).toBe(false);
 
-    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     await deps.webchatRepo.addMessage("unread-message", created.id, "assistant", "[]");
 
     const listRes = await app.request("/chat/sessions");
@@ -900,7 +900,7 @@ describe("Webchat API", () => {
       processors: [new SimpleLogRecordProcessor(exporter)],
     });
     logs.setGlobalLoggerProvider(provider);
-    const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stdoutSpy = rs.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       const app = createWebchatRuntime(deps).routes;
@@ -944,7 +944,7 @@ describe("Webchat API", () => {
       processors: [new SimpleLogRecordProcessor(exporter)],
     });
     logs.setGlobalLoggerProvider(provider);
-    const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stdoutSpy = rs.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       const app = createWebchatRuntime(deps).routes;
@@ -1049,7 +1049,7 @@ describe("Webchat API", () => {
       processors: [new SimpleLogRecordProcessor(exporter)],
     });
     logs.setGlobalLoggerProvider(provider);
-    const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stdoutSpy = rs.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       const sessionId = "delete-log-session";
@@ -1122,11 +1122,11 @@ describe("Webchat API", () => {
       processors: [new SimpleLogRecordProcessor(exporter)],
     });
     logs.setGlobalLoggerProvider(provider);
-    const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stdoutSpy = rs.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       deps.agentSessionManager = {
-        acquire: vi.fn(
+        acquire: rs.fn(
           async () =>
             ({
               key: { agentName: "main", channelThreadKey: "webchat:test" },
@@ -1519,7 +1519,7 @@ describe("Webchat API", () => {
     let sentTurn: AgentTurnInput | undefined;
     let sentOptions: SendTurnOptions | undefined;
     deps.agentSessionManager = {
-      acquire: vi.fn(async (_key, init) => {
+      acquire: rs.fn(async (_key, init) => {
         acquiredInit = init;
         return {
           key: { agentName: "main", channelThreadKey: "webchat:test" },
@@ -1573,7 +1573,7 @@ describe("Webchat API", () => {
 
   it("accepts a logged-out provider as a persisted failed turn", async () => {
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => {
+      acquire: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
@@ -1625,7 +1625,7 @@ describe("Webchat API", () => {
       ]),
     );
 
-    await vi.waitFor(async () => {
+    await rs.waitFor(async () => {
       const trace = await deps.webchatRepo.getTraceContentByTurn(session.id, turn.turnId);
       expect(trace).not.toBeNull();
       expect(JSON.parse(trace!.content)).toEqual([
@@ -1650,7 +1650,7 @@ describe("Webchat API", () => {
 
   it("uses an LLM-generated summary to name a new chat from its first user message", async () => {
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => {
+      acquire: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
@@ -1660,7 +1660,7 @@ describe("Webchat API", () => {
       peek: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
-    const generateTitle = vi.fn(async () => "Q4 Launch Plan");
+    const generateTitle = rs.fn(async () => "Q4 Launch Plan");
     deps.conversationTitleGenerator = { generate: generateTitle };
     const app = createWebchatRuntime(deps).routes;
 
@@ -1709,7 +1709,7 @@ describe("Webchat API", () => {
 
   it("does not delay the turn terminal event while conversation naming is still running", async () => {
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => {
+      acquire: rs.fn(async () => {
         throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
           code: "model_provider_unavailable",
           provider: "openai",
@@ -1720,7 +1720,7 @@ describe("Webchat API", () => {
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
     let finishTitle!: (title: string) => void;
-    const generateTitle = vi.fn(
+    const generateTitle = rs.fn(
       () =>
         new Promise<string>((resolve) => {
           finishTitle = resolve;
@@ -1748,7 +1748,7 @@ describe("Webchat API", () => {
     expect((await deps.webchatRepo.getSession(session.id))?.name).toBe("New Chat");
 
     finishTitle("Q4 Launch Plan");
-    await vi.waitFor(async () => {
+    await rs.waitFor(async () => {
       expect((await deps.webchatRepo.getSession(session.id))?.name).toBe("Q4 Launch Plan");
     });
   });
@@ -1762,7 +1762,7 @@ describe("Webchat API", () => {
       onEvent?: (evt: { event: string; data: string }) => void,
     ) => {
       deps.agentSessionManager = {
-        acquire: vi.fn(async (key) => ({
+        acquire: rs.fn(async (key) => ({
           key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
           sessionId: "agent-session",
           status: "idle",
@@ -1783,7 +1783,7 @@ describe("Webchat API", () => {
         peek: () => undefined,
         shutdown: async () => undefined,
       } as unknown as typeof deps.agentSessionManager;
-      const sendMessageRun = vi.fn(async () => ({ status: "ok" }));
+      const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
       deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
       const app = createWebchatRuntime(deps).routes;
 
@@ -2185,10 +2185,10 @@ describe("Webchat API", () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const interrupt = vi.fn(async () => undefined);
-      const wrongTurnInterrupt = vi.fn(async () => undefined);
+      const interrupt = rs.fn(async () => undefined);
+      const wrongTurnInterrupt = rs.fn(async () => undefined);
       deps.agentSessionManager = {
-        acquire: vi.fn(async () => ({
+        acquire: rs.fn(async () => ({
           key: { agentName: "main" },
           sessionId: "runtime",
           status: "running",
@@ -2233,10 +2233,10 @@ describe("Webchat API", () => {
           onStatusChange: () => () => undefined,
           interrupt: wrongTurnInterrupt,
         })),
-        peek: vi.fn(),
+        peek: rs.fn(),
         shutdown: async () => undefined,
       } as unknown as typeof deps.agentSessionManager;
-      const sendMessageRun = vi.fn(async () => ({ status: "ok" }));
+      const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
       deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
       const app = createWebchatRuntime(deps).routes;
       const res = await app.request("/chat/sessions", {
@@ -2306,7 +2306,7 @@ describe("Webchat API", () => {
   it("expands a slash-skill command for the model but persists the raw text", async () => {
     let sentTurn: AgentTurnInput | undefined;
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => {
+      acquire: rs.fn(async () => {
         return {
           key: { agentName: "main", channelThreadKey: "webchat:test" },
           sessionId: "agent-session",
@@ -2395,7 +2395,7 @@ describe("Webchat API", () => {
   it("expands a structured skillName field, winning over typed-slash text parsing", async () => {
     let sentTurn: AgentTurnInput | undefined;
     deps.agentSessionManager = {
-      acquire: vi.fn(async () => {
+      acquire: rs.fn(async () => {
         return {
           key: { agentName: "main", channelThreadKey: "webchat:test" },
           sessionId: "agent-session",
@@ -2501,7 +2501,7 @@ describe("Webchat API", () => {
         yield { type: "result", content: "" };
       };
       deps.agentSessionManager = {
-        acquire: vi.fn((key, _init) => {
+        acquire: rs.fn((key, _init) => {
           acquiredAgents.push(key.agentName);
           const session = {
             key: { agentName: key.agentName, channelThreadKey: "webchat:suspend" },
@@ -3003,17 +3003,17 @@ describe("Webchat API", () => {
           };
         },
       };
-      vi.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      vi.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
         providerThreadId: "source-provider-thread",
         checkpointId: "rated-provider-turn",
       });
-      const showApp = vi.spyOn(deps.actionEngine, "run").mockResolvedValue({
+      const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
         placement: { appId: "sessions", route: "feedback-fork-session" },
       });
@@ -3078,12 +3078,12 @@ describe("Webchat API", () => {
       // persisted user/assistant exchange the fork prompt cannot quote the
       // rated turn, so processing must not start — a fork anchored to the
       // transcript head could learn from the wrong exchange.
-      const runForked = vi.fn();
+      const runForked = rs.fn();
       deps.agentRunner = {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const showApp = vi.spyOn(deps.actionEngine, "run");
+      const showApp = rs.spyOn(deps.actionEngine, "run");
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
@@ -3101,12 +3101,12 @@ describe("Webchat API", () => {
     });
 
     it("does not start feedback processing when no text was set", async () => {
-      const runForked = vi.fn();
+      const runForked = rs.fn();
       deps.agentRunner = {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const showApp = vi.spyOn(deps.actionEngine, "run");
+      const showApp = rs.spyOn(deps.actionEngine, "run");
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
@@ -3241,7 +3241,7 @@ describe("Webchat API", () => {
     it("emits exactly one OTLP feedback event per turn", async () => {
       // With write-once semantics rome-obs sees one log row per turn, so
       // downstream analytics don't need to dedup or take latest-by-timestamp.
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const logSpy = rs.spyOn(console, "log").mockImplementation(() => {});
       try {
         const app = createWebchatRuntime(deps).routes;
         await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
@@ -3271,7 +3271,7 @@ describe("Webchat API", () => {
       // + rating only so user-typed text (which may include code, names, or
       // accidental secrets) never leaves the user's VM.
       const COMMENT = "private feedback text that must not leave the box";
-      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const logSpy = rs.spyOn(console, "log").mockImplementation(() => {});
       try {
         const app = createWebchatRuntime(deps).routes;
         const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
@@ -3352,17 +3352,17 @@ describe("Webchat API", () => {
           };
         },
       };
-      const acquireSource = vi.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      vi.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
         providerThreadId: "source-provider-thread",
         checkpointId: "provider-turn-t2",
       });
-      const showApp = vi.spyOn(deps.actionEngine, "run").mockResolvedValue({
+      const showApp = rs.spyOn(deps.actionEngine, "run").mockResolvedValue({
         status: "place_widget",
         placement: { appId: "sessions", route: "branch-fork-session" },
       });
@@ -3436,15 +3436,15 @@ describe("Webchat API", () => {
         startSeq: 0,
         blocks: [{ type: "turn_end", turnId: TURN_ID, status: "interrupted", durationMs: 10 }],
       });
-      const runForked = vi.fn(() => (async function* () {})());
+      const runForked = rs.fn(() => (async function* () {})());
       deps.agentRunner = {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      const acquireSource = vi.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      const exactCheckpoint = vi.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      const exactCheckpoint = rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: "turn-before-stop",
         provider: "anthropic",
@@ -3491,7 +3491,7 @@ describe("Webchat API", () => {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         async *runForked() {},
       };
-      vi.spyOn(deps.agentSessionManager, "acquire").mockRejectedValue(
+      rs.spyOn(deps.agentSessionManager, "acquire").mockRejectedValue(
         new Error("source provider session is unavailable"),
       );
       const app = createWebchatRuntime(deps).routes;
@@ -3509,15 +3509,15 @@ describe("Webchat API", () => {
     });
 
     it("returns a conflict instead of forking from the head when the turn checkpoint is missing", async () => {
-      const runForked = vi.fn(() => (async function* () {})());
+      const runForked = rs.fn(() => (async function* () {})());
       deps.agentRunner = {
         run: deps.agentRunner.run.bind(deps.agentRunner),
         runForked,
       };
-      vi.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
+      rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      vi.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue(null);
+      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue(null);
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
@@ -3535,8 +3535,8 @@ describe("Webchat API", () => {
     it("retries backend continuation Stop without interrupting a later provider turn", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
-      const owner = { currentTurnId: "backend-provider-turn", interrupt: vi.fn(async () => {}) };
-      vi.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
+      const owner = { currentTurnId: "backend-provider-turn", interrupt: rs.fn(async () => {}) };
+      rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
       let finish!: () => void;
       const gate = new Promise<void>((resolve) => {
@@ -3559,7 +3559,7 @@ describe("Webchat API", () => {
         });
       });
       let turnId = "";
-      await vi.waitFor(async () => {
+      await rs.waitFor(async () => {
         const turns = await (await routes.request(`/chat/sessions/${sessionId}/turns`)).json();
         turnId = turns[0]?.turnId;
         expect(turnId).toMatch(/^backend:/);
@@ -3724,7 +3724,7 @@ describe("Webchat API", () => {
     });
 
     it("emits keepalive events on idle message event streams", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const sessionId = "sess-recap-events-keepalive";
       await deps.webchatRepo.createSession(sessionId, "Recap Events Keepalive");
       const app = createWebchatRuntime(deps).routes;
@@ -3736,7 +3736,7 @@ describe("Webchat API", () => {
         const reader = res.body!.getReader();
         const pendingRead = reader.read();
 
-        await vi.advanceTimersByTimeAsync(20_000);
+        await rs.advanceTimersByTimeAsync(20_000);
 
         const chunk = await pendingRead;
         expect(chunk.done).toBe(false);
@@ -3745,7 +3745,7 @@ describe("Webchat API", () => {
 
         await reader.cancel();
       } finally {
-        vi.useRealTimers();
+        rs.useRealTimers();
       }
     });
   });

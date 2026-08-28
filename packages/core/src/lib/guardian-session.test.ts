@@ -5,7 +5,7 @@
  * half enforces the trusted-loopback invariant (loopback peer + no
  * X-Forwarded-For), which HTTP-level tests can't reach.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { createSession } from "./auth.js";
 import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
 import { guardianAuth } from "../db/schema.js";

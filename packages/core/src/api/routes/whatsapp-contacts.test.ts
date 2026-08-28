@@ -1,20 +1,20 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { whatsappContactsRoutes } from "./whatsapp-contacts.js";
 import type { ApiDeps } from "../deps.js";
 
-type SendSpy = ReturnType<typeof vi.fn>;
+type SendSpy = ReturnType<typeof rs.fn>;
 
 function buildDeps(opts: { adapter?: SendSpy | null } = {}): {
   deps: ApiDeps;
   adapter: SendSpy | null;
 } {
-  const adapter = opts.adapter === undefined ? vi.fn(async () => undefined) : opts.adapter;
+  const adapter = opts.adapter === undefined ? rs.fn(async () => undefined) : opts.adapter;
   const deps = {
     talkRouter: {
       list: async () =>
         adapter ? [{ connectionId: "connection:whatsapp", service: "whatsapp" }] : [],
-      send: adapter ?? vi.fn(),
+      send: adapter ?? rs.fn(),
     },
     whatsAppStoreRepo: {
       listContacts: async () => [],
@@ -69,7 +69,7 @@ describe("POST /whatsapp/contacts/:jid/send", () => {
 
   it("surfaces a 502 when the adapter throws", async () => {
     const { deps } = buildDeps({
-      adapter: vi.fn(async () => {
+      adapter: rs.fn(async () => {
         throw new Error("socket closed");
       }),
     });

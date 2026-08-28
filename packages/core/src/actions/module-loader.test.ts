@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 // These tests spawn a real Node process (with tsx, the same loader the dev
-// stack and forked action workers run under). Vitest cannot host them: its
+// stack and forked action workers run under). Rstest cannot host them: its
 // module runner executes `import(url)` through vite-node, which resolves the
 // module graph itself and never consults Node's resolve hooks — the very
 // mechanism under test.

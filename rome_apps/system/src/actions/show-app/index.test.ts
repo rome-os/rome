@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 
 import { createAction } from "./index.js";

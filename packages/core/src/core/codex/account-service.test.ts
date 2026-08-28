@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import {
   SharedCodexAccountService,
   type SharedCodexAccountServiceOptions,
@@ -137,7 +137,7 @@ describe("SharedCodexAccountService", () => {
   it("falls back to the auth file and marks a revoked refresh token", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/read", new Error("refresh token was revoked; log out and sign in again"));
-    const markAuthRevoked = vi.fn(async () => {});
+    const markAuthRevoked = rs.fn(async () => {});
     const service = createService(rpc, {
       markAuthRevoked,
       readFileStatus: async () => ({
@@ -172,7 +172,7 @@ describe("SharedCodexAccountService", () => {
       verificationUrl: "https://auth.openai.com/codex/device",
     });
     const service = createService(rpc);
-    const changed = vi.fn();
+    const changed = rs.fn();
     service.onAccountChanged(changed);
 
     await expect(service.startBrowserLogin()).resolves.toMatchObject({
@@ -216,7 +216,7 @@ describe("SharedCodexAccountService", () => {
       verificationUrl: "https://auth.openai.com/codex/device",
     });
     const service = createService(rpc);
-    const changed = vi.fn();
+    const changed = rs.fn();
     service.onAccountChanged(changed);
     await service.startDeviceLogin();
 
@@ -245,7 +245,7 @@ describe("SharedCodexAccountService", () => {
     rpc.queue("account/login/cancel", { status: "canceled" });
     rpc.queue("account/logout", {});
     const service = createService(rpc);
-    const changed = vi.fn();
+    const changed = rs.fn();
     service.onAccountChanged(changed);
     await service.startDeviceLogin();
 
@@ -274,7 +274,7 @@ describe("SharedCodexAccountService", () => {
     const service = createService(rpc);
 
     const starting = service.startDeviceLogin();
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(rpc.requests.some((request) => request.method === "account/login/start")).toBe(true);
     });
     await service.cancelLogin();
@@ -303,11 +303,11 @@ describe("SharedCodexAccountService", () => {
       }),
     );
     const service = createService(rpc);
-    const changed = vi.fn();
+    const changed = rs.fn();
     service.onAccountChanged(changed);
 
     const starting = service.startDeviceLogin();
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(rpc.requests.some((request) => request.method === "account/login/start")).toBe(true);
     });
     rpc.notify("account/login/completed", {
@@ -335,7 +335,7 @@ describe("SharedCodexAccountService", () => {
       verificationUrl: "https://auth.openai.com/codex/device",
     });
     const service = createService(rpc);
-    const changed = vi.fn();
+    const changed = rs.fn();
     service.onAccountChanged(changed);
     await service.startDeviceLogin();
 

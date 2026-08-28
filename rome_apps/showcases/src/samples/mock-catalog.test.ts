@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { MOCK_PRESET_CATALOG } from "./mock-catalog.js";
 import {
   SHOWCASE_PRESET_CATALOG_SCHEMA,

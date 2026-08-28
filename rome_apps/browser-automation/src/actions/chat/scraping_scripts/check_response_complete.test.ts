@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
 const scriptSource = readFileSync(new URL("./check_response_complete.js", import.meta.url), "utf8");
 
 function loadScript(responseFactory: () => unknown[]) {
   const document = {
-    querySelectorAll: vi.fn((selector: string) => {
+    querySelectorAll: rs.fn((selector: string) => {
       if (selector === "article") {
         return responseFactory();
       }
@@ -39,17 +39,17 @@ function loadScript(responseFactory: () => unknown[]) {
 
 describe("check_response_complete script", () => {
   it("returns complete once the latest response exposes its toolbar actions", async () => {
-    const scrollIntoView = vi.fn();
-    const dispatchEvent = vi.fn();
+    const scrollIntoView = rs.fn();
+    const dispatchEvent = rs.fn();
     const parentElement = {
       dispatchEvent,
-      querySelector: vi.fn(() => null),
+      querySelector: rs.fn(() => null),
     };
     const copyButton = { id: "copy" };
     const response = {
       parentElement,
       scrollIntoView,
-      querySelector: vi.fn((selector: string) => {
+      querySelector: rs.fn((selector: string) => {
         if (selector === '[data-message-author-role="assistant"]') {
           return { id: "assistant" };
         }
@@ -78,18 +78,18 @@ describe("check_response_complete script", () => {
   });
 
   it("returns incomplete after the timeout window elapses", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
-      const scrollIntoView = vi.fn();
-      const dispatchEvent = vi.fn();
+      const scrollIntoView = rs.fn();
+      const dispatchEvent = rs.fn();
       const parentElement = {
         dispatchEvent,
-        querySelector: vi.fn(() => null),
+        querySelector: rs.fn(() => null),
       };
       const response = {
         parentElement,
         scrollIntoView,
-        querySelector: vi.fn((selector: string) => {
+        querySelector: rs.fn((selector: string) => {
           if (selector === '[data-message-author-role="assistant"]') {
             return { id: "assistant" };
           }
@@ -105,11 +105,11 @@ describe("check_response_complete script", () => {
         }) => Promise<{ complete: boolean }>
       )({ timeout: 400 });
 
-      await vi.runAllTimersAsync();
+      await rs.runAllTimersAsync();
 
       await expect(resultPromise).resolves.toEqual({ complete: false });
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 });

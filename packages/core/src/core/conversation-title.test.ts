@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider, ModelSession, ModelSessionParams } from "./agent-runner.js";
 import {
   CONVERSATION_TITLE_INPUT_MAX_LENGTH,
@@ -16,12 +16,12 @@ function resultSession(content: string): ModelSession {
     events: (async function* () {
       yield { type: "result" as const, content };
     })(),
-    sendUserInput: vi.fn(async () => undefined),
-    fork: vi.fn(async () => {
+    sendUserInput: rs.fn(async () => undefined),
+    fork: rs.fn(async () => {
       throw new Error("not supported");
     }),
-    interrupt: vi.fn(async () => undefined),
-    close: vi.fn(async () => undefined),
+    interrupt: rs.fn(async () => undefined),
+    close: rs.fn(async () => undefined),
   };
 }
 
@@ -33,13 +33,13 @@ describe("conversation title generation", () => {
       id: "mock",
       displayName: "Mock",
       builtinTools: new Set(),
-      openSession: vi.fn(async (params) => {
+      openSession: rs.fn(async (params) => {
         openParams = params;
         return session;
       }),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: vi.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
 
     const title = await createConversationTitleGenerator(modelResolver).generate(
@@ -87,10 +87,10 @@ describe("conversation title generation", () => {
       id: "mock",
       displayName: "Mock",
       builtinTools: new Set(),
-      openSession: vi.fn(async () => session),
+      openSession: rs.fn(async () => session),
     };
     const modelResolver: ModelResolver = {
-      getModelProvider: vi.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+      getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
     };
     const firstMessage = `${"a".repeat(CONVERSATION_TITLE_INPUT_MAX_LENGTH)}SHOULD_NOT_APPEAR`;
 
@@ -103,17 +103,17 @@ describe("conversation title generation", () => {
         ),
       }),
     );
-    expect(vi.mocked(session.sendUserInput).mock.calls[0]?.[0].text).not.toContain(
+    expect(rs.mocked(session.sendUserInput).mock.calls[0]?.[0].text).not.toContain(
       "SHOULD_NOT_APPEAR",
     );
   });
 
   it("closes a model session that opens after the generation timeout", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
       const session = resultSession("Too late");
       let resolveOpen!: (session: ModelSession) => void;
-      const openSession = vi.fn(
+      const openSession = rs.fn(
         () =>
           new Promise<ModelSession>((resolve) => {
             resolveOpen = resolve;
@@ -126,7 +126,7 @@ describe("conversation title generation", () => {
         openSession,
       };
       const modelResolver: ModelResolver = {
-        getModelProvider: vi.fn(async () => ({ modelProvider: provider, model: "small-model" })),
+        getModelProvider: rs.fn(async () => ({ modelProvider: provider, model: "small-model" })),
       };
       const pending = createConversationTitleGenerator(modelResolver, { timeoutMs: 10 }).generate(
         "Name this chat",
@@ -136,14 +136,14 @@ describe("conversation title generation", () => {
       expect(openSession).toHaveBeenCalledOnce();
 
       const rejection = expect(pending).rejects.toThrow("timed out");
-      await vi.advanceTimersByTimeAsync(10);
+      await rs.advanceTimersByTimeAsync(10);
       await rejection;
 
       resolveOpen(session);
-      await vi.waitFor(() => expect(session.close).toHaveBeenCalledOnce());
+      await rs.waitFor(() => expect(session.close).toHaveBeenCalledOnce());
       expect(session.sendUserInput).not.toHaveBeenCalled();
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 });

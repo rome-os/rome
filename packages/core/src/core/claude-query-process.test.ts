@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 
-vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
+rs.mock("node:child_process", () => ({ spawn: rs.fn() }));
 
 function setup() {
   const child = Object.assign(new EventEmitter(), {
@@ -13,12 +13,12 @@ function setup() {
     stdout: new PassThrough(),
     killed: false,
     exitCode: null,
-    kill: vi.fn((_signal?: NodeJS.Signals) => {
+    kill: rs.fn((_signal?: NodeJS.Signals) => {
       child.killed = true;
       return true;
     }),
   });
-  vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+  rs.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
   const owner = createClaudeQueryProcess();
   owner.abortController.signal.addEventListener("abort", () => child.kill("SIGTERM"));
   owner.spawn({ command: "claude", args: [], env: {}, signal: owner.abortController.signal });
@@ -26,8 +26,8 @@ function setup() {
 }
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.clearAllMocks();
+  rs.useRealTimers();
+  rs.clearAllMocks();
 });
 
 describe("Claude Query process cancellation", () => {
@@ -48,22 +48,22 @@ describe("Claude Query process cancellation", () => {
   });
 
   it("escalates only the owned process when SIGTERM does not exit", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     const { owner, child } = setup();
     const abort = owner.abort();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await rs.advanceTimersByTimeAsync(1_000);
     expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
     child.emit("exit", null, "SIGKILL");
     await abort;
-    await vi.advanceTimersByTimeAsync(5_000);
+    await rs.advanceTimersByTimeAsync(5_000);
     expect(child.kill).toHaveBeenCalledTimes(2);
   });
 
   it("reports an unconfirmed exit and permits another cancellation attempt", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     const { owner, child } = setup();
     const first = expect(owner.abort()).rejects.toThrow("did not exit");
-    await vi.advanceTimersByTimeAsync(2_000);
+    await rs.advanceTimersByTimeAsync(2_000);
     await first;
     const second = owner.abort();
     child.emit("exit", null, "SIGKILL");

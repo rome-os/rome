@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import type { Attachment, ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
 import { createAction } from "./index.js";
 
@@ -60,7 +60,7 @@ describe("fetch_channel_history", () => {
   it("returns formatted messages on success", async () => {
     const messages = [makeMessage()];
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockResolvedValue(messages),
+      fetchHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -100,7 +100,7 @@ describe("fetch_channel_history", () => {
 
   it("returns error when fetchHistory throws", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockRejectedValue(new Error("API rate limit")),
+      fetchHistory: rs.fn().mockRejectedValue(new Error("API rate limit")),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -113,7 +113,7 @@ describe("fetch_channel_history", () => {
 
   it("returns no-messages text when history is empty", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockResolvedValue([]),
+      fetchHistory: rs.fn().mockResolvedValue([]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -133,7 +133,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockResolvedValue(messages),
+      fetchHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -147,7 +147,7 @@ describe("fetch_channel_history", () => {
 
   it("does not include a structured messages array by default", async () => {
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockResolvedValue([makeMessage()]),
+      fetchHistory: rs.fn().mockResolvedValue([makeMessage()]),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 
@@ -176,7 +176,7 @@ describe("fetch_channel_history", () => {
       }),
     ];
     const adapter: HistoryAdapter = {
-      fetchHistory: vi.fn().mockResolvedValue(messages),
+      fetchHistory: rs.fn().mockResolvedValue(messages),
     };
     const deps = makeDeps(new Map([["discord", adapter]]));
 

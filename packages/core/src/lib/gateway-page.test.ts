@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "@rstest/core";
 import { detectTailnetDns, getInstanceName } from "./gateway-page.js";
 import { persons } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ActionConfig,
   ImageGenerationInterface,
@@ -18,10 +18,10 @@ const PNG_BASE64 =
 
 function makeCapability(
   outcome: ImageGenerationOutcome,
-): ImageGenerationInterface & { generate: ReturnType<typeof vi.fn> } {
+): ImageGenerationInterface & { generate: ReturnType<typeof rs.fn> } {
   return {
     listProviders: () => [{ id: "codex", displayName: "Codex (ChatGPT)" }],
-    generate: vi.fn(async () => outcome),
+    generate: rs.fn(async () => outcome),
   };
 }
 
@@ -29,11 +29,11 @@ let projectsRoot: string;
 
 beforeEach(async () => {
   projectsRoot = await mkdtemp(join(tmpdir(), "generate-image-test-"));
-  vi.stubEnv("ROME_PROJECTS_ROOT", projectsRoot);
+  rs.stubEnv("ROME_PROJECTS_ROOT", projectsRoot);
 });
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
+  rs.unstubAllEnvs();
   await rm(projectsRoot, { recursive: true, force: true });
 });
 

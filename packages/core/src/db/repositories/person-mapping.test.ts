@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";

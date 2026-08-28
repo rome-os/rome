@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { buildTurnInput, MAX_INPUT_IMAGE_BYTES } from "./turn-input.js";
 
 // Minimal valid PNG: the 8-byte signature is all `sniffImageMimeType` needs.

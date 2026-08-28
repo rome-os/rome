@@ -8,7 +8,7 @@
 // the cases where reading a mirror's activity summary instead used to answer
 // something else.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { latestDynamic, type StreamAccount } from "@rome/api-types/people";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import {

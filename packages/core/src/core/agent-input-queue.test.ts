@@ -1,5 +1,5 @@
 import { context } from "@opentelemetry/api";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { InputStatusMessage } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
 import type { ModelSession } from "./agent-runner.js";
@@ -7,11 +7,11 @@ import { AgentInputQueue } from "./agent-input-queue.js";
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function setup(steer = vi.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
+function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
   const started: AgentTurnInput[] = [];
   const statuses: InputStatusMessage[] = [];
   const handles: AgentTurnHandle[] = [];
-  const errors = vi.fn();
+  const errors = rs.fn();
   const queue = new AgentInputQueue(
     (input) => {
       started.push(input);
@@ -91,7 +91,7 @@ describe("conversational input lane", () => {
   it("falls back only on definite rejection, including rejection racing completion", async () => {
     let reject!: (value: "deferred") => void;
     const s = setup(
-      vi.fn().mockImplementation(
+      rs.fn().mockImplementation(
         () =>
           new Promise((resolve) => {
             reject = resolve;
@@ -111,7 +111,7 @@ describe("conversational input lane", () => {
   });
 
   it("does not replay a transport failure whose delivery is unknown", async () => {
-    const s = setup(vi.fn().mockRejectedValue(new Error("timeout")));
+    const s = setup(rs.fn().mockRejectedValue(new Error("timeout")));
     s.submit("a");
     s.queue.ready("turn-1");
     s.submit("b");

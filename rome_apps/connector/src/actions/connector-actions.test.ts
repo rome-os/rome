@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 import { createAction as createConnectorConnect } from "./connector-connect/index.js";
 import { createAction as createConnectorEventSchema } from "./connector-event-schema/index.js";
@@ -19,20 +19,20 @@ import { createAction as createConnectorToolSchema } from "./connector-tool-sche
 // fail-closed path ("not logged in") is exercised deterministically — independent
 // of whether the machine running the tests happens to have a real Composio login.
 //
-// HOME is process-global, so this is only safe because each vitest test FILE runs
+// HOME is process-global, so this is only safe because each Rstest test FILE runs
 // in its own isolated worker and the tests within a file run serially (no
 // `.concurrent`) — nothing else in this process reads HOME while it is redirected.
-// `vi.stubEnv` records the prior value and `vi.unstubAllEnvs` restores it even if
+// `rs.stubEnv` records the prior value and `rs.unstubAllEnvs` restores it even if
 // an assertion throws mid-test, so the redirect can never leak past the file.
 let homeDir: string;
 
 beforeEach(() => {
   homeDir = mkdtempSync(join(tmpdir(), "connector-no-session-"));
-  vi.stubEnv("HOME", homeDir);
+  rs.stubEnv("HOME", homeDir);
 });
 
 afterEach(() => {
-  vi.unstubAllEnvs();
+  rs.unstubAllEnvs();
   rmSync(homeDir, { recursive: true, force: true });
 });
 

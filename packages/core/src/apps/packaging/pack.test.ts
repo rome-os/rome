@@ -10,7 +10,7 @@ import {
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { buildSourceWorkspace, packArtifact } from "./pack.js";
 import { hashArtifact } from "./hash.js";
 import {

@@ -4,14 +4,14 @@ import type {
   TurnMiddlewareContext,
   TurnMiddlewareHookDeps,
 } from "@rome-os/app-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createHook } from "./index.js";
 
 const logger: AppLogger = {
-  debug: vi.fn(),
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
+  debug: rs.fn(),
+  info: rs.fn(),
+  warn: rs.fn(),
+  error: rs.fn(),
 };
 
 function makeContext(agentName: string, emitted: AgentMessage[]): TurnMiddlewareContext {
@@ -25,21 +25,21 @@ function makeContext(agentName: string, emitted: AgentMessage[]): TurnMiddleware
 
 describe("welcome-to-rome turn middleware routing", () => {
   afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
+    rs.useRealTimers();
+    rs.clearAllMocks();
   });
 
   it("intercepts the app-owned canonical agent id", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     const emitted: AgentMessage[] = [];
-    const next = vi.fn(async () => {});
+    const next = rs.fn(async () => {});
     const deps: TurnMiddlewareHookDeps = { appId: "welcome-to-rome", logger };
     const promise = createHook(deps).handle(
       makeContext("welcome-to-rome:welcome-to-rome", emitted),
       next,
     );
 
-    await vi.runAllTimersAsync();
+    await rs.runAllTimersAsync();
     await promise;
 
     expect(next).not.toHaveBeenCalled();
@@ -48,7 +48,7 @@ describe("welcome-to-rome turn middleware routing", () => {
 
   it("does not intercept the same local name owned by another app", async () => {
     const emitted: AgentMessage[] = [];
-    const next = vi.fn(async () => {});
+    const next = rs.fn(async () => {});
     const deps: TurnMiddlewareHookDeps = { appId: "welcome-to-rome", logger };
 
     await createHook(deps).handle(makeContext("other-app:welcome-to-rome", emitted), next);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { resolveCloudAuthEnabled, CLOUD_AUTH_GATE_NAME } from "./cloud-auth-gate.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "./guardian-auth-state.js";
 import { useFakeFeatureGates, resetFeatureGates } from "@rome-os/libs/feature-flags/testing";

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 
 const execFileAsync = promisify(execFile);
 const script = fileURLToPath(new URL("./check-pr-title.sh", import.meta.url));

@@ -14,52 +14,55 @@
 // ledger import AND the transition-driven custody sync are exercised for real.
 
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
+  rstest: "importActual",
+};
 
 const {
   redeemRomeCloudOAuthHandoff,
   syncProviderTokenFile,
   syncGithubShellIntegrationForProvider,
-} = vi.hoisted(() => ({
-  redeemRomeCloudOAuthHandoff: vi.fn(),
-  syncProviderTokenFile: vi.fn(async (..._a: unknown[]) => {}),
-  syncGithubShellIntegrationForProvider: vi.fn(async (..._a: unknown[]) => {}),
+} = rs.hoisted(() => ({
+  redeemRomeCloudOAuthHandoff: rs.fn(),
+  syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
+  syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
-vi.mock("../../lib/rome-cloud-oauth.js", () => ({
+rs.mock("../../lib/rome-cloud-oauth.js", () => ({
   redeemRomeCloudOAuthHandoff,
-  createRomeCloudOAuthStartRedirect: vi.fn(),
-  createRomeCloudOAuthStartUrl: vi.fn(() => ({ connectUrl: "", available: true })),
+  createRomeCloudOAuthStartRedirect: rs.fn(),
+  createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
 }));
 // Spread the real module so exports the route path relies on transitively
 // (e.g. `normalizeScopes`, consumed by the connections bundle mapper) resolve
 // against the actual implementation; only the network/disk side effects below
 // are stubbed.
-vi.mock("../../lib/provider-accounts.js", async (importActual) => ({
-  ...(await importActual<typeof import("../../lib/provider-accounts.js")>()),
-  getProviderTokenBundle: vi.fn(async () => null),
+rs.mock("../../lib/provider-accounts.js", () => ({
+  ...providerAccountsModule,
+  getProviderTokenBundle: rs.fn(async () => null),
 }));
-vi.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../lib/provider-token-files.js", () => ({
   syncProviderTokenFile,
-  clearProviderTokenFile: vi.fn(async (..._a: unknown[]) => {}),
+  clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
 }));
-vi.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../lib/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
-  clearGithubShellIntegrationForProvider: vi.fn(async (..._a: unknown[]) => {}),
+  clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
-vi.mock("../../lib/guardian-auth-state.js", () => ({
-  getGuardianAuthState: vi.fn(async () => ({
+rs.mock("../../lib/guardian-auth-state.js", () => ({
+  getGuardianAuthState: rs.fn(async () => ({
     exists: true,
     userId: "guardian-1",
     onboardingComplete: true,
   })),
 }));
-vi.mock("../../lib/auth.js", () => ({
+rs.mock("../../lib/auth.js", () => ({
   COOKIE_NAME: "rome_session",
-  verifySession: vi.fn(() => null),
-  issueGuardianSession: vi.fn(),
+  verifySession: rs.fn(() => null),
+  issueGuardianSession: rs.fn(),
 }));
-vi.mock("../../lib/oauth-providers.js", () => ({
+rs.mock("../../lib/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   getEnabledOAuthProviders: () => ["github", "slack"],
   isEnabledOAuthProvider: () => true,
@@ -105,7 +108,7 @@ async function postRedeem(deps: ApiDeps) {
 
 describe("POST /oauth/redeem — ledger-only provider write path", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();
@@ -199,7 +202,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const registry = makeRegistry();
     // Force the sole write to fail. The connection is minted first, so it exists —
     // but its grant must NOT reach authorized, and custody must never fire.
-    vi.spyOn(registry, "importCredential").mockRejectedValueOnce(new Error("ledger down"));
+    rs.spyOn(registry, "importCredential").mockRejectedValueOnce(new Error("ledger down"));
 
     const res = await postRedeem(makeDeps(registry));
 

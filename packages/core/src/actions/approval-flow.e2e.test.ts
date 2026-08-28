@@ -10,7 +10,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { ActionEngine, type ApprovalCreatedEvent } from "./engine.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ApprovalHandler } from "./approval-handler.js";

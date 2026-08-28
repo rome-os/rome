@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
 
 function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
@@ -199,7 +199,7 @@ describe("AIToolState", () => {
   });
 
   it("sets conservative access after a definite logout", async () => {
-    const codexUsage = vi.fn(async () => null);
+    const codexUsage = rs.fn(async () => null);
     const state = createAIToolState({
       probes: probes({
         codexStatus: async () => ({ loggedIn: false }),
@@ -242,7 +242,7 @@ describe("AIToolState", () => {
     const statusGate = new Promise<void>((resolve) => {
       releaseStatus = resolve;
     });
-    const codexStatus = vi.fn(async () => {
+    const codexStatus = rs.fn(async () => {
       await statusGate;
       return { loggedIn: true };
     });
@@ -270,11 +270,11 @@ describe("AIToolState", () => {
     const claudeGate = new Promise<void>((resolve) => {
       releaseClaude = resolve;
     });
-    const claudeStatus = vi.fn(async () => {
+    const claudeStatus = rs.fn(async () => {
       await claudeGate;
       return { loggedIn: true };
     });
-    const codexStatus = vi.fn(async () => ({ loggedIn: true }));
+    const codexStatus = rs.fn(async () => ({ loggedIn: true }));
     const state = createAIToolState({
       probes: probes({ claudeStatus, codexStatus }),
       startRefresh: false,
@@ -291,19 +291,19 @@ describe("AIToolState", () => {
   });
 
   it("runs all provider checks on the hourly timer", async () => {
-    vi.useFakeTimers();
-    const codexStatus = vi.fn(async () => ({
+    rs.useFakeTimers();
+    const codexStatus = rs.fn(async () => ({
       loggedIn: true,
       authMode: "chatgpt" as const,
       planType: "plus" as const,
     }));
-    const codexUsage = vi.fn(async () => ({
+    const codexUsage = rs.fn(async () => ({
       checkedAt: "2026-07-11T00:00:00.000Z",
       source: "test",
       fiveHour: { usedPercent: 50 },
     }));
-    const claudeStatus = vi.fn(async () => ({ loggedIn: true, authMethod: "oauth" }));
-    const claudeUsage = vi.fn(async () => ({
+    const claudeStatus = rs.fn(async () => ({ loggedIn: true, authMethod: "oauth" }));
+    const claudeUsage = rs.fn(async () => ({
       checkedAt: "2026-07-11T00:00:00.000Z",
       source: "test",
       fiveHour: { usedPercent: 50 },
@@ -315,7 +315,7 @@ describe("AIToolState", () => {
     });
     state.markQuotaExhausted("openai");
     state.markQuotaExhausted("anthropic");
-    await vi.advanceTimersByTimeAsync(1_000);
+    await rs.advanceTimersByTimeAsync(1_000);
     expect(codexStatus).toHaveBeenCalledTimes(1);
     expect(codexUsage).toHaveBeenCalledTimes(1);
     expect(claudeStatus).toHaveBeenCalledTimes(1);
@@ -323,6 +323,6 @@ describe("AIToolState", () => {
     expect(state.get().codex.quotaExhausted).toBe(false);
     expect(state.get().claude.quotaExhausted).toBe(false);
     state.close();
-    vi.useRealTimers();
+    rs.useRealTimers();
   });
 });

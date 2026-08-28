@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { buildGatewayHtml, type GatewayPageInput } from "./gateway-html.js";
 
 const baseInput: GatewayPageInput = {

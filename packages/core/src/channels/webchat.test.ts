@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -14,12 +14,12 @@ describe("WebChatAdapter", () => {
     testDb = createTestDb();
     repo = new WebChatRepository(testDb.db);
     adapter = new WebChatAdapter(repo);
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
   });
 

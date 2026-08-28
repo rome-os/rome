@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import {
   DEFAULT_WEBCHAT_LARGE_MODEL_SELECTION,
   normalizeWebchatLargeModelSelectionId,

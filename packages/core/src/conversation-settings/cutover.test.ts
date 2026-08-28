@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { connections, romeSessions } from "../db/schema/system.js";
@@ -86,7 +86,7 @@ describe("conversation settings startup cutover", () => {
     await settings.set("feishu.channels", {
       oc_group: { chatName: "Launch", mode: "ignore", autoThread: false },
     });
-    const observe = vi.fn();
+    const observe = rs.fn();
 
     cutoverConversationSettings({
       db: testDb.db,
@@ -146,7 +146,7 @@ describe("conversation settings startup cutover", () => {
     testDb = createTestDb();
     const settings = new SettingsRepository(testDb.db);
     await settings.set("discord.channels", {});
-    const observe = vi.fn();
+    const observe = rs.fn();
 
     cutoverConversationSettings({
       db: testDb.db,
@@ -167,7 +167,7 @@ describe("conversation settings startup cutover", () => {
     await settings.set("discord.channels", {
       general: { channelName: "general", requireMention: false },
     });
-    const observe = vi.fn();
+    const observe = rs.fn();
 
     cutoverConversationSettings({
       db: testDb.db,

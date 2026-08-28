@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { SessionQueries } from "./sessions.js";
 import { sessionsRoutes } from "./sessions.js";
 
 function createService(): SessionQueries {
   return {
-    querySessions: vi.fn(async () => ({ marker: "query" }) as never),
-    queryMetrics: vi.fn(async () => ({ marker: "metrics" }) as never),
-    getSession: vi.fn(async () => null),
+    querySessions: rs.fn(async () => ({ marker: "query" }) as never),
+    queryMetrics: rs.fn(async () => ({ marker: "metrics" }) as never),
+    getSession: rs.fn(async () => null),
   };
 }
 

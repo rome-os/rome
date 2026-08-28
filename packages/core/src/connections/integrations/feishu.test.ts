@@ -7,7 +7,7 @@
 //      an `error` event → CredentialRejected (auth) or Disconnected (transport).
 //   4. inbound/outbound messages map through the provider-neutral Talk handle.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ConversationId } from "@rome-os/app-runtime";
 import {
   type CardActionEvent,

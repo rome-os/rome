@@ -15,7 +15,7 @@
 //   4. Discovery/re-attach: an in-flight login is reported as the grant's active
 //      setup through the generic SetupManager surface.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import {
   TelegramUserAuthError,
@@ -52,16 +52,16 @@ function makeLoginFake(
   } = {},
 ) {
   const handle = {
-    sendCode: vi.fn(async () => ({ isCodeViaApp: true })),
-    submitCode: vi.fn(
+    sendCode: rs.fn(async () => ({ isCodeViaApp: true })),
+    submitCode: rs.fn(
       opts.submitCode ??
         (async (): Promise<TelegramUserLoginOutcome> => ({
           status: "connected",
           account: ACCOUNT,
         })),
     ),
-    submitPassword: vi.fn(opts.submitPassword ?? (async () => ACCOUNT)),
-    stop: vi.fn(async () => {}),
+    submitPassword: rs.fn(opts.submitPassword ?? (async () => ACCOUNT)),
+    stop: rs.fn(async () => {}),
   } satisfies TelegramUserLoginHandle;
   return handle;
 }
@@ -77,7 +77,7 @@ const VALID_CREDS = {
  *  `presenting` snapshot before it reaches the next prompt, so the next input
  *  must wait for that prompt rather than fire against the transient state. */
 async function waitForField(session: SetupSession, name: string): Promise<void> {
-  await vi.waitFor(() => {
+  await rs.waitFor(() => {
     const state = session.state;
     if (state.status !== "awaiting-input") throw new Error(`not awaiting input (${state.status})`);
     if (state.form.fields[0]?.name !== name) {
@@ -89,9 +89,9 @@ async function waitForField(session: SetupSession, name: string): Promise<void> 
 describe("makeTelegramUserSetup", () => {
   it("prompts credentials, sends the code, then confers on a code-only login", async () => {
     const login = makeLoginFake();
-    const openLogin = vi.fn(() => login);
+    const openLogin = rs.fn(() => login);
     const fn = makeTelegramUserSetup({ openLogin });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -101,16 +101,16 @@ describe("makeTelegramUserSetup", () => {
 
     await session.provideInput(VALID_CREDS);
     // The phone number is normalized to `+digits` before it reaches the client.
-    await vi.waitFor(() => expect(login.sendCode).toHaveBeenCalledWith("+15551234567"));
+    await rs.waitFor(() => expect(login.sendCode).toHaveBeenCalledWith("+15551234567"));
     expect(openLogin).toHaveBeenCalledWith(12345, "hash-secret");
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const state = session.state;
       if (state.status !== "awaiting-input") throw new Error("not awaiting the code");
       expect(state.form.fields[0].name).toBe("code");
     });
 
     await session.provideInput({ code: "12345" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     // The login client is stopped BEFORE the conferral commit (the registry
     // builds the real Talk from the ledger the moment the credential lands).
@@ -130,7 +130,7 @@ describe("makeTelegramUserSetup", () => {
 
   it("prompts for the 2FA password when Telegram requires it, re-prompting on a wrong one", async () => {
     const login = makeLoginFake({
-      submitCode: vi.fn(
+      submitCode: rs.fn(
         async (): Promise<TelegramUserLoginOutcome> => ({
           status: "password_required",
           passwordHint: "the usual",
@@ -144,7 +144,7 @@ describe("makeTelegramUserSetup", () => {
       return ACCOUNT;
     });
     const fn = makeTelegramUserSetup({ openLogin: () => login });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -161,7 +161,7 @@ describe("makeTelegramUserSetup", () => {
 
     // A wrong password re-prompts, carrying the GramJS error; no commit yet.
     await session.provideInput({ password: "wrong" });
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const state = session.state;
       if (state.status !== "awaiting-input") throw new Error("not re-prompting the password");
       expect(state.form.fields[0].name).toBe("password");
@@ -170,7 +170,7 @@ describe("makeTelegramUserSetup", () => {
     expect(commit).not.toHaveBeenCalled();
 
     await session.provideInput({ password: "correct" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     expect(login.submitPassword).toHaveBeenCalledTimes(2);
   });
@@ -181,7 +181,7 @@ describe("makeTelegramUserSetup", () => {
       throw new TelegramUserAuthError("PHONE_CODE_INVALID");
     });
     const fn = makeTelegramUserSetup({ openLogin: () => login });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -189,7 +189,7 @@ describe("makeTelegramUserSetup", () => {
     await waitForField(session, "code");
 
     await session.provideInput({ code: "00000" });
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const state = session.state;
       if (state.status !== "awaiting-input") throw new Error("not re-prompting the code");
       expect(state.form.fields[0].name).toBe("code");
@@ -198,13 +198,13 @@ describe("makeTelegramUserSetup", () => {
     expect(commit).not.toHaveBeenCalled();
 
     await session.provideInput({ code: "12345" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
   });
 
   it("re-prompts with the error on invalid credentials before opening the login client", async () => {
     const login = makeLoginFake();
-    const openLogin = vi.fn(() => login);
+    const openLogin = rs.fn(() => login);
     const fn = makeTelegramUserSetup({ openLogin });
     const session = new SetupSession({ fn, commit: async () => {} });
     await session.started();
@@ -221,19 +221,19 @@ describe("makeTelegramUserSetup", () => {
     expect(openLogin).not.toHaveBeenCalled();
 
     await session.provideInput(VALID_CREDS);
-    await vi.waitFor(() => expect(openLogin).toHaveBeenCalledTimes(1));
+    await rs.waitFor(() => expect(openLogin).toHaveBeenCalledTimes(1));
   });
 
   it("cancel mid-login stops the login client and runs no commit", async () => {
     const login = makeLoginFake();
     const fn = makeTelegramUserSetup({ openLogin: () => login });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
     await session.provideInput(VALID_CREDS);
     // Park at the code prompt (the login client is now open).
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const state = session.state;
       if (state.status !== "awaiting-input") throw new Error("not awaiting the code");
       expect(state.form.fields[0].name).toBe("code");
@@ -242,7 +242,7 @@ describe("makeTelegramUserSetup", () => {
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });
     expect(commit).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(login.stop).toHaveBeenCalled());
+    await rs.waitFor(() => expect(login.stop).toHaveBeenCalled());
   });
 });
 

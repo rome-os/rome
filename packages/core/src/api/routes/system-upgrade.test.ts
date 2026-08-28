@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 
 // The routes read the build identity through getBuildInfo(), which caches at
 // module scope — each case re-imports the route module fresh after setting the
 // env it should observe.
 // The instance token now lives in an in-memory cache, not the env. Each fresh
-// import re-evaluates instance-identity (vi.resetModules), so set the cache on
+// import re-evaluates instance-identity (rs.resetModules), so set the cache on
 // the *same* fresh module the route imports — hence the import lives here, after
 // the reset, rather than at the top of the file.
 async function freshApp(opts: { enrolled?: boolean } = {}) {
-  vi.resetModules();
+  rs.resetModules();
   const { setInstanceTokenInMemory } = await import("../../lib/instance-identity.js");
   setInstanceTokenInMemory(opts.enrolled === false ? null : "romeinst_test-token");
   const { systemUpgradeRoutes } = await import("./system-upgrade.js");
@@ -35,9 +35,9 @@ type RecordedRequest = { url: string; method: string; headers: Headers; body: st
 /** Stub Rome Cloud at the network seam: every outbound fetch gets `response`. */
 function stubRomeCloud(response: { status: number; json?: unknown; text?: string }) {
   const requests: RecordedRequest[] = [];
-  vi.stubGlobal(
+  rs.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requests.push({
         url: String(input),
         method: init?.method ?? "GET",
@@ -55,9 +55,9 @@ function stubRomeCloud(response: { status: number; json?: unknown; text?: string
 }
 
 function stubRomeCloudDown() {
-  vi.stubGlobal(
+  rs.stubGlobal(
     "fetch",
-    vi.fn(async () => {
+    rs.fn(async () => {
       throw new TypeError("fetch failed");
     }),
   );
@@ -78,7 +78,7 @@ describe("system upgrade API", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     for (const key of ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
       else process.env[key] = saved[key];

@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "@rstest/core";
 import { getExternalRequestOrigin } from "./request-origin.js";
 
 function req(headers: Record<string, string | undefined>, url = "http://127.0.0.1:8787/x") {

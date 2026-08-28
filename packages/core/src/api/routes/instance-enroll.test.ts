@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { instanceEnrollRoutes } from "./instance-enroll.js";
 import { getInstanceToken, setInstanceTokenInMemory } from "../../lib/instance-identity.js";

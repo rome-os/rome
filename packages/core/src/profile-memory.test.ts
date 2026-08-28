@@ -1,23 +1,23 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, rs, beforeEach } from "@rstest/core";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-vi.mock("./paths.js", () => ({
-  getProfileDir: vi.fn(() => "/tmp/profile"),
-  getProfileMemoryDir: vi.fn(() => "/tmp/profile/memory"),
-  getProjectRoot: vi.fn(() => "/tmp/project"),
-  getCoreRoot: vi.fn(() => "/tmp/project/packages/core"),
+rs.mock("./paths.js", () => ({
+  getProfileDir: rs.fn(() => "/tmp/profile"),
+  getProfileMemoryDir: rs.fn(() => "/tmp/profile/memory"),
+  getProjectRoot: rs.fn(() => "/tmp/project"),
+  getCoreRoot: rs.fn(() => "/tmp/project/packages/core"),
 }));
 
 import { getProfileDir, getProfileMemoryDir, getProjectRoot, getCoreRoot } from "./paths.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 
-const mockedGetProfileDir = vi.mocked(getProfileDir);
-const mockedGetProfileMemoryDir = vi.mocked(getProfileMemoryDir);
-const mockedGetProjectRoot = vi.mocked(getProjectRoot);
-const mockedGetCoreRoot = vi.mocked(getCoreRoot);
+const mockedGetProfileDir = rs.mocked(getProfileDir);
+const mockedGetProfileMemoryDir = rs.mocked(getProfileMemoryDir);
+const mockedGetProjectRoot = rs.mocked(getProjectRoot);
+const mockedGetCoreRoot = rs.mocked(getCoreRoot);
 
 // getMemoryTemplateDir() resolves the template relative to getCoreRoot(). This
 // test file lives at packages/core/src, so the real core root is two levels up.
@@ -29,7 +29,7 @@ function createTempDir(prefix: string): string {
 
 describe("profile-memory", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   // Regression: the template path used to point at the monorepo root, where no

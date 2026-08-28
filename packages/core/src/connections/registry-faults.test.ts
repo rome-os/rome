@@ -9,7 +9,7 @@
 // therefore push the fault, then `await flush()` (a macrotask) so the renewal /
 // backoff flow settles before asserting.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import type { ConversationId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { CapabilityDiscovery, extractBrowserUrl, sanitizeName } from "./capability-discovery.js";
 
 // Mock child_process.execFile
-vi.mock("node:child_process", () => ({
-  execFile: vi.fn(),
+rs.mock("node:child_process", () => ({
+  execFile: rs.fn(),
 }));
 
 import { execFile } from "node:child_process";
@@ -13,7 +13,7 @@ import { promisify } from "node:util";
 // at import time, so we intercept execFile itself and control its callback behavior.
 
 function mockExecFile(impl: (cmd: string, args: string[]) => { stdout: string; stderr: string }) {
-  (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+  (execFile as unknown as ReturnType<typeof rs.fn>).mockImplementation(
     (
       cmd: string,
       args: string[],
@@ -30,7 +30,7 @@ function mockExecFile(impl: (cmd: string, args: string[]) => { stdout: string; s
 }
 
 function mockExecFileFail() {
-  (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+  (execFile as unknown as ReturnType<typeof rs.fn>).mockImplementation(
     (
       _cmd: string,
       _args: string[],
@@ -42,22 +42,22 @@ function mockExecFileFail() {
 }
 
 // Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
+const mockFetch = rs.fn();
+rs.stubGlobal("fetch", mockFetch);
 const LOCAL_BROWSER_URL = "http://127.0.0.1:9222/json/version";
 
 describe("CapabilityDiscovery", () => {
   let discovery: CapabilityDiscovery;
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     discovery = new CapabilityDiscovery();
     mockFetch.mockReset();
   });
 
   afterEach(() => {
     discovery.stop();
-    vi.useRealTimers();
+    rs.useRealTimers();
   });
 
   describe("no Tailscale installed", () => {

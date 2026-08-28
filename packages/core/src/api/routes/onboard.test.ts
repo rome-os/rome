@@ -5,7 +5,7 @@
  * is required, and a blank one is rejected BEFORE anything is persisted (so the
  * accountId can never be silently written into settings.guardianName).
  */
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { onboardRoutes } from "./onboard.js";

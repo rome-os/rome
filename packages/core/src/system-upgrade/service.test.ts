@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { SystemUpgradeService } from "./service.js";
 import type { ApplyResult, CheckResult, UpgradeCheck } from "./rome-cloud-client.js";
 
@@ -15,7 +15,7 @@ function makeService(
     isEnabled?: () => Promise<boolean>;
   } = {},
 ) {
-  const applyUpgrade = opts.applyUpgrade ?? vi.fn(async () => ({ ok: true }) as ApplyResult);
+  const applyUpgrade = opts.applyUpgrade ?? rs.fn(async () => ({ ok: true }) as ApplyResult);
   // Countdown timers are captured rather than armed, so a test can fire the
   // deadline path deterministically.
   const timers: (() => void)[] = [];
@@ -48,7 +48,7 @@ describe("SystemUpgradeService.checkAndOffer", () => {
   });
 
   it("stands down without probing when the auto_upgrade gate is off", async () => {
-    const checkUpgrade = vi.fn(async () =>
+    const checkUpgrade = rs.fn(async () =>
       check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
     );
     const { service } = makeService({ isEnabled: async () => false, checkUpgrade });
@@ -70,7 +70,7 @@ describe("SystemUpgradeService.checkAndOffer", () => {
   });
 
   it("is idempotent: a re-fire while a countdown is live does not re-check or reset", async () => {
-    const checkUpgrade = vi.fn(async () =>
+    const checkUpgrade = rs.fn(async () =>
       check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
     );
     const { service } = makeService({ checkUpgrade });
@@ -141,7 +141,7 @@ describe("SystemUpgradeService cutover", () => {
     });
     await service.checkAndOffer();
     fireDeadline();
-    await vi.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("updating"));
+    await rs.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("updating"));
     expect(applyUpgrade).toHaveBeenCalledExactlyOnceWith("1.3.0");
   });
 
@@ -152,13 +152,13 @@ describe("SystemUpgradeService cutover", () => {
     });
     await service.checkAndOffer();
     fireDeadline();
-    await vi.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("idle"));
+    await rs.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("idle"));
     expect(service.getHub().getSnapshot().targetVersion).toBeNull();
   });
 
   it("a deadline firing during an in-flight relay does not double-apply", async () => {
     let release!: (result: ApplyResult) => void;
-    const applyUpgrade = vi.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
+    const applyUpgrade = rs.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
     const { service, fireDeadline } = makeService({
       checkUpgrade: async () => check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
       applyUpgrade,
@@ -174,7 +174,7 @@ describe("SystemUpgradeService cutover", () => {
 
   it("a deadline firing during a failing in-flight relay stands the offer down", async () => {
     let release!: (result: ApplyResult) => void;
-    const applyUpgrade = vi.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
+    const applyUpgrade = rs.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
     const { service, fireDeadline } = makeService({
       checkUpgrade: async () => check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
       applyUpgrade,
@@ -188,13 +188,13 @@ describe("SystemUpgradeService cutover", () => {
     release({ ok: false, error: "pantheon_unreachable" });
     expect(await pending).toEqual({ ok: false, error: "pantheon_unreachable" });
     expect(applyUpgrade).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("idle"));
+    await rs.waitFor(() => expect(service.getHub().getSnapshot().phase).toBe("idle"));
     expect(service.getHub().getSnapshot().targetVersion).toBeNull();
   });
 
   it("a concurrent update now shares the in-flight relay outcome", async () => {
     let release!: (result: ApplyResult) => void;
-    const applyUpgrade = vi.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
+    const applyUpgrade = rs.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
     const { service } = makeService({
       checkUpgrade: async () => check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
       applyUpgrade,
@@ -210,7 +210,7 @@ describe("SystemUpgradeService cutover", () => {
 
   it("a concurrent update now shares an accepted relay's ack", async () => {
     let release!: (result: ApplyResult) => void;
-    const applyUpgrade = vi.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
+    const applyUpgrade = rs.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
     const { service } = makeService({
       checkUpgrade: async () => check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
       applyUpgrade,
@@ -227,7 +227,7 @@ describe("SystemUpgradeService cutover", () => {
 
   it("defer is a no-op while a cutover relay is in flight", async () => {
     let release!: (result: ApplyResult) => void;
-    const applyUpgrade = vi.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
+    const applyUpgrade = rs.fn(() => new Promise<ApplyResult>((resolve) => (release = resolve)));
     const { service } = makeService({
       checkUpgrade: async () => check({ upgradeAvailable: true, latest: { version: "1.3.0" } }),
       applyUpgrade,

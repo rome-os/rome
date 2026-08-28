@@ -6,7 +6,7 @@
 //   3. The account-401 → renew-once-then-degrade flow end-to-end over the real
 //      ConnectionRegistry (the route-driven scheme's renew answers "re-confer").
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import type { WechatAdapterConfig } from "../../channels/wechat.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { CliLoginError, parseApiKeyFromSession, parseLoginSession } from "./composio-login.js";
 
 // Fixtures captured from `composio` CLI v0.2.27 in the dev runtime container.

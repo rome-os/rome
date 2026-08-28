@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import {
   CLOUD_GUARDIAN_PASSWORD_SENTINEL,
@@ -102,7 +102,7 @@ describe("resolveAndRecordAccount", () => {
 
   afterEach(() => {
     testDb.close();
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   const seedGuardian = (accountId: string | null) =>
@@ -166,7 +166,7 @@ describe("resolveAndRecordAccount", () => {
 
   it("logs a would-reject mismatch and leaves the recorded account intact", async () => {
     await seedGuardian("acct-A");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
 
     await resolveAndRecordAccount(testDb.db, { prove: provesAs(ok("acct-B")) });
 
@@ -178,7 +178,7 @@ describe("resolveAndRecordAccount", () => {
 
   it("is a no-op when accountId already matches the resolved account", async () => {
     await seedGuardian("acct-A");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
 
     await resolveAndRecordAccount(testDb.db, { prove: provesAs(ok("acct-A")) });
 

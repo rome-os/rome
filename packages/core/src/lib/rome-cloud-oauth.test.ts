@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
 import { oauthPendingAttempts } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
@@ -24,7 +24,7 @@ describe("Rome Cloud OAuth brokering", () => {
   afterEach(() => {
     process.env = { ...savedEnv };
     setInstanceTokenInMemory(null);
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   describe("createRomeCloudOAuthStartUrl", () => {
@@ -97,7 +97,7 @@ describe("Rome Cloud OAuth brokering", () => {
     }
 
     function stubRedeemFetch() {
-      const fetchMock = vi.fn(async (_input: unknown, _init?: { body?: string }) => {
+      const fetchMock = rs.fn(async (_input: unknown, _init?: { body?: string }) => {
         return new Response(
           JSON.stringify({ provider: "github", tokens: { accessToken: "tok" } }),
           {
@@ -106,7 +106,7 @@ describe("Rome Cloud OAuth brokering", () => {
           },
         );
       });
-      vi.stubGlobal("fetch", fetchMock);
+      rs.stubGlobal("fetch", fetchMock);
       return fetchMock;
     }
 
@@ -121,9 +121,9 @@ describe("Rome Cloud OAuth brokering", () => {
     it("surfaces the broker's error_description over the bare OAuth error code", async () => {
       setInstanceTokenInMemory("romeinst_test-token");
       const state = await startState();
-      vi.stubGlobal(
+      rs.stubGlobal(
         "fetch",
-        vi.fn(
+        rs.fn(
           async () =>
             new Response(
               JSON.stringify({
@@ -143,9 +143,9 @@ describe("Rome Cloud OAuth brokering", () => {
     it("falls back to the bare OAuth error code when the broker sends no description", async () => {
       setInstanceTokenInMemory("romeinst_test-token");
       const state = await startState();
-      vi.stubGlobal(
+      rs.stubGlobal(
         "fetch",
-        vi.fn(
+        rs.fn(
           async () =>
             new Response(JSON.stringify({ error: "invalid_grant" }), {
               status: 400,

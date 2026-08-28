@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { getAppRouteBase, getAppHref, getEmbeddedAppHref, getFullAppHref } from "./app-routes.js";
 
 describe("app-routes", () => {

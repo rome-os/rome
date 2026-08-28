@@ -1,19 +1,19 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, rs, beforeEach } from "@rstest/core";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-vi.mock("./paths.js", () => ({
-  getExampleAppsDir: vi.fn(() => "/tmp/example_apps"),
-  getProfileExampleAppsDir: vi.fn(() => "/tmp/example-apps"),
+rs.mock("./paths.js", () => ({
+  getExampleAppsDir: rs.fn(() => "/tmp/example_apps"),
+  getProfileExampleAppsDir: rs.fn(() => "/tmp/example-apps"),
 }));
 
 import { getExampleAppsDir, getProfileExampleAppsDir } from "./paths.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 
-const mockedGetExampleAppsDir = vi.mocked(getExampleAppsDir);
-const mockedGetProfileExampleAppsDir = vi.mocked(getProfileExampleAppsDir);
+const mockedGetExampleAppsDir = rs.mocked(getExampleAppsDir);
+const mockedGetProfileExampleAppsDir = rs.mocked(getProfileExampleAppsDir);
 
 // This file lives at packages/core/src — four levels up is the repo root.
 const REAL_REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
@@ -38,7 +38,7 @@ function writeExampleApp(exampleAppsDir: string, appId: string): void {
 
 describe("profile-example-apps", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("seeds an example app into the authoring dir, excluding node_modules/dist", () => {

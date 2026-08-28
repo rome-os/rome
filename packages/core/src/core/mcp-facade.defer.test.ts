@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { buildFacadeBundle, type FacadeParams } from "./mcp-facade.js";
 
 function baseParams(overrides: Partial<FacadeParams> = {}): FacadeParams {
@@ -21,14 +21,14 @@ describe("defer facade tool", () => {
   });
 
   it("registers on a non-interactive surface (no UI needed — it injects a message)", () => {
-    const executeDefer = vi.fn().mockResolvedValue({ ok: true });
+    const executeDefer = rs.fn().mockResolvedValue({ ok: true });
     const tool = deferTool(baseParams({ executeDefer, supportsInteractiveSurface: false }));
     expect(tool).toBeDefined();
     expect(tool?.inputSchema).toMatchObject({ required: ["name"] });
   });
 
   it("relays the call to executeDefer and returns its result", async () => {
-    const executeDefer = vi
+    const executeDefer = rs
       .fn()
       .mockResolvedValue({ ok: true, deferredUntil: "2026-06-25T12:05:00.000Z" });
     const tool = deferTool(baseParams({ executeDefer, supportsInteractiveSurface: true }));
@@ -39,7 +39,7 @@ describe("defer facade tool", () => {
   });
 
   it("surfaces a thrown error as a tool error", async () => {
-    const executeDefer = vi.fn().mockRejectedValue(new Error("defer fires in the past"));
+    const executeDefer = rs.fn().mockRejectedValue(new Error("defer fires in the past"));
     const tool = deferTool(baseParams({ executeDefer, supportsInteractiveSurface: true }));
     const result = await tool!.handler({ name: "x", at: "2020-01-01T00:00:00Z" });
     expect(result.isError).toBe(true);

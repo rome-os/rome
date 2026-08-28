@@ -1,10 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as pathsModule from "../paths.js" with { rstest: "importActual" };
 import type { AgentConfig } from "../types.js";
 
-const mockPaths = vi.hoisted(() => ({
+const mockPaths = rs.hoisted(() => ({
   projectRoot: "/tmp/rome-test-project-root",
   profileDir: "/tmp/rome-test-profile",
   profileMemoryDir: "/tmp/rome-test-profile/memory",
@@ -13,18 +14,15 @@ const mockPaths = vi.hoisted(() => ({
   customAppAuthoringRoot: "/tmp/rome-test-profile/projects/apps",
 }));
 
-vi.mock("../paths.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../paths.js")>();
-  return {
-    ...actual,
-    getProjectRoot: vi.fn(() => mockPaths.projectRoot),
-    getProfileDir: vi.fn(() => mockPaths.profileDir),
-    getProfileMemoryDir: vi.fn(() => mockPaths.profileMemoryDir),
-    getProfileInstalledAppsDir: vi.fn(() => mockPaths.profileInstalledAppsDir),
-    getProjectsRoot: vi.fn(() => mockPaths.projectsRoot),
-    getCustomAppAuthoringRoot: vi.fn(() => mockPaths.customAppAuthoringRoot),
-  };
-});
+rs.mock("../paths.js", () => ({
+  ...pathsModule,
+  getProjectRoot: rs.fn(() => mockPaths.projectRoot),
+  getProfileDir: rs.fn(() => mockPaths.profileDir),
+  getProfileMemoryDir: rs.fn(() => mockPaths.profileMemoryDir),
+  getProfileInstalledAppsDir: rs.fn(() => mockPaths.profileInstalledAppsDir),
+  getProjectsRoot: rs.fn(() => mockPaths.projectsRoot),
+  getCustomAppAuthoringRoot: rs.fn(() => mockPaths.customAppAuthoringRoot),
+}));
 
 import {
   buildInteractiveSurfaceGuidanceSection,
@@ -61,7 +59,7 @@ describe("PromptBuilder", () => {
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
+    rs.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -172,7 +170,7 @@ describe("PromptBuilder", () => {
   });
 
   it("honours INTERNAL_API_PORT in the agent browser guidance", () => {
-    vi.stubEnv("INTERNAL_API_PORT", "9999");
+    rs.stubEnv("INTERNAL_API_PORT", "9999");
 
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 

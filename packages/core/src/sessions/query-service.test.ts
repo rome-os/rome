@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { romeAgentMessages } from "../db/schema.js";
@@ -12,8 +12,8 @@ describe("SessionQueryService", () => {
   let service: SessionQueryService;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
     testDb = createTestDb();
     webchat = new WebChatRepository(testDb.db);
     const codeReviewAgent = {
@@ -54,7 +54,7 @@ describe("SessionQueryService", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import {
@@ -90,7 +90,7 @@ function liveEngine(): { engine: RoutineEngine; provider: ScheduleTriggerProvide
   const engine = new RoutineEngine(
     routinesRepo,
     new RoutineRunsRepository(testDb.db),
-    { run: vi.fn() } as never,
+    { run: rs.fn() } as never,
     0,
     new FakeClock(),
   );

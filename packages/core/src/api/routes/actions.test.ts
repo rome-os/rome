@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { actionsRoutes } from "./actions.js";
 import { createTestDb, buildTestDeps } from "../../test/helpers.js";
@@ -89,7 +89,7 @@ describe("Actions API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const cancel = vi.fn(async () => true);
+      const cancel = rs.fn(async () => true);
       const engine = { ...deps.actionEngine, cancel } as unknown as ApiDeps["actionEngine"];
       const app = new Hono().route("/", actionsRoutes({ ...deps, actionEngine: engine }));
 

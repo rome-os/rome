@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createArtifactReferenceResolver } from "./artifact-reference.js";
 
 describe("createArtifactReferenceResolver", () => {
   it("resolves an agent reference through the agent registry", () => {
-    const getCanonicalName = vi.fn(() => "workflow-studio:designer");
+    const getCanonicalName = rs.fn(() => "workflow-studio:designer");
     const resolve = createArtifactReferenceResolver({
       agentLoader: { getCanonicalName },
-      actionRegistry: { getCanonicalName: vi.fn() },
+      actionRegistry: { getCanonicalName: rs.fn() },
     });
 
     expect(
@@ -19,9 +19,9 @@ describe("createArtifactReferenceResolver", () => {
   });
 
   it("resolves an action reference through the action registry", () => {
-    const getCanonicalName = vi.fn(() => "workflow-studio:validate-design");
+    const getCanonicalName = rs.fn(() => "workflow-studio:validate-design");
     const resolve = createArtifactReferenceResolver({
-      agentLoader: { getCanonicalName: vi.fn() },
+      agentLoader: { getCanonicalName: rs.fn() },
       actionRegistry: { getCanonicalName },
     });
 
@@ -37,9 +37,9 @@ describe("createArtifactReferenceResolver", () => {
   it("rejects an action reference missing from the registry", () => {
     const resolve = createArtifactReferenceResolver({
       agentLoader: {
-        getCanonicalName: vi.fn(),
+        getCanonicalName: rs.fn(),
       },
-      actionRegistry: { getCanonicalName: vi.fn(() => undefined) },
+      actionRegistry: { getCanonicalName: rs.fn(() => undefined) },
     });
 
     expect(() => resolve({ kind: "action", value: "missing" })).toThrow(

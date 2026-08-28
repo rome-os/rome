@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { runTurn, type WelcomeEffects } from "./script.js";
 import type { ProgressRepository, WelcomeProgress } from "../../db/repositories/progress.js";
 
@@ -14,7 +14,7 @@ function makeEffects(node: WelcomeProgress["node"], overrides: Partial<WelcomePr
     completedAt: null,
     ...overrides,
   };
-  const send = vi.fn(async () => ({ ok: true }));
+  const send = rs.fn(async () => ({ ok: true }));
   const progress = {
     get: () => row,
     patch: (p: Partial<WelcomeProgress> & { appIdeas?: string; appIdeasGeneratedAt?: string }) => {
@@ -32,10 +32,10 @@ function makeEffects(node: WelcomeProgress["node"], overrides: Partial<WelcomePr
   } as unknown as ProgressRepository;
   const fx = {
     progress,
-    getAgentName: vi.fn(async () => "Rome"),
-    getLocale: vi.fn(async () => "en" as const),
-    say: vi.fn(async () => {}),
-    summon: vi.fn(),
+    getAgentName: rs.fn(async () => "Rome"),
+    getLocale: rs.fn(async () => "en" as const),
+    say: rs.fn(async () => {}),
+    summon: rs.fn(),
     chatgpt: {} as WelcomeEffects["chatgpt"],
     email: { send },
   } as unknown as WelcomeEffects;
@@ -48,7 +48,7 @@ const resolution = (obj: unknown) => `\`\`\`json\n${JSON.stringify(obj)}\n\`\`\`
 describe("runTurn — email handshake gate", () => {
   it("greets with the guardian-chosen agent name", async () => {
     const { fx } = makeEffects("greet");
-    vi.mocked(fx.getAgentName).mockResolvedValue("Nova");
+    rs.mocked(fx.getAgentName).mockResolvedValue("Nova");
 
     const reply = await runTurn("Let's get started", fx);
 
@@ -60,7 +60,7 @@ describe("runTurn — email handshake gate", () => {
 
   it("uses Chinese copy from the first welcome step", async () => {
     const { fx } = makeEffects("greet");
-    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");
 
     const reply = await runTurn("开始设置", fx);
 
@@ -81,7 +81,7 @@ describe("runTurn — email handshake gate", () => {
 
   it("uses the guardian-chosen agent name in the hello email body", async () => {
     const { fx, send } = makeEffects("await_email");
-    vi.mocked(fx.getAgentName).mockResolvedValue("Nova");
+    rs.mocked(fx.getAgentName).mockResolvedValue("Nova");
 
     await runTurn(resolution({ agreed: true, guardianEmail: "g@x.com" }), fx);
 
@@ -132,7 +132,7 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
 
   it("uses Chinese questions when the guardian selected Chinese", async () => {
     const { fx, getNode } = makeEffects("await_choice");
-    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");
 
     const reply = await runTurn(resolution({ choice: "回答几个问题" }), fx);
 
@@ -146,7 +146,7 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
 
   it("accepts the Chinese browser-skip action", async () => {
     const { fx, getNode } = makeEffects("await_browser");
-    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");
 
     const reply = await runTurn(resolution({ action: "暂时跳过" }), fx);
 
@@ -157,7 +157,7 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
   it("folds the answers into memory via an inline welcome-memory summon", async () => {
     const { fx, getNode } = makeEffects("await_questions");
     // Route the memory summon vs. the later ideas summon by agent name.
-    vi.mocked(fx.summon).mockImplementation(async (agent: string) =>
+    rs.mocked(fx.summon).mockImplementation(async (agent: string) =>
       agent === "welcome-memory"
         ? { ok: true, output: { summary: "Engineer interested in AI." } }
         : { ok: true, output: { ideas: [{ title: "Launch tracker", prompt: "Build it." }] } },
@@ -196,7 +196,7 @@ describe("runTurn — getting-to-know-you questionnaire", () => {
 describe("runTurn — locale fallback ideas", () => {
   it("uses the Chinese fallback title without changing the English one", async () => {
     const { fx } = makeEffects("await_idea");
-    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");
 
     const reply = await runTurn(resolution({ ideaTitle: "培养习惯" }), fx);
 
@@ -219,12 +219,12 @@ describe("runTurn — briefing scout suggestions", () => {
     const { fx, getNode } = makeEffects("await_browser", {
       introRawInput: "The guardian cares about AI, software engineering, and product strategy.",
     });
-    fx.chatgpt.checkLogin = vi.fn(async () => ({ loggedIn: true, reason: "" }));
-    fx.chatgpt.scrape = vi.fn(async () => ({
+    fx.chatgpt.checkLogin = rs.fn(async () => ({ loggedIn: true, reason: "" }));
+    fx.chatgpt.scrape = rs.fn(async () => ({
       ok: true,
       reply: "The guardian cares about AI, software engineering, and product strategy.",
     }));
-    vi.mocked(fx.summon).mockResolvedValue({
+    rs.mocked(fx.summon).mockResolvedValue({
       ok: true,
       output: { summary: "Interests: AI and software engineering." },
     });
@@ -246,7 +246,7 @@ describe("runTurn — briefing scout suggestions", () => {
     const { fx, getNode } = makeEffects("await_scouts", {
       introSummary: "Interests: design and product strategy.",
     });
-    vi.mocked(fx.summon).mockResolvedValue({
+    rs.mocked(fx.summon).mockResolvedValue({
       ok: true,
       output: { ideas: [{ title: "Launch tracker", prompt: "Build me a launch tracker." }] },
     });
@@ -260,8 +260,8 @@ describe("runTurn — briefing scout suggestions", () => {
 
   it("localizes Chinese scout suggestions from Chinese answers", async () => {
     const { fx } = makeEffects("await_questions");
-    vi.mocked(fx.getLocale).mockResolvedValue("zh-CN");
-    vi.mocked(fx.summon).mockResolvedValue({
+    rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");
+    rs.mocked(fx.summon).mockResolvedValue({
       ok: true,
       output: { summary: "对人工智能和软件工程感兴趣。" },
     });

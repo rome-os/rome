@@ -7,7 +7,7 @@
 // cancel, idempotent late delivery, and the same-origin guard.
 
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The OAuth provider descriptor's custody hook writes the tmpfs token file +
 // spawns `gh` off the terminal conferral. This suite exercises the setup
@@ -15,13 +15,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // the confer off the real disk / `gh` binary AND deterministic — an un-mocked
 // `gh` spawn (ENOENT) is slow enough on a loaded CI runner to push the `done`
 // transition past the poll's default timeout (the terminal write awaits custody).
-vi.mock("../../lib/github-shell-integration.js", () => ({
-  syncGithubShellIntegrationForProvider: vi.fn(async () => {}),
-  clearGithubShellIntegrationForProvider: vi.fn(async () => {}),
+rs.mock("../../lib/github-shell-integration.js", () => ({
+  syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
+  clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-vi.mock("../../lib/provider-token-files.js", () => ({
-  syncProviderTokenFile: vi.fn(async () => {}),
-  clearProviderTokenFile: vi.fn(async () => {}),
+rs.mock("../../lib/provider-token-files.js", () => ({
+  syncProviderTokenFile: rs.fn(async () => {}),
+  clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
 import { SetupManager } from "../../connections/setup/manager.js";
@@ -77,9 +77,9 @@ function fakePersonRepo(): PersonMappingRepository {
     findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
     // The terminal conferral applies the guardian mapping through the synchronous
     // write helpers enlisted in its transaction — not the async setters.
-    writeChannelUserId: vi.fn(),
-    writeChannelMapping: vi.fn(() => "id"),
-    deleteGuardianChannelMappings: vi.fn(),
+    writeChannelUserId: rs.fn(),
+    writeChannelMapping: rs.fn(() => "id"),
+    deleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
 
@@ -264,8 +264,8 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
       // The terminal conferral applies the guardian mapping through the synchronous
       // write helpers enlisted in its transaction — not the async setters.
-      writeChannelUserId: vi.fn(),
-      writeChannelMapping: vi.fn(() => "id"),
+      writeChannelUserId: rs.fn(),
+      writeChannelMapping: rs.fn(() => "id"),
     };
     registry.register(feishuDeps(overrides, personRepo));
     const manager = new SetupManager({
@@ -355,7 +355,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     expect(registry.find("feishu")).toHaveLength(0);
 
     resolveLink({ channelUserId: "ou_guardian" });
-    await vi.waitFor(async () => {
+    await rs.waitFor(async () => {
       const poll = await app.request(`/setups/${cid}`);
       expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
     });
@@ -400,7 +400,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       qrDataUrl: "data:image/png;base64,QR",
       expiresAt: null,
     });
-    await vi.waitFor(async () => {
+    await rs.waitFor(async () => {
       const poll = await app.request(`/setups/${cid}`);
       const body = (await poll.json()) as { state: { view?: { links?: { url: string }[] } } };
       expect((body.state.view?.links ?? []).map((l) => l.url)).toContain(
@@ -409,7 +409,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     });
 
     resolveMinted({ appId: "cli_minted", appSecret: "minted", domain: "lark" });
-    await vi.waitFor(async () => {
+    await rs.waitFor(async () => {
       const poll = await app.request(`/setups/${cid}`);
       expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
     });
@@ -568,7 +568,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
   }
 
   async function pollDone(app: Hono, cid: string) {
-    await vi.waitFor(
+    await rs.waitFor(
       async () => {
         const poll = await app.request(`/setups/${cid}`);
         expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
@@ -675,7 +675,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
   });
 
   it("keeps a cancelled redirect state owned and leaves zero durable state", async () => {
-    const redeem = vi.fn(async (handoff: string) => ({
+    const redeem = rs.fn(async (handoff: string) => ({
       credential: { material: { accessToken: `tok-${handoff}` }, expiresAt: "never" as const },
       profile: { login: "octocat" },
     }));
@@ -724,7 +724,7 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
     // The redeem runs in a ctx.step, so the return resolves at `presenting`; the
     // failure surfaces on the next poll.
     expect(ret.status).toBe(200);
-    await vi.waitFor(
+    await rs.waitFor(
       async () => {
         const poll = await app.request(`/setups/${json.cid}`);
         const state = ((await poll.json()) as { state: { status: string; reason?: string } }).state;

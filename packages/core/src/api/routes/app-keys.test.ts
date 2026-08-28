@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
@@ -157,7 +157,7 @@ describe("appKeysRoutes", () => {
   });
 
   it("refreshes the app runtime only when the environment changed", async () => {
-    const refresh = vi.spyOn(deps, "refreshAppRuntime");
+    const refresh = rs.spyOn(deps, "refreshAppRuntime");
 
     const rejected = await put("lowercase", { value: "v" });
     expect(rejected.status).toBe(400);

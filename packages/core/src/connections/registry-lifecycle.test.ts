@@ -8,7 +8,7 @@
 //   Extra: externalCustody — ledger row kind "external", no secret, build
 //          receives resolver-produced material; also after rehydration.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { createTestDb } from "../test/helpers.js";

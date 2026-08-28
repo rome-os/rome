@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { PublicAccessState } from "./public-access-state.js";
 
 describe("PublicAccessState", () => {

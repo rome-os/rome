@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import type {
@@ -8,9 +8,9 @@ import type {
   SkillMcpDefinition,
 } from "./agent-runner.js";
 
-const { createSdkMcpServerMock, sdkToolMock } = vi.hoisted(() => ({
-  createSdkMcpServerMock: vi.fn((config: unknown) => config),
-  sdkToolMock: vi.fn(
+const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
+  createSdkMcpServerMock: rs.fn((config: unknown) => config),
+  sdkToolMock: rs.fn(
     (
       name: string,
       description: string,
@@ -25,7 +25,7 @@ const { createSdkMcpServerMock, sdkToolMock } = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
   createSdkMcpServer: createSdkMcpServerMock,
   tool: sdkToolMock,
 }));
@@ -154,7 +154,7 @@ function getSubagentServerTools() {
 
 describe("buildAnthropicMcpServers", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("registers only the fixed four tools on the actions MCP server", () => {
@@ -195,7 +195,7 @@ describe("buildAnthropicMcpServers", () => {
   });
 
   it("passes Claude's exact tool-use identity into subagent execution", async () => {
-    const executeSubagent = vi.fn(async () => ({ status: "completed" }));
+    const executeSubagent = rs.fn(async () => ({ status: "completed" }));
     build({
       subagentTools: [
         {
@@ -351,7 +351,7 @@ describe("buildAnthropicMcpServers", () => {
     // single source of truth for "is this name visible to this agent". The
     // stub here mirrors that contract: unknown name → throw.
     const allowedNames = new Set(baseActionCatalog.map((a) => a.name));
-    const executeAction = vi.fn(async (name: string, input: unknown) => {
+    const executeAction = rs.fn(async (name: string, input: unknown) => {
       if (!allowedNames.has(name)) throw new Error(`Unknown action: ${name}`);
       return { received: input };
     });
@@ -392,7 +392,7 @@ describe("buildAnthropicMcpServers", () => {
     // contract: the executeAction callback is the gate that rejects names
     // that aren't currently visible.
     const liveCatalog: ActionMcpDefinition[] = [baseActionCatalog[0]];
-    const executeAction = vi.fn(async (name: string) => {
+    const executeAction = rs.fn(async (name: string) => {
       if (!liveCatalog.some((a) => a.name === name)) {
         throw new Error(`Unknown action: ${name}`);
       }

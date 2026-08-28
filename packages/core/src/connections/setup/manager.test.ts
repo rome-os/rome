@@ -4,7 +4,7 @@
 // terminal write imports into the ADDRESSED connection (never blindly
 // find()[0]), and the guardian map — never reaching into the manager internals.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../../db/index.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
@@ -44,7 +44,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
     profile?: ProfileRecord;
   }> = [];
   let connected: Connection[] = [...seed];
-  const mint = vi.fn((service: string): Connection => {
+  const mint = rs.fn((service: string): Connection => {
     const conn = mkConn(`conn-${service}`, service);
     connected = [...connected, conn];
     return conn;
@@ -83,7 +83,7 @@ function fakeRegistry(setup: SetupFn | undefined, seed: Connection[] = []) {
 
 /** A person-mapping repo double; `writeChannelMapping` is the guardian-map sink
  *  (the participant the conferral transaction runs). */
-function fakePersonRepo(writeChannelMapping = vi.fn(() => "id")): PersonMappingRepository {
+function fakePersonRepo(writeChannelMapping = rs.fn(() => "id")): PersonMappingRepository {
   return {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [{ id: "guardian", channelMappings: [] }],
@@ -126,7 +126,7 @@ describe("SetupManager", () => {
 
   it("placeholder flow: mints the connection, imports, and maps the guardian", async () => {
     const { registry, imports, connect } = fakeRegistry(discordSetup);
-    const writeChannelMapping = vi.fn(() => "id");
+    const writeChannelMapping = rs.fn(() => "id");
     const mgr = new SetupManager({
       registry,
       personMappingRepo: fakePersonRepo(writeChannelMapping),

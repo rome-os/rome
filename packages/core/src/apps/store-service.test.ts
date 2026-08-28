@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createAppStoreService } from "./store-service.js";
 
 describe("createAppStoreService", () => {
   it("uses the complete scoped listing id for installed-state lookup", async () => {
-    const get = vi.fn(() => null);
+    const get = rs.fn(() => null);
     const service = createAppStoreService({
-      fetch: vi.fn(async () =>
+      fetch: rs.fn(async () =>
         Response.json({
           listings: [
             {
@@ -37,7 +37,7 @@ describe("createAppStoreService", () => {
   });
 
   it("lists store listings and annotates installed state when requested", async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = rs.fn(
       async (..._args: Parameters<typeof fetch>) =>
         new Response(
           JSON.stringify({
@@ -111,7 +111,7 @@ describe("createAppStoreService", () => {
   });
 
   it("normalizes sourceAvailable for current and legacy version responses", async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = rs.fn(
       async () =>
         new Response(
           JSON.stringify({

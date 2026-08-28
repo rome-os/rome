@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "@rstest/core";
 import { getCurrentActionContext, runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { callAction } from "./call-action.js";
 import { actionExecutionContext } from "./context.js";

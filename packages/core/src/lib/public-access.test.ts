@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "@rstest/core";
 import { generateCaddyfile } from "./caddyfile-generator.js";
 
 describe("generateCaddyfile", () => {

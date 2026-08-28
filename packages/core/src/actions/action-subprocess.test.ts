@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionEvent, StreamAgentMessage } from "@rome-os/app-runtime";
 import { ActionEngine } from "./engine.js";
 import { ActionCancelledError, ActionWorkerExitError } from "./action-errors.js";
@@ -178,12 +178,12 @@ describe("main-owned action subprocess", () => {
     }
 
     const child = new FakeChild();
-    const processFactory = vi.fn(
+    const processFactory = rs.fn(
       (_entryPath: string, _options: ForkOptions) => child as unknown as ChildProcess,
     );
-    const workerRpcAttach = vi.fn();
-    const sessionDispose = vi.fn();
-    const sessionAttach = vi.fn(() => ({ dispose: sessionDispose }));
+    const workerRpcAttach = rs.fn();
+    const sessionDispose = rs.fn();
+    const sessionAttach = rs.fn(() => ({ dispose: sessionDispose }));
     const engine = new ActionEngine(
       new ActionRegistryImpl([]),
       undefined,
@@ -263,7 +263,7 @@ describe("main-owned action subprocess", () => {
     registerActionSubprocessHost(mainForW1, coordinator, { worker: "w1" });
 
     const registry = new ActionRegistryImpl([]);
-    const localB = vi.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
+    const localB = rs.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
     registry.register(buildAction("action_b", { cancellable: true, execute: localB }));
     registry.register(
       buildAction("action_a", {
@@ -330,7 +330,7 @@ describe("main-owned action subprocess", () => {
     registerActionSubprocessHost(mainForW1, coordinator, { worker: "w1" });
 
     let appContext!: RomeAppContext;
-    const localB = vi.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
+    const localB = rs.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
     const w1Registry = new ActionRegistryImpl([]);
     w1Registry.register(buildAction("action_b", { cancellable: true, execute: localB }));
     w1Registry.register(
@@ -400,7 +400,7 @@ describe("main-owned action subprocess", () => {
   });
 
   it("characterizes the former W1 -> W2 agent call as a 600-second timeout failure", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
       const delegationLink = createTransportPair();
       const mainForW1 = new IpcRpc(delegationLink.a, "main-w1");
@@ -441,14 +441,14 @@ describe("main-owned action subprocess", () => {
       });
 
       const run = engine.run("action_a", {});
-      await vi.advanceTimersByTimeAsync(AGENT_SESSION_RUN_TURN_TIMEOUT_MS);
+      await rs.advanceTimersByTimeAsync(AGENT_SESSION_RUN_TURN_TIMEOUT_MS);
 
       await expect(run).resolves.toEqual({
         status: "error",
         error: `IpcRpc timeout: agent.session.runTurn (${AGENT_SESSION_RUN_TURN_TIMEOUT_MS}ms)`,
       });
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 
@@ -523,7 +523,7 @@ describe("main-owned action subprocess", () => {
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
     const run = engine.run("action_a", {}, { executionId: "root-cancel" });
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(1));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(1));
 
     expect(coordinator.cancelRoot("root-cancel", "cancel A")).toBe(1);
 
@@ -562,7 +562,7 @@ describe("main-owned action subprocess", () => {
     });
     const coordinator = new ActionWorkerCoordinator(engine);
     engine.setActionWorkerCoordinator(coordinator);
-    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    const kill = rs.spyOn(process, "kill").mockImplementation((pid, signal) => {
       const child = pid === -456_789 ? rootChild : pid === -567_890 ? delegatedChild : undefined;
       if (child && signal === "SIGTERM") {
         child.signalCode = "SIGTERM";
@@ -574,13 +574,13 @@ describe("main-owned action subprocess", () => {
 
     try {
       const rootRun = engine.run("action_a", {}, { executionId: "root-main-cancel" });
-      await vi.waitFor(() => expect(rootChild.sent).toHaveLength(1));
+      await rs.waitFor(() => expect(rootChild.sent).toHaveLength(1));
       const delegatedRun = coordinator.run(
         { worker: "w1" },
         payload("action-b-main-cancel", "root-main-cancel"),
         () => undefined,
       );
-      await vi.waitFor(() => expect(coordinator.activeCount()).toBe(1));
+      await rs.waitFor(() => expect(coordinator.activeCount()).toBe(1));
 
       await expect(engine.cancel("root-main-cancel")).resolves.toBe(true);
 
@@ -623,7 +623,7 @@ describe("main-owned action subprocess", () => {
       workerWarmPoolSize: 0,
       actionWorkerFork: () => detachedChild as unknown as ChildProcess,
     });
-    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    const kill = rs.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === -678_901 && signal === "SIGTERM") {
         detachedChild.signalCode = "SIGTERM";
         detachedChild.pid = undefined;
@@ -658,7 +658,7 @@ describe("main-owned action subprocess", () => {
 
       await expect(engine.cancel(receipt.executionId)).resolves.toBe(true);
       expect(kill).toHaveBeenCalledWith(-678_901, "SIGTERM");
-      await vi.waitFor(() => expect(engine.cancel(receipt.executionId)).resolves.toBe(false));
+      await rs.waitFor(() => expect(engine.cancel(receipt.executionId)).resolves.toBe(false));
     } finally {
       kill.mockRestore();
     }
@@ -668,7 +668,7 @@ describe("main-owned action subprocess", () => {
     const link = createTransportPair();
     const main = new IpcRpc(link.a, "main");
     const w1 = new IpcRpc(link.b, "w1");
-    const cancel = vi.fn();
+    const cancel = rs.fn();
     const host: MainActionWorkerHost = {
       startDelegatedAction() {
         const current = deferred<never>();
@@ -685,10 +685,10 @@ describe("main-owned action subprocess", () => {
     registerActionSubprocessHost(main, coordinator, { worker: "w1" });
     const client = new DelegatedActionClient(w1);
     const runB = client.run(payload("b", "root-disconnect"));
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(1));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(1));
     // Start a second execution after the first has been indexed.
     const runC = client.run(payload("c", "root-disconnect"));
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(2));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(2));
 
     link.disconnect();
 
@@ -696,7 +696,7 @@ describe("main-owned action subprocess", () => {
     await expect(runC).rejects.toMatchObject({ name: "IpcRpcDisconnectError" });
     expect(cancel).toHaveBeenCalledTimes(2);
     expect(cancel).toHaveBeenCalledWith("Owner worker disconnected");
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(0));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(0));
   });
 
   it("keeps a detached runAction alive when W1 is cancelled", async () => {
@@ -706,7 +706,7 @@ describe("main-owned action subprocess", () => {
     const detachedPayloads: ActionWorkerPayload[] = [];
     const w2 = deferred<{ status: "ok"; data: string }>();
     let w2Completed = false;
-    const startDelegatedAction = vi.fn<MainActionWorkerHost["startDelegatedAction"]>();
+    const startDelegatedAction = rs.fn<MainActionWorkerHost["startDelegatedAction"]>();
     const coordinator = new ActionWorkerCoordinator({
       startDelegatedAction,
       async startDetachedAction(actionPayload) {
@@ -768,7 +768,7 @@ describe("main-owned action subprocess", () => {
     link.disconnect();
     expect(w2Completed).toBe(false);
     w2.resolve({ status: "ok", data: "review complete" });
-    await vi.waitFor(() => expect(w2Completed).toBe(true));
+    await rs.waitFor(() => expect(w2Completed).toBe(true));
   });
 
   it("cancels an awaited nested runAction when W1 is cancelled", async () => {
@@ -808,7 +808,7 @@ describe("main-owned action subprocess", () => {
     appContext = appContextFor(engine);
 
     const parent = engine.run("action_a", {}, { executionId: "root-a" });
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(1));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(1));
 
     expect(coordinator.cancelRoot("root-a", "cancel W1")).toBe(1);
 
@@ -820,7 +820,7 @@ describe("main-owned action subprocess", () => {
     expect(delegatedPayloads).toHaveLength(1);
     expect(delegatedPayloads[0].context.rootExecutionId).toBe("root-a");
     expect(delegatedPayloads[0].context.parentExecutionId).toBe("root-a");
-    await vi.waitFor(() => expect(coordinator.activeCount()).toBe(0));
+    await rs.waitFor(() => expect(coordinator.activeCount()).toBe(0));
   });
 
   it("keeps concurrent delegated results and event streams isolated by execution id", async () => {
@@ -853,7 +853,7 @@ describe("main-owned action subprocess", () => {
       onRuntimeEvent: (event) =>
         cEvents.push((event as { message: { content: string } }).message.content),
     });
-    await vi.waitFor(() => expect(executions.size).toBe(2));
+    await rs.waitFor(() => expect(executions.size).toBe(2));
 
     observers.get("c")?.({ type: "agent_message", message: { type: "text", content: "c-event" } });
     executions.get("c")?.resolve({ status: "ok", data: "c-result" });
@@ -1009,7 +1009,7 @@ describe("main-owned action subprocess", () => {
       execute: async () => await callAction("action_b", {}),
     });
     const runner = {
-      run: vi.fn(async () => {
+      run: rs.fn(async () => {
         throw new ActionCancelledError("cancel B");
       }),
     };
@@ -1035,7 +1035,7 @@ describe("main-owned action subprocess", () => {
   });
 
   it("keeps non-cancellable B inside W1 and sends no delegated request", async () => {
-    const runner = { run: vi.fn() };
+    const runner = { run: rs.fn() };
     const registry = new ActionRegistryImpl([]);
     registry.register(
       buildAction("action_b", { execute: async () => ({ status: "ok", data: "local" }) }),
@@ -1073,7 +1073,7 @@ describe("main-owned action subprocess", () => {
   });
 
   it("allows a delegated request to outlive the ordinary 30-second RPC deadline", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
       const link = createTransportPair();
       const main = new IpcRpc(link.a, "main");
@@ -1086,12 +1086,12 @@ describe("main-owned action subprocess", () => {
       };
       registerActionSubprocessHost(main, new ActionWorkerCoordinator(host), { worker: "w1" });
       const run = new DelegatedActionClient(worker).run(payload("long-running"));
-      await vi.advanceTimersByTimeAsync(31_000);
+      await rs.advanceTimersByTimeAsync(31_000);
       result.resolve({ status: "ok", data: "late-result" });
 
       await expect(run).resolves.toEqual({ status: "ok", data: "late-result" });
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 });

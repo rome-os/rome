@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { PersonMappingRepository } from "../../../../../packages/core/src/db/repositories/person-mapping.js";
 import { ApprovalsRepository } from "../../../../../packages/core/src/db/repositories/approvals.js";
@@ -20,7 +20,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   afterEach(() => {
     testDb.close();
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   it("add person → pending approval → approve → person.approved=true", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
@@ -8,8 +8,8 @@ import type { ApprovalHandler } from "../../actions/approval-handler.js";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {
-    onApproved: vi.fn(async () => {}),
-    onRejected: vi.fn(async () => {}),
+    onApproved: rs.fn(async () => {}),
+    onRejected: rs.fn(async () => {}),
   } as unknown as ApprovalHandler;
 }
 
@@ -29,7 +29,7 @@ describe("Approvals API", () => {
 
   afterEach(() => {
     testDb.close();
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   describe("GET /approvals", () => {

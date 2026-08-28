@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { TERMINAL_COMMAND_PRESETS } from "./terminal-server.js";
 
 describe("TERMINAL_COMMAND_PRESETS", () => {

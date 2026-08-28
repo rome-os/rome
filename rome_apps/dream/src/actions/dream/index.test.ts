@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { createAction, type DreamDeps } from "./index.js";
@@ -29,8 +29,8 @@ function makeDeps(
       },
     } as unknown as AgentRunner,
     appContext: {
-      runAction: overrides?.runAction ?? vi.fn().mockResolvedValue({ status: "ok" }),
-      listRoutines: overrides?.listRoutines ?? vi.fn().mockResolvedValue([]),
+      runAction: overrides?.runAction ?? rs.fn().mockResolvedValue({ status: "ok" }),
+      listRoutines: overrides?.listRoutines ?? rs.fn().mockResolvedValue([]),
     },
   } as unknown as AppActionRuntimeDeps<DreamDeps>;
 }
@@ -73,8 +73,8 @@ describe("dream", () => {
   });
 
   it("registers daily schedule when none exists", async () => {
-    const runAction = vi.fn().mockResolvedValue({ status: "ok" });
-    const listRoutines = vi.fn().mockResolvedValue([]);
+    const runAction = rs.fn().mockResolvedValue({ status: "ok" });
+    const listRoutines = rs.fn().mockResolvedValue([]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
 
     const action = createAction(actionConfig, deps);
@@ -91,10 +91,10 @@ describe("dream", () => {
   });
 
   it("still registers the daily routine when an unrelated dream routine exists", async () => {
-    const runAction = vi.fn().mockResolvedValue({ status: "ok" });
+    const runAction = rs.fn().mockResolvedValue({ status: "ok" });
     // A different routine that happens to run the `dream` action must not
     // suppress the required daily self-register (dedup is on name, not action).
-    const listRoutines = vi.fn().mockResolvedValue([{ actionName: "dream", name: "weekly-dream" }]);
+    const listRoutines = rs.fn().mockResolvedValue([{ actionName: "dream", name: "weekly-dream" }]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
 
     const action = createAction(actionConfig, deps);
@@ -104,8 +104,8 @@ describe("dream", () => {
   });
 
   it("skips scheduling when dream event already exists", async () => {
-    const runAction = vi.fn().mockResolvedValue({ status: "ok" });
-    const listRoutines = vi.fn().mockResolvedValue([{ actionName: "dream", name: "daily-dream" }]);
+    const runAction = rs.fn().mockResolvedValue({ status: "ok" });
+    const listRoutines = rs.fn().mockResolvedValue([{ actionName: "dream", name: "daily-dream" }]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
 
     const action = createAction(actionConfig, deps);
@@ -115,8 +115,8 @@ describe("dream", () => {
   });
 
   it("continues even if schedule registration fails", async () => {
-    const runAction = vi.fn().mockRejectedValue(new Error("schedule failed"));
-    const listRoutines = vi.fn().mockResolvedValue([]);
+    const runAction = rs.fn().mockRejectedValue(new Error("schedule failed"));
+    const listRoutines = rs.fn().mockResolvedValue([]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
 
     const action = createAction(actionConfig, deps);
@@ -129,8 +129,8 @@ describe("dream", () => {
     // create_routine returns { status: "error" } rather than throwing; the dream
     // run must still complete (registration failure is non-fatal) and must not
     // treat the soft failure as a scheduled routine.
-    const runAction = vi.fn().mockResolvedValue({ status: "error", error: "bad trigger" });
-    const listRoutines = vi.fn().mockResolvedValue([]);
+    const runAction = rs.fn().mockResolvedValue({ status: "error", error: "bad trigger" });
+    const listRoutines = rs.fn().mockResolvedValue([]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
 
     const action = createAction(actionConfig, deps);

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { SessionManager } from "./session-manager.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";

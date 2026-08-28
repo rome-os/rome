@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";

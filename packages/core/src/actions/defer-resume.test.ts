@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createResumeSessionAction } from "../../../../rome_apps/system/src/actions/resume-session/index.js";
 import { runDefer, type DeferContext } from "../core/defer.js";

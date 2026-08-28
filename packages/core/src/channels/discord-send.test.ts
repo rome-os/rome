@@ -1,10 +1,10 @@
 import { ChannelType } from "discord.js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { DiscordAdapter } from "./discord.js";
 
 describe("DiscordAdapter.sendMessage", () => {
   it("returns the provider message id for an attachment-only delivery", async () => {
-    const send = vi.fn().mockResolvedValue({ id: "discord-attachment-1" });
+    const send = rs.fn().mockResolvedValue({ id: "discord-attachment-1" });
     const channel = {
       id: "discord-thread-1",
       type: ChannelType.DM,
@@ -16,7 +16,7 @@ describe("DiscordAdapter.sendMessage", () => {
     Object.assign(adapter, {
       client: {
         channels: {
-          fetch: vi.fn().mockResolvedValue(channel),
+          fetch: rs.fn().mockResolvedValue(channel),
         },
       },
     });

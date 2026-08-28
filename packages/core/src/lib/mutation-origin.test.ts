@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { isSameOriginMutationRequest } from "./mutation-origin.js";
 
 function req(headers: Record<string, string | undefined>, url = "https://rome.example/x") {

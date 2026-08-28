@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   Client,
   REST,
@@ -21,13 +21,13 @@ const BASE_REQUEST: ChannelApiRequest = {
 };
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
+  rs.useRealTimers();
+  rs.restoreAllMocks();
 });
 
 describe("DiscordAdapter REST broker capability", () => {
   it("pins requests to Discord API v10 and keeps authentication provider-owned", async () => {
-    const queue = vi.spyOn(REST.prototype, "queueRequest");
+    const queue = rs.spyOn(REST.prototype, "queueRequest");
     const adapter = new DiscordAdapter({ botToken: "not-exposed" });
 
     await expect(
@@ -44,7 +44,7 @@ describe("DiscordAdapter REST broker capability", () => {
 
   it("shares one epoch-owned REST manager and projects safe response data", async () => {
     const managers = new Set<REST>();
-    const queue = vi.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
+    const queue = rs.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
       this: REST,
     ) {
       managers.add(this);
@@ -77,8 +77,8 @@ describe("DiscordAdapter REST broker capability", () => {
   });
 
   it("returns the current 401 outcome before reporting a credential fault", async () => {
-    const onGatewayFault = vi.fn();
-    vi.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
+    const onGatewayFault = rs.fn();
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
       this: REST,
       request: InternalRequest,
     ) {
@@ -115,8 +115,8 @@ describe("DiscordAdapter REST broker capability", () => {
   });
 
   it("returns a rate-limit failure instead of an intermediate 429 at the deadline", async () => {
-    vi.useFakeTimers();
-    vi.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
+    rs.useFakeTimers();
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(async function (
       this: REST,
       request: InternalRequest,
     ) {
@@ -153,7 +153,7 @@ describe("DiscordAdapter REST broker capability", () => {
     const adapter = new DiscordAdapter({ botToken: "not-exposed" });
 
     const result = adapter.executeApiRequest({ ...BASE_REQUEST, timeoutMs: 1_000 });
-    await vi.advanceTimersByTimeAsync(1_000);
+    await rs.advanceTimersByTimeAsync(1_000);
 
     await expect(result).resolves.toEqual({
       error: {
@@ -165,9 +165,9 @@ describe("DiscordAdapter REST broker capability", () => {
   });
 
   it("aborts queued broker requests when the credential epoch stops", async () => {
-    vi.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
     let signal: AbortSignal | undefined;
-    vi.spyOn(REST.prototype, "queueRequest").mockImplementation(
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
       async (_request: InternalRequest) => {
         signal = _request.signal;
         return new Promise<ResponseLike>(() => undefined);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { KeyedMutex } from "./keyed-mutex.js";
 
 /** A promise plus its resolver, for driving deterministic interleavings. */

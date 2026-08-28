@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "@rstest/core";
 import { createSummonAction } from "../../../rome_apps/system/src/actions/summon/index.js";
 import {
   clearTestTelemetryBridge,

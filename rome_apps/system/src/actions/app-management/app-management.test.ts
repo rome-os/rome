@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { AppLifecycle } from "@rome-os/app-runtime";
 import type { AppStoreReader } from "../app-store-common.js";
 import { appManagement } from "./index.js";
@@ -8,8 +8,8 @@ const HASH_2 = "2".repeat(64);
 
 function makeStore(): AppStoreReader {
   return {
-    listListings: vi.fn(),
-    getListing: vi.fn(async () => ({
+    listListings: rs.fn(),
+    getListing: rs.fn(async () => ({
       status: 200,
       body: {
         available: true,
@@ -66,10 +66,10 @@ function makeAppManager(installResult: unknown = null): AppLifecycle {
       error: null,
     } as const);
   return {
-    create: vi.fn(),
-    install: vi.fn(async () => result),
-    uninstall: vi.fn(),
-    setEnabled: vi.fn(),
+    create: rs.fn(),
+    install: rs.fn(async () => result),
+    uninstall: rs.fn(),
+    setEnabled: rs.fn(),
   };
 }
 
@@ -113,7 +113,7 @@ describe("appManagement", () => {
   });
   it("forwards a remix create as the distinct create-from shape", async () => {
     const appManager = makeAppManager();
-    vi.mocked(appManager.create).mockResolvedValue({
+    rs.mocked(appManager.create).mockResolvedValue({
       appId: "ray-calendar",
       created: true,
       rootPath: "/projects/apps/ray-calendar",
@@ -170,7 +170,7 @@ describe("appManagement", () => {
       finishInstall = resolve;
     });
     const appManager = makeAppManager();
-    appManager.install = vi.fn(() => installResult);
+    appManager.install = rs.fn(() => installResult);
 
     let actionSettled = false;
     const action = appManagement(

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   createClaudeLoginWatcher,
   stripAnsi,
@@ -22,7 +22,7 @@ afterEach(() => {
   for (const watcher of activeWatchers.splice(0)) {
     watcher.dispose();
   }
-  vi.useRealTimers();
+  rs.useRealTimers();
 });
 
 // The real shapes printed by the `claude /login` first-run wizard (an Ink TUI):
@@ -212,15 +212,15 @@ describe("createClaudeLoginWatcher", () => {
     });
 
     it("retries Enter when the theme picker remains visible and idle", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { sends, watcher } = collect();
       watcher.push(THEME_OUTPUT);
       expect(sends).toEqual(["\r"]);
 
-      vi.advanceTimersByTime(1499);
+      rs.advanceTimersByTime(1499);
       expect(sends).toEqual(["\r"]);
 
-      vi.advanceTimersByTime(1);
+      rs.advanceTimersByTime(1);
       expect(sends).toEqual(["\r", "\r"]);
     });
 
@@ -237,44 +237,44 @@ describe("createClaudeLoginWatcher", () => {
     });
 
     it("retries Enter when the login picker remains visible and idle", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { sends, watcher } = collect();
       watcher.push(LOGIN_OUTPUT);
       expect(sends).toEqual(["\r"]);
 
-      vi.advanceTimersByTime(1500);
+      rs.advanceTimersByTime(1500);
       expect(sends).toEqual(["\r", "\r"]);
     });
 
     it("gives the login picker a fresh retry delay after advancing from theme", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { sends, watcher } = collect();
       watcher.push(THEME_OUTPUT);
-      vi.advanceTimersByTime(1000);
+      rs.advanceTimersByTime(1000);
 
       watcher.push(LOGIN_OUTPUT);
       expect(sends).toEqual(["\r", "\r"]);
 
-      vi.advanceTimersByTime(499);
+      rs.advanceTimersByTime(499);
       expect(sends).toEqual(["\r", "\r"]);
 
-      vi.advanceTimersByTime(1001);
+      rs.advanceTimersByTime(1001);
       expect(sends).toEqual(["\r", "\r", "\r"]);
     });
 
     it("stops retrying once the auth URL arrives", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { sends, watcher } = collect();
       watcher.push(LOGIN_OUTPUT);
       expect(sends).toEqual(["\r"]);
 
       watcher.push(URL_OUTPUT);
-      vi.advanceTimersByTime(1500);
+      rs.advanceTimersByTime(1500);
       expect(sends).toEqual(["\r"]);
     });
 
     it("stops retrying when the code prompt arrives even if the auth URL is not parseable", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { events, sends, watcher } = collect();
       watcher.push(LOGIN_OUTPUT);
       expect(sends).toEqual(["\r"]);
@@ -282,7 +282,7 @@ describe("createClaudeLoginWatcher", () => {
       watcher.push(UNPARSEABLE_POST_PICKER_OUTPUT);
       expect(events.filter((e) => e.type === "auth_url")).toHaveLength(0);
 
-      vi.advanceTimersByTime(1500);
+      rs.advanceTimersByTime(1500);
       expect(sends).toEqual(["\r"]);
     });
 
@@ -317,11 +317,11 @@ describe("createClaudeLoginWatcher", () => {
     });
 
     it("caps retries for a stuck picker", () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const { sends, watcher } = collect();
       watcher.push(LOGIN_OUTPUT);
 
-      vi.advanceTimersByTime(60_000);
+      rs.advanceTimersByTime(60_000);
       expect(sends).toHaveLength(8);
     });
 

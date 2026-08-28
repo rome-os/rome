@@ -10,7 +10,7 @@
 //   - a record that no longer matches the schema throws (fail-closed) rather than
 //     rendering a silently sparse display.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { ConnectionDescriptor, ProfileRecord } from "../types.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";

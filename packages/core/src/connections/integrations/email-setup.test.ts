@@ -13,7 +13,7 @@
 
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
@@ -62,7 +62,7 @@ describe("makeEmailSetup (coroutine)", () => {
     const { values, repo } = makeSettingsStore();
     const fn = makeEmailSetup({ provision: () => provision.promise, settings: repo });
     let rowAtCommit: unknown;
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {
       rowAtCommit = values.get("email");
     });
     const session = new SetupSession({ fn, commit });
@@ -75,7 +75,7 @@ describe("makeEmailSetup (coroutine)", () => {
     }
 
     provision.resolve({ address: EMAIL_ADDRESS, inboundSecret: EMAIL_SECRET });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls[0][0]).toEqual({
       credential: {
@@ -110,7 +110,7 @@ describe("makeEmailSetup (coroutine)", () => {
     });
     const session = new SetupSession({ fn, commit: async () => {} });
     await session.started();
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(values.get("email")).toEqual({ enabled: true, guardianEmail: "g@example.com" });
   });
@@ -123,11 +123,11 @@ describe("makeEmailSetup (coroutine)", () => {
       },
       settings: repo,
     });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
     await session.started();
 
-    await vi.waitFor(() => expect(session.state.status).toBe("failed"));
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
     expect(session.state).toEqual({
       status: "failed",
       reason: "could not reach Rome Cloud mail API: ECONNRESET",
@@ -140,7 +140,7 @@ describe("makeEmailSetup (coroutine)", () => {
     const provision = deferred<{ address: string; inboundSecret: string }>();
     const { values, repo } = makeSettingsStore();
     const fn = makeEmailSetup({ provision: () => provision.promise, settings: repo });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
     await session.started();
 
@@ -155,7 +155,7 @@ describe("makeEmailSetup (coroutine)", () => {
 
 const SAME_ORIGIN = { "sec-fetch-site": "same-origin" };
 
-function makeMailProvider(provisionMock: ReturnType<typeof vi.fn>): MailProvider {
+function makeMailProvider(provisionMock: ReturnType<typeof rs.fn>): MailProvider {
   return {
     provision: provisionMock as unknown as MailProvider["provision"],
     send: async () => ({ messageId: "m_out", threadId: "t_out" }),
@@ -215,7 +215,7 @@ function makeSetupApp() {
   const { db: testDb, close } = createTestDb();
   openTestDbs.push(close);
   const settingsRepo = new SettingsRepository(testDb);
-  const provisionMock = vi.fn(async () => ({
+  const provisionMock = rs.fn(async () => ({
     address: EMAIL_ADDRESS,
     inboundSecret: EMAIL_SECRET,
   }));
@@ -244,7 +244,7 @@ function makeSetupApp() {
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],
-    deleteGuardianChannelMappings: vi.fn(),
+    deleteGuardianChannelMappings: rs.fn(),
   } as unknown as ApiDeps["personMappingRepo"];
   registry.register(
     makeEmailDescriptor({
@@ -282,7 +282,7 @@ async function runSetup(app: Hono, idOrService = "email") {
   expect(started.status).toBe(200);
   const { cid } = (await started.json()) as { cid: string };
   let state: { status: string; reason?: string } = { status: "unknown" };
-  await vi.waitFor(async () => {
+  await rs.waitFor(async () => {
     const res = await app.request(`/setups/${cid}`);
     expect(res.status).toBe(200);
     ({ state } = (await res.json()) as { state: { status: string; reason?: string } });

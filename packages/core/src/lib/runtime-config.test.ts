@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { RUNTIME_CONFIG_FILENAME, buildRuntimeConfigJs } from "./runtime-config.js";
 
 describe("buildRuntimeConfigJs", () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { runInstanceIdentityHeartbeatTick } from "./instance-identity-heartbeat.js";
 import {
   getInstanceToken,
@@ -26,7 +26,7 @@ function memoryStore(initial: Record<string, unknown> = {}) {
 }
 
 const prove = (status: ProveIdentityResult["status"]) =>
-  vi.fn(async () =>
+  rs.fn(async () =>
     status === "ok"
       ? ({ status: "ok", identity: { accountId: "a", instanceId: "i" } } as ProveIdentityResult)
       : ({ status } as ProveIdentityResult),

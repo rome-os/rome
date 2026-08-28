@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import type { SubagentExecution } from "./subagent-execution.js";
 
@@ -13,7 +13,7 @@ function execution(sessionId: string, turnId: string): SubagentExecution {
       },
     },
     completion: new Promise(() => undefined),
-    interrupt: vi.fn(async () => undefined),
+    interrupt: rs.fn(async () => undefined),
   };
 }
 

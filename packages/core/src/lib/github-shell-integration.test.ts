@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
-const childProcess = vi.hoisted(() => ({
-  spawn: vi.fn(),
+const childProcess = rs.hoisted(() => ({
+  spawn: rs.fn(),
 }));
 
-vi.mock("node:child_process", () => ({
+rs.mock("node:child_process", () => ({
   spawn: childProcess.spawn,
 }));
 
@@ -17,14 +17,14 @@ import {
 function mockGhSuccess() {
   childProcess.spawn.mockImplementation(() => {
     const child = new EventEmitter() as EventEmitter & {
-      stderr: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
-      stdin: { end: ReturnType<typeof vi.fn> };
-      kill: ReturnType<typeof vi.fn>;
+      stderr: EventEmitter & { setEncoding: ReturnType<typeof rs.fn> };
+      stdin: { end: ReturnType<typeof rs.fn> };
+      kill: ReturnType<typeof rs.fn>;
     };
-    child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
-    child.stderr.setEncoding = vi.fn();
-    child.stdin = { end: vi.fn() };
-    child.kill = vi.fn();
+    child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof rs.fn> };
+    child.stderr.setEncoding = rs.fn();
+    child.stdin = { end: rs.fn() };
+    child.kill = rs.fn();
     queueMicrotask(() => child.emit("close", 0));
     return child;
   });

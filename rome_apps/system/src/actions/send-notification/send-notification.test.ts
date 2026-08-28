@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createAction, createSendNotificationAction } from "./index.js";
 import type { SendNotificationDeps, SendOutcome } from "./index.js";
@@ -6,19 +6,19 @@ import type { SendNotificationDeps, SendOutcome } from "./index.js";
 const config = { name: "send_notification", type: "system" } as unknown as ActionConfig;
 
 const withOutcome = (outcome: SendOutcome) =>
-  createSendNotificationAction(config, { notify: { send: vi.fn(async () => outcome) } });
+  createSendNotificationAction(config, { notify: { send: rs.fn(async () => outcome) } });
 
 // Exposes the notify.send spy so a test can assert exactly what content the
 // action forwarded.
 const withSpy = () => {
-  const send = vi.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }) as SendOutcome);
+  const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }) as SendOutcome);
   return { action: createSendNotificationAction(config, { notify: { send } }), send };
 };
 
 const withThrow = (err: unknown) =>
   createSendNotificationAction(config, {
     notify: {
-      send: vi.fn(async () => {
+      send: rs.fn(async () => {
         throw err;
       }),
     },
@@ -140,6 +140,6 @@ describe("send_notification action", () => {
       /notify capability/,
     );
     // A well-formed dep loads fine.
-    expect(() => createAction(config, { notify: { send: vi.fn() } })).not.toThrow();
+    expect(() => createAction(config, { notify: { send: rs.fn() } })).not.toThrow();
   });
 });

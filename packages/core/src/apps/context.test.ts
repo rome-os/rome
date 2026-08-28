@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -66,16 +66,16 @@ describe("app runtime context", () => {
 
   it("exposes adapter ports instead of broad internal repository objects", () => {
     const settingsRepo = {
-      get: vi.fn(async () => null),
-      set: vi.fn(async () => undefined),
-      delete: vi.fn(async () => undefined),
-      getAll: vi.fn(async () => ({})),
+      get: rs.fn(async () => null),
+      set: rs.fn(async () => undefined),
+      delete: rs.fn(async () => undefined),
+      getAll: rs.fn(async () => ({})),
     } as unknown as SettingsRepository;
     const webchatRepo = {
-      getSession: vi.fn(async () => null),
-      getMessages: vi.fn(async () => []),
-      addTurnRecapMessage: vi.fn(),
-      deleteSession: vi.fn(),
+      getSession: rs.fn(async () => null),
+      getMessages: rs.fn(async () => []),
+      addTurnRecapMessage: rs.fn(),
+      deleteSession: rs.fn(),
     } as unknown as WebChatRepository;
 
     const repositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
@@ -91,7 +91,7 @@ describe("app runtime context", () => {
     const services: RomeAppRuntimeServices = {
       catalog: catalogFor(app),
       db: {} as RomeAppRuntimeServices["db"],
-      actionEngine: { run: vi.fn() } as unknown as ActionEngine,
+      actionEngine: { run: rs.fn() } as unknown as ActionEngine,
       repositories,
     };
 
@@ -227,7 +227,7 @@ export function createApiHandler() {
     const services: RomeAppRuntimeServices = {
       catalog: catalogFor(app),
       db: {} as RomeAppRuntimeServices["db"],
-      actionEngine: { run: vi.fn() } as unknown as ActionEngine,
+      actionEngine: { run: rs.fn() } as unknown as ActionEngine,
       repositories,
     };
 
@@ -311,7 +311,7 @@ export function createAction(config, deps) {
 
   it("binds favor action-request creation to the app-api requester identity", async () => {
     const repositories = createRepositories();
-    const requestAction = vi.fn(async (input) => ({
+    const requestAction = rs.fn(async (input) => ({
       status: "pending_consent" as const,
       request: favorRequestView(input.app.appId),
       authorizationUrl: "https://rome-cloud.test/favors/action-requests/favor-1/authorize",
@@ -342,7 +342,7 @@ export function createApiHandler(ctx) {
     const services: RomeAppRuntimeServices = {
       catalog: catalogFor(apiApp),
       db: {} as RomeAppRuntimeServices["db"],
-      actionEngine: { run: vi.fn() } as unknown as ActionEngine,
+      actionEngine: { run: rs.fn() } as unknown as ActionEngine,
       repositories,
       favorService,
     };
@@ -433,7 +433,7 @@ describe("runAction invocation port", () => {
       undefined,
       undefined,
       undefined,
-      { processRole: "main", workerWarmPoolSize: 0, actionWorkerFork: vi.fn() },
+      { processRole: "main", workerWarmPoolSize: 0, actionWorkerFork: rs.fn() },
     );
     const context = createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),
@@ -466,7 +466,7 @@ describe("runAction invocation port", () => {
   });
 
   it("rejects circular args with code unserializable without executing the callee", async () => {
-    const execute = vi.fn(async () => ({ status: "ok" }) as ActionResult);
+    const execute = rs.fn(async () => ({ status: "ok" }) as ActionResult);
     const context = contextWithActions([probeAction("never_runs", execute)]);
     const args: Record<string, unknown> = {};
     args.self = args;
@@ -764,13 +764,13 @@ describe("runAction invocation port", () => {
 function createRepositories(): RomeAppRuntimeServices["repositories"] {
   return {
     settings: {
-      get: vi.fn(async () => null),
-      set: vi.fn(async () => undefined),
+      get: rs.fn(async () => null),
+      set: rs.fn(async () => undefined),
     },
     webchatRecaps: {
-      getSession: vi.fn(async () => null),
-      getMessages: vi.fn(async () => []),
-      addTurnRecapMessage: vi.fn(),
+      getSession: rs.fn(async () => null),
+      getMessages: rs.fn(async () => []),
+      addTurnRecapMessage: rs.fn(),
     },
   };
 }

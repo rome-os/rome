@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { BackendTurnRunnerProxy, NotifyServiceProxy, TalkRouterProxy } from "./service-proxies.js";
 import {
   setWorkerRpcInProcessDispatcher,
@@ -59,13 +59,13 @@ describe("BackendTurnRunnerProxy", () => {
   const originalSend = process.send;
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     process.send = originalSend;
     setWorkerRpcInProcessDispatcher(null);
   });
 
   it("allows a backend turn 30 minutes to finish", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {}));
 
@@ -86,13 +86,13 @@ describe("BackendTurnRunnerProxy", () => {
       },
     );
 
-    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    await rs.advanceTimersByTimeAsync(10 * 60 * 1000);
     expect(settled).toBe(false);
 
     const rejection = expect(promise).rejects.toThrow(
       "WorkerRPC timeout: session.continue (1800000ms)",
     );
-    await vi.advanceTimersByTimeAsync(20 * 60 * 1000);
+    await rs.advanceTimersByTimeAsync(20 * 60 * 1000);
     await rejection;
   });
 });
@@ -101,15 +101,15 @@ describe("NotifyServiceProxy", () => {
   const originalSend = process.send;
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     // getWorkerRpc() only uses the in-process dispatcher when process.send is
-    // undefined (vitest's forks pool otherwise leaves it defined); restore both.
+    // undefined (Rstest's forks pool otherwise leaves it defined); restore both.
     process.send = originalSend;
     setWorkerRpcInProcessDispatcher(null);
   });
 
   it("does not time out a ~120s dispatch under the 150s RPC budget", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(
       () =>
@@ -119,7 +119,7 @@ describe("NotifyServiceProxy", () => {
     );
 
     const promise = new NotifyServiceProxy().send();
-    await vi.advanceTimersByTimeAsync(120_000);
+    await rs.advanceTimersByTimeAsync(120_000);
 
     await expect(promise).resolves.toEqual({
       kind: "ok",
@@ -130,7 +130,7 @@ describe("NotifyServiceProxy", () => {
   });
 
   it("configures a 150s RPC timeout, not the 30s WorkerRPC default", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {})); // never settles
 
@@ -141,11 +141,11 @@ describe("NotifyServiceProxy", () => {
     });
 
     // Past the 30s default: if the timeout weren't overridden, it would fire here.
-    await vi.advanceTimersByTimeAsync(30_000);
+    await rs.advanceTimersByTimeAsync(30_000);
     expect(settled).toBe(false);
 
     // At 150s the RPC times out; the proxy converts that transport failure.
-    await vi.advanceTimersByTimeAsync(120_000);
+    await rs.advanceTimersByTimeAsync(120_000);
     await expect(promise).resolves.toEqual({ kind: "outcome_unknown" });
   });
 

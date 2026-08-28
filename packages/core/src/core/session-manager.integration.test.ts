@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { SessionManager } from "./session-manager.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";

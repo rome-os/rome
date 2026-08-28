@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { Hono } from "hono";
 import { createWebhookAuth } from "./webhook-auth.js";
 

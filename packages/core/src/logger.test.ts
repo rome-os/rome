@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import {
   InMemoryLogRecordExporter,
@@ -39,13 +39,13 @@ describe("createLogger OTLP emission", () => {
     exporter = setup.exporter;
     shutdown = setup.shutdown;
     // Suppress stdout noise so the test reporter stays clean.
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    rs.spyOn(console, "log").mockImplementation(() => {});
+    rs.spyOn(console, "warn").mockImplementation(() => {});
+    rs.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     if (shutdown) await shutdown();
     shutdown = undefined;
   });
@@ -104,7 +104,7 @@ describe("createLogger OTLP emission", () => {
   });
 
   it("stringifies non-primitive data exactly once across both sinks", () => {
-    const stdoutSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const stdoutSpy = rs.spyOn(console, "log").mockImplementation(() => {});
     const log = createLogger("dual");
     const nested = { a: 1, b: [2, 3] };
 

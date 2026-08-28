@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { dirname } from "node:path";
 import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
 
@@ -6,7 +6,7 @@ import { createChatGPTImageAction, type ChatGPTImageBrowserResult } from "./inde
 
 describe("chatgpt_image action", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     setCurrentActionContextResolver(null);
   });
 
@@ -85,15 +85,15 @@ describe("chatgpt_image action", () => {
       width: 1024,
       height: 1024,
     };
-    const runImageGeneration = vi.fn().mockResolvedValue({
+    const runImageGeneration = rs.fn().mockResolvedValue({
       endpoint: {
         name: "cdp-local-chromium",
         browserUrl: "http://127.0.0.1:9222",
       },
       result: browserResult,
     });
-    const mkdirMock = vi.fn().mockResolvedValue(undefined);
-    const writeFileMock = vi.fn().mockResolvedValue(undefined);
+    const mkdirMock = rs.fn().mockResolvedValue(undefined);
+    const writeFileMock = rs.fn().mockResolvedValue(undefined);
     const action = createChatGPTImageAction(
       {
         name: "chatgpt_image",
@@ -160,7 +160,7 @@ describe("chatgpt_image action", () => {
       },
       {
         capabilityDiscovery: {} as never,
-        runImageGeneration: vi.fn().mockResolvedValue({
+        runImageGeneration: rs.fn().mockResolvedValue({
           endpoint: {
             name: "cdp-local-chromium",
             browserUrl: "http://127.0.0.1:9222",
@@ -193,8 +193,8 @@ describe("chatgpt_image action", () => {
       mimeType: "image/png",
       imageDataBase64: Buffer.from("fake image bytes").toString("base64"),
     };
-    const mkdirMock = vi.fn().mockResolvedValue(undefined);
-    const writeFileMock = vi.fn().mockResolvedValue(undefined);
+    const mkdirMock = rs.fn().mockResolvedValue(undefined);
+    const writeFileMock = rs.fn().mockResolvedValue(undefined);
     const action = createChatGPTImageAction(
       {
         name: "chatgpt_image",
@@ -207,7 +207,7 @@ describe("chatgpt_image action", () => {
       },
       {
         capabilityDiscovery: {} as never,
-        runImageGeneration: vi.fn().mockResolvedValue({
+        runImageGeneration: rs.fn().mockResolvedValue({
           endpoint: {
             name: "cdp-local-chromium",
             browserUrl: "http://127.0.0.1:9222",
@@ -264,7 +264,7 @@ describe("chatgpt_image action", () => {
       },
       {
         capabilityDiscovery: {} as never,
-        runImageGeneration: vi
+        runImageGeneration: rs
           .fn()
           .mockRejectedValue(new Error("ChatGPT Images send button is unavailable")),
       },

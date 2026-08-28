@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { RoutinesRepository } from "../../../../../packages/core/src/db/repositories/routines.js";
 import type { ScheduleTrigger } from "../../../../../packages/core/src/routines/types.js";

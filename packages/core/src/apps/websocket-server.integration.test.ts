@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "@rstest/core";
 import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

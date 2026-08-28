@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { AgentRunner } from "./agent-runner.js";
 import { AgentLoader } from "./agent-loader.js";
 import { SessionManager } from "./session-manager.js";
@@ -29,19 +29,17 @@ import {
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
 } from "../apps/artifact-id.js";
+import * as pathsModule from "../paths.js" with { rstest: "importActual" };
 
-vi.mock("../paths.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../paths.js")>();
-  return {
-    ...actual,
-    getProjectRoot: vi.fn(() => "/tmp/agent-runner-test"),
-    getDefaultAgentWorkingDir: vi.fn(() => "/tmp/default-project"),
-    ensureDefaultAgentWorkingDir: vi.fn(async () => "/tmp/default-project"),
-    getProfileDir: vi.fn(() => "/tmp/agent-runner-test/profile"),
-    getProfileMemoryDir: vi.fn(() => "/tmp/agent-runner-test/memory"),
-    getProfileInstalledAppsDir: vi.fn(() => "/tmp/agent-runner-test/installed-apps"),
-  };
-});
+rs.mock("../paths.js", () => ({
+  ...pathsModule,
+  getProjectRoot: rs.fn(() => "/tmp/agent-runner-test"),
+  getDefaultAgentWorkingDir: rs.fn(() => "/tmp/default-project"),
+  ensureDefaultAgentWorkingDir: rs.fn(async () => "/tmp/default-project"),
+  getProfileDir: rs.fn(() => "/tmp/agent-runner-test/profile"),
+  getProfileMemoryDir: rs.fn(() => "/tmp/agent-runner-test/memory"),
+  getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
+}));
 
 import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
@@ -278,21 +276,21 @@ describe("AgentRunner", () => {
       key: { agentName: "test-main", channelThreadKey: "webchat:sess-1" },
       sessionId: "source-session",
       status: "idle" as const,
-      sendTurn: vi.fn(),
+      sendTurn: rs.fn(),
       async *runForkedTurn(input: { prompt: string; tier?: string }) {
         inputs.push(input);
         yield { type: "result", content: "Fork summary", agent: "test-main" } as const;
       },
-      subscribe: vi.fn(() => () => undefined),
-      onStatusChange: vi.fn(() => () => undefined),
-      interrupt: vi.fn(async () => undefined),
-      close: vi.fn(async () => undefined),
-      getSubmittedOutput: vi.fn(() => undefined),
+      subscribe: rs.fn(() => () => undefined),
+      onStatusChange: rs.fn(() => () => undefined),
+      interrupt: rs.fn(async () => undefined),
+      close: rs.fn(async () => undefined),
+      getSubmittedOutput: rs.fn(() => undefined),
     };
     const manager = {
-      acquire: vi.fn(),
-      peek: vi.fn(() => source),
-      shutdown: vi.fn(async () => undefined),
+      acquire: rs.fn(),
+      peek: rs.fn(() => source),
+      shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const runner = new AgentRunner(manager);
 
@@ -320,7 +318,7 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
         sessionId: "source-session",
         status: "idle" as const,
-        sendTurn: vi.fn(),
+        sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {
           yield {
             type: "turn_start",
@@ -339,16 +337,16 @@ describe("AgentRunner", () => {
             agent: "main",
           } as const;
         },
-        subscribe: vi.fn(() => () => undefined),
-        onStatusChange: vi.fn(() => () => undefined),
-        interrupt: vi.fn(async () => undefined),
-        close: vi.fn(async () => undefined),
-        getSubmittedOutput: vi.fn(() => undefined),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+        getSubmittedOutput: rs.fn(() => undefined),
       };
       const manager = {
-        acquire: vi.fn(),
-        peek: vi.fn(() => source),
-        shutdown: vi.fn(async () => undefined),
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
       const runner = new AgentRunner(manager, undefined, repo);
 
@@ -402,7 +400,7 @@ describe("AgentRunner", () => {
       key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },
       sessionId: "source-session",
       status: "idle" as const,
-      sendTurn: vi.fn(),
+      sendTurn: rs.fn(),
       async *runForkedTurn(input: { prompt: string }) {
         yield {
           type: "turn_start",
@@ -421,16 +419,16 @@ describe("AgentRunner", () => {
           agent: "main",
         } as const;
       },
-      subscribe: vi.fn(() => () => undefined),
-      onStatusChange: vi.fn(() => () => undefined),
-      interrupt: vi.fn(async () => undefined),
-      close: vi.fn(async () => undefined),
-      getSubmittedOutput: vi.fn(() => undefined),
+      subscribe: rs.fn(() => () => undefined),
+      onStatusChange: rs.fn(() => () => undefined),
+      interrupt: rs.fn(async () => undefined),
+      close: rs.fn(async () => undefined),
+      getSubmittedOutput: rs.fn(() => undefined),
     };
     const manager = {
-      acquire: vi.fn(),
-      peek: vi.fn(() => source),
-      shutdown: vi.fn(async () => undefined),
+      acquire: rs.fn(),
+      peek: rs.fn(() => source),
+      shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const turnStreams = createAgentTurnStreamRegistry();
     const runner = new AgentRunner(manager, undefined, undefined, turnStreams);
@@ -588,7 +586,7 @@ describe("AgentRunner", () => {
     });
 
     it("rejects a checkpoint from a different provider thread", async () => {
-      const onFork = vi.fn();
+      const onFork = rs.fn();
       const messages = await runForkAgainstLiveSession(() => forkSessionStub({}), {
         sourceProviderThreadId: "live-provider-thread",
         onFork,
@@ -610,7 +608,7 @@ describe("AgentRunner", () => {
     });
 
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const provider = withForkSupport(
         new MockModelProvider([[{ type: "result", content: "Source ready" }]]),
         () =>
@@ -654,7 +652,7 @@ describe("AgentRunner", () => {
         // Production evicts otherwise-idle source sessions after 15 seconds.
         // Cross several sweeper intervals while the first fork is leased: the
         // source must remain available for another side chat.
-        await vi.advanceTimersByTimeAsync(500);
+        await rs.advanceTimersByTimeAsync(500);
         expect(manager.peek(key)?.sessionId).toBe(sourceSessionId);
 
         secondFork = runner
@@ -672,7 +670,7 @@ describe("AgentRunner", () => {
 
         await secondFork.return?.();
         await firstFork.return?.();
-        await vi.advanceTimersByTimeAsync(200);
+        await rs.advanceTimersByTimeAsync(200);
         expect(manager.peek(key)).toBeUndefined();
 
         // The webchat route reacquires before every fork. Webchat's persisted
@@ -696,7 +694,7 @@ describe("AgentRunner", () => {
         await resumedFork?.return?.();
         await secondFork?.return?.();
         await firstFork?.return?.();
-        vi.useRealTimers();
+        rs.useRealTimers();
         await manager.shutdown();
       }
     });
@@ -886,7 +884,7 @@ describe("AgentRunner", () => {
 
     it("preserves App Store attribution on isolated forks", async () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = vi.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
+      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
         if (name !== "test-main") return record;
         return {
@@ -912,7 +910,7 @@ describe("AgentRunner", () => {
           },
           {
             appCatalog: {
-              get: vi.fn((appId: string) =>
+              get: rs.fn((appId: string) =>
                 appId === "test-app"
                   ? {
                       source: {
@@ -1442,13 +1440,13 @@ describe("AgentRunner", () => {
         confirmExit = resolve;
       });
       const turnMiddleware = createTurnMiddlewareChain();
-      vi.spyOn(turnMiddleware, "run").mockImplementation(async (_ctx, next) => {
+      rs.spyOn(turnMiddleware, "run").mockImplementation(async (_ctx, next) => {
         await middlewareGate;
         await next();
       });
-      const interrupt = vi.fn(() => exit);
-      const sendUserInput = vi.fn(async () => {});
-      vi.spyOn(mockProvider, "openSession").mockImplementation(async (params) => ({
+      const interrupt = rs.fn(() => exit);
+      const sendUserInput = rs.fn(async () => {});
+      rs.spyOn(mockProvider, "openSession").mockImplementation(async (params) => ({
         ...createClosableModelSession(params),
         interrupt,
         sendUserInput,
@@ -1470,10 +1468,10 @@ describe("AgentRunner", () => {
         finished = true;
         return value;
       });
-      await vi.waitFor(() => expect(turnMiddleware.run).toHaveBeenCalled());
+      await rs.waitFor(() => expect(turnMiddleware.run).toHaveBeenCalled());
       const stopping = turn.interrupt!("user-stop");
       releaseMiddleware();
-      await vi.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(2));
+      await rs.waitFor(() => expect(interrupt).toHaveBeenCalledTimes(2));
       expect(finished).toBe(false);
       expect(sendUserInput).not.toHaveBeenCalled();
       confirmExit();
@@ -1506,7 +1504,7 @@ describe("AgentRunner", () => {
     it("reopens an aborted provider through the conversational input lane", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];
-      const cancels = vi.fn();
+      const cancels = rs.fn();
       let releaseFirst!: () => void;
       const firstGate = new Promise<void>((resolve) => {
         releaseFirst = resolve;
@@ -1582,7 +1580,7 @@ describe("AgentRunner", () => {
       expect(firstInput.receipt.disposition).toBe("started");
       const first = await firstInput.turn;
       const firstMessages = collectMessages(first.events);
-      await vi.waitFor(() => expect(prompts).toEqual(["first"]));
+      await rs.waitFor(() => expect(prompts).toEqual(["first"]));
       await first.interrupt!("user-stop");
       expect(await firstMessages).toContainEqual(
         expect.objectContaining({ type: "turn_end", status: "interrupted" }),
@@ -1592,7 +1590,7 @@ describe("AgentRunner", () => {
       expect(secondInput.receipt.disposition).toBe("started");
       const second = await secondInput.turn;
       const secondMessages = collectMessages(second.events);
-      await vi.waitFor(() => expect(prompts).toEqual(["first", "second"]));
+      await rs.waitFor(() => expect(prompts).toEqual(["first", "second"]));
       await first.interrupt!("late-repeat");
       expect(cancels).toHaveBeenCalledTimes(1);
       releaseSecond();
@@ -1730,7 +1728,7 @@ describe("AgentRunner", () => {
     });
 
     it("resumes an explicit sessionId without a caller-provided channelThreadKey", async () => {
-      const sendTurn: AgentSession["sendTurn"] = vi.fn(() => ({
+      const sendTurn: AgentSession["sendTurn"] = rs.fn(() => ({
         turnId: "turn-1",
         events: (async function* () {
           yield { type: "result", content: "resumed", agent: "test-main" } as const;
@@ -1743,19 +1741,19 @@ describe("AgentRunner", () => {
         sessionId: "sess-1",
         status: "idle",
         sendTurn,
-        subscribe: vi.fn(() => () => undefined),
-        onStatusChange: vi.fn(() => () => undefined),
-        interrupt: vi.fn(async () => undefined),
-        close: vi.fn(async () => undefined),
-        getSubmittedOutput: vi.fn(() => undefined),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+        getSubmittedOutput: rs.fn(() => undefined),
       };
       const manager: AgentSessionManager = {
-        acquire: vi.fn(async () => {
+        acquire: rs.fn(async () => {
           throw new Error("implicit acquire should not be used");
         }),
-        acquireBySessionId: vi.fn(async () => session),
-        peek: vi.fn(() => undefined),
-        shutdown: vi.fn(async () => undefined),
+        acquireBySessionId: rs.fn(async () => session),
+        peek: rs.fn(() => undefined),
+        shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager);
 
@@ -2026,7 +2024,7 @@ describe("AgentRunner", () => {
     it("persists the provider checkpoint for a completed Rome turn", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const openSession = provider.openSession.bind(provider);
-      provider.openSession = vi.fn(async (params) => ({
+      provider.openSession = rs.fn(async (params) => ({
         ...(await openSession(params)),
         providerThreadId: "provider-thread",
         lastCompletedTurnCheckpoint: "provider-turn-2",
@@ -2771,7 +2769,7 @@ describe("AgentRunner", () => {
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = vi.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
+      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
         if (name !== "test-main") return record;
         return {
@@ -2787,7 +2785,7 @@ describe("AgentRunner", () => {
       try {
         const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
         const appCatalog = {
-          get: vi.fn((appId: string) =>
+          get: rs.fn((appId: string) =>
             appId === "test-app"
               ? {
                   source: {
@@ -2821,7 +2819,7 @@ describe("AgentRunner", () => {
 
         const localProvider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
         const localAppCatalog = {
-          get: vi.fn(() => ({
+          get: rs.fn(() => ({
             source: {
               mode: "bundle",
               path: "/tmp/test-app",
@@ -4210,7 +4208,7 @@ describe("AgentRunner", () => {
 
   describe("tools", () => {
     it("forwards explicit threadContext into action execution", async () => {
-      const actionRun = vi
+      const actionRun = rs
         .spyOn(actionEngine, "run")
         .mockResolvedValue({ status: "ok", data: { ok: true } });
 

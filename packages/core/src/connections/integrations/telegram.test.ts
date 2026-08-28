@@ -8,7 +8,7 @@
 //      (network), and drive the send-401 → renew-once-then-degrade flow
 //      end-to-end over the real ConnectionRegistry.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";

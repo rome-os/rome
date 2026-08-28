@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { UpgradeStatusHub } from "./status-hub.js";
 
 /** Deterministic clock + timer wheel for the hub's countdown. */
@@ -24,7 +24,7 @@ class FakeClock {
   }
 }
 
-function makeHub(onDeadline = vi.fn()) {
+function makeHub(onDeadline = rs.fn()) {
   const clock = new FakeClock();
   const hub = new UpgradeStatusHub({
     onDeadline,

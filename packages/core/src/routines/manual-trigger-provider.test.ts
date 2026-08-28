@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "@rstest/core";
 import { ManualTriggerProvider } from "./manual-trigger-provider.js";
 import type { Routine, Trigger } from "./types.js";
 

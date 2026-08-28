@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { filterChannelApiResponseHeaders } from "./api-request.js";
 
 describe("channel provider API response projection", () => {

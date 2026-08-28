@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { RoutineEngine } from "./engine.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
@@ -74,7 +74,7 @@ describe("RoutineEngine.reactivateFloating", () => {
     await seed("eventbus", { type: "event-bus", eventName: "x.y" });
 
     const engine = makeEngine(repo);
-    const activate = vi.spyOn(engine, "activate").mockResolvedValue();
+    const activate = rs.spyOn(engine, "activate").mockResolvedValue();
 
     await engine.reactivateFloating();
 
@@ -92,7 +92,7 @@ describe("RoutineEngine.reactivateFloating", () => {
       rrule: "FREQ=DAILY",
     });
     const engine = makeEngine(repo);
-    const activate = vi.spyOn(engine, "activate").mockResolvedValue();
+    const activate = rs.spyOn(engine, "activate").mockResolvedValue();
 
     await engine.reactivateFloating();
 

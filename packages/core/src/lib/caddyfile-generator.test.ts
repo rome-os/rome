@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
 import type { PublicAccessConfig } from "./public-access-config.js";
 

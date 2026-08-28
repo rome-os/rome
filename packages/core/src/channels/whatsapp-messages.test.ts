@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { waMessages } from "../db/schema.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";

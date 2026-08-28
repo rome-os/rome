@@ -14,7 +14,7 @@
  * regression in mount ordering inside `api/index.ts` breaks this test
  * without the test file needing to mirror that order itself.
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import os from "node:os";
 import path from "node:path";

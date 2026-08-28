@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { logs } from "@opentelemetry/api-logs";
 import {
@@ -24,11 +24,11 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
   beforeEach(() => {
     harness = installTestSpanHarness("node");
     // Suppress the inbound-message stdout log line so the reporter stays clean.
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    rs.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     await harness.shutdown();
   });
 
@@ -116,11 +116,11 @@ describe("inbound channel message log (composition-root wrapping)", () => {
     });
     logs.setGlobalLoggerProvider(provider);
     // Suppress the mirrored stdout line so the test reporter stays clean.
-    vi.spyOn(console, "log").mockImplementation(() => {});
+    rs.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     logs.disable();
     await provider.shutdown();
     await harness.shutdown();

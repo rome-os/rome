@@ -8,7 +8,7 @@
 //   2. isGuardianLinkMessage — the pure security gate (finding #1): only a
 //      non-bot author whose message text is exactly the dashboard code binds.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
 import { isGuardianLinkMessage, makeDiscordSetup } from "./discord.js";
@@ -26,11 +26,11 @@ function deferred<T>() {
 describe("makeDiscordSetup", () => {
   it("prompts, probes, shows the one-time code, then confers on guardian link", async () => {
     const link = deferred<{ channelUserId: string }>();
-    const probeBotIdentity = vi.fn(async () => ({ botId: "42", botUsername: "rome_bot" }));
-    const waitForGuardianLink = vi.fn(() => link.promise);
-    const generateCode = vi.fn(() => "246810");
+    const probeBotIdentity = rs.fn(async () => ({ botId: "42", botUsername: "rome_bot" }));
+    const waitForGuardianLink = rs.fn(() => link.promise);
+    const generateCode = rs.fn(() => "246810");
     const fn = makeDiscordSetup({ probeBotIdentity, waitForGuardianLink, generateCode });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -64,7 +64,7 @@ describe("makeDiscordSetup", () => {
     expect(waitForGuardianLink).toHaveBeenCalledWith("good-token", "246810", expect.anything());
 
     link.resolve({ channelUserId: "guardian-777" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls[0][0]).toEqual({
       credential: { material: { token: "good-token" }, expiresAt: "never" },
@@ -78,11 +78,11 @@ describe("makeDiscordSetup", () => {
   });
 
   it("re-prompts with the error when the token probe is refused", async () => {
-    const probeBotIdentity = vi
+    const probeBotIdentity = rs
       .fn<(token: string) => Promise<{ botId: string; botUsername: string }>>()
       .mockRejectedValueOnce(new Error("Invalid bot token — check the Discord Developer Portal"))
       .mockResolvedValueOnce({ botId: "1", botUsername: "ok" });
-    const waitForGuardianLink = vi.fn(() => new Promise<{ channelUserId: string }>(() => {}));
+    const waitForGuardianLink = rs.fn(() => new Promise<{ channelUserId: string }>(() => {}));
     const fn = makeDiscordSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -113,16 +113,16 @@ describe("makeDiscordSetup", () => {
   });
 
   it("interrupts the guardian-link wait on cancel, running no commit", async () => {
-    const probeBotIdentity = vi.fn(async () => ({ botId: "1", botUsername: "ok" }));
+    const probeBotIdentity = rs.fn(async () => ({ botId: "1", botUsername: "ok" }));
     let linkSignal: AbortSignal | undefined;
-    const waitForGuardianLink = vi.fn(
+    const waitForGuardianLink = rs.fn(
       (_token: string, _code: string, signal: AbortSignal) =>
         new Promise<{ channelUserId: string }>((_resolve, reject) => {
           linkSignal = signal;
           signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const fn = makeDiscordSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -142,15 +142,15 @@ describe("makeDiscordSetup", () => {
 
   it("interrupts an in-flight token probe on cancel (no re-prompt), running no commit", async () => {
     let probeSignal: AbortSignal | undefined;
-    const probeBotIdentity = vi.fn(
+    const probeBotIdentity = rs.fn(
       (_token: string, signal?: AbortSignal) =>
         new Promise<{ botId: string; botUsername: string }>((_resolve, reject) => {
           probeSignal = signal;
           signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const waitForGuardianLink = vi.fn(() => new Promise<{ channelUserId: string }>(() => {}));
-    const commit = vi.fn(async () => {});
+    const waitForGuardianLink = rs.fn(() => new Promise<{ channelUserId: string }>(() => {}));
+    const commit = rs.fn(async () => {});
     const fn = makeDiscordSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -160,7 +160,7 @@ describe("makeDiscordSetup", () => {
 
     await session.started();
     void session.provideInput({ token: "good" });
-    await vi.waitFor(() => expect(probeBotIdentity).toHaveBeenCalled());
+    await rs.waitFor(() => expect(probeBotIdentity).toHaveBeenCalled());
 
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });

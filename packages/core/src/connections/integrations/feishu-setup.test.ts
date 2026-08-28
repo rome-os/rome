@@ -9,7 +9,7 @@
 //   2. isFeishuGuardianLinkMessage — the pure link gate: only a sender whose
 //      message text is exactly the dashboard code binds.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
 import { isFeishuGuardianLinkMessage, makeFeishuSetup, type FeishuSetupDeps } from "./feishu.js";
@@ -26,15 +26,15 @@ function deferred<T>() {
 
 function makeDeps(overrides: Partial<FeishuSetupDeps> = {}): FeishuSetupDeps {
   return {
-    probeCredentials: vi.fn(async () => {}),
-    registerAgentApp: vi.fn(async () => ({
+    probeCredentials: rs.fn(async () => {}),
+    registerAgentApp: rs.fn(async () => ({
       appId: "cli_minted",
       appSecret: "minted-secret",
       domain: "feishu" as const,
     })),
-    waitForGuardianLink: vi.fn(async () => ({ channelUserId: "ou_guardian" })),
-    guardianLinked: vi.fn(async () => false),
-    generateCode: vi.fn(() => "246810"),
+    waitForGuardianLink: rs.fn(async () => ({ channelUserId: "ou_guardian" })),
+    guardianLinked: rs.fn(async () => false),
+    generateCode: rs.fn(() => "246810"),
     ...overrides,
   };
 }
@@ -42,8 +42,8 @@ function makeDeps(overrides: Partial<FeishuSetupDeps> = {}): FeishuSetupDeps {
 describe("makeFeishuSetup (manual mode)", () => {
   it("prompts mode+domain, then credentials, probes, links the guardian, and confers once", async () => {
     const link = deferred<{ channelUserId: string }>();
-    const deps = makeDeps({ waitForGuardianLink: vi.fn(() => link.promise) });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const deps = makeDeps({ waitForGuardianLink: rs.fn(() => link.promise) });
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
 
     await session.started();
@@ -78,7 +78,7 @@ describe("makeFeishuSetup (manual mode)", () => {
     );
 
     link.resolve({ channelUserId: "ou_guardian" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     const conferral = commit.mock.calls[0][0];
     // Terminal conferral: domain is duplicated into material (adapter build
@@ -92,7 +92,7 @@ describe("makeFeishuSetup (manual mode)", () => {
   });
 
   it("re-prompts the credential form with the error when the probe is refused", async () => {
-    const probeCredentials = vi
+    const probeCredentials = rs
       .fn<FeishuSetupDeps["probeCredentials"]>()
       .mockRejectedValueOnce(new Error("Invalid App ID or App Secret"))
       .mockResolvedValueOnce(undefined);
@@ -113,14 +113,14 @@ describe("makeFeishuSetup (manual mode)", () => {
   });
 
   it("skips the guardian-link step when the guardian is already mapped", async () => {
-    const deps = makeDeps({ guardianLinked: vi.fn(async () => true) });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const deps = makeDeps({ guardianLinked: rs.fn(async () => true) });
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
     await session.started();
     await session.provideInput({ mode: "manual", domain: "feishu" });
     await session.provideInput({ appId: "cli_abc", appSecret: "shh" });
 
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(deps.waitForGuardianLink).not.toHaveBeenCalled();
     expect(commit.mock.calls[0][0].guardianChannelUserId).toBeUndefined();
   });
@@ -134,12 +134,12 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
       domain: "feishu" | "lark";
     }>();
     let emitQr!: (qr: { url: string; qrDataUrl: string | null; expiresAt: string | null }) => void;
-    const registerAgentApp = vi.fn((opts: Parameters<FeishuSetupDeps["registerAgentApp"]>[0]) => {
+    const registerAgentApp = rs.fn((opts: Parameters<FeishuSetupDeps["registerAgentApp"]>[0]) => {
       emitQr = opts.onQrCode;
       return registration.promise;
     });
     const deps = makeDeps({ registerAgentApp });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
 
     await session.started();
@@ -157,7 +157,7 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
       qrDataUrl: "data:image/png;base64,QR",
       expiresAt: "2026-07-15T00:10:00.000Z",
     });
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(session.state.status).toBe("presenting");
       if (session.state.status === "presenting") {
         const urls = (session.state.view.links ?? []).map((l) => l.url);
@@ -168,14 +168,14 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
 
     // Scan completes: the SDK minted fresh credentials (tenant resolved lark).
     registration.resolve({ appId: "cli_minted", appSecret: "minted-secret", domain: "lark" });
-    await vi.waitFor(() => expect(deps.waitForGuardianLink).toHaveBeenCalled());
+    await rs.waitFor(() => expect(deps.waitForGuardianLink).toHaveBeenCalled());
     expect(deps.waitForGuardianLink).toHaveBeenCalledWith(
       { appId: "cli_minted", appSecret: "minted-secret", domain: "lark" },
       "246810",
       expect.anything(),
     );
 
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     const conferral = commit.mock.calls[0][0];
     expect(conferral.credential).toEqual({
       material: {
@@ -195,7 +195,7 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
 
   it("interrupts an in-flight registerApp wait on cancel, running no commit", async () => {
     let stepSignal: AbortSignal | undefined;
-    const registerAgentApp = vi.fn(
+    const registerAgentApp = rs.fn(
       (opts: Parameters<FeishuSetupDeps["registerAgentApp"]>[0]) =>
         new Promise<{ appId: string; appSecret: string; domain: "feishu" | "lark" }>(
           (_resolve, reject) => {
@@ -207,7 +207,7 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
         ),
     );
     const deps = makeDeps({ registerAgentApp });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
     await session.started();
     await session.provideInput({ mode: "agent-ready", domain: "feishu" });
@@ -222,7 +222,7 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
 
   it("interrupts the guardian-link wait on cancel, running no commit", async () => {
     let linkSignal: AbortSignal | undefined;
-    const waitForGuardianLink = vi.fn(
+    const waitForGuardianLink = rs.fn(
       (_m: unknown, _code: string, signal: AbortSignal) =>
         new Promise<{ channelUserId: string }>((_resolve, reject) => {
           linkSignal = signal;
@@ -230,11 +230,11 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
         }),
     );
     const deps = makeDeps({ waitForGuardianLink });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
     await session.started();
     await session.provideInput({ mode: "agent-ready", domain: "lark" });
-    await vi.waitFor(() => expect(waitForGuardianLink).toHaveBeenCalled());
+    await rs.waitFor(() => expect(waitForGuardianLink).toHaveBeenCalled());
 
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });
@@ -243,16 +243,16 @@ describe("makeFeishuSetup (agent-ready mode)", () => {
   });
 
   it("fails with a guardian-readable reason when registerApp rejects", async () => {
-    const registerAgentApp = vi
+    const registerAgentApp = rs
       .fn<FeishuSetupDeps["registerAgentApp"]>()
       .mockRejectedValue(new Error("QR code expired"));
     const deps = makeDeps({ registerAgentApp });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn: makeFeishuSetup(deps), commit });
     await session.started();
     await session.provideInput({ mode: "agent-ready", domain: "feishu" });
 
-    await vi.waitFor(() => expect(session.state.status).toBe("failed"));
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
     expect(session.state).toEqual({ status: "failed", reason: "QR code expired" });
     expect(commit).not.toHaveBeenCalled();
   });

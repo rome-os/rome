@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { WhatsAppAdapter } from "./whatsapp.js";
 import type { NormalizedMessage } from "./types.js";
 import type {
@@ -13,13 +13,13 @@ import type {
 
 // Mock @whiskeysockets/baileys
 
-const mockSendMessage = vi.fn();
-const mockEnd = vi.fn();
-const mockRequestPairingCode = vi.fn();
-const mockDownloadMediaMessage = vi.hoisted(() => vi.fn());
-const profileMemoryDir = vi.hoisted(() => ({ value: "" }));
+const mockSendMessage = rs.fn();
+const mockEnd = rs.fn();
+const mockRequestPairingCode = rs.fn();
+const mockDownloadMediaMessage = rs.hoisted(() => rs.fn());
+const profileMemoryDir = rs.hoisted(() => ({ value: "" }));
 
-vi.mock("../paths.js", () => ({
+rs.mock("../paths.js", () => ({
   getProfileMemoryDir: () => profileMemoryDir.value,
 }));
 
@@ -28,7 +28,7 @@ const eventHandlers: Record<string, (...args: unknown[]) => void> = {};
 
 const mockSock = {
   ev: {
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+    on: rs.fn((event: string, handler: (...args: unknown[]) => void) => {
       eventHandlers[event] = handler;
     }),
   },
@@ -42,7 +42,7 @@ const mockSock = {
   },
 };
 
-const mockSaveCreds = vi.fn();
+const mockSaveCreds = rs.fn();
 
 // Faithful re-implementations of Baileys' JID helpers (the real module pulls in
 // libsignal + native deps, so we don't importActual it). These mirror
@@ -52,10 +52,10 @@ function decodeUser(jid?: string): string | undefined {
   return jid?.split("@")[0]?.split(":")[0]?.split("_")[0];
 }
 
-vi.mock("@whiskeysockets/baileys", () => {
+rs.mock("@whiskeysockets/baileys", () => {
   return {
-    default: vi.fn(() => mockSock),
-    useMultiFileAuthState: vi.fn(() =>
+    default: rs.fn(() => mockSock),
+    useMultiFileAuthState: rs.fn(() =>
       Promise.resolve({
         state: { creds: {}, keys: {} },
         saveCreds: mockSaveCreds,
@@ -102,7 +102,7 @@ describe("WhatsAppAdapter", () => {
   let adapter: WhatsAppAdapter;
 
   beforeEach(async () => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     // Clear event handlers
     for (const key of Object.keys(eventHandlers)) {
       delete eventHandlers[key];
@@ -112,7 +112,7 @@ describe("WhatsAppAdapter", () => {
   });
 
   afterEach(async () => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     await rm(profileMemoryDir.value, { recursive: true, force: true });
   });
 
@@ -507,7 +507,7 @@ describe("WhatsAppAdapter", () => {
 
   describe("fetchHistory()", () => {
     it("reads recent mirrored messages from the sync store", async () => {
-      const fetchHistory = vi.fn(async () => [
+      const fetchHistory = rs.fn(async () => [
         {
           id: "m1",
           chatJid: "111@s.whatsapp.net",
@@ -550,8 +550,8 @@ describe("WhatsAppAdapter", () => {
         fetchHistory,
       });
       await adapter.start();
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-06-19T12:00:00Z"));
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2026-06-19T12:00:00Z"));
 
       const messages = await adapter.fetchHistory("111:7@s.whatsapp.net", 2);
 
@@ -579,7 +579,7 @@ describe("WhatsAppAdapter", () => {
           attachments: [{ type: "image", caption: "photo caption" }],
         }),
       ]);
-      vi.useRealTimers();
+      rs.useRealTimers();
     });
 
     it("formats reaction and media-only history rows into readable text", async () => {
@@ -649,7 +649,7 @@ describe("WhatsAppAdapter", () => {
 
   describe("connection handling", () => {
     it("waits for the registration QR event before requesting a pairing code", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       mockRequestPairingCode.mockResolvedValue("ABCD1234");
       await adapter.start();
 
@@ -657,7 +657,7 @@ describe("WhatsAppAdapter", () => {
       expect(mockRequestPairingCode).not.toHaveBeenCalled();
 
       eventHandlers["connection.update"]({ qr: "registration-ready" });
-      await vi.advanceTimersByTimeAsync(750);
+      await rs.advanceTimersByTimeAsync(750);
 
       await expect(code).resolves.toBe("ABCD1234");
       expect(mockRequestPairingCode).toHaveBeenCalledWith("14155550134");
@@ -667,7 +667,7 @@ describe("WhatsAppAdapter", () => {
       const registeredAdapter = new WhatsAppAdapter({
         authProvider: async () => ({
           state: { creds: { registered: true }, keys: {} } as never,
-          saveCreds: vi.fn(),
+          saveCreds: rs.fn(),
         }),
       });
       await registeredAdapter.start();
@@ -679,7 +679,7 @@ describe("WhatsAppAdapter", () => {
     });
 
     it("reconnects on non-logout disconnect", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       await adapter.start();
 
       const connectionHandler = eventHandlers["connection.update"];
@@ -698,10 +698,10 @@ describe("WhatsAppAdapter", () => {
 
       // The adapter should schedule a reconnect via setTimeout
       // Advance timers to trigger it
-      vi.advanceTimersByTime(1_000);
+      rs.advanceTimersByTime(1_000);
       // The reconnect calls start() again, which calls makeWASocket
       // We just verify it doesn't throw
-      vi.useRealTimers();
+      rs.useRealTimers();
     });
   });
 
@@ -731,7 +731,7 @@ describe("WhatsAppAdapter", () => {
 
   describe("onConnected()", () => {
     it("fires callback with authenticated JID on connection open", async () => {
-      const callback = vi.fn();
+      const callback = rs.fn();
       adapter.onConnected(callback);
       await adapter.start();
 
@@ -745,7 +745,7 @@ describe("WhatsAppAdapter", () => {
       const originalUser = mockSock.user;
       mockSock.user = { id: "1234567890:8@s.whatsapp.net" };
       try {
-        const callback = vi.fn();
+        const callback = rs.fn();
         adapter.onConnected(callback);
         await adapter.start();
 

@@ -4,14 +4,14 @@ import type {
   TurnMiddlewareContext,
   TurnMiddlewareHookDeps,
 } from "@rome-os/app-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createHook } from "./index.js";
 
 const logger: AppLogger = {
-  debug: vi.fn(),
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
+  debug: rs.fn(),
+  info: rs.fn(),
+  warn: rs.fn(),
+  error: rs.fn(),
 };
 
 function makeContext(agentName: string, emitted: AgentMessage[]): TurnMiddlewareContext {
@@ -25,12 +25,12 @@ function makeContext(agentName: string, emitted: AgentMessage[]): TurnMiddleware
 
 describe("replay turn middleware routing", () => {
   afterEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("intercepts the app-owned canonical agent id", async () => {
     const emitted: AgentMessage[] = [];
-    const next = vi.fn(async () => {});
+    const next = rs.fn(async () => {});
     const deps: TurnMiddlewareHookDeps = { appId: "replay", logger };
 
     await createHook(deps).handle(makeContext("replay:replay", emitted), next);
@@ -41,7 +41,7 @@ describe("replay turn middleware routing", () => {
 
   it("does not intercept the same local name owned by another app", async () => {
     const emitted: AgentMessage[] = [];
-    const next = vi.fn(async () => {});
+    const next = rs.fn(async () => {});
     const deps: TurnMiddlewareHookDeps = { appId: "replay", logger };
 
     await createHook(deps).handle(makeContext("other-app:replay", emitted), next);

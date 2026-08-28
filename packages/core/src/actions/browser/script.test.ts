@@ -1,21 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as browserRuntimeModule from "@rome-os/app-runtime/browser" with {
+  rstest: "importActual",
+};
 
-const { readFileMock, runDiscoveredBrowserScriptMock } = vi.hoisted(() => ({
-  readFileMock: vi.fn(),
-  runDiscoveredBrowserScriptMock: vi.fn(),
+const { readFileMock, runDiscoveredBrowserScriptMock } = rs.hoisted(() => ({
+  readFileMock: rs.fn(),
+  runDiscoveredBrowserScriptMock: rs.fn(),
 }));
 
-vi.mock("node:fs/promises", () => ({
+rs.mock("node:fs/promises", () => ({
   readFile: readFileMock,
 }));
 
-vi.mock("@rome-os/app-runtime/browser", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@rome-os/app-runtime/browser")>();
-  return {
-    ...actual,
-    runDiscoveredBrowserScript: runDiscoveredBrowserScriptMock,
-  };
-});
+rs.mock("@rome-os/app-runtime/browser", () => ({
+  ...browserRuntimeModule,
+  runDiscoveredBrowserScript: runDiscoveredBrowserScriptMock,
+}));
 
 import {
   buildBrowserScriptExpression,
@@ -25,7 +25,7 @@ import {
 
 describe("browser script helpers", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("builds an expression that injects the script and preserves undefined args", () => {
@@ -59,7 +59,7 @@ describe("browser script helpers", () => {
   });
 
   it("delegates discovered browser script execution to the shared app-runtime helper", async () => {
-    const close = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
     runDiscoveredBrowserScriptMock.mockResolvedValue({
       endpoint: {
         name: "cdp-local-chromium",

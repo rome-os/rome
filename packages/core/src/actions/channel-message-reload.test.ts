@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +88,7 @@ export function createHook() {
       registerConnection() {},
     } as ChannelMessageHook;
     let current: ChannelMessageHook = previous;
-    const onSkip = vi.fn();
+    const onSkip = rs.fn();
     const reload = createChannelMessageHookReloader({
       catalog: catalogWithHookDir(dir),
       deps: {},
@@ -115,9 +115,9 @@ export function createHook() {
 }
 `);
     const previous = {
-      register: vi.fn(async () => {}),
-      registerConnection: vi.fn(),
-      unregister: vi.fn(),
+      register: rs.fn(async () => {}),
+      registerConnection: rs.fn(),
+      unregister: rs.fn(),
     };
     let current: ChannelMessageHook = previous;
     const reload = createChannelMessageHookReloader({

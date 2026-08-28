@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ResolvedApp } from "../apps/state.js";
 import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
 import { RomeCloudFavorService } from "./rome-cloud-service.js";
@@ -15,7 +15,7 @@ describe("RomeCloudFavorService", () => {
       else process.env[key] = value;
     }
     setInstanceTokenInMemory(null);
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   it("forwards the Rome Cloud-issued viewer token when creating a favor action request", async () => {
@@ -23,7 +23,7 @@ describe("RomeCloudFavorService", () => {
     setInstanceTokenInMemory("romeinst_test-token");
 
     let postedBody: Record<string, unknown> | null = null;
-    const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+    const fetchImpl = rs.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       postedBody = JSON.parse(String(init?.body));
       expect(String(input)).toBe("http://rome-cloud.test/api/favors/action-requests");
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer romeinst_test-token");
@@ -56,7 +56,7 @@ describe("RomeCloudFavorService", () => {
   });
 
   it("does not create a request when the visitor session lacks a favor viewer token", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+    const fetchImpl = rs.fn<typeof fetch>();
     const service = new RomeCloudFavorService(fetchImpl);
 
     const result = await service.requestAction({
@@ -77,7 +77,7 @@ describe("RomeCloudFavorService", () => {
       process.env.PANTHEON_INSTANCE_ORIGIN = "https://guardian.rome.test";
       setInstanceTokenInMemory("romeinst_test-token");
       return new RomeCloudFavorService(
-        vi.fn(async () =>
+        rs.fn(async () =>
           Response.json({ status: "pending_consent", request: favorRequestView() }),
         ) as unknown as typeof fetch,
       );

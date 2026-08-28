@@ -3,7 +3,7 @@ import { cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
 import { packBundle } from "./packaging/index.js";
@@ -64,10 +64,10 @@ async function fixture(includeSource = true) {
     updatedAt: new Date(0).toISOString(),
   };
   const appManager = {
-    readLockfileEntry: vi.fn(async (appId: string) => (appId === "calendar" ? entry : null)),
+    readLockfileEntry: rs.fn(async (appId: string) => (appId === "calendar" ? entry : null)),
   } as unknown as AppManager;
-  const appCatalog = { get: vi.fn(() => null) } as unknown as AppCatalog;
-  const bundleFetcher = vi.fn(async () => bytes);
+  const appCatalog = { get: rs.fn(() => null) } as unknown as AppCatalog;
+  const bundleFetcher = rs.fn(async () => bytes);
   return {
     root,
     bundleRoot,
@@ -147,7 +147,7 @@ describe("remixApp", () => {
 
   it("downloads an uninstalled Store bundle without requiring an installed root", async () => {
     const f = await fixture();
-    vi.mocked(f.appManager.readLockfileEntry).mockResolvedValue(null);
+    rs.mocked(f.appManager.readLockfileEntry).mockResolvedValue(null);
     await rm(f.installedRoot, { recursive: true });
     const result = await remixApp(
       {

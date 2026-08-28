@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { isPageReadyForAutomation, pickBrowserEndpoint } from "./cdp.js";
 
 describe("facebook CDP helpers", () => {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import { PolicyEngine, type PolicyContext } from "./policy-engine.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";

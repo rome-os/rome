@@ -1,18 +1,20 @@
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as composioWebhookModule from "../api/composio-webhook.js" with { rstest: "importActual" };
+import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
-const mocks = vi.hoisted(() => ({
-  ensureWebhookRegistered: vi.fn(),
-  loadConnectorClient: vi.fn(),
+const mocks = rs.hoisted(() => ({
+  ensureWebhookRegistered: rs.fn(),
+  loadConnectorClient: rs.fn(),
 }));
 
-vi.mock("../shared.js", async (importActual) => ({
-  ...(await importActual<typeof import("../shared.js")>()),
+rs.mock("../shared.js", () => ({
+  ...sharedModule,
   loadConnectorClient: mocks.loadConnectorClient,
 }));
 
-vi.mock("../api/composio-webhook.js", async (importActual) => ({
-  ...(await importActual<typeof import("../api/composio-webhook.js")>()),
+rs.mock("../api/composio-webhook.js", () => ({
+  ...composioWebhookModule,
   ensureComposioWebhookRegistered: mocks.ensureWebhookRegistered,
 }));
 
@@ -30,9 +32,9 @@ const config: ActionConfig = {
 
 describe("connector_connect webhook self-healing", () => {
   beforeEach(() => {
-    vi.resetAllMocks();
+    rs.resetAllMocks();
     mocks.loadConnectorClient.mockResolvedValue({
-      findActiveConnectedAccount: vi.fn().mockResolvedValue({ kind: "ok", id: "ca_1" }),
+      findActiveConnectedAccount: rs.fn().mockResolvedValue({ kind: "ok", id: "ca_1" }),
     });
     mocks.ensureWebhookRegistered.mockRejectedValue(new Error("relay unavailable"));
   });

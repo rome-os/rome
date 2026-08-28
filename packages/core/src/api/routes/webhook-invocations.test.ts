@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { webhookInvocationsRoutes } from "./webhook-invocations.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";

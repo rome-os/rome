@@ -15,7 +15,7 @@
  * The dashboard-side `/api/apps/<appId>/*` surface is intentionally NOT
  * consulted against `noAuth` — those always require a session.
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../index.js";

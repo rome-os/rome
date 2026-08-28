@@ -1,25 +1,26 @@
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as sharedModule from "../shared.js" with { rstest: "importActual" };
 
 // Composio is the external system here; fake the connector client so the
 // response-mapping can be exercised as a black box (given an upstream response,
 // assert the action result), without a live Composio account.
-const loadConnectorClient = vi.fn();
+const loadConnectorClient = rs.fn();
 // Keep the real shared helpers (ROME_USER_ID, isRomeManagedToolkit,
 // romeManagedConnectHint, …) and fake only the Composio client — so the action's
 // real Rome-managed routing is exercised and adding a shared export can't silently
 // leave it undefined here.
-vi.mock("../shared.js", async (importActual) => ({
-  ...(await importActual<typeof import("../shared.js")>()),
+rs.mock("../shared.js", () => ({
+  ...sharedModule,
   loadConnectorClient: () => loadConnectorClient(),
 }));
 
 // GitHub is brokered by Rome's own integration, not Composio — fake the direct
 // GitHub proxy (token read + HTTP call) so its branch is exercised as a black box
 // without a token file on disk or a live GitHub API.
-const readGithubOAuthToken = vi.fn();
-const githubProxyCall = vi.fn();
-vi.mock("../api/github-proxy.js", () => ({
+const readGithubOAuthToken = rs.fn();
+const githubProxyCall = rs.fn();
+rs.mock("../api/github-proxy.js", () => ({
   readGithubOAuthToken: () => readGithubOAuthToken(),
   githubProxyCall: (args: unknown) => githubProxyCall(args),
 }));
@@ -27,9 +28,9 @@ vi.mock("../api/github-proxy.js", () => ({
 // Slack is likewise brokered by Rome's own integration, not Composio — fake the
 // direct Slack proxy (token read + HTTP call) so its branch is exercised as a
 // black box without a token file on disk or a live Slack API.
-const readSlackOAuthTokens = vi.fn();
-const slackProxyCall = vi.fn();
-vi.mock("../api/slack-proxy.js", () => ({
+const readSlackOAuthTokens = rs.fn();
+const slackProxyCall = rs.fn();
+rs.mock("../api/slack-proxy.js", () => ({
   readSlackOAuthTokens: () => readSlackOAuthTokens(),
   slackProxyCall: (args: unknown) => slackProxyCall(args),
 }));
@@ -59,7 +60,7 @@ function clientWithProxy(proxyTool: () => Promise<unknown>) {
 const run = (input: Record<string, unknown>) => createAction(config, deps).execute(input);
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 // path-only call: linear's default host (api.linear.app) is filled in by Rome, so

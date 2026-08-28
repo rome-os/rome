@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";

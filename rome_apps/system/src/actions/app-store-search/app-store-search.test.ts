@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { AppStoreReader } from "../app-store-common.js";
 import { appStoreSearch } from "./index.js";
 
 function makeStore(): AppStoreReader {
   return {
-    listListings: vi.fn(async () => ({
+    listListings: rs.fn(async () => ({
       status: 200,
       body: {
         available: true,
@@ -34,7 +34,7 @@ function makeStore(): AppStoreReader {
         ],
       },
     })),
-    getListing: vi.fn(async () => ({
+    getListing: rs.fn(async () => ({
       status: 200,
       body: {
         available: true,

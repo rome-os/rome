@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
+import { describe, expect, it, afterEach, beforeEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
@@ -139,7 +139,7 @@ describe("AgentTraceRecorder", () => {
   });
 
   it("retries session creation after a transient ensure failure", async () => {
-    const ensureSpy = vi
+    const ensureSpy = rs
       .spyOn(repo, "ensureRomeSession")
       .mockRejectedValueOnce(new Error("sqlite busy"));
     const recorder = new AgentTraceRecorder({
@@ -373,9 +373,9 @@ describe("AgentTraceRecorder", () => {
   });
 
   it("keeps recorder failures best-effort", async () => {
-    const warn = vi.fn();
+    const warn = rs.fn();
     const recorder = {
-      record: vi.fn(async () => {
+      record: rs.fn(async () => {
         throw new Error("sqlite busy");
       }),
     } as unknown as AgentTraceRecorder;

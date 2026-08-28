@@ -1,24 +1,24 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { AppServerClient } from "./app-server-client.js";
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
+const { spawnMock } = rs.hoisted(() => ({ spawnMock: rs.fn() }));
 
-vi.mock("./cli.js", () => ({ spawnCodexAppServer: spawnMock }));
+rs.mock("./cli.js", () => ({ spawnCodexAppServer: spawnMock }));
 
 function fakeProc(): ChildProcessWithoutNullStreams & EventEmitter {
   const proc = new EventEmitter() as EventEmitter & {
     stdout: PassThrough;
     stderr: PassThrough;
     stdin: PassThrough;
-    kill: ReturnType<typeof vi.fn>;
+    kill: ReturnType<typeof rs.fn>;
   };
   proc.stdout = new PassThrough();
   proc.stderr = new PassThrough();
   proc.stdin = new PassThrough();
-  proc.kill = vi.fn();
+  proc.kill = rs.fn();
   return proc as unknown as ChildProcessWithoutNullStreams & EventEmitter;
 }
 
@@ -26,7 +26,7 @@ describe("AppServerClient", () => {
   it("rejects in-flight and post-exit requests once the app-server exited", async () => {
     const proc = fakeProc();
     spawnMock.mockReturnValue(proc);
-    const onExit = vi.fn();
+    const onExit = rs.fn();
     const client = new AppServerClient({
       cwd: "/",
       env: {},
@@ -50,7 +50,7 @@ describe("AppServerClient", () => {
   it("turns a stdin EPIPE into one transport exit instead of an unhandled error", async () => {
     const proc = fakeProc();
     spawnMock.mockReturnValue(proc);
-    const onExit = vi.fn();
+    const onExit = rs.fn();
     const client = new AppServerClient({
       cwd: "/",
       env: {},

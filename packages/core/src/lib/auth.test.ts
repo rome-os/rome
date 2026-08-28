@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { setCookie } from "hono/cookie";
 import {
@@ -166,13 +166,13 @@ describe("issueGuardianSession", () => {
 
 describe("configurable session lifetime", () => {
   // SESSION_MAX_AGE_SECONDS is read at module load, so each case re-imports the
-  // module with the env set first (vi.resetModules + dynamic import).
+  // module with the env set first (rs.resetModules + dynamic import).
   const original = process.env.ROME_SESSION_MAX_AGE_SECONDS;
 
   afterEach(() => {
     if (original === undefined) delete process.env.ROME_SESSION_MAX_AGE_SECONDS;
     else process.env.ROME_SESSION_MAX_AGE_SECONDS = original;
-    vi.resetModules();
+    rs.resetModules();
   });
 
   async function maxAgeOf(): Promise<string | undefined> {
@@ -192,13 +192,13 @@ describe("configurable session lifetime", () => {
 
   it("uses the ~1 year override from ROME_SESSION_MAX_AGE_SECONDS (desktop)", async () => {
     process.env.ROME_SESSION_MAX_AGE_SECONDS = String(60 * 60 * 24 * 365);
-    vi.resetModules();
+    rs.resetModules();
     expect(await maxAgeOf()).toBe("Max-Age=31536000");
   });
 
   it("falls back to the 30-day default when unset (cloud)", async () => {
     delete process.env.ROME_SESSION_MAX_AGE_SECONDS;
-    vi.resetModules();
+    rs.resetModules();
     expect(await maxAgeOf()).toBe("Max-Age=2592000");
   });
 });

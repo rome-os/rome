@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { guardianAuth } from "../db/schema.js";
 import { createSession, createVisitorSession } from "./auth.js";
@@ -201,7 +201,7 @@ describe("session actor ambient context", () => {
 
   it("resolves a lazy source once and memoizes it", async () => {
     const actor: SessionActor = { kind: "visitor", accountId: "a", email: "e@example.com" };
-    const source = vi.fn(async () => actor);
+    const source = rs.fn(async () => actor);
     await runWithSessionActor(source, async () => {
       expect(await currentSessionActor()).toBe(actor);
       expect(await currentSessionActor()).toBe(actor);

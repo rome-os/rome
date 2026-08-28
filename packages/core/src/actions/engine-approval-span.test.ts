@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import { installTestSpanHarness, type SpanHarness } from "../test/helpers.js";
 import { createTestRome, buildAction, type TestRome } from "../test/kit/index.js";

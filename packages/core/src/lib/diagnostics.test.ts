@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { assembleDiagnosticBundle } from "./diagnostics.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../test/helpers.js";
 

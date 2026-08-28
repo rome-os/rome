@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createResumeSessionAction } from "./index.js";
 
 const config = { name: "resume_session" } as unknown as ActionConfig;
 
 function makeDeps() {
-  const runAndDeliver = vi.fn().mockResolvedValue(undefined);
+  const runAndDeliver = rs.fn().mockResolvedValue(undefined);
   const deps = { backendTurnRunner: { runAndDeliver } } as never;
   return { deps, runAndDeliver };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { createFetchRecorder, FetchRecorderUnmatchedError } from "./fetch-recorder.js";
 
 // Contract tests for the kit's outbound-HTTP fake: code under test receives

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";

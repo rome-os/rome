@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -100,40 +100,40 @@ function createMessageHandlerDeps(
   const approvals: Record<string, unknown>[] = [];
   const settings = overrides.settings ?? {};
   const conversations = {
-    ensureChannelConversation: vi.fn(async (input: Record<string, unknown>) => ({
+    ensureChannelConversation: rs.fn(async (input: Record<string, unknown>) => ({
       id: `channel:${String(input.channel)}:${String(input.threadId)}`,
       agentName: input.agentName === "main" ? null : String(input.agentName),
     })),
-    addMessage: vi.fn(async () => ({ inserted: true })),
-    promoteMessageToUser: vi.fn(async () => undefined),
-    recordOutboundMessage: vi.fn(async () => undefined),
+    addMessage: rs.fn(async () => ({ inserted: true })),
+    promoteMessageToUser: rs.fn(async () => undefined),
+    recordOutboundMessage: rs.fn(async () => undefined),
     ...overrides.conversations,
   };
 
   const deps = {
     agentRunner,
     personMappingRepo: {
-      findByChannelUser: vi.fn(async () => null),
-      findByName: vi.fn(async () => []),
-      findByNameFuzzy: vi.fn(async () => null),
-      findByBondLevel: vi.fn(async () => []),
-      create: vi.fn(async () => "person-1"),
-      addChannelMapping: vi.fn(async () => undefined),
+      findByChannelUser: rs.fn(async () => null),
+      findByName: rs.fn(async () => []),
+      findByNameFuzzy: rs.fn(async () => null),
+      findByBondLevel: rs.fn(async () => []),
+      create: rs.fn(async () => "person-1"),
+      addChannelMapping: rs.fn(async () => undefined),
       ...overrides.personMappingRepo,
     },
     sentinelLogRepo: {
-      create: vi.fn(async () => "sentinel-1"),
-      findUnreviewed: vi.fn(async () => []),
-      markReviewed: vi.fn(async () => undefined),
+      create: rs.fn(async () => "sentinel-1"),
+      findUnreviewed: rs.fn(async () => []),
+      markReviewed: rs.fn(async () => undefined),
     },
     approvalsRepo: {
-      create: vi.fn(async (approval: Record<string, unknown>) => {
+      create: rs.fn(async (approval: Record<string, unknown>) => {
         approvals.push(approval);
         return "approval-1";
       }),
     },
     policyEngine: {
-      evaluate: vi.fn(async () => ({ action: "allow" as const })),
+      evaluate: rs.fn(async () => ({ action: "allow" as const })),
     },
     appContext: {
       app: { id: "inbox", version: "0.1.0", description: "Inbox" },
@@ -142,16 +142,16 @@ function createMessageHandlerDeps(
       log: {} as never,
       repositories: {
         settings: {
-          get: vi.fn(async (key: string) => (key in settings ? settings[key] : null)),
-          set: vi.fn(async () => undefined),
+          get: rs.fn(async (key: string) => (key in settings ? settings[key] : null)),
+          set: rs.fn(async () => undefined),
         },
         conversations,
       },
-      runAction: vi.fn(async (_name: string, args: Record<string, unknown>) => {
+      runAction: rs.fn(async (_name: string, args: Record<string, unknown>) => {
         sentMessages.push(args);
         return { status: "ok" };
       }),
-      listRoutines: vi.fn(async () => []),
+      listRoutines: rs.fn(async () => []),
     },
     resolveProfilePath: (filePath: string) => filePath,
     strangerPersonId: STRANGER_PERSON_ID,
@@ -162,7 +162,7 @@ function createMessageHandlerDeps(
 
 describe("buildMessageContext", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("loads guardian and sender markdown for non-guardian messages", () => {
@@ -422,7 +422,7 @@ describe("parseSentinelDecision", () => {
 
 describe("message reply bond-level settings", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("defaults to replying to mapped guardian senders after sender mapping runs", async () => {
@@ -433,14 +433,14 @@ describe("message reply bond-level settings", () => {
       channelMappings: [],
       profilePath: null,
     };
-    const findByChannelUser = vi.fn(async () => null as PersonRecord | null);
+    const findByChannelUser = rs.fn(async () => null as PersonRecord | null);
     findByChannelUser.mockResolvedValueOnce(null).mockResolvedValueOnce(mappedPerson);
-    const addChannelMapping = vi.fn(async () => undefined);
+    const addChannelMapping = rs.fn(async () => undefined);
 
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: {
         findByChannelUser,
-        findByNameFuzzy: vi.fn(async () => mappedPerson),
+        findByNameFuzzy: rs.fn(async () => mappedPerson),
         addChannelMapping,
       },
       agentResponses: [[{ type: "result", content: "Sure." }]],
@@ -486,7 +486,7 @@ describe("message reply bond-level settings", () => {
 
     const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
     });
     const action = createAction(actionConfig, deps);
@@ -527,7 +527,7 @@ describe("message reply bond-level settings", () => {
     };
     const { deps, agentRunner, conversations } = createMessageHandlerDeps({
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
       agentResponses: [[{ type: "result", content: "Sure." }]],
     });
@@ -570,10 +570,10 @@ describe("message reply bond-level settings", () => {
     };
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
       conversations: {
-        addMessage: vi.fn(async () => ({ inserted: false })),
+        addMessage: rs.fn(async () => ({ inserted: false })),
       },
     });
     const action = createAction(actionConfig, deps);
@@ -608,7 +608,7 @@ describe("message reply bond-level settings", () => {
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
       agentResponses: [
         [{ type: "result", content: "Sure." }],
@@ -655,7 +655,7 @@ describe("message reply bond-level settings", () => {
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       settings: { replyToBondLevels: ["guardian", "inner-circle", "acquaintance", "other"] },
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
       agentResponses: [
         [
@@ -668,7 +668,7 @@ describe("message reply bond-level settings", () => {
         [{ type: "result", content: "APPROVE" }],
       ],
     });
-    (deps.policyEngine.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
       action: "sentinel_review",
     });
     const action = createAction(actionConfig, deps);
@@ -713,7 +713,7 @@ describe("message reply bond-level settings", () => {
 
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: {
-        findByChannelUser: vi.fn(async () => mappedPerson),
+        findByChannelUser: rs.fn(async () => mappedPerson),
       },
     });
     const action = createAction(actionConfig, deps);
@@ -746,7 +746,7 @@ describe("message reply bond-level settings", () => {
 
 describe("per-channel agent routing (trusted path)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   const guardianPerson: PersonRecord = {
@@ -759,7 +759,7 @@ describe("per-channel agent routing (trusted path)", () => {
 
   it("routes to the app-declared agent when channel binds one and it is in the catalog", async () => {
     const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => guardianPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main", "sentinel", "envoy", "pm-assistant"],
       // Guardian path skips envoy → only one agent run is performed.
       agentResponses: [[{ type: "result", content: "On it." }]],
@@ -787,7 +787,7 @@ describe("per-channel agent routing (trusted path)", () => {
 
   it("uses the parent-derived routing for a native thread session", async () => {
     const { deps, conversations } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => guardianPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main", "sentinel", "envoy", "parent-agent"],
       agentResponses: [[{ type: "result", content: "Child reply" }]],
     });
@@ -817,7 +817,7 @@ describe("per-channel agent routing (trusted path)", () => {
 
   it("falls back to main when the routed agent is not in the catalog (e.g. app uninstalled)", async () => {
     const { deps, agentRunner, approvals } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => guardianPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       knownAgents: ["main", "sentinel", "envoy"], // pm-assistant intentionally absent
       agentResponses: [[{ type: "result", content: "Hi from main." }]],
     });
@@ -843,7 +843,7 @@ describe("per-channel agent routing (trusted path)", () => {
     // validators); routing must not drop or re-route the message over that —
     // it honors the requested agent unchanged.
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => guardianPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [[{ type: "result", content: "Hi from pm-assistant." }]],
     });
     agentRunner.hasAgent = () => {
@@ -867,7 +867,7 @@ describe("per-channel agent routing (trusted path)", () => {
 
   it("defaults to main when routedAgentName is absent", async () => {
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => guardianPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [[{ type: "result", content: "Hi." }]],
     });
     const action = createAction(actionConfig, deps);
@@ -895,7 +895,7 @@ describe("per-channel agent routing (trusted path)", () => {
     };
 
     const { deps, agentRunner } = createMessageHandlerDeps({
-      personMappingRepo: { findByChannelUser: vi.fn(async () => strangerPerson) },
+      personMappingRepo: { findByChannelUser: rs.fn(async () => strangerPerson) },
       knownAgents: ["main", "sentinel", "envoy", "pm-assistant"],
       // Allow replies to "other" so the untrusted branch actually runs (the
       // default replyToBondLevels would otherwise short-circuit and ignore).
@@ -904,7 +904,7 @@ describe("per-channel agent routing (trusted path)", () => {
     });
     // Force untrusted: bond level "other" isn't in the default trustedBondLevels
     // and policy.action !== "allow" → falls into handleUntrustedMessage.
-    (deps.policyEngine.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
       action: "monitor",
     });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { v4 as uuid } from "uuid";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { events } from "../db/schema.js";

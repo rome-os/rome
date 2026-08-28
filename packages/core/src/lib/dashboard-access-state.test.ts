@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { DashboardAccessState } from "./dashboard-access-state.js";
 
 describe("DashboardAccessState", () => {

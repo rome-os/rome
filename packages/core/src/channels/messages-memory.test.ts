@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { TimelineEntry } from "@rome/api-types/people";
 import { memoryMessages, type HeldMessage } from "./messages-memory.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { routinesRoutes } from "./routines.js";
@@ -521,9 +521,9 @@ describe("Routines API", () => {
     // At 16:00Z it is already 2026-06-24 01:00 in Tokyo. A one-off at 00:30
     // Tokyo (= 2026-06-23T15:30Z) is in the past; a UTC-naive check with a 24h
     // grace would have wrongly accepted it.
-    vi.useFakeTimers({ shouldAdvanceTime: false });
+    rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
-      vi.setSystemTime(new Date("2026-06-23T16:00:00Z"));
+      rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
       const past = await app.request("/routines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -559,7 +559,7 @@ describe("Routines API", () => {
       });
       expect(future.status).toBe(201);
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 

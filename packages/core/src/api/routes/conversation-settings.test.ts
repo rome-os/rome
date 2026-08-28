@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
 import { conversationSettingsRoutes } from "./conversation-settings.js";
 
 function harness() {
-  const list = vi.fn(async () => ({ items: [], nextCursor: "next" }));
-  const update = vi.fn(async (input: unknown) => ({ input }));
-  const reset = vi.fn(async (input: unknown) => ({ input }));
+  const list = rs.fn(async () => ({ items: [], nextCursor: "next" }));
+  const update = rs.fn(async (input: unknown) => ({ input }));
+  const reset = rs.fn(async (input: unknown) => ({ input }));
   const deps = {
     conversationSettings: { list, update, reset },
   } as unknown as ApiDeps;

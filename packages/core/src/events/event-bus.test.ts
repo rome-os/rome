@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { EventBus, type BusEvent } from "./event-bus.js";
 
 function makeEvent(overrides: Partial<BusEvent> = {}): BusEvent {

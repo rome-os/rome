@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
@@ -32,7 +32,7 @@ describe("SettingsRepository", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
   });
 
@@ -93,12 +93,12 @@ describe("SettingsRepository", () => {
     });
 
     it("replaces the value and advances updated_at when the key is present", async () => {
-      vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      rs.useFakeTimers({ toFake: ["Date"] });
+      rs.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
       await repo.set("stamped", "first");
       const [first] = await testDb.db.select().from(settings).where(eq(settings.key, "stamped"));
 
-      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+      rs.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
       await repo.set("stamped", "second");
       const rows = await testDb.db.select().from(settings).where(eq(settings.key, "stamped"));
 

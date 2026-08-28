@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type {
   NotifyContent as CoreNotifyContent,
   SendOutcome as CoreSendOutcome,
@@ -17,7 +17,7 @@ import type {
 // as equal — an added/removed OPTIONAL field would slip through. This standard
 // `Equal` compares the types identically, so any drift (a renamed/added/removed
 // field or variant, optional or required, on either side) resolves to `false`
-// and fails `tsc --noEmit`. Compile-time guard; vitest only runs the trivial
+// and fails `tsc --noEmit`. Compile-time guard; Rstest only runs the trivial
 // assertion below.
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -32,7 +32,7 @@ describe("send_notification structural copy", () => {
   it("stays field-for-field in sync with core (enforced at typecheck)", () => {
     // The real guard is the two compile-time constants above; a drift fails
     // `pnpm typecheck`, not this runtime assertion. This keeps the file a
-    // runnable vitest suite.
+    // runnable Rstest suite.
     expect(true).toBe(true);
   });
 });

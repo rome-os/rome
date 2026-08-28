@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { checkHealthReadiness, healthRoutes, type HealthDeps } from "./health.js";
 import { createTestDb } from "../../test/helpers.js";
@@ -22,7 +22,7 @@ describe("GET /health", () => {
       "/",
       healthRoutes({
         db: {
-          all: vi.fn(() => {
+          all: rs.fn(() => {
             throw new Error("database is closed");
           }),
         } as unknown as HealthDeps["db"],
@@ -41,7 +41,7 @@ describe("GET /health", () => {
     let calls = 0;
     const readiness = await checkHealthReadiness({
       db: {
-        all: vi.fn(() => {
+        all: rs.fn(() => {
           const callIndex = calls++;
           if (callIndex === 5) {
             throw new Error("no such table: rome_sessions");
@@ -63,7 +63,7 @@ describe("GET /health", () => {
       "/",
       healthRoutes({
         db: {
-          all: vi
+          all: rs
             .fn()
             .mockReturnValueOnce([])
             .mockImplementationOnce(() => {

@@ -1,28 +1,28 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as browserRuntimeModule from "@rome-os/app-runtime/browser" with {
+  rstest: "importActual",
+};
 
 const {
   buildBrowserScriptExpressionMock,
   loadCachedScriptSourceMock,
   openDiscoveredPageSessionMock,
   acquireChatGPTClipboardLockMock,
-} = vi.hoisted(() => ({
-  buildBrowserScriptExpressionMock: vi.fn(),
-  loadCachedScriptSourceMock: vi.fn(),
-  openDiscoveredPageSessionMock: vi.fn(),
-  acquireChatGPTClipboardLockMock: vi.fn(),
+} = rs.hoisted(() => ({
+  buildBrowserScriptExpressionMock: rs.fn(),
+  loadCachedScriptSourceMock: rs.fn(),
+  openDiscoveredPageSessionMock: rs.fn(),
+  acquireChatGPTClipboardLockMock: rs.fn(),
 }));
 
-vi.mock("@rome-os/app-runtime/browser", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@rome-os/app-runtime/browser")>();
-  return {
-    ...actual,
-    buildBrowserScriptExpression: buildBrowserScriptExpressionMock,
-    loadCachedScriptSource: loadCachedScriptSourceMock,
-    openDiscoveredPageSession: openDiscoveredPageSessionMock,
-  };
-});
+rs.mock("@rome-os/app-runtime/browser", () => ({
+  ...browserRuntimeModule,
+  buildBrowserScriptExpression: buildBrowserScriptExpressionMock,
+  loadCachedScriptSource: loadCachedScriptSourceMock,
+  openDiscoveredPageSession: openDiscoveredPageSessionMock,
+}));
 
-vi.mock("./clipboard_lock.js", () => ({
+rs.mock("./clipboard_lock.js", () => ({
   acquireChatGPTClipboardLock: acquireChatGPTClipboardLockMock,
 }));
 
@@ -30,22 +30,22 @@ import { createChatGPTChatAction, postProcessCopiedReportMarkdown } from "./inde
 
 describe("chatgpt_chat action", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    vi.restoreAllMocks();
+    rs.clearAllMocks();
+    rs.restoreAllMocks();
     loadCachedScriptSourceMock.mockResolvedValue("// browser script");
     buildBrowserScriptExpressionMock.mockImplementation(
       ({ entrypointExpression }: { entrypointExpression: string }) =>
         `expression:${entrypointExpression}`,
     );
     acquireChatGPTClipboardLockMock.mockResolvedValue({
-      release: vi.fn().mockResolvedValue(undefined),
+      release: rs.fn().mockResolvedValue(undefined),
     });
   });
 
   it("returns markdown copied from the ChatGPT response toolbar", async () => {
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -56,12 +56,12 @@ describe("chatgpt_chat action", () => {
         .mockResolvedValueOnce({ complete: true })
         .mockResolvedValueOnce({ copyConfirmed: true }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
-    const release = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
+    const release = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
     acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 
-    const readClipboardText = vi
+    const readClipboardText = rs
       .fn()
       .mockResolvedValueOnce("old clipboard")
       .mockResolvedValueOnce("# Test\n\n* alpha\n* beta");
@@ -117,8 +117,8 @@ describe("chatgpt_chat action", () => {
 
   it("post-processes copied markdown before returning it", async () => {
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -129,10 +129,10 @@ describe("chatgpt_chat action", () => {
         .mockResolvedValueOnce({ complete: true })
         .mockResolvedValueOnce({ copyConfirmed: true }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
 
-    const readClipboardText = vi
+    const readClipboardText = rs
       .fn()
       .mockResolvedValueOnce("old clipboard")
       .mockResolvedValueOnce(`${buildLongReportBody()}
@@ -153,10 +153,10 @@ If it helps, I can rewrite this as a compact executive summary.
   });
 
   it("falls back to scraped text while a response is still incomplete", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = rs.spyOn(console, "warn").mockImplementation(() => {});
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -166,10 +166,10 @@ If it helps, I can rewrite this as a compact executive summary.
         })
         .mockResolvedValueOnce({ complete: false }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
 
-    const readClipboardText = vi.fn().mockResolvedValue("existing clipboard");
+    const readClipboardText = rs.fn().mockResolvedValue("existing clipboard");
     const action = createActionForTest(readClipboardText);
 
     const result = await action.execute({ prompt: "test", timeout: 1000 });
@@ -194,8 +194,8 @@ If it helps, I can rewrite this as a compact executive summary.
 
   it("retries copy once before using the changed clipboard", async () => {
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -207,10 +207,10 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ copyConfirmed: false })
         .mockResolvedValueOnce({ copyConfirmed: false }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
 
-    const readClipboardText = vi
+    const readClipboardText = rs
       .fn()
       .mockResolvedValueOnce("before")
       .mockResolvedValueOnce("# Test\n\n* alpha\n* beta");
@@ -227,11 +227,11 @@ If it helps, I can rewrite this as a compact executive summary.
   });
 
   it("waits for clipboard settlement, then retries the copy button once before releasing the lock", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
       const session = {
-        send: vi.fn().mockResolvedValue(undefined),
-        evaluateByValue: vi
+        send: rs.fn().mockResolvedValue(undefined),
+        evaluateByValue: rs
           .fn()
           .mockResolvedValueOnce({
             prompt: "test",
@@ -243,12 +243,12 @@ If it helps, I can rewrite this as a compact executive summary.
           .mockResolvedValueOnce({ copyConfirmed: true })
           .mockResolvedValueOnce({ copyConfirmed: true }),
       };
-      const close = vi.fn().mockResolvedValue(undefined);
-      const release = vi.fn().mockResolvedValue(undefined);
+      const close = rs.fn().mockResolvedValue(undefined);
+      const release = rs.fn().mockResolvedValue(undefined);
       openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
       acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 
-      const readClipboardText = vi
+      const readClipboardText = rs
         .fn()
         .mockResolvedValueOnce("stable clipboard")
         .mockResolvedValueOnce("stable clipboard")
@@ -257,7 +257,7 @@ If it helps, I can rewrite this as a compact executive summary.
       const action = createActionForTest(readClipboardText);
 
       const resultPromise = action.execute({ prompt: "test" });
-      await vi.runAllTimersAsync();
+      await rs.runAllTimersAsync();
       const result = await resultPromise;
 
       expect(session.evaluateByValue).toHaveBeenCalledTimes(4);
@@ -277,15 +277,15 @@ If it helps, I can rewrite this as a compact executive summary.
         release.mock.invocationCallOrder[0],
       );
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 
   it("returns scraped text and sources when markdown copy is not confirmed", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = rs.spyOn(console, "warn").mockImplementation(() => {});
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -297,10 +297,10 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ copyConfirmed: false })
         .mockResolvedValueOnce({ copyConfirmed: false }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
 
-    const action = createActionForTest(vi.fn().mockResolvedValue("same clipboard"));
+    const action = createActionForTest(rs.fn().mockResolvedValue("same clipboard"));
 
     const result = await action.execute({ prompt: "test" });
 
@@ -327,13 +327,13 @@ If it helps, I can rewrite this as a compact executive summary.
   });
 
   it("releases the lock after reading the final clipboard contents and before closing the page", async () => {
-    const readClipboardText = vi
+    const readClipboardText = rs
       .fn()
       .mockResolvedValueOnce("old clipboard")
       .mockResolvedValueOnce("# Test\n\n* alpha\n* beta");
     const session = {
-      send: vi.fn().mockResolvedValue(undefined),
-      evaluateByValue: vi
+      send: rs.fn().mockResolvedValue(undefined),
+      evaluateByValue: rs
         .fn()
         .mockResolvedValueOnce({
           prompt: "test",
@@ -344,8 +344,8 @@ If it helps, I can rewrite this as a compact executive summary.
         .mockResolvedValueOnce({ complete: true })
         .mockResolvedValueOnce({ copyConfirmed: true }),
     };
-    const close = vi.fn().mockResolvedValue(undefined);
-    const release = vi.fn().mockResolvedValue(undefined);
+    const close = rs.fn().mockResolvedValue(undefined);
+    const release = rs.fn().mockResolvedValue(undefined);
     openDiscoveredPageSessionMock.mockResolvedValue({ session, close });
     acquireChatGPTClipboardLockMock.mockResolvedValue({ release });
 

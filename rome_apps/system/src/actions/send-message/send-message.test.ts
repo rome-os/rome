@@ -2,7 +2,7 @@ import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig, TalkRouter } from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
 import type { SendMessageInput } from "./index.js";
@@ -15,7 +15,7 @@ function makeAdapter(service = "discord"): TalkRouter {
   return {
     list: async () => [{ connectionId: `test:${service}`, service }],
     subscribe: () => () => {},
-    send: vi.fn(async (_connectionId, conversationId) => ({ conversationId })),
+    send: rs.fn(async (_connectionId, conversationId) => ({ conversationId })),
     feature: () => null,
   };
 }
@@ -27,13 +27,13 @@ describe("send_message attachments", () => {
     outsideRoot = join(tempDir, "outside");
     await mkdir(projectsRoot, { recursive: true });
     await mkdir(outsideRoot, { recursive: true });
-    vi.stubEnv("ROME_PROJECTS_ROOT", projectsRoot);
-    vi.stubEnv("ROME_PROFILE", "send-message-test");
+    rs.stubEnv("ROME_PROJECTS_ROOT", projectsRoot);
+    rs.stubEnv("ROME_PROFILE", "send-message-test");
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.restoreAllMocks();
+    rs.unstubAllEnvs();
+    rs.restoreAllMocks();
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -110,7 +110,7 @@ describe("send_message email union", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [connectionId, threadId, message] = (adapter.send as ReturnType<typeof vi.fn>).mock
+    const [connectionId, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock
       .calls[0];
     expect(connectionId).toBe("test:email");
     expect(threadId).toBe("");
@@ -128,7 +128,7 @@ describe("send_message email union", () => {
       text: "reply",
     });
 
-    const [, , message] = (adapter.send as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(message.kind).toBe("email");
     expect(message.inReplyToMessageId).toBe("msg_1");
   });
@@ -148,7 +148,7 @@ describe("send_message email union", () => {
       to: "x@y.com",
       html: "<p>hi</p>",
     });
-    const [, , message] = (adapter.send as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(message.html).toBe("<p>hi</p>");
   });
 });
@@ -185,7 +185,7 @@ describe("send_message chat recipient aliases", () => {
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
     const adapter = makeAdapter("whatsapp");
     const personMappingRepo = {
-      findByBondLevel: vi.fn(async () => [
+      findByBondLevel: rs.fn(async () => [
         {
           channelMappings: [
             { channel: "email", channelUserId: "guardian@example.com" },
@@ -218,7 +218,7 @@ describe("send_message chat recipient aliases", () => {
   it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {
     const adapter = makeAdapter("whatsapp");
     const personMappingRepo = {
-      findByBondLevel: vi.fn(async () => [{ channelMappings: [] }]),
+      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
     };
 
     await expect(
@@ -252,15 +252,15 @@ describe("send_message chat recipient aliases", () => {
 describe("send_message conversation recording", () => {
   it("stores a confirmed out-of-band delivery as a pending notification", async () => {
     const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
       conversationId: "thread-1",
     });
-    const ensureChannelConversation = vi.fn(async () => ({
+    const ensureChannelConversation = rs.fn(async () => ({
       id: "channel:discord:thread-1",
       agentName: null,
     }));
-    const recordOutboundMessage = vi.fn(async () => undefined);
+    const recordOutboundMessage = rs.fn(async () => undefined);
 
     const result = await executeSendMessage(
       adapter,
@@ -269,8 +269,8 @@ describe("send_message conversation recording", () => {
         conversations: {
           ensureChannelConversation,
           recordOutboundMessage,
-          addMessage: vi.fn(),
-          promoteMessageToUser: vi.fn(),
+          addMessage: rs.fn(),
+          promoteMessageToUser: rs.fn(),
         },
       },
     );
@@ -296,7 +296,7 @@ describe("send_message conversation recording", () => {
 
   it("keeps a confirmed delivery successful when transcript recording fails", async () => {
     const adapter = makeAdapter();
-    (adapter.send as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-2",
       conversationId: "thread-2",
     });
@@ -314,12 +314,12 @@ describe("send_message conversation recording", () => {
         },
         {
           conversations: {
-            ensureChannelConversation: vi.fn(),
-            recordOutboundMessage: vi.fn(async () => {
+            ensureChannelConversation: rs.fn(),
+            recordOutboundMessage: rs.fn(async () => {
               throw new Error("database unavailable");
             }),
-            addMessage: vi.fn(),
-            promoteMessageToUser: vi.fn(),
+            addMessage: rs.fn(),
+            promoteMessageToUser: rs.fn(),
           },
         },
       ),

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   isWechatAuthError,
   normalizeWechatBaseUrl,
@@ -11,19 +11,19 @@ import {
   type WechatMessage,
 } from "./wechat.js";
 
-const profileDirs = vi.hoisted(() => ({ profileDir: "", memoryDir: "" }));
-const loggerMocks = vi.hoisted(() => ({
-  debug: vi.fn(),
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
+const profileDirs = rs.hoisted(() => ({ profileDir: "", memoryDir: "" }));
+const loggerMocks = rs.hoisted(() => ({
+  debug: rs.fn(),
+  info: rs.fn(),
+  warn: rs.fn(),
+  error: rs.fn(),
 }));
 
-vi.mock("../logger.js", () => ({
+rs.mock("../logger.js", () => ({
   createLogger: () => loggerMocks,
 }));
 
-vi.mock("../paths.js", () => ({
+rs.mock("../paths.js", () => ({
   getProfileDir: () => profileDirs.profileDir,
   getProfileMemoryDir: () => profileDirs.memoryDir,
 }));
@@ -384,7 +384,7 @@ describe("WechatAdapter inbound attachments", () => {
   }
 
   afterEach(async () => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     globalThis.fetch = originalFetch;
     await rm(profileDirs.memoryDir, { recursive: true, force: true });
     await rm(profileDirs.profileDir, { recursive: true, force: true });
@@ -399,13 +399,13 @@ describe("WechatAdapter inbound attachments", () => {
     const key = Buffer.from("00112233445566778899aabbccddeeff", "hex");
     const plaintext = Buffer.from("image bytes");
     const encrypted = encryptForTest(plaintext, key);
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = rs.fn(async () => {
       return new Response(new Uint8Array(encrypted), {
         status: 200,
         headers: { "content-type": "image/jpeg" },
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const message = normalizeWechatMessage(
       makeWechatMessage({
@@ -454,13 +454,13 @@ describe("WechatAdapter sendMessage", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     globalThis.fetch = originalFetch;
   });
 
   it("sends proactive text to the channel user with the latest cached context token", async () => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn(async () => new Response("{}", { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     const adapter = new WechatAdapter({
       token: "token",
@@ -531,14 +531,14 @@ describe("isWechatAuthError", () => {
 describe("WechatAdapter fault surfacing", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
+    rs.unstubAllGlobals();
+    rs.useRealTimers();
     globalThis.fetch = originalFetch;
   });
 
   it("surfaces a terminal HTTP 401 poll failure through onFault (auth) and stops looping", async () => {
-    const fetchMock = vi.fn(async () => new Response("unauthorized", { status: 401 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn(async () => new Response("unauthorized", { status: 401 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     const faults: unknown[] = [];
     const adapter = new WechatAdapter({
@@ -559,10 +559,10 @@ describe("WechatAdapter fault surfacing", () => {
   });
 
   it("pauses errcode -14 for one hour, blocks outbound calls, then retries", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     loggerMocks.warn.mockClear();
     loggerMocks.error.mockClear();
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = rs.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
         return new Response(
           JSON.stringify({
@@ -576,7 +576,7 @@ describe("WechatAdapter fault surfacing", () => {
       }
       return new Response("unauthorized", { status: 401 });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const faults: unknown[] = [];
     const adapter = new WechatAdapter({
@@ -588,7 +588,7 @@ describe("WechatAdapter fault surfacing", () => {
     });
 
     await adapter.start();
-    await vi.waitFor(() => expect(loggerMocks.warn).toHaveBeenCalledTimes(1));
+    await rs.waitFor(() => expect(loggerMocks.warn).toHaveBeenCalledTimes(1));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(faults).toHaveLength(0);
@@ -613,11 +613,11 @@ describe("WechatAdapter fault surfacing", () => {
     });
     const remainingPauseMs = Date.parse(pauseData.retryAt) - Date.now();
     expect(remainingPauseMs).toBeGreaterThan(0);
-    await vi.advanceTimersByTimeAsync(remainingPauseMs - 1);
+    await rs.advanceTimersByTimeAsync(remainingPauseMs - 1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(faults).toHaveLength(0);
 
-    await vi.advanceTimersByTimeAsync(1);
+    await rs.advanceTimersByTimeAsync(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(faults).toHaveLength(1);
     expect(isWechatAuthError(faults[0])).toBe(true);
@@ -625,13 +625,13 @@ describe("WechatAdapter fault surfacing", () => {
     expect(adapter.getRuntimeDegradation()).toBeNull();
 
     await adapter.stop();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(rs.getTimerCount()).toBe(0);
   });
 
   it("stop cancels a stale-session cooldown timer", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     loggerMocks.warn.mockClear();
-    const fetchMock = vi.fn(
+    const fetchMock = rs.fn(
       async () =>
         new Response(
           JSON.stringify({
@@ -643,7 +643,7 @@ describe("WechatAdapter fault surfacing", () => {
           { status: 200 },
         ),
     );
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const adapter = new WechatAdapter({
       token: "stale-token",
@@ -653,11 +653,11 @@ describe("WechatAdapter fault surfacing", () => {
     });
 
     await adapter.start();
-    await vi.waitFor(() => expect(loggerMocks.warn).toHaveBeenCalledTimes(1));
+    await rs.waitFor(() => expect(loggerMocks.warn).toHaveBeenCalledTimes(1));
     await adapter.stop();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(rs.getTimerCount()).toBe(0);
   });
 });
 

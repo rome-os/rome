@@ -5,7 +5,7 @@
  * covers the channel-adapter path.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, trace, type Context, type SpanContext } from "@opentelemetry/api";
 
 import { installTestSpanHarness, type SpanHarness } from "./helpers.js";

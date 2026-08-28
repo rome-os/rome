@@ -2,7 +2,7 @@
 //   1. material round-trip (settings ⇄ SecretRecord, incl. apiId stringify +
 //      nullable username), descriptor shape, the route-driven session scheme
 //      (confer throws, renew "re-confer") — pure.
-//   2. fault mapping — a fake TelegramUserAdapter (vi.mock) lets us drive a
+//   2. fault mapping — a fake TelegramUserAdapter (rs.mock) lets us drive a
 //      start rejection and a send failure; the real
 //      isTelegramUserSessionRejected classifier (imported unmocked) decides
 //      CredentialRejected{ grant: "session" } vs. Disconnected.
@@ -15,7 +15,7 @@
 // transport seam (see telegram-user.test.ts), so we mock the adapter module and
 // pin the descriptor's own mapping arithmetic here.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ConversationId,
   InboundMessage,
@@ -28,6 +28,9 @@ import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
+import * as telegramUserModule from "../../channels/telegram-user.js" with {
+  rstest: "importActual",
+};
 
 const fakeState: {
   startError: unknown;
@@ -53,13 +56,10 @@ const fakeState: {
   probeGate: null,
 };
 
-vi.mock("../../channels/telegram-user.js", async () => {
+rs.mock("../../channels/telegram-user.js", () => {
   // Keep the real classifier + error class; only replace the adapter transport.
-  const actual = await vi.importActual<typeof import("../../channels/telegram-user.js")>(
-    "../../channels/telegram-user.js",
-  );
   return {
-    ...actual,
+    ...telegramUserModule,
     TelegramUserAdapter: class {
       onMessage(_handler: (msg: NormalizedMessage) => Promise<void>): void {}
       async start(): Promise<void> {

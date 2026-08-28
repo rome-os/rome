@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { actionExecutionsRoutes } from "./action-executions.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
@@ -16,7 +16,7 @@ describe("Action-executions API", () => {
 
   afterEach(() => {
     testDb.close();
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   describe("GET /action-executions", () => {
@@ -76,7 +76,7 @@ describe("Action-executions API", () => {
 
     it("returns 202 when the engine reports the cancel succeeded", async () => {
       const deps = await buildTestDeps(testDb.db);
-      const engine = { ...deps.actionEngine, cancel: vi.fn(async () => true) };
+      const engine = { ...deps.actionEngine, cancel: rs.fn(async () => true) };
       const app = new Hono().route(
         "/",
         actionExecutionsRoutes({

@@ -1,6 +1,6 @@
 // The Discord descriptor. Two layers under test:
 //   1. isDiscordAuthError / descriptor shape / token-validate wiring — pure.
-//   2. fault mapping — a fake DiscordAdapter (vi.mock of ../../channels/discord.js)
+//   2. fault mapping — a fake DiscordAdapter (rs.mock of ../../channels/discord.js)
 //      captures the descriptor's `onGatewayFault` wiring and lets us drive a
 //      login rejection (DiscordjsError) and live gateway faults, asserting they
 //      surface as CredentialRejected{ grant: "bot" } vs. Disconnected.
@@ -10,7 +10,7 @@
 // descriptor's own mapping arithmetic is what this file pins, and the adapter's
 // transport internals are covered by discord.test.ts.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
@@ -53,7 +53,7 @@ const fakeState: {
   channels: [],
 };
 
-vi.mock("../../channels/discord.js", () => ({
+rs.mock("../../channels/discord.js", () => ({
   DiscordAdapter: class {
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
@@ -97,7 +97,7 @@ function flush(): Promise<void> {
 
 const deps = {
   conversationSettings: {} as never,
-  personMappingRepo: { findByChannelUser: vi.fn(async () => null) } as never,
+  personMappingRepo: { findByChannelUser: rs.fn(async () => null) } as never,
   listAgents: () => [],
   validateToken: async () => {},
 };
@@ -173,7 +173,7 @@ describe("discord descriptor shape", () => {
   });
 
   it("runs the injected token validator on confer", async () => {
-    const validate = vi.fn(async () => {});
+    const validate = rs.fn(async () => {});
     const desc = makeDiscordDescriptor({ ...deps, validateToken: validate });
     await desc.auth.bot.confer({
       prompt: async () => ({ token: "abc" }),

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { z } from "zod";
 import { toMcpToolShape } from "./json-schema-zod.js";
 

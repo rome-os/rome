@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The rejection cases below are expected to log. Mocking keeps that off the
 // suite's stderr, where it reads as a failure rather than as the assertion, and
 // gives the tests below a handle to assert the diagnostic actually fires.
-const logError = vi.hoisted(() => vi.fn());
-vi.mock("../logger.js", () => ({
-  createLogger: () => ({ error: logError, info: vi.fn(), warn: vi.fn() }),
+const logError = rs.hoisted(() => rs.fn());
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ error: logError, info: rs.fn(), warn: rs.fn() }),
 }));
 
 import {

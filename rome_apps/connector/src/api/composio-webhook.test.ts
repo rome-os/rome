@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
 import {
   ensureComposioWebhookRegistered,
@@ -7,8 +7,8 @@ import {
 
 describe("ensureComposioWebhookRegistered", () => {
   it("registers Composio at the exact relay deposit URL and stores fresh signing material", async () => {
-    const setWebhookUrl = vi.fn().mockResolvedValue({ id: "wh_1", secret: "whsec_1" });
-    const set = vi.fn().mockResolvedValue(undefined);
+    const setWebhookUrl = rs.fn().mockResolvedValue({ id: "wh_1", secret: "whsec_1" });
+    const set = rs.fn().mockResolvedValue(undefined);
 
     await expect(
       ensureComposioWebhookRegistered({
@@ -24,8 +24,8 @@ describe("ensureComposioWebhookRegistered", () => {
   });
 
   it("does not call Composio or mutate local state when Relay is unavailable", async () => {
-    const setWebhookUrl = vi.fn();
-    const set = vi.fn();
+    const setWebhookUrl = rs.fn();
+    const set = rs.fn();
 
     await expect(
       ensureComposioWebhookRegistered({
@@ -40,12 +40,12 @@ describe("ensureComposioWebhookRegistered", () => {
   });
 
   it("rejects a non-HTTPS relay deposit URL before registering it with Composio", async () => {
-    const setWebhookUrl = vi.fn();
+    const setWebhookUrl = rs.fn();
 
     await expect(
       ensureComposioWebhookRegistered({
         client: { setWebhookUrl },
-        appSettings: { set: vi.fn() },
+        appSettings: { set: rs.fn() },
         settings: { get: async () => ({ depositUrl: "http://relay.example/h/mailbox" }) },
       }),
     ).rejects.toThrow("must use HTTPS");

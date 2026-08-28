@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { RESUME_SESSION_ACTION, parseDeferInput, runDefer, type DeferContext } from "./defer.js";
 
 // A fixed "now" on a minute boundary keeps the ceil math easy to reason about.
@@ -77,7 +77,7 @@ describe("parseDeferInput", () => {
 
 describe("runDefer", () => {
   it("creates a one-off UTC routine targeting the dispatcher", async () => {
-    const createRoutine = vi.fn().mockResolvedValue({ routineId: "r-1" });
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
     const result = await runDefer(
       { name: "检查 GitHub CI", afterMinutes: 5 },
       { context: baseContext, createRoutine, now: NOW },
@@ -120,7 +120,7 @@ describe("runDefer", () => {
   });
 
   it("throws on a missing thread context", async () => {
-    const createRoutine = vi.fn();
+    const createRoutine = rs.fn();
     await expect(
       runDefer(
         { name: "x", afterMinutes: 5 },
@@ -138,14 +138,14 @@ describe("runDefer", () => {
   });
 
   it("propagates a create_routine domain error", async () => {
-    const createRoutine = vi.fn().mockRejectedValue(new Error("boom"));
+    const createRoutine = rs.fn().mockRejectedValue(new Error("boom"));
     await expect(
       runDefer({ name: "x", afterMinutes: 5 }, { context: baseContext, createRoutine, now: NOW }),
     ).rejects.toThrow("boom");
   });
 
   it("carries the channel coords from channelContext into the resume args", async () => {
-    const createRoutine = vi.fn().mockResolvedValue({ routineId: "r-2" });
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-2" });
     await runDefer(
       { name: "watch deploy", afterMinutes: 1 },
       {

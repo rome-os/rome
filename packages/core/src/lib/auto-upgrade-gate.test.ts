@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import type { Config } from "../config.js";
 import { AUTO_UPGRADE_GATE_NAME, resolveAutoUpgradeEnabled } from "./auto-upgrade-gate.js";
 import { useFakeFeatureGates, resetFeatureGates } from "@rome-os/libs/feature-flags/testing";

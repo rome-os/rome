@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { AppManagerError } from "./manager.js";
 import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/index.js";
 import { remixApp } from "./remix.js";
@@ -49,7 +49,7 @@ describe("AppManager", () => {
   let harness: TestAppsHarness;
   let workspaceRoot: string;
   let packedRoot: string;
-  const bundleFetcher = vi.fn<import("./store-bundle.js").BundleFetcher>();
+  const bundleFetcher = rs.fn<import("./store-bundle.js").BundleFetcher>();
 
   beforeEach(async () => {
     bundleFetcher.mockReset();
@@ -94,8 +94,8 @@ describe("AppManager", () => {
     const before = existsSync(harness.lockfilePath)
       ? await readFile(harness.lockfilePath, "utf8")
       : null;
-    const install = vi.spyOn(harness.appManager, "install");
-    const uninstall = vi.spyOn(harness.appManager, "uninstall");
+    const install = rs.spyOn(harness.appManager, "install");
+    const uninstall = rs.spyOn(harness.appManager, "uninstall");
     bundleFetcher.mockClear();
     const result = await remixApp(
       {
@@ -780,14 +780,14 @@ sideEffects: read-only
         JSON.stringify({ name: "testapp", scripts: { build: "false" } }),
         "utf-8",
       );
-      vi.stubEnv("ROME_PROJECT_ROOT", harness.profileRoot);
+      rs.stubEnv("ROME_PROJECT_ROOT", harness.profileRoot);
       try {
         await expect(harness.appManager.install({ source })).rejects.toMatchObject({
           code: "ARTIFACT_INVALID",
           message: expect.stringMatching(/pnpm build:apps/),
         });
       } finally {
-        vi.unstubAllEnvs();
+        rs.unstubAllEnvs();
       }
 
       // The failed build never transitioned anything: the lockfile still

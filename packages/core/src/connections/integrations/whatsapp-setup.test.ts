@@ -12,7 +12,7 @@
 //      an in-flight pairing setup is reported as the grant's active setup
 //      through the generic SetupManager surface.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
@@ -36,11 +36,11 @@ function deferred<T>() {
 
 function makePairingFake(paired: Promise<string>) {
   const handle = {
-    start: vi.fn(async () => {}),
-    requestPairingCode: vi.fn(async () => "ABCD1234"),
-    waitForPaired: vi.fn(() => paired),
-    serialize: vi.fn(() => ({ creds: "serialized-creds", keys: "serialized-keys" })),
-    stop: vi.fn(async () => {}),
+    start: rs.fn(async () => {}),
+    requestPairingCode: rs.fn(async () => "ABCD1234"),
+    waitForPaired: rs.fn(() => paired),
+    serialize: rs.fn(() => ({ creds: "serialized-creds", keys: "serialized-keys" })),
+    stop: rs.fn(async () => {}),
   } satisfies WhatsAppPairingHandle;
   return handle;
 }
@@ -49,9 +49,9 @@ describe("makeWhatsAppSetup", () => {
   it("prompts the phone number, shows the pairing code, then confers on link", async () => {
     const link = deferred<string>();
     const pairing = makePairingFake(link.promise);
-    const openPairing = vi.fn(() => pairing);
+    const openPairing = rs.fn(() => pairing);
     const fn = makeWhatsAppSetup({ openPairing });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -61,13 +61,13 @@ describe("makeWhatsAppSetup", () => {
 
     const afterInput = await session.provideInput({ phoneNumber: "+1 (415) 555-0134" });
     // The number is normalized to digits before it reaches the socket.
-    await vi.waitFor(() => expect(pairing.requestPairingCode).toHaveBeenCalledWith("14155550134"));
-    await vi.waitFor(() => expect(session.state.status).toBe("presenting"));
+    await rs.waitFor(() => expect(pairing.requestPairingCode).toHaveBeenCalledWith("14155550134"));
+    await rs.waitFor(() => expect(session.state.status).toBe("presenting"));
     expect(afterInput.state.status).toBe("presenting");
 
     // The pairing code is server-authored into the view payload (formatted for
     // reading) so the standard renderer shows it without WhatsApp knowledge.
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const state = session.state;
       if (state.status !== "presenting") throw new Error("not presenting");
       expect(state.view.body).toContain("ABCD-1234");
@@ -76,7 +76,7 @@ describe("makeWhatsAppSetup", () => {
     });
 
     link.resolve("14155550134@s.whatsapp.net");
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     // The transient socket is stopped BEFORE the conferral commit (WhatsApp
     // allows one live socket per session; the registry builds the real Talker).
@@ -101,7 +101,7 @@ describe("makeWhatsAppSetup", () => {
   });
 
   it("re-prompts with the error on an invalid phone number", async () => {
-    const openPairing = vi.fn(() => makePairingFake(new Promise<string>(() => {})));
+    const openPairing = rs.fn(() => makePairingFake(new Promise<string>(() => {})));
     const fn = makeWhatsAppSetup({ openPairing });
     const session = new SetupSession({ fn, commit: async () => {} });
     await session.started();
@@ -121,37 +121,37 @@ describe("makeWhatsAppSetup", () => {
   it("cancel mid-pairing-wait stops the transient socket and runs no commit", async () => {
     const pairing = makePairingFake(new Promise<string>(() => {}));
     const fn = makeWhatsAppSetup({ openPairing: () => pairing });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
     await session.provideInput({ phoneNumber: "14155550134" });
-    await vi.waitFor(() => expect(pairing.waitForPaired).toHaveBeenCalled());
+    await rs.waitFor(() => expect(pairing.waitForPaired).toHaveBeenCalled());
 
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });
     expect(commit).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(pairing.stop).toHaveBeenCalled());
+    await rs.waitFor(() => expect(pairing.stop).toHaveBeenCalled());
   });
 
   it("fails the setup and stops the socket when the pairing handshake faults", async () => {
     const link = deferred<string>();
     const pairing = makePairingFake(link.promise);
     const fn = makeWhatsAppSetup({ openPairing: () => pairing });
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
     await session.provideInput({ phoneNumber: "14155550134" });
-    await vi.waitFor(() => expect(pairing.waitForPaired).toHaveBeenCalled());
+    await rs.waitFor(() => expect(pairing.waitForPaired).toHaveBeenCalled());
 
     link.reject(new Error("WhatsApp connection failed during pairing."));
-    await vi.waitFor(() => expect(session.state.status).toBe("failed"));
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
     if (session.state.status === "failed") {
       expect(session.state.reason).toBe("WhatsApp connection failed during pairing.");
     }
     expect(commit).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(pairing.stop).toHaveBeenCalled());
+    await rs.waitFor(() => expect(pairing.stop).toHaveBeenCalled());
   });
 });
 
@@ -162,7 +162,7 @@ describe("makeWhatsAppSetup", () => {
 describe("WhatsApp setup discovery", () => {
   function makeRegistry(): SetupRegistry {
     const descriptor = createWhatsAppDescriptor({
-      syncSink: { upsertContacts: vi.fn(), upsertChats: vi.fn(), insertMessages: vi.fn() } as never,
+      syncSink: { upsertContacts: rs.fn(), upsertChats: rs.fn(), insertMessages: rs.fn() } as never,
       onGuardianConnected: () => {},
       openPairing: () => makePairingFake(new Promise<string>(() => {})),
     });

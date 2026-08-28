@@ -5,7 +5,7 @@
 //   2. registry-level: connect() unlocks talk immediately.
 //   3. send/fetchHistory round-trip through the wrapped WebChatAdapter.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ConversationId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";

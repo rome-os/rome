@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { errorHandler } from "./error-handler.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelSessionForkOpenParams, ModelSessionForkParams } from "../agent-runner.js";
 import {
   createBorrowedExactForkSession,
@@ -71,7 +71,7 @@ describe("evaluateBorrowedExactFork", () => {
 
 describe("createBorrowedExactForkSession", () => {
   it("scopes dynamic tools to the fork runtime and rolls back", async () => {
-    const rollbackTurn = vi.fn(async () => undefined);
+    const rollbackTurn = rs.fn(async () => undefined);
     let hasForkActionTool = false;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",

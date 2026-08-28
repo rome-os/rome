@@ -11,7 +11,7 @@
  * observed, so the assertions cover the wire behavior an app builder programs
  * against — not internals.
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "@rstest/core";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";

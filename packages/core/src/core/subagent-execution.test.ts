@@ -1,5 +1,5 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type {
@@ -25,7 +25,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   const releases = turnIds.map(() => deferred());
   const calls: Array<{ input: AgentTurnInput; options?: SendTurnOptions }> = [];
   let turnIndex = 0;
-  const interrupt = vi.fn(async () => {
+  const interrupt = rs.fn(async () => {
     releases[Math.max(0, turnIndex - 1)]?.resolve();
   });
   const session: AgentSession = {
@@ -67,7 +67,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
     subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,
     interrupt,
-    close: vi.fn(async () => undefined),
+    close: rs.fn(async () => undefined),
     getSubmittedOutput: () => undefined,
   };
   return { session, releases, calls, interrupt };
@@ -105,10 +105,10 @@ describe("SubagentExecutionService", () => {
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
     const childManager = {
-      acquire: vi.fn(async () => children.shift()!),
-      acquireBySessionId: vi.fn(),
-      peek: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
+      acquire: rs.fn(async () => children.shift()!),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
     const service = createSubagentExecutionService({
@@ -199,10 +199,10 @@ describe("SubagentExecutionService", () => {
     });
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
     const childManager = {
-      acquire: vi.fn(),
-      acquireBySessionId: vi.fn(async () => resumed.session),
-      peek: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
+      acquire: rs.fn(),
+      acquireBySessionId: rs.fn(async () => resumed.session),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
       webchatRepo: repo,

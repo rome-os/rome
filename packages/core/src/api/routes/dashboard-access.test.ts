@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { dashboardAccessRoutes } from "./dashboard-access.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";

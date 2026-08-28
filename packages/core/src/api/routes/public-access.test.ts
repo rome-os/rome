@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import {
   chmodSync,
   existsSync,
@@ -15,6 +15,7 @@ import { publicAccessRoutes } from "./public-access.js";
 import { PublicAccessState } from "../../lib/public-access-state.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
+import * as gatewayPageModule from "../../lib/gateway-page.js" with { rstest: "importActual" };
 
 // Public-access routes over the real lib/public-access pipeline (edge-only
 // fakes, #763): PUT runs the production writeCaddyfileAndReload — the
@@ -29,10 +30,10 @@ import type { ApiDeps } from "../deps.js";
 // would succeed and escape the test. Stubbed to a no-op until the output
 // path grows a seam (Track B note on #763). getInstanceName stays real.
 
-vi.mock("../../lib/gateway-page.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/gateway-page.js")>();
-  return { ...actual, generateGatewayPage: vi.fn(async () => {}) };
-});
+rs.mock("../../lib/gateway-page.js", () => ({
+  ...gatewayPageModule,
+  generateGatewayPage: rs.fn(async () => {}),
+}));
 
 const ENV_KEYS = [
   "CADDY_CONFIG_PATH",

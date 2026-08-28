@@ -8,7 +8,7 @@
 // with 401. The public setup must wait for readiness and remain presenting.
 
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../../channels/whatsapp.js";
@@ -65,8 +65,8 @@ function fakeSocketFactory(controls: FakeWhatsAppSocket[]): WhatsAppSocketFactor
         }
         return "ABCD1234";
       },
-      end: vi.fn(),
-      sendMessage: vi.fn(),
+      end: rs.fn(),
+      sendMessage: rs.fn(),
       user: undefined,
     };
   }) as unknown as WhatsAppSocketFactory;
@@ -128,7 +128,7 @@ describe("WhatsApp generic setup — pairing readiness", () => {
     });
     expect(input.status).toBe(200);
 
-    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    await rs.waitFor(() => expect(sockets).toHaveLength(1));
     // Leave a scheduling window in which the old implementation called
     // requestPairingCode too early and the fake WhatsApp server returned 401.
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -136,7 +136,7 @@ describe("WhatsApp generic setup — pairing readiness", () => {
     sockets[0].ready = true;
     sockets[0].emit("connection.update", { qr: "registration-ready" });
 
-    await vi.waitFor(
+    await rs.waitFor(
       async () => {
         const state = await setupState(app, cid);
         expect(state.status).toBe("presenting");

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Parser } from "tar";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { hashArtifact, packBundle } from "./packaging/index.js";
 import { isPublishableSource, publishAppBundle } from "./publish.js";
 import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
@@ -141,13 +141,13 @@ describe("isPublishableSource", () => {
 describe("publishAppBundle", () => {
   beforeEach(() => {
     setInstanceTokenInMemory("romeinst_test-token");
-    vi.stubEnv("PANTHEON_BASE_ORIGIN", "https://store.example");
-    vi.stubEnv("PANTHEON_DOMAIN", "");
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://store.example");
+    rs.stubEnv("PANTHEON_DOMAIN", "");
   });
 
   afterEach(() => {
     setInstanceTokenInMemory(null);
-    vi.unstubAllEnvs();
+    rs.unstubAllEnvs();
   });
 
   it("uploads the packed bundle with the instance bearer token and a matching sha256 header", async () => {
@@ -246,7 +246,7 @@ describe("publishAppBundle", () => {
     const bundle = await makeInstalledBundleDir();
     const pinnedHash = await hashArtifact(bundle);
     await writeFile(join(bundle, "dist", "index.js"), "export const edited = true;\n");
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = rs.fn() as unknown as typeof fetch;
 
     expect(await publishAppBundle(bundle, pinnedHash, { fetch: fetchImpl })).toEqual({
       status: "artifact_drifted",
@@ -255,7 +255,7 @@ describe("publishAppBundle", () => {
   });
 
   it("reports a missing artifact dir instead of throwing", async () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = rs.fn() as unknown as typeof fetch;
 
     expect(
       await publishAppBundle("/nonexistent/artifact", "a".repeat(64), { fetch: fetchImpl }),
@@ -266,7 +266,7 @@ describe("publishAppBundle", () => {
   it("reports no_token when the instance is not enrolled", async () => {
     setInstanceTokenInMemory(null);
     const bundle = await makeInstalledBundleDir();
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = rs.fn() as unknown as typeof fetch;
 
     expect(
       await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl }),
@@ -277,12 +277,12 @@ describe("publishAppBundle", () => {
   });
 
   it("reports unconfigured when no Rome Cloud origin is set", async () => {
-    vi.stubEnv("PANTHEON_BASE_ORIGIN", "");
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
     const bundle = await makeInstalledBundleDir();
 
     expect(
       await publishAppBundle(bundle, await hashArtifact(bundle), {
-        fetch: vi.fn() as unknown as typeof fetch,
+        fetch: rs.fn() as unknown as typeof fetch,
       }),
     ).toEqual({ status: "unconfigured" });
   });

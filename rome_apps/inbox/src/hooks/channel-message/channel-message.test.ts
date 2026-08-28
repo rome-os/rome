@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ActionEngineLike,
   ConversationId,
@@ -58,9 +58,9 @@ function snapshot(
 function createHarness() {
   const handlers = new Map<string, (message: InboundMessage) => Promise<void>>();
   const features = new Map<string, Partial<TalkFeatureMap>>();
-  const run = vi.fn(async () => ({ status: "ok" as const }));
+  const run = rs.fn(async () => ({ status: "ok" as const }));
   const actionEngine = { run } as unknown as ActionEngineLike;
-  const get = vi.fn(async ({ connectionId, conversationId }) =>
+  const get = rs.fn(async ({ connectionId, conversationId }) =>
     snapshot(connectionId, conversationId),
   );
   const conversationSettings = { get } as unknown as ConversationSettingsControl;
@@ -156,7 +156,7 @@ describe("ChannelMessageHook", () => {
   });
 
   it("materializes attachments through the inboundMedia feature", async () => {
-    const materialize = vi.fn(async () => [
+    const materialize = rs.fn(async () => [
       { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
     ]);
     harness.features.set(TELEGRAM_ID, { inboundMedia: { materialize } });
@@ -182,34 +182,34 @@ describe("ChannelMessageHook", () => {
           finishRun = () => resolve({ status: "ok" });
         }),
     );
-    const update = vi.fn(async () => undefined);
-    const finish = vi.fn(async () => undefined);
-    const begin = vi.fn(async () => ({ update, finish }));
+    const update = rs.fn(async () => undefined);
+    const finish = rs.fn(async () => undefined);
+    const begin = rs.fn(async () => ({ update, finish }));
     harness.features.set(TELEGRAM_ID, { activity: { begin } });
 
     const handling = harness.emit(TELEGRAM_ID, message({ messageId: "processing" }));
-    await vi.waitFor(() => expect(update).toHaveBeenCalledWith("thinking"));
+    await rs.waitFor(() => expect(update).toHaveBeenCalledWith("thinking"));
     expect(finish).not.toHaveBeenCalled();
     finishRun();
     await handling;
-    await vi.waitFor(() => expect(finish).toHaveBeenCalledWith("done"));
+    await rs.waitFor(() => expect(finish).toHaveBeenCalledWith("done"));
   });
 
   it("finishes activity as error when handling fails", async () => {
     harness.run.mockRejectedValue(new Error("handler failed"));
-    const finish = vi.fn(async () => undefined);
+    const finish = rs.fn(async () => undefined);
     harness.features.set(TELEGRAM_ID, {
-      activity: { begin: vi.fn(async () => ({ update: vi.fn(), finish })) },
+      activity: { begin: rs.fn(async () => ({ update: rs.fn(), finish })) },
     });
 
     await harness.emit(TELEGRAM_ID, message());
 
-    await vi.waitFor(() => expect(finish).toHaveBeenCalledWith("error"));
+    await rs.waitFor(() => expect(finish).toHaveBeenCalledWith("error"));
   });
 
   it("does not block dispatch when cosmetic activity feedback stalls", async () => {
     harness.features.set(TELEGRAM_ID, {
-      activity: { begin: vi.fn(() => new Promise(() => {})) },
+      activity: { begin: rs.fn(() => new Promise(() => {})) },
     });
 
     await harness.emit(TELEGRAM_ID, message());

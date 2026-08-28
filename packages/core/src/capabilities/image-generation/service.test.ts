@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ImageGenerationProvider, ImageProviderGenerateResult } from "@rome-os/app-runtime";
 import { createImageGenerationService } from "./service.js";
 
@@ -6,14 +6,14 @@ function makeProvider(
   id: string,
   overrides: Partial<ImageGenerationProvider> = {},
 ): ImageGenerationProvider & {
-  availability: ReturnType<typeof vi.fn>;
-  generate: ReturnType<typeof vi.fn>;
+  availability: ReturnType<typeof rs.fn>;
+  generate: ReturnType<typeof rs.fn>;
 } {
   return {
     id,
     displayName: `Provider ${id}`,
-    availability: vi.fn(async () => ({ available: true }) as const),
-    generate: vi.fn(
+    availability: rs.fn(async () => ({ available: true }) as const),
+    generate: rs.fn(
       async (): Promise<ImageProviderGenerateResult> => ({
         status: "ok",
         image: { data: "aGk=", mimeType: "image/png" },
@@ -21,8 +21,8 @@ function makeProvider(
     ),
     ...overrides,
   } as ImageGenerationProvider & {
-    availability: ReturnType<typeof vi.fn>;
-    generate: ReturnType<typeof vi.fn>;
+    availability: ReturnType<typeof rs.fn>;
+    generate: ReturnType<typeof rs.fn>;
   };
 }
 
@@ -57,7 +57,7 @@ describe("createImageGenerationService", () => {
 
   it("skips a provider whose availability says no and uses the next one", async () => {
     const down = makeProvider("down", {
-      availability: vi.fn(async () => ({
+      availability: rs.fn(async () => ({
         available: false as const,
         reason: "not connected",
         remedy: "Connect it.",
@@ -77,7 +77,7 @@ describe("createImageGenerationService", () => {
     // Availability is advisory: a provider can look available and still fail
     // closed at generate time (e.g. auth revoked mid-flight).
     const flaky = makeProvider("flaky", {
-      generate: vi.fn(async () => ({
+      generate: rs.fn(async () => ({
         status: "unavailable" as const,
         reason: "auth revoked",
         remedy: "Reconnect it.",
@@ -94,7 +94,7 @@ describe("createImageGenerationService", () => {
 
   it("stops the sweep on a failed result instead of retrying elsewhere", async () => {
     const refusing = makeProvider("refusing", {
-      generate: vi.fn(async () => ({ status: "failed" as const, message: "content policy" })),
+      generate: rs.fn(async () => ({ status: "failed" as const, message: "content policy" })),
     });
     const up = makeProvider("up");
     const service = createImageGenerationService({ providers: [refusing, up] });
@@ -111,14 +111,14 @@ describe("createImageGenerationService", () => {
 
   it("collects every provider's reason and remedy when none is available", async () => {
     const a = makeProvider("a", {
-      availability: vi.fn(async () => ({
+      availability: rs.fn(async () => ({
         available: false as const,
         reason: "not connected",
         remedy: "Connect A.",
       })),
     });
     const b = makeProvider("b", {
-      generate: vi.fn(async () => ({
+      generate: rs.fn(async () => ({
         status: "unavailable" as const,
         reason: "quota exhausted",
         remedy: "Wait for B.",
@@ -148,7 +148,7 @@ describe("createImageGenerationService", () => {
 
   it("still tries generate when the advisory availability check throws", async () => {
     const provider = makeProvider("shaky", {
-      availability: vi.fn(async () => {
+      availability: rs.fn(async () => {
         throw new Error("probe timeout");
       }),
     });
@@ -162,7 +162,7 @@ describe("createImageGenerationService", () => {
 
   it("maps an unexpected generate throw to a failed outcome", async () => {
     const provider = makeProvider("crashy", {
-      generate: vi.fn(async () => {
+      generate: rs.fn(async () => {
         throw new Error("boom");
       }),
     });

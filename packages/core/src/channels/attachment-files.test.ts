@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   isAllowedAttachmentUrl,
   MAX_ATTACHMENT_BYTES,
@@ -14,9 +14,9 @@ import {
 } from "./attachment-files.js";
 import type { Attachment, NormalizedMessage } from "./types.js";
 
-const profileMemoryDir = vi.hoisted(() => ({ value: "" }));
+const profileMemoryDir = rs.hoisted(() => ({ value: "" }));
 
-vi.mock("../paths.js", () => ({
+rs.mock("../paths.js", () => ({
   getProfileMemoryDir: () => profileMemoryDir.value,
 }));
 
@@ -41,7 +41,7 @@ describe("attachment URL downloads", () => {
   });
 
   afterEach(async () => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
     await rm(profileMemoryDir.value, { recursive: true, force: true });
   });
 
@@ -72,13 +72,13 @@ describe("attachment URL downloads", () => {
 
   it("downloads allowed URLs", async () => {
     const body = Buffer.from("image-data");
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = rs.fn(async () => {
       return new Response(body, {
         status: 200,
         headers: { "content-type": "image/png" },
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const attachments = await saveUrlAttachments(
       messageWithAttachments([
@@ -97,8 +97,8 @@ describe("attachment URL downloads", () => {
   });
 
   it("skips untrusted attachment URLs before fetching", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn();
+    rs.stubGlobal("fetch", fetchMock);
 
     const originalAttachment: Attachment = {
       type: "document",
@@ -111,7 +111,7 @@ describe("attachment URL downloads", () => {
   });
 
   it("keeps successful URL downloads when another attachment fails", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
+    const fetchMock = rs.fn(async (url: string) => {
       if (url.includes("too-large")) {
         return new Response("small placeholder", {
           status: 200,
@@ -123,7 +123,7 @@ describe("attachment URL downloads", () => {
         headers: { "content-type": "image/png" },
       });
     });
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const attachments = await saveUrlAttachments(
       messageWithAttachments([

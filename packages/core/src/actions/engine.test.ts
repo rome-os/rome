@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, rs, afterEach } from "@rstest/core";
 import {
   ActionEngine,
   resolveActionWorkerEntryPath,
@@ -31,6 +31,10 @@ import {
 // journal entries, and approval rows back from the DB — not stub call shapes.
 // The only faked seam is `executeInSubprocess` (the worker fork — a process
 // boundary), and only in the tests that exercise the fork orchestration.
+
+interface SubprocessEngine {
+  executeInSubprocess(...args: unknown[]): Promise<ActionResult>;
+}
 
 describe("ActionEngine", () => {
   let rome: TestRome;
@@ -132,7 +136,7 @@ describe("ActionEngine", () => {
       factoryOptions: { autoRespond?: boolean } = {},
     ) {
       const children: FakeWorkerChild[] = [];
-      const createWorkerProcess = vi
+      const createWorkerProcess = rs
         .spyOn(
           engine as unknown as {
             createWorkerProcess(options: { pooled: boolean; detached: boolean }): unknown;
@@ -159,7 +163,7 @@ describe("ActionEngine", () => {
 
     function installFakeChildProcessFactory(factoryOptions: { autoRespond?: boolean } = {}) {
       const children: FakeWorkerChild[] = [];
-      const actionWorkerFork = vi.fn(() => {
+      const actionWorkerFork = rs.fn(() => {
         const child = new FakeWorkerChild(factoryOptions.autoRespond ?? true);
         children.push(child);
         return child as unknown as ChildProcess;
@@ -246,7 +250,7 @@ describe("ActionEngine", () => {
       children[0].emit("message", { type: "ready" });
 
       const run = engine.run("root", {});
-      await vi.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+      await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
 
       await engine.restartWorkerWarmPool();
 
@@ -280,7 +284,7 @@ describe("ActionEngine", () => {
       children[0].emit("message", { type: "ready" });
 
       const rootRun = engine.run("root", {});
-      await vi.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+      await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
 
       let delegatedError: unknown;
       try {
@@ -315,7 +319,7 @@ describe("ActionEngine", () => {
       });
 
       const first = engine.run("root", {});
-      await vi.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+      await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
 
       await expect(engine.run("root", {})).rejects.toMatchObject({
         name: "ActionWorkerCapacityError",
@@ -834,7 +838,7 @@ describe("ActionEngine", () => {
     });
 
     it("runs nested cancellable actions in a subprocess", async () => {
-      const childExecute = vi.fn(
+      const childExecute = rs.fn(
         async (): Promise<ActionResult> => ({ status: "ok", data: "in-process" }),
       );
       await setup({
@@ -849,8 +853,8 @@ describe("ActionEngine", () => {
           }),
         ],
       });
-      const executeInSubprocess = vi
-        .spyOn(rome.actionEngine as never, "executeInSubprocess")
+      const executeInSubprocess = rs
+        .spyOn(rome.actionEngine as unknown as SubprocessEngine, "executeInSubprocess")
         .mockResolvedValue({ status: "ok", data: "child-result" });
 
       const result = await rome.actionEngine.run("parent", {});
@@ -865,16 +869,17 @@ describe("ActionEngine", () => {
         actions: [buildAction("root_stream")],
         engine: { processRole: "main" },
       });
-      vi.spyOn(rome.actionEngine as never, "executeInSubprocess").mockImplementation(
-        async (...args: unknown[]) => {
-          const observer = args[1] as { onRuntimeEvent?: (event: unknown) => void } | undefined;
-          observer?.onRuntimeEvent?.({
-            type: "agent_message",
-            message: { type: "thinking", content: "subprocess", agent: "main" },
-          });
-          return { status: "ok" };
-        },
-      );
+      rs.spyOn(
+        rome.actionEngine as unknown as SubprocessEngine,
+        "executeInSubprocess",
+      ).mockImplementation(async (...args: unknown[]) => {
+        const observer = args[1] as { onRuntimeEvent?: (event: unknown) => void } | undefined;
+        observer?.onRuntimeEvent?.({
+          type: "agent_message",
+          message: { type: "thinking", content: "subprocess", agent: "main" },
+        });
+        return { status: "ok" };
+      });
       const events: ActionRuntimeEvent[] = [];
 
       await rome.actionEngine.run("root_stream", {}, undefined, {
@@ -896,7 +901,10 @@ describe("ActionEngine", () => {
         actions: [buildAction("root")],
         engine: { processRole: "main" },
       });
-      vi.spyOn(rome.actionEngine as never, "executeInSubprocess").mockResolvedValue({
+      rs.spyOn(
+        rome.actionEngine as unknown as SubprocessEngine,
+        "executeInSubprocess",
+      ).mockResolvedValue({
         status: "pending_approval",
         approval: {
           approvalId: "approval-1",
@@ -927,18 +935,19 @@ describe("ActionEngine", () => {
         engine: { processRole: "main" },
       });
       // The fake worker leaves a descendant row mid-flight, then crashes.
-      vi.spyOn(rome.actionEngine as never, "executeInSubprocess").mockImplementation(
-        async (...args: unknown[]) => {
-          const invocation = args[0] as { rootExecutionId: string };
-          await rome.repos.actionExecutions.create({
-            id: "descendant-1",
-            rootExecutionId: invocation.rootExecutionId,
-            actionName: "descendant",
-            status: "running",
-          });
-          throw new Error("worker crashed");
-        },
-      );
+      rs.spyOn(
+        rome.actionEngine as unknown as SubprocessEngine,
+        "executeInSubprocess",
+      ).mockImplementation(async (...args: unknown[]) => {
+        const invocation = args[0] as { rootExecutionId: string };
+        await rome.repos.actionExecutions.create({
+          id: "descendant-1",
+          rootExecutionId: invocation.rootExecutionId,
+          actionName: "descendant",
+          status: "running",
+        });
+        throw new Error("worker crashed");
+      });
 
       await expect(rome.actionEngine.run("root", { x: 1 })).rejects.toThrow("worker crashed");
 

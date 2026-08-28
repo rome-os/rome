@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import type {
   ConversationDescriptor,
   ConversationId,
@@ -145,7 +145,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     session: { ...defaults.session, ...initial.session },
   };
   const descriptors = new Map<string, ConversationDescriptor>();
-  const observe = vi.fn((descriptor: ConversationDescriptor) => {
+  const observe = rs.fn((descriptor: ConversationDescriptor) => {
     descriptors.set(descriptor.ref.conversationId, descriptor);
   });
   const makeSnapshot = (conversationId: ConversationId): ConversationSettingsSnapshot => ({
@@ -161,10 +161,10 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     effective: structuredClone(effective),
     overrides: {},
   });
-  const get = vi.fn(async (ref: { conversationId: ConversationId }) =>
+  const get = rs.fn(async (ref: { conversationId: ConversationId }) =>
     makeSnapshot(ref.conversationId),
   );
-  const update = vi.fn(async (input: Parameters<ConversationSettingsControl["update"]>[0]) => {
+  const update = rs.fn(async (input: Parameters<ConversationSettingsControl["update"]>[0]) => {
     for (const field of input.clear) {
       if (field === "enabled") effective.enabled = defaults.enabled;
       if (field === "activation.mode") effective.activation.mode = defaults.activation.mode;
@@ -183,7 +183,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     }
     return makeSnapshot(input.ref.conversationId);
   });
-  const reset = vi.fn(async (input: Parameters<ConversationSettingsControl["reset"]>[0]) => {
+  const reset = rs.fn(async (input: Parameters<ConversationSettingsControl["reset"]>[0]) => {
     effective = structuredClone(defaults);
     return makeSnapshot(input.ref.conversationId);
   });
@@ -192,7 +192,7 @@ function makeConversationSettings(initial: ConversationSettingsOverrides = {}) {
     get,
     update,
     reset,
-    list: vi.fn(),
+    list: rs.fn(),
   } as unknown as ConversationSettingsControl & {
     observe(descriptor: ConversationDescriptor): void;
   };

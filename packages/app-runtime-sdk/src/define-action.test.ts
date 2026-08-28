@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { defineAction, z, type ActionConfig } from "./index.js";
 
 const config: ActionConfig = {

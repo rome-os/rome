@@ -22,7 +22,7 @@
 //     descriptor not registered → no-op
 //     idempotent: a second reconcile is a no-op
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The real OAuth descriptor's custody hook (added/5c) writes the tmpfs
 // token file + spawns `gh` off every authorized/revoke transition. These tests
@@ -30,13 +30,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // keep them off the real disk / `gh` binary (which would clobber a developer's
 // real gh auth on revoke). Custody firing itself is covered in
 // registry-lifecycle.test.ts.
-vi.mock("../lib/github-shell-integration.js", () => ({
-  syncGithubShellIntegrationForProvider: vi.fn(async () => {}),
-  clearGithubShellIntegrationForProvider: vi.fn(async () => {}),
+rs.mock("../lib/github-shell-integration.js", () => ({
+  syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
+  clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-vi.mock("../lib/provider-token-files.js", () => ({
-  syncProviderTokenFile: vi.fn(async () => {}),
-  clearProviderTokenFile: vi.fn(async () => {}),
+rs.mock("../lib/provider-token-files.js", () => ({
+  syncProviderTokenFile: rs.fn(async () => {}),
+  clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
 import { createTestDb } from "../test/helpers.js";

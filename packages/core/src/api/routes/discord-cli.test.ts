@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelApiResult } from "../../channels/api-request.js";
 import type { GrantState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
@@ -121,7 +121,7 @@ describe("Discord CLI loopback broker routes", () => {
   });
 
   it("auth checks the live /users/@me identity", async () => {
-    const execute = vi.fn(
+    const execute = rs.fn(
       async (): Promise<ChannelApiResult> => ({
         response: {
           status: 200,
@@ -143,7 +143,7 @@ describe("Discord CLI loopback broker routes", () => {
   });
 
   it("revalidates hand-crafted requests and protected headers", async () => {
-    const execute = vi.fn();
+    const execute = rs.fn();
     const response = await appWith(execute).request("/_internal/discord/api", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -162,7 +162,7 @@ describe("Discord CLI loopback broker routes", () => {
   });
 
   it("rejects an oversized broker request before dispatch", async () => {
-    const execute = vi.fn();
+    const execute = rs.fn();
     const response = await appWith(execute).request("/_internal/discord/api", {
       method: "POST",
       headers: {
@@ -180,7 +180,7 @@ describe("Discord CLI loopback broker routes", () => {
   });
 
   it("returns completed Discord errors over local HTTP 200 and strips unsafe headers", async () => {
-    const execute = vi.fn(async () => ({
+    const execute = rs.fn(async () => ({
       response: {
         status: 403,
         headers: {

@@ -3,7 +3,7 @@
 // Both confer through a headless `GuardianInteraction` fake that echoes canned
 // form answers, and both answer "re-confer" from renew().
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { credentialsPaste, romeCloudOAuth, tokenPaste } from "./schemes.js";
 import type { GuardianInteraction } from "./types.js";
 

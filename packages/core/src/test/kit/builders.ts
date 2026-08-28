@@ -29,7 +29,7 @@ export function buildAction(name: string, overrides: BuildActionOverrides = {}):
 
 /**
  * An action that records every invocation. The default testkit replacement
- * for `vi.fn()`-stubbed engines: the action really executes through the real
+ * for `rs.fn()`-stubbed engines: the action really executes through the real
  * engine, and the test asserts on what reached it (plus the DB rows the
  * engine wrote).
  */

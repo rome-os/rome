@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { AsyncResource } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { ActionEngine } from "./engine.js";
 import { replayContext, type ReplayStore } from "./replay.js";
@@ -11,6 +11,11 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
+import type { ActionResult } from "./types.js";
+
+interface SubprocessEngine {
+  executeInSubprocess(...args: unknown[]): Promise<ActionResult>;
+}
 
 // A fake IPC peer standing in for the worker ChildProcess: it records every
 // message the server sends back so tests can assert on the rpc_response.
@@ -45,7 +50,7 @@ async function rpc(
 ): Promise<RpcResponse> {
   const id = nextId++;
   fake.emitter.emit("message", { type: "rpc_request", clientId: "client-1", id, method, params });
-  return await vi.waitFor(() => {
+  return await rs.waitFor(() => {
     const response = fake.sent.find((m) => m.id === id);
     if (!response) throw new Error("no response yet");
     return response;
@@ -62,30 +67,30 @@ function makeServer(
     routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
-    appManager?: { setEnabled: ReturnType<typeof vi.fn>; install?: ReturnType<typeof vi.fn> };
+    appManager?: { setEnabled: ReturnType<typeof rs.fn>; install?: ReturnType<typeof rs.fn> };
     appStore?: {
-      listListings: ReturnType<typeof vi.fn>;
-      getListing: ReturnType<typeof vi.fn>;
+      listListings: ReturnType<typeof rs.fn>;
+      getListing: ReturnType<typeof rs.fn>;
     };
-    hasRegisteredAction?: ReturnType<typeof vi.fn>;
-    notify?: { send: ReturnType<typeof vi.fn> };
-    talkRouter?: { list: ReturnType<typeof vi.fn> };
+    hasRegisteredAction?: ReturnType<typeof rs.fn>;
+    notify?: { send: ReturnType<typeof rs.fn> };
+    talkRouter?: { list: ReturnType<typeof rs.fn> };
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
   const eventCatalog = overrides.eventCatalog ?? new EventCatalog();
-  const appManager = overrides.appManager ?? { setEnabled: vi.fn(async () => {}) };
+  const appManager = overrides.appManager ?? { setEnabled: rs.fn(async () => {}) };
   const appStore = overrides.appStore ?? {
-    listListings: vi.fn(async () => ({
+    listListings: rs.fn(async () => ({
       status: 200,
       body: { available: true, browseOrigin: "https://store.example", listings: [] },
     })),
-    getListing: vi.fn(async () => ({
+    getListing: rs.fn(async () => ({
       status: 200,
       body: { available: true, browseOrigin: "https://store.example" },
     })),
   };
-  const routineEngine = { activate: vi.fn(async () => {}), deactivate: vi.fn() };
+  const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn() };
   const services = {
     routineEngine,
     routinesRepo: overrides.routinesRepo,
@@ -95,11 +100,11 @@ function makeServer(
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
     appStore,
     hasAgent: () => false,
-    hasRegisteredAction: overrides.hasRegisteredAction ?? vi.fn(() => false),
+    hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
     hasAction: () => false,
-    systemUpgrade: { checkAndOffer: vi.fn() },
-    backendTurnRunner: { runAndDeliver: vi.fn() },
-    notify: overrides.notify ?? { send: vi.fn() },
+    systemUpgrade: { checkAndOffer: rs.fn() },
+    backendTurnRunner: { runAndDeliver: rs.fn() },
+    notify: overrides.notify ?? { send: rs.fn() },
     talkRouter: overrides.talkRouter,
   } as unknown as WorkerRpcServices;
   return {
@@ -115,9 +120,9 @@ function makeServer(
 
 describe("WorkerRpcServer param validation", () => {
   it("forwards a pinned Store source to create without an install call", async () => {
-    const install = vi.fn();
-    const { server, services } = makeServer({ appManager: { setEnabled: vi.fn(), install } });
-    const create = vi.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
+    const install = rs.fn();
+    const { server, services } = makeServer({ appManager: { setEnabled: rs.fn(), install } });
+    const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
     const fake = makeFakeWorker();
     server.attach(fake.worker);
     const params = {
@@ -146,7 +151,7 @@ describe("WorkerRpcServer param validation", () => {
     { appId: "calendar", prompt: "untrusted instructions" },
   ])("rejects a mixed or unpinned Remix source %#", async (from) => {
     const { server, services } = makeServer();
-    const create = vi.spyOn(services.appLifecycle, "create");
+    const create = rs.spyOn(services.appLifecycle, "create");
     const fake = makeFakeWorker();
     server.attach(fake.worker);
     expect(
@@ -158,7 +163,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it.each([false, true])("normalizes the confirmed hash for installed=%s", async (installed) => {
     const { server, services } = makeServer();
-    const create = vi.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
+    const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
     const fake = makeFakeWorker();
     server.attach(fake.worker);
     const pin = { listingId: "@alice/calendar", version: "1.0.0", contentHash: "A".repeat(64) };
@@ -175,7 +180,7 @@ describe("WorkerRpcServer param validation", () => {
 
   it("preserves a canonical Remix source and expected pin across RPC", async () => {
     const { server, services } = makeServer();
-    const create = vi.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
+    const create = rs.spyOn(services.appLifecycle, "create").mockResolvedValue({} as never);
     const fake = makeFakeWorker();
     server.attach(fake.worker);
     const params = {
@@ -211,7 +216,7 @@ describe("WorkerRpcServer param validation", () => {
   });
 
   it("serves the current main-process Talk connection list", async () => {
-    const list = vi
+    const list = rs
       .fn()
       .mockResolvedValueOnce([{ connectionId: "discord-1", service: "discord" }])
       .mockResolvedValueOnce([{ connectionId: "wechat-1", service: "wechat" }]);
@@ -298,7 +303,7 @@ describe("WorkerRpcServer param validation", () => {
   });
 
   it("answers actions.has from the main action registry", async () => {
-    const hasRegisteredAction = vi.fn((name: string) => name === "send_message");
+    const hasRegisteredAction = rs.fn((name: string) => name === "send_message");
     const { server } = makeServer({ hasRegisteredAction });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -381,7 +386,7 @@ describe("WorkerRpcServer routines.schedule", () => {
 
   it("activates an enabled routine and acks", async () => {
     const { server, services } = makeServer({
-      routinesRepo: { findById: vi.fn(async () => baseRow) },
+      routinesRepo: { findById: rs.fn(async () => baseRow) },
     });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -396,7 +401,7 @@ describe("WorkerRpcServer routines.schedule", () => {
 
   it("deactivates a disabled routine instead of activating it", async () => {
     const { server, services } = makeServer({
-      routinesRepo: { findById: vi.fn(async () => ({ ...baseRow, enabled: false })) },
+      routinesRepo: { findById: rs.fn(async () => ({ ...baseRow, enabled: false })) },
     });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -410,7 +415,7 @@ describe("WorkerRpcServer routines.schedule", () => {
 
   it("errors when the routine is not found and touches neither engine path", async () => {
     const { server, services } = makeServer({
-      routinesRepo: { findById: vi.fn(async () => undefined) },
+      routinesRepo: { findById: rs.fn(async () => undefined) },
     });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -424,7 +429,7 @@ describe("WorkerRpcServer routines.schedule", () => {
   });
 
   it("rejects routines.schedule with an empty routineId without reading the repo", async () => {
-    const findById = vi.fn();
+    const findById = rs.fn();
     const { server } = makeServer({
       routinesRepo: { findById },
     });
@@ -502,8 +507,8 @@ describe("WorkerRpcServer events.publish", () => {
     const actionEngine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
       processRole: "main",
     });
-    const executeInSubprocess = vi
-      .spyOn(actionEngine as never, "executeInSubprocess")
+    const executeInSubprocess = rs
+      .spyOn(actionEngine as unknown as SubprocessEngine, "executeInSubprocess")
       .mockResolvedValue({ status: "ok" });
     let routineRun: Promise<unknown> | undefined;
     let observedReplayRoot: string | undefined;
@@ -541,8 +546,8 @@ describe("WorkerRpcServer events.publish", () => {
         params: { name: "github.pull_request", source: "connector", payload: {} },
       });
     });
-    await vi.waitFor(() => expect(fake.sent.some((message) => message.id === id)).toBe(true));
-    await vi.waitFor(() => expect(routineRun).toBeDefined());
+    await rs.waitFor(() => expect(fake.sent.some((message) => message.id === id)).toBe(true));
+    await rs.waitFor(() => expect(routineRun).toBeDefined());
     await routineRun;
     pooledWorkerResource.emitDestroy();
 
@@ -633,7 +638,7 @@ describe("WorkerRpcServer event discovery", () => {
 
 describe("notify.send dispatch", () => {
   it("dispatches notify.send to the notify service and echoes the SendOutcome", async () => {
-    const send = vi.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -650,7 +655,7 @@ describe("notify.send dispatch", () => {
     ["an empty-string body", { body: "" }, { body: "" }],
     ["no body ({})", {}, undefined],
   ])("parses %s and forwards it to notify.send", async (_label, params, expectedArg) => {
-    const send = vi.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -662,7 +667,7 @@ describe("notify.send dispatch", () => {
   });
 
   it("rejects a non-string body without calling the notify service", async () => {
-    const send = vi.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -678,7 +683,7 @@ describe("notify.send dispatch", () => {
     // only emit {} or {body}, so an unknown key means a bug or a typo (e.g.
     // `bodu`) — surface it as an error rather than silently dropping it and
     // sending the default alert.
-    const send = vi.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
@@ -698,7 +703,7 @@ describe("notify.send dispatch", () => {
       release = r;
     });
     let completed = false;
-    const send = vi.fn(async () => {
+    const send = rs.fn(async () => {
       await gate; // block until the test releases (i.e. past the disconnect)
       completed = true; // main-side work completes despite the worker being gone
       return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
@@ -730,8 +735,8 @@ describe("notify.send dispatch", () => {
     }
 
     const worker = new NotifyWorker();
-    const disconnected = vi.fn();
-    const exited = vi.fn();
+    const disconnected = rs.fn();
+    const exited = rs.fn();
     worker.on("disconnect", disconnected);
     worker.on("exit", exited);
     const registry = new ActionRegistryImpl([]);
@@ -742,7 +747,7 @@ describe("notify.send dispatch", () => {
       actionWorkerFork: () => worker as unknown as ChildProcess,
     });
     engine.setWorkerRpcServer(server);
-    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    const kill = rs.spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === -789_012 && signal === "SIGTERM") {
         worker.connected = false;
         worker.signalCode = "SIGTERM";
@@ -757,13 +762,13 @@ describe("notify.send dispatch", () => {
 
     try {
       const run = engine.run("send_notification", {}, { executionId: "notify-cancel-root" });
-      await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+      await rs.waitFor(() => expect(send).toHaveBeenCalledOnce());
 
       await expect(engine.cancel("notify-cancel-root")).resolves.toBe(true);
       await expect(run).rejects.toMatchObject({ name: "ActionCancelledError" });
 
       release();
-      await vi.waitFor(() => expect(completed).toBe(true));
+      await rs.waitFor(() => expect(completed).toBe(true));
 
       expect(kill).toHaveBeenCalledWith(-789_012, "SIGTERM");
       expect(disconnected).toHaveBeenCalledOnce();

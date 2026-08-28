@@ -1,4 +1,4 @@
-// Shared test fixtures. No vitest imports here so all three
+// Shared test fixtures. No Rstest imports here so all three
 // test agents (registry, ledger, rehydration) can import from this one file.
 //
 // Six fake descriptors mirror the six canonical services:

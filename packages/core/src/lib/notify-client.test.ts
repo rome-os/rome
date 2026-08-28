@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { NotifyClient } from "./notify-client.js";
 
 function client(opts: { token?: string | null; origin?: string | null; fetchImpl: typeof fetch }) {
@@ -28,19 +28,19 @@ function stalledRes(status: number) {
 
 describe("NotifyClient.send", () => {
   it("returns no_token when no instance token is present", async () => {
-    const c = client({ token: null, fetchImpl: vi.fn() });
+    const c = client({ token: null, fetchImpl: rs.fn() });
     expect(await c.send()).toEqual({ kind: "no_token" });
   });
 
   it("returns unconfigured when the Rome Cloud origin is unset", async () => {
-    const c = client({ origin: null, fetchImpl: vi.fn() });
+    const c = client({ origin: null, fetchImpl: rs.fn() });
     expect(await c.send()).toEqual({ kind: "unconfigured" });
   });
 
   it("sends a Bearer POST to /api/notify and returns ok with counts", async () => {
     // Type the mock args as Parameters<typeof fetch> so mock.calls[0]
     // destructures to [input, init?] and typechecks (test files are compiled).
-    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) =>
+    const fetchImpl = rs.fn(async (..._args: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 2, sent: 1, failed: 1 }),
     );
     const out = await client({ fetchImpl }).send();
@@ -56,7 +56,7 @@ describe("NotifyClient.send", () => {
   });
 
   it("sends no body for send({}) with no content field", async () => {
-    const fetchImpl = vi.fn(async (..._a: Parameters<typeof fetch>) =>
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
     );
     await client({ fetchImpl }).send({});
@@ -66,7 +66,7 @@ describe("NotifyClient.send", () => {
   });
 
   it("sends a custom body as JSON with a Content-Type header", async () => {
-    const fetchImpl = vi.fn(async (..._a: Parameters<typeof fetch>) =>
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
     );
     const out = await client({ fetchImpl }).send({ body: "Build failed" });
@@ -78,7 +78,7 @@ describe("NotifyClient.send", () => {
   });
 
   it("forwards an empty-string body verbatim (Rome Cloud owns the fallback)", async () => {
-    const fetchImpl = vi.fn(async (..._a: Parameters<typeof fetch>) =>
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
     );
     await client({ fetchImpl }).send({ body: "" });
@@ -90,7 +90,7 @@ describe("NotifyClient.send", () => {
   it("forwards a whitespace-only body unchanged (never client-trimmed/dropped)", async () => {
     // The client must not trim or blank-drop; Rome Cloud is the sole normalization
     // authority. Guards against a future `content?.body?.trim()`-style regression.
-    const fetchImpl = vi.fn(async (..._a: Parameters<typeof fetch>) =>
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
     );
     await client({ fetchImpl }).send({ body: "   " });
@@ -101,7 +101,7 @@ describe("NotifyClient.send", () => {
 
   it("maps a broker 400 (rejected body) to outcome_unknown, no new SendOutcome member", async () => {
     const c = client({
-      fetchImpl: vi.fn(async () => jsonRes(400, { error: "invalid_request" })),
+      fetchImpl: rs.fn(async () => jsonRes(400, { error: "invalid_request" })),
     });
     expect(await c.send({ body: "bad" })).toEqual({ kind: "outcome_unknown" });
   });
@@ -109,7 +109,7 @@ describe("NotifyClient.send", () => {
   it("maps Rome Cloud 401 to reenroll", async () => {
     const stalled = stalledRes(401);
     const c = client({
-      fetchImpl: vi.fn(async () => stalled.response),
+      fetchImpl: rs.fn(async () => stalled.response),
     });
     expect(await c.send()).toEqual({ kind: "reenroll" });
     expect(stalled.wasCancelled()).toBe(true);
@@ -117,21 +117,21 @@ describe("NotifyClient.send", () => {
 
   it("maps Rome Cloud 403 to reenroll", async () => {
     const c = client({
-      fetchImpl: vi.fn(async () => jsonRes(403, { error: "instance_revoked" })),
+      fetchImpl: rs.fn(async () => jsonRes(403, { error: "instance_revoked" })),
     });
     expect(await c.send()).toEqual({ kind: "reenroll" });
   });
 
   it("maps a 5xx to outcome_unknown", async () => {
     const stalled = stalledRes(502);
-    const c = client({ fetchImpl: vi.fn(async () => stalled.response) });
+    const c = client({ fetchImpl: rs.fn(async () => stalled.response) });
     expect(await c.send()).toEqual({ kind: "outcome_unknown" });
     expect(stalled.wasCancelled()).toBe(true);
   });
 
   it("maps a network error to outcome_unknown", async () => {
     const c = client({
-      fetchImpl: vi.fn(async () => {
+      fetchImpl: rs.fn(async () => {
         throw new Error("ECONNRESET");
       }),
     });
@@ -139,7 +139,7 @@ describe("NotifyClient.send", () => {
   });
 
   it("throws for an invalid origin before dispatching a request", async () => {
-    const fetchImpl = vi.fn();
+    const fetchImpl = rs.fn();
     const c = client({ origin: "https://[invalid", fetchImpl });
 
     await expect(c.send()).rejects.toThrow();
@@ -148,7 +148,7 @@ describe("NotifyClient.send", () => {
 
   it("maps a request timeout (abort fired) to outcome_unknown", async () => {
     // fetch that never resolves on its own; the 50ms AbortController must abort it.
-    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) => {
+    const fetchImpl = rs.fn((..._args: Parameters<typeof fetch>) => {
       const signal = (_args[1] as RequestInit).signal;
       return new Promise<Response>((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
@@ -158,13 +158,13 @@ describe("NotifyClient.send", () => {
   });
 
   it("maps a malformed 200 body to outcome_unknown", async () => {
-    const c = client({ fetchImpl: vi.fn(async () => jsonRes(200, { ok: true })) });
+    const c = client({ fetchImpl: rs.fn(async () => jsonRes(200, { ok: true })) });
     expect(await c.send()).toEqual({ kind: "outcome_unknown" });
   });
 
   it("maps an inconsistent 200 body (sent+failed !== attempted) to outcome_unknown", async () => {
     const c = client({
-      fetchImpl: vi.fn(async (..._a: Parameters<typeof fetch>) =>
+      fetchImpl: rs.fn(async (..._a: Parameters<typeof fetch>) =>
         jsonRes(200, { attempted: 0, sent: 1, failed: 0 }),
       ),
     });
@@ -173,7 +173,7 @@ describe("NotifyClient.send", () => {
 
   it("maps a negative count to outcome_unknown", async () => {
     const c = client({
-      fetchImpl: vi.fn(async (..._a: Parameters<typeof fetch>) =>
+      fetchImpl: rs.fn(async (..._a: Parameters<typeof fetch>) =>
         jsonRes(200, { attempted: 2, sent: -1, failed: 3 }),
       ),
     });
@@ -182,7 +182,7 @@ describe("NotifyClient.send", () => {
 
   it("maps a non-integer count to outcome_unknown", async () => {
     const c = client({
-      fetchImpl: vi.fn(async (..._a: Parameters<typeof fetch>) =>
+      fetchImpl: rs.fn(async (..._a: Parameters<typeof fetch>) =>
         jsonRes(200, { attempted: 2, sent: 1.5, failed: 0.5 }),
       ),
     });
@@ -193,9 +193,9 @@ describe("NotifyClient.send", () => {
   // ~100s of sequential APNs sends) must complete, not be aborted. Uses the real
   // 120s default (not the 50ms test override) with fake timers.
   it("does not abort a slow-but-valid ~100s fetch (under the 120s HTTP budget)", async () => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     try {
-      const fetchImpl = vi.fn((..._a: Parameters<typeof fetch>) => {
+      const fetchImpl = rs.fn((..._a: Parameters<typeof fetch>) => {
         // Honor the abort signal so a *too-short* budget flips the outcome: if
         // the timeout fired before 100s this rejects → outcome_unknown and the
         // ok assertion below fails. Without this the test would pass even with a
@@ -214,10 +214,10 @@ describe("NotifyClient.send", () => {
         fetchImpl,
       });
       const p = c.send();
-      await vi.advanceTimersByTimeAsync(100_000); // < 120s: the abort must NOT fire
+      await rs.advanceTimersByTimeAsync(100_000); // < 120s: the abort must NOT fire
       expect(await p).toEqual({ kind: "ok", attempted: 1, sent: 1, failed: 0 });
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 });

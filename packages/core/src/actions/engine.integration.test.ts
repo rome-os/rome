@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ActionEngine } from "./engine.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -29,7 +29,7 @@ function makeAction(
   const { execute, ...configOverrides } = overrides ?? {};
   return {
     config: { ...defaultConfig, name, ...configOverrides },
-    execute: execute ?? vi.fn(async (): Promise<ActionResult> => ({ status: "ok" })),
+    execute: execute ?? rs.fn(async (): Promise<ActionResult> => ({ status: "ok" })),
   };
 }
 
@@ -37,11 +37,11 @@ function makeRegistry(...actions: Action[]): ActionRegistry {
   const map = new Map<string, Action>();
   for (const a of actions) map.set(a.config.name, a);
   return {
-    register: vi.fn((a: Action) => map.set(a.config.name, a)),
-    get: vi.fn((n: string) => map.get(n)),
-    has: vi.fn((n: string) => map.has(n)),
-    list: vi.fn(() => [...map.keys()]),
-    getForAgent: vi.fn(
+    register: rs.fn((a: Action) => map.set(a.config.name, a)),
+    get: rs.fn((n: string) => map.get(n)),
+    has: rs.fn((n: string) => map.has(n)),
+    list: rs.fn(() => [...map.keys()]),
+    getForAgent: rs.fn(
       (names: string[]) => names.map((n) => map.get(n)).filter(Boolean) as Action[],
     ),
   };
@@ -67,8 +67,8 @@ describe("Approval flow integration", () => {
   });
 
   it("record → approval exception → journal persisted → replay → action executes → completes", async () => {
-    const execA = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A-result" }));
-    const execB = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "B-result" }));
+    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A-result" }));
+    const execB = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "B-result" }));
 
     const childA = makeAction("child_a", { execute: execA });
     const childB = makeAction("child_b", {
@@ -165,8 +165,8 @@ describe("Approval flow integration", () => {
   });
 
   it("divergence during replay falls through gracefully in default mode", async () => {
-    const execA = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A" }));
-    const execX = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "X" }));
+    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A" }));
+    const execX = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "X" }));
 
     const childA = makeAction("child_a", { execute: execA });
     const childX = makeAction("child_x", { execute: execX });
@@ -244,8 +244,8 @@ describe("Approval flow integration", () => {
   });
 
   it("divergence during replay throws in strict mode", async () => {
-    const execA = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A" }));
-    const execX = vi.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "X" }));
+    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A" }));
+    const execX = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "X" }));
 
     const childA = makeAction("child_a", { execute: execA });
     const childX = makeAction("child_x", { execute: execX });

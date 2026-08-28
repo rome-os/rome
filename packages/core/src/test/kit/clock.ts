@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { rs } from "@rstest/core";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
 
 // Wall-clock time is a process edge; tests control it instead of sleeping.
@@ -9,7 +9,7 @@ import type { Clock, ClockTimer } from "../../lib/clock.js";
 //   that component's time with advance(). Never touches global timers, so
 //   it composes with real-time machinery (croner, chokidar, network fakes)
 //   running in the same test.
-// - installTestClock — thin wrapper over vitest's *global* fake timers, for
+// - installTestClock — thin wrapper over Rstest's *global* fake timers, for
 //   code that still reads ambient time. Standardizes the install /
 //   advance-with-microtask-flush / restore dance.
 //
@@ -48,17 +48,17 @@ export interface TestClock {
 }
 
 export function installTestClock(start?: Date): TestClock {
-  vi.useFakeTimers(start ? { now: start } : undefined);
+  rs.useFakeTimers(start ? { now: start } : undefined);
   return {
     now: () => new Date(),
     advance: async (duration) => {
-      await vi.advanceTimersByTimeAsync(parseDuration(duration));
+      await rs.advanceTimersByTimeAsync(parseDuration(duration));
     },
     runUntilIdle: async () => {
-      await vi.runOnlyPendingTimersAsync();
+      await rs.runOnlyPendingTimersAsync();
     },
     uninstall: () => {
-      vi.useRealTimers();
+      rs.useRealTimers();
     },
   };
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { Cron } from "croner";
 import { ScheduleTriggerProvider } from "./schedule-trigger-provider.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -7,7 +7,7 @@ import type { SessionActor } from "../lib/session-actor.js";
 import type { Routine, Trigger } from "./types.js";
 
 // Reach into the provider's private `jobs` map to invoke `Cron.trigger()`
-// directly. We deliberately bypass wall-clock waits and `vi.useFakeTimers`
+// directly. We deliberately bypass wall-clock waits and `rs.useFakeTimers`
 // here — `Cron.trigger()` is croner's public "fire the callback now" API,
 // which lets us assert what the provider's callback does without coupling
 // to internal timer scheduling.
@@ -114,9 +114,9 @@ describe("ScheduleTriggerProvider", () => {
     // clock, so job.nextRun() returns the same calendar match unless we move
     // the system clock past it. Use fake timers + setSystemTime to position
     // before/after the daily 09:00 UTC boundary.
-    vi.useFakeTimers({ shouldAdvanceTime: false });
+    rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
-      vi.setSystemTime(new Date("2026-05-25T08:59:00Z"));
+      rs.setSystemTime(new Date("2026-05-25T08:59:00Z"));
 
       const id = await repo.create({
         name: "daily",
@@ -143,7 +143,7 @@ describe("ScheduleTriggerProvider", () => {
 
       // Jump just past the scheduled boundary, then manually fire. The
       // post-fire updateNextRun should now resolve to tomorrow's 09:00.
-      vi.setSystemTime(new Date("2026-05-25T09:00:01Z"));
+      rs.setSystemTime(new Date("2026-05-25T09:00:01Z"));
       await jobFor(provider, id).trigger();
 
       const after = await repo.findById(id);
@@ -156,7 +156,7 @@ describe("ScheduleTriggerProvider", () => {
       expect(after?.enabled).toBe(true);
       expect(provider.isActive(id)).toBe(true);
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 
@@ -165,9 +165,9 @@ describe("ScheduleTriggerProvider", () => {
     // legacy "next HH:mm" path. activate() schedules a single Cron(Date,...)
     // fire; manual trigger() invokes the callback, which records the fire
     // and marks the routine consumed.
-    vi.useFakeTimers({ shouldAdvanceTime: false });
+    rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
-      vi.setSystemTime(new Date("2099-12-30T00:00:00Z"));
+      rs.setSystemTime(new Date("2099-12-30T00:00:00Z"));
       const id = await repo.create({
         name: "dated-one-off",
         trigger: {
@@ -203,7 +203,7 @@ describe("ScheduleTriggerProvider", () => {
       expect(after?.nextRunAt).toBeNull();
       expect(provider.isActive(id)).toBe(false);
     } finally {
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 
@@ -331,33 +331,31 @@ describe("ScheduleTriggerProvider", () => {
   // that session. A mocked Cron captures the ambient actor at construction —
   // the moment the real croner registers its timer.
   it("constructs cron jobs outside the ambient session-actor scope (all three branches)", async () => {
-    // vi.resetModules gives the re-imported provider a FRESH session-actor
+    // rs.resetModules gives the re-imported provider a FRESH session-actor
     // module (fresh ALS instance), so the scope must be entered and observed
     // through that same fresh module — not this file's top-level import.
     const capturedAtConstruction: Promise<SessionActor | undefined>[] = [];
-    vi.resetModules();
-    vi.doMock("croner", async () => {
-      const { currentSessionActor } = await import("../lib/session-actor.js");
-      return {
-        Cron: class {
-          constructor() {
-            capturedAtConstruction.push(currentSessionActor());
-          }
-          nextRun() {
-            return new Date(Date.now() + 60_000);
-          }
-          stop() {}
-          isStopped() {
-            return true;
-          }
-        },
-      };
-    });
+    rs.resetModules();
+    const freshSessionActor = await import("../lib/session-actor.js");
+    rs.doMock("croner", () => ({
+      Cron: class {
+        constructor() {
+          capturedAtConstruction.push(freshSessionActor.currentSessionActor());
+        }
+        nextRun() {
+          return new Date(Date.now() + 60_000);
+        }
+        stop() {}
+        isStopped() {
+          return true;
+        }
+      },
+    }));
     try {
       const { ScheduleTriggerProvider: MockedProvider } = await import(
         "./schedule-trigger-provider.js"
       );
-      const { runWithSessionActor, currentSessionActor } = await import("../lib/session-actor.js");
+      const { runWithSessionActor, currentSessionActor } = freshSessionActor;
       const mocked = new MockedProvider(repo);
       const actor: SessionActor = { kind: "guardian", userId: "seat-1", via: "cookie" };
       const triggers: Trigger[] = [
@@ -380,8 +378,8 @@ describe("ScheduleTriggerProvider", () => {
       }
       mocked.stop();
     } finally {
-      vi.doUnmock("croner");
-      vi.resetModules();
+      rs.doUnmock("croner");
+      rs.resetModules();
     }
   });
 });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { create as tarCreate } from "tar";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
@@ -1535,7 +1535,7 @@ describe("App lifecycle e2e", () => {
     }
 
     afterEach(() => {
-      vi.unstubAllEnvs();
+      rs.unstubAllEnvs();
     });
 
     it("flags a workspace app under rome_apps/ whose app.yaml advertises a newer version", async () => {
@@ -1547,7 +1547,7 @@ describe("App lifecycle e2e", () => {
         actionName: "echo_first_up",
         version: "0.1.0",
       });
-      vi.stubEnv("ROME_PROJECT_ROOT", projectRoot);
+      rs.stubEnv("ROME_PROJECT_ROOT", projectRoot);
 
       const packedRoot = await packSeed(seedRoot, "first-up");
       await installWorkspace(harness, "first-up", packedRoot);
@@ -1574,7 +1574,7 @@ describe("App lifecycle e2e", () => {
         actionName: "echo_prof_up",
         version: "0.1.0",
       });
-      vi.stubEnv("ROME_APP_AUTHORING_ROOT", authoringRoot);
+      rs.stubEnv("ROME_APP_AUTHORING_ROOT", authoringRoot);
 
       const packedRoot = await packSeed(devRoot, "prof-up");
       await installWorkspace(harness, "prof-up", packedRoot);
@@ -1618,7 +1618,7 @@ describe("App lifecycle e2e", () => {
         actionName: "echo_noop_fp",
         version: "0.1.0",
       });
-      vi.stubEnv("ROME_PROJECT_ROOT", projectRoot);
+      rs.stubEnv("ROME_PROJECT_ROOT", projectRoot);
       const packedRoot = await packSeed(seedRoot, "noop-fp");
       await installWorkspace(harness, "noop-fp", packedRoot);
 

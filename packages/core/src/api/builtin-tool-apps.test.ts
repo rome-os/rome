@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { BUILTIN_TOOL_APPS, DISCOVERY_SHIM_TOOLS, TOOL_TO_BUILTIN } from "./builtin-tool-apps.js";
 
 describe("builtin trace app mapping", () => {

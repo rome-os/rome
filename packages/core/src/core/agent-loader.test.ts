@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import { AgentLoader } from "./agent-loader.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type { AppCatalog } from "../apps/catalog.js";
 import { createEmptyLegacyArtifactBindings, formatArtifactId } from "../apps/artifact-id.js";
 
-vi.mock("../apps/core-artifacts.js", () => ({
+rs.mock("../apps/core-artifacts.js", () => ({
   listCoreArtifactsByKind: async () => [],
 }));
 

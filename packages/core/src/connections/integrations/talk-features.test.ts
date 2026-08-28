@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { NormalizedMessage } from "@rome-os/app-runtime";
 import { historyFeature } from "./talk-features.js";
 

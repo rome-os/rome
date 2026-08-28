@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +39,7 @@ describe("file browser event streams", () => {
   /** Fakes only the heartbeat cadence. Call before opening the stream (the
    *  handler registers its interval at stream start). Safe only because the
    *  watcher is pinned to native (non-polling) mode in beforeEach. */
-  const useHeartbeatClock = () => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const useHeartbeatClock = () => rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 
   beforeEach(() => {
     savedUsePolling = process.env.CHOKIDAR_USEPOLLING;
@@ -55,7 +55,7 @@ describe("file browser event streams", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     if (savedUsePolling === undefined) delete process.env.CHOKIDAR_USEPOLLING;
     else process.env.CHOKIDAR_USEPOLLING = savedUsePolling;
     rmSync(rootDir, { recursive: true, force: true });
@@ -135,11 +135,11 @@ describe("file browser event streams", () => {
     await expect(readSseChunk(reader)).resolves.toContain("event: ready");
 
     const firstPingRead = readSseChunk(reader);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await rs.advanceTimersByTimeAsync(60_000);
     await expect(firstPingRead).resolves.toContain("event: ping");
 
     const secondPingRead = readSseChunk(reader);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await rs.advanceTimersByTimeAsync(60_000);
     await expect(secondPingRead).resolves.toContain("event: ping");
 
     await reader.cancel();
@@ -177,8 +177,8 @@ describe("file browser event streams", () => {
 
     // Nobody reads: the first ping stays in-flight, and after two more
     // heartbeat strikes the stream is torn down rather than queuing forever.
-    await vi.advanceTimersByTimeAsync(60_000);
-    await vi.advanceTimersByTimeAsync(180_000);
+    await rs.advanceTimersByTimeAsync(60_000);
+    await rs.advanceTimersByTimeAsync(180_000);
 
     const unreadPing = await readSseChunk(reader);
     expect(unreadPing).toContain("event: ping");
@@ -195,7 +195,7 @@ describe("file browser event streams", () => {
     await expect(reader.read()).resolves.toMatchObject({ done: true });
 
     // No heartbeat survives the abort.
-    await vi.advanceTimersByTimeAsync(120_000);
+    await rs.advanceTimersByTimeAsync(120_000);
     await expect(reader.read()).resolves.toMatchObject({ done: true });
   });
 
@@ -207,7 +207,7 @@ describe("file browser event streams", () => {
     abortController.abort();
     await expect(reader.read()).resolves.toMatchObject({ done: true });
 
-    await vi.advanceTimersByTimeAsync(120_000);
+    await rs.advanceTimersByTimeAsync(120_000);
     await expect(reader.read()).resolves.toMatchObject({ done: true });
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "@rstest/core";
 import { EventCatalog, inferPayloadSchema } from "./event-catalog.js";
 
 // The catalog has two external roles. A *producer* app declares what event

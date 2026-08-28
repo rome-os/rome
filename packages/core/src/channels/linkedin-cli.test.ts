@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import {
   OpencliAuthError,
   OpencliCommandError,
@@ -291,7 +291,7 @@ describe("parseThreadParticipants", () => {
 
 describe("readLinkedInThreadParticipants", () => {
   it("invokes the thread-participants command for the requested thread", async () => {
-    const run = vi.fn(async () =>
+    const run = rs.fn(async () =>
       ok(
         JSON.stringify([
           {

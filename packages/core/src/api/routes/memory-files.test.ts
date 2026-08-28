@@ -1,36 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as childProcessModule from "node:child_process" with { rstest: "importActual" };
+import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { Hono } from "hono";
+import * as pathsModule from "../../paths.js" with { rstest: "importActual" };
 
-const childProcessState = vi.hoisted(() => ({
-  execFileSync: vi.fn(),
+const childProcessState = rs.hoisted(() => ({
+  execFileSync: rs.fn(),
 }));
 
-const chokidarState = vi.hoisted(() => ({
+const chokidarState = rs.hoisted(() => ({
   watchers: [] as Array<{
-    close: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof rs.fn>;
     emit: (eventName: string, ...args: unknown[]) => boolean;
   }>,
 }));
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    default: actual,
-    execFileSync: childProcessState.execFileSync,
-  };
-});
+rs.mock("node:child_process", () => ({
+  ...childProcessModule,
+  default: childProcessModule,
+  execFileSync: childProcessState.execFileSync,
+}));
 
-vi.mock("chokidar", async () => {
-  const { EventEmitter } = await import("node:events");
+rs.mock("chokidar", () => {
   return {
-    watch: vi.fn(() => {
+    watch: rs.fn(() => {
       const watcher = Object.assign(new EventEmitter(), {
-        close: vi.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
       });
       chokidarState.watchers.push(watcher);
       return watcher;
@@ -38,21 +37,18 @@ vi.mock("chokidar", async () => {
   };
 });
 
-const state = vi.hoisted(() => ({
+const state = rs.hoisted(() => ({
   profileDir: "",
   memoryDir: "",
 }));
 
-vi.mock("../../paths.js", async () => {
-  const actual = await vi.importActual<typeof import("../../paths.js")>("../../paths.js");
-  return {
-    ...actual,
-    getProfileDir: vi.fn(() => state.profileDir),
-  };
-});
+rs.mock("../../paths.js", () => ({
+  ...pathsModule,
+  getProfileDir: rs.fn(() => state.profileDir),
+}));
 
-vi.mock("../../profile-memory.js", () => ({
-  ensureProfileMemoryInitialized: vi.fn(() => state.memoryDir),
+rs.mock("../../profile-memory.js", () => ({
+  ensureProfileMemoryInitialized: rs.fn(() => state.memoryDir),
 }));
 
 import { memoryFilesRoutes } from "./memory-files.js";
@@ -93,7 +89,7 @@ describe("Memory files API", () => {
 
   afterEach(() => {
     rmSync(state.profileDir, { recursive: true, force: true });
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     chokidarState.watchers = [];
   });
 
@@ -183,7 +179,7 @@ describe("Memory files API", () => {
   it("closes the events stream when the watcher fails before ready", async () => {
     const responsePromise = buildApp().request("/memory/events");
 
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       expect(chokidarState.watchers).toHaveLength(1);
     });
 

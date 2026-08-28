@@ -1,5 +1,5 @@
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { subscribeGithubWebhook, unionGithubEvents } from "./connector-github-subscribe/index.js";
 import { unsubscribeGithubWebhook } from "./connector-github-unsubscribe/index.js";
 import type {
@@ -8,8 +8,8 @@ import type {
   GithubHookMutationInput,
 } from "./github-hook-client.js";
 
-const readGithubOAuthToken = vi.fn();
-vi.mock("../api/github-proxy.js", () => ({
+const readGithubOAuthToken = rs.fn();
+rs.mock("../api/github-proxy.js", () => ({
   readGithubOAuthToken: () => readGithubOAuthToken(),
 }));
 
@@ -67,8 +67,8 @@ function makeClient(initial: GithubHook[]): GithubHookClient & {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
-  vi.unstubAllEnvs();
+  rs.clearAllMocks();
+  rs.unstubAllEnvs();
 });
 
 describe("unionGithubEvents", () => {

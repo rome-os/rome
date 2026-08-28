@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AbortError } from "@anthropic-ai/claude-agent-sdk";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
+  rstest: "importActual",
+};
+import * as anthropicLoginModule from "../lib/anthropic-login.js" with { rstest: "importActual" };
 import { AnthropicProvider } from "./anthropic-provider.js";
 import type { AgentMessage } from "../types.js";
 import type {
@@ -9,16 +12,18 @@ import type {
 } from "./agent-runner.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../lib/anthropic-compatible-providers.js";
 
+const { AbortError } = claudeAgentSdkModule;
+
 const {
   queryMock,
   createSdkMcpServerMock,
   sdkToolMock,
   markAnthropicAuthRevokedMock,
   clearAnthropicAuthRevokedMock,
-} = vi.hoisted(() => ({
-  queryMock: vi.fn(),
-  createSdkMcpServerMock: vi.fn((config: unknown) => config),
-  sdkToolMock: vi.fn(
+} = rs.hoisted(() => ({
+  queryMock: rs.fn(),
+  createSdkMcpServerMock: rs.fn((config: unknown) => config),
+  sdkToolMock: rs.fn(
     (
       name: string,
       description: string,
@@ -31,25 +36,22 @@ const {
       handler,
     }),
   ),
-  markAnthropicAuthRevokedMock: vi.fn(),
-  clearAnthropicAuthRevokedMock: vi.fn(),
+  markAnthropicAuthRevokedMock: rs.fn(),
+  clearAnthropicAuthRevokedMock: rs.fn(),
 }));
 
-vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@anthropic-ai/claude-agent-sdk")>()),
+rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  ...claudeAgentSdkModule,
   query: queryMock,
   createSdkMcpServer: createSdkMcpServerMock,
   tool: sdkToolMock,
 }));
 
-vi.mock("../lib/anthropic-login.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/anthropic-login.js")>();
-  return {
-    ...actual,
-    markAnthropicAuthRevoked: markAnthropicAuthRevokedMock,
-    clearAnthropicAuthRevoked: clearAnthropicAuthRevokedMock,
-  };
-});
+rs.mock("../lib/anthropic-login.js", () => ({
+  ...anthropicLoginModule,
+  markAnthropicAuthRevoked: markAnthropicAuthRevokedMock,
+  clearAnthropicAuthRevoked: clearAnthropicAuthRevokedMock,
+}));
 
 // Mock SDK Query: yields the canned messages then ends. The provider's
 // events generator reads from this; the consumer drains it once and we
@@ -59,11 +61,11 @@ function mockQuery(messages: unknown[], contextUsage?: unknown) {
     async *[Symbol.asyncIterator]() {
       for (const m of messages) yield m;
     },
-    interrupt: vi.fn(async () => {}),
-    close: vi.fn(),
+    interrupt: rs.fn(async () => {}),
+    close: rs.fn(),
     ...(contextUsage
       ? {
-          getContextUsage: vi.fn(async () => contextUsage),
+          getContextUsage: rs.fn(async () => contextUsage),
         }
       : {}),
   };
@@ -76,8 +78,8 @@ function mockThrowingQuery(error: unknown) {
     async *[Symbol.asyncIterator]() {
       throw error;
     },
-    interrupt: vi.fn(async () => {}),
-    close: vi.fn(),
+    interrupt: rs.fn(async () => {}),
+    close: rs.fn(),
   };
   queryMock.mockReturnValue(iter);
   return iter;
@@ -145,7 +147,7 @@ describe("AnthropicProvider", () => {
         yield { ...second, isReplay: true };
         yield { type: "result", subtype: "success", result: "second", num_turns: 1 };
       },
-      close: vi.fn(),
+      close: rs.fn(),
     }));
     const session = await new AnthropicProvider().openSession(buildParams());
     const events = session.events[Symbol.asyncIterator]();
@@ -179,7 +181,7 @@ describe("AnthropicProvider", () => {
         yield { ...(await inputs.next()).value, isReplay: true };
         yield { type: "result", subtype: "success", result: "both", num_turns: 2 };
       },
-      close: vi.fn(),
+      close: rs.fn(),
     }));
     const session = await new AnthropicProvider().openSession(buildParams());
     const events = session.events[Symbol.asyncIterator]();
@@ -192,7 +194,7 @@ describe("AnthropicProvider", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     markAnthropicAuthRevokedMock.mockResolvedValue(undefined);
     clearAnthropicAuthRevokedMock.mockResolvedValue(undefined);
     mockQuery([
@@ -225,8 +227,8 @@ describe("AnthropicProvider", () => {
       begin = resolve;
     });
     const q = {
-      interrupt: vi.fn(),
-      close: vi.fn(),
+      interrupt: rs.fn(),
+      close: rs.fn(),
       async *[Symbol.asyncIterator]() {
         if (phase === "partial") {
           yield {
@@ -334,7 +336,7 @@ describe("AnthropicProvider", () => {
           }
           throw new AbortError("Cancelled");
         },
-        close: vi.fn(),
+        close: rs.fn(),
       };
     });
 
@@ -752,7 +754,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin" },
         settingsRepo: {
-          get: vi.fn().mockResolvedValue({
+          get: rs.fn().mockResolvedValue({
             provider: "deepseek",
             apiKey: "deepseek-key",
             updatedAt: "2026-04-26T00:00:00.000Z",
@@ -864,7 +866,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", ANTHROPIC_AUTH_TOKEN: "old-token" },
         settingsRepo: {
-          get: vi.fn().mockResolvedValue({
+          get: rs.fn().mockResolvedValue({
             provider: "deepseek",
             apiKey: "deepseek-key",
             updatedAt: "2026-04-26T00:00:00.000Z",
@@ -904,7 +906,7 @@ describe("AnthropicProvider", () => {
           ENABLE_TOOL_SEARCH: "true",
         },
         settingsRepo: {
-          get: vi.fn().mockResolvedValue({
+          get: rs.fn().mockResolvedValue({
             provider: "custom",
             env: {
               ANTHROPIC_AUTH_TOKEN: "ark-key",
@@ -944,7 +946,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", ANTHROPIC_API_KEY: "anthropic-key" },
         settingsRepo: {
-          get: vi.fn().mockResolvedValue({
+          get: rs.fn().mockResolvedValue({
             provider: "meta",
             apiKey: "meta-key",
             updatedAt: "2026-04-26T00:00:00.000Z",
@@ -976,7 +978,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", TZ: "UTC" },
         settingsRepo: {
-          get: vi
+          get: rs
             .fn()
             .mockImplementation(async (key: string) =>
               key === "guardianTimezone" ? "America/Los_Angeles" : null,
@@ -1004,7 +1006,7 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", TZ: "UTC" },
         settingsRepo: {
-          get: vi.fn().mockImplementation(async (key: string) => {
+          get: rs.fn().mockImplementation(async (key: string) => {
             if (key === "guardianTimezone") {
               return "America/New_York";
             }

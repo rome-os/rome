@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import * as sdk from "./index.js";
 
 // The published SDK carries zero IPC vocabulary, so an app cannot

@@ -13,7 +13,10 @@
 // and it is best-effort (a custody-clear failure does not block the teardown).
 
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
+  rstest: "importActual",
+};
 
 const {
   removeProviderAccount,
@@ -21,33 +24,33 @@ const {
   clearProviderTokenFile,
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider,
-} = vi.hoisted(() => ({
-  removeProviderAccount: vi.fn(async (..._a: unknown[]) => {}),
-  syncProviderTokenFile: vi.fn(async (..._a: unknown[]) => {}),
-  clearProviderTokenFile: vi.fn(async (..._a: unknown[]) => {}),
-  syncGithubShellIntegrationForProvider: vi.fn(async (..._a: unknown[]) => {}),
-  clearGithubShellIntegrationForProvider: vi.fn(async (..._a: unknown[]) => {}),
+} = rs.hoisted(() => ({
+  removeProviderAccount: rs.fn(async (..._a: unknown[]) => {}),
+  syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
+  clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
+  syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
+  clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
 // Spread the real module so any export the route path transitively depends on
 // (e.g. `normalizeScopes` via the connections bundle mapper) resolves against
 // the actual implementation; only the stateful calls below are stubbed.
-vi.mock("../../lib/provider-accounts.js", async (importActual) => ({
-  ...(await importActual<typeof import("../../lib/provider-accounts.js")>()),
+rs.mock("../../lib/provider-accounts.js", () => ({
+  ...providerAccountsModule,
   removeProviderAccount,
-  getProviderTokenBundle: vi.fn(async () => null),
+  getProviderTokenBundle: rs.fn(async () => null),
 }));
 // Both the sync and clear halves are stubbed: `makeAuthorizedRegistry` imports a
 // bundle (→ custody sync fires) before the test tears down (→ custody clear).
-vi.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../lib/provider-token-files.js", () => ({
   syncProviderTokenFile,
   clearProviderTokenFile,
 }));
-vi.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../lib/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider,
 }));
-vi.mock("../../lib/oauth-providers.js", () => ({
+rs.mock("../../lib/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   isOAuthProvider: (value: string) => ["google", "github", "slack"].includes(value),
   getEnabledOAuthProviders: () => ["github", "slack", "google"],
@@ -96,7 +99,7 @@ function request(deps: ApiDeps, path: string) {
 
 describe("OAuth teardown via /connections DELETE routes", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();

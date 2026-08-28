@@ -11,7 +11,7 @@
  *
  * Anything else is `anonymous` (200, not 401 — the route is a public probe).
  */
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import { buildApp } from "../index.js";
 import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../lib/auth.js";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { foldAccounts } from "./account-fold.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 

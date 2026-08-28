@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { NormalizedMessage } from "@rome-os/app-runtime";
 import { EmailAdapter, type EmailInboxCoordinates } from "./email.js";
 import type {
@@ -25,15 +25,15 @@ function makeProvider(overrides: Partial<MailProvider> = {}): MailProvider & {
   const sent: SendMailInput[] = [];
   return {
     sent,
-    provision: vi.fn(async () => ({
+    provision: rs.fn(async () => ({
       address: "slug@mail.romeos.cc",
       inboundSecret: INBOUND_SECRET,
     })),
-    send: vi.fn(async (input: SendMailInput): Promise<SendMailResult> => {
+    send: rs.fn(async (input: SendMailInput): Promise<SendMailResult> => {
       sent.push(input);
       return { messageId: "m_out", threadId: "t_out" };
     }),
-    getMessage: vi.fn(
+    getMessage: rs.fn(
       async (messageId: string): Promise<RomeMailMessage> => ({
         id: messageId,
         threadId: "t1",
@@ -49,12 +49,12 @@ function makeProvider(overrides: Partial<MailProvider> = {}): MailProvider & {
         labels: [],
       }),
     ),
-    getAttachment: vi.fn(async () => ({
+    getAttachment: rs.fn(async () => ({
       downloadUrl: "https://example.com/x",
       expiresAt: new Date(0).toISOString(),
       size: 0,
     })),
-    listMessages: vi.fn(async () => ({ messages: [], nextPageToken: undefined })),
+    listMessages: rs.fn(async () => ({ messages: [], nextPageToken: undefined })),
     ...overrides,
   };
 }
@@ -326,23 +326,23 @@ describe("EmailAdapter inbound attachments", () => {
 
   beforeEach(async () => {
     sandboxHome = await mkdtemp(join(tmpdir(), "rome-email-"));
-    vi.stubEnv("HOME", sandboxHome);
-    vi.stubEnv("ROME_PROFILE", "email-test");
+    rs.stubEnv("HOME", sandboxHome);
+    rs.stubEnv("ROME_PROFILE", "email-test");
   });
 
   afterEach(async () => {
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
+    rs.unstubAllEnvs();
+    rs.unstubAllGlobals();
     await rm(sandboxHome, { recursive: true, force: true });
   });
 
   it("surfaces an attachment manifest and pulls bytes via presigned URL", async () => {
     const bytes = Buffer.from("hello-bytes");
-    const fetchMock = vi.fn(async () => new Response(bytes, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn(async () => new Response(bytes, { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     const provider = makeProvider({
-      getAttachment: vi.fn(async () => ({
+      getAttachment: rs.fn(async () => ({
         downloadUrl: "https://files.example/presigned",
         expiresAt: new Date(0).toISOString(),
         filename: "doc.pdf",
@@ -374,7 +374,7 @@ describe("EmailAdapter inbound attachments", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://files.example/presigned", expect.anything());
     expect(saved[0].localPath).toBeTruthy();
 
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
   });
 });
 
@@ -383,15 +383,15 @@ describe("EmailAdapter.start guardian resolution", () => {
     const provider = makeProvider();
     const stored: Record<string, unknown> = {};
     const settingsRepo = {
-      get: vi.fn(async () => stored.email),
-      set: vi.fn(async (key: string, value: unknown) => {
+      get: rs.fn(async () => stored.email),
+      set: rs.fn(async (key: string, value: unknown) => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
     const personMappingRepo = {
-      findByChannelUser: vi.fn(async () => null),
-      findByBondLevel: vi.fn(async () => []),
-      addChannelMapping: vi.fn(async () => {}),
+      findByChannelUser: rs.fn(async () => null),
+      findByBondLevel: rs.fn(async () => []),
+      addChannelMapping: rs.fn(async () => {}),
     } as unknown as PersonMappingRepository;
 
     const adapter = new EmailAdapter({
@@ -421,15 +421,15 @@ describe("EmailAdapter.start guardian resolution", () => {
     // guardianEmail is durable settings config: the row carries it, and start()
     // reads it from there rather than the grant material.
     const settingsRepo = {
-      get: vi.fn(async () => ({ enabled: true, guardianEmail: "set@example.com" })),
-      set: vi.fn(async () => {}),
+      get: rs.fn(async () => ({ enabled: true, guardianEmail: "set@example.com" })),
+      set: rs.fn(async () => {}),
     } as unknown as SettingsRepository;
     const personMappingRepo = {
-      findByChannelUser: vi.fn(async () => null),
-      findByBondLevel: vi.fn(async () => []),
-      addChannelMapping: vi.fn(async () => {}),
+      findByChannelUser: rs.fn(async () => null),
+      findByBondLevel: rs.fn(async () => []),
+      addChannelMapping: rs.fn(async () => {}),
     } as unknown as PersonMappingRepository;
-    const resolver = vi.fn(async () => "owner@example.com");
+    const resolver = rs.fn(async () => "owner@example.com");
 
     const adapter = new EmailAdapter({
       provider,
@@ -450,15 +450,15 @@ describe("EmailAdapter.start guardian resolution", () => {
     // A single settings store shared across two boots (the row persists).
     const stored: Record<string, unknown> = { email: { enabled: true } };
     const settingsRepo = {
-      get: vi.fn(async (key: string) => stored[key]),
-      set: vi.fn(async (key: string, value: unknown) => {
+      get: rs.fn(async (key: string) => stored[key]),
+      set: rs.fn(async (key: string, value: unknown) => {
         stored[key] = value;
       }),
     } as unknown as SettingsRepository;
     const personMappingRepo = {
-      findByChannelUser: vi.fn(async () => null),
-      findByBondLevel: vi.fn(async () => []),
-      addChannelMapping: vi.fn(async () => {}),
+      findByChannelUser: rs.fn(async () => null),
+      findByBondLevel: rs.fn(async () => []),
+      addChannelMapping: rs.fn(async () => {}),
     } as unknown as PersonMappingRepository;
 
     // Rome Cloud can't answer yet at connect-time boot.
@@ -526,7 +526,7 @@ describe("EmailAdapter.fetchHistory", () => {
 
   it("lists by time window, hydrates each body, and returns oldest-first", async () => {
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({
+      listMessages: rs.fn(async () => ({
         messages: [
           listItem({
             providerMessageId: "m2",
@@ -538,7 +538,7 @@ describe("EmailAdapter.fetchHistory", () => {
         ],
         nextPageToken: undefined,
       })),
-      getMessage: vi.fn(async (id: string) =>
+      getMessage: rs.fn(async (id: string) =>
         fullMessage(id, `body-${id}`, {
           from: [{ name: id === "m1" ? "Alice" : "Bob", email: `${id}@example.com` }],
         }),
@@ -549,7 +549,7 @@ describe("EmailAdapter.fetchHistory", () => {
     const messages = await adapter.fetchHistory(null, 24);
 
     // `after` is the window cutoff, newest-first paging.
-    const listArgs = (provider.listMessages as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const listArgs = (provider.listMessages as ReturnType<typeof rs.fn>).mock.calls[0][0];
     expect(listArgs.ascending).toBe(false);
     expect(new Date(listArgs.after).getTime()).toBeLessThanOrEqual(
       Date.now() - 24 * 60 * 60 * 1000 + 1000,
@@ -563,7 +563,7 @@ describe("EmailAdapter.fetchHistory", () => {
 
   it("filters to a single thread when threadId is given", async () => {
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({
+      listMessages: rs.fn(async () => ({
         messages: [
           listItem({ providerMessageId: "m1", threadId: "tA" }),
           listItem({
@@ -573,7 +573,7 @@ describe("EmailAdapter.fetchHistory", () => {
           }),
         ],
       })),
-      getMessage: vi.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
     });
     const adapter = makeAdapter(provider);
 
@@ -605,8 +605,8 @@ describe("EmailAdapter.fetchHistory", () => {
 
     let call = 0;
     const provider = makeProvider({
-      listMessages: vi.fn(async () => pages[call++]),
-      getMessage: vi.fn(async (id: string) =>
+      listMessages: rs.fn(async () => pages[call++]),
+      getMessage: rs.fn(async (id: string) =>
         fullMessage(id, `body-${id}`, { threadId: "tWanted" }),
       ),
     });
@@ -623,8 +623,8 @@ describe("EmailAdapter.fetchHistory", () => {
     // A misbehaving provider: every page is empty but advertises more. The scan
     // cap counts messages (0 here), so the empty-page guard is what must stop us.
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({ messages: [], nextPageToken: "always-more" })),
-      getMessage: vi.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+      listMessages: rs.fn(async () => ({ messages: [], nextPageToken: "always-more" })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
     });
     const adapter = makeAdapter(provider);
 
@@ -637,10 +637,10 @@ describe("EmailAdapter.fetchHistory", () => {
 
   it("falls back to the list preview when body hydration fails", async () => {
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({
+      listMessages: rs.fn(async () => ({
         messages: [listItem({ providerMessageId: "m1", preview: "the preview body" })],
       })),
-      getMessage: vi.fn(async () => {
+      getMessage: rs.fn(async () => {
         throw new Error("pull failed");
       }),
     });
@@ -654,10 +654,10 @@ describe("EmailAdapter.fetchHistory", () => {
 
   it("is side-effect free: a later reply does not ride a thread it never ingested", async () => {
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({
+      listMessages: rs.fn(async () => ({
         messages: [listItem({ providerMessageId: "m1", threadId: "tA" })],
       })),
-      getMessage: vi.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
     });
     const adapter = makeAdapter(provider);
 
@@ -677,7 +677,7 @@ describe("EmailAdapter.fetchHistory", () => {
     // Rome, not to the counterparty — otherwise the transcript misreads our own
     // replies as theirs.
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({
+      listMessages: rs.fn(async () => ({
         messages: [
           listItem({
             providerMessageId: "out",
@@ -695,7 +695,7 @@ describe("EmailAdapter.fetchHistory", () => {
           }),
         ],
       })),
-      getMessage: vi.fn(async (id: string) =>
+      getMessage: rs.fn(async (id: string) =>
         fullMessage(id, `body-${id}`, {
           from:
             id === "out"
@@ -718,14 +718,14 @@ describe("EmailAdapter.fetchHistory", () => {
 
   it("clamps an invalid windowHours to the default look-back", async () => {
     const provider = makeProvider({
-      listMessages: vi.fn(async () => ({ messages: [], nextPageToken: undefined })),
+      listMessages: rs.fn(async () => ({ messages: [], nextPageToken: undefined })),
     });
     const adapter = makeAdapter(provider);
 
     for (const bad of [NaN, Infinity, -5, 0]) {
-      (provider.listMessages as ReturnType<typeof vi.fn>).mockClear();
+      (provider.listMessages as ReturnType<typeof rs.fn>).mockClear();
       await adapter.fetchHistory(null, bad);
-      const listArgs = (provider.listMessages as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const listArgs = (provider.listMessages as ReturnType<typeof rs.fn>).mock.calls[0][0];
       // Falls back to a finite 24h cutoff rather than throwing or inverting it.
       const afterMs = new Date(listArgs.after).getTime();
       expect(Number.isFinite(afterMs)).toBe(true);

@@ -14,7 +14,7 @@
 //      message; maps a 409 (a live adapter still polling the token) to a
 //      guardian-readable failure.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { Bot, type Transformer } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import { SetupSession } from "../setup/session.js";
@@ -93,17 +93,17 @@ function tgMessage(fromId: number, text: string, isBot = false) {
 describe("makeTelegramSetup", () => {
   it("prompts, probes, shows the one-time code, then confers on guardian link", async () => {
     const link = deferred<{ channelUserId: string }>();
-    const probeBotIdentity = vi.fn(async () => ({ botId: "424242", botUsername: "@setup_bot" }));
-    const waitForGuardianLink = vi.fn(() => link.promise);
-    const guardianLinked = vi.fn(async () => false);
-    const generateCode = vi.fn(() => "246810");
+    const probeBotIdentity = rs.fn(async () => ({ botId: "424242", botUsername: "@setup_bot" }));
+    const waitForGuardianLink = rs.fn(() => link.promise);
+    const guardianLinked = rs.fn(async () => false);
+    const generateCode = rs.fn(() => "246810");
     const fn = makeTelegramSetup({
       probeBotIdentity,
       waitForGuardianLink,
       guardianLinked,
       generateCode,
     });
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
 
     await session.started();
@@ -134,7 +134,7 @@ describe("makeTelegramSetup", () => {
     expect(waitForGuardianLink).toHaveBeenCalledWith("123:abc", "246810", expect.anything());
 
     link.resolve({ channelUserId: "guardian-777" });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls[0][0]).toEqual({
       credential: { material: { token: "123:abc" }, expiresAt: "never" },
@@ -148,10 +148,10 @@ describe("makeTelegramSetup", () => {
   });
 
   it("skips the guardian-link probe when a guardian is already mapped (re-conferral)", async () => {
-    const probeBotIdentity = vi.fn(async () => ({ botId: "1", botUsername: "@ok" }));
-    const waitForGuardianLink = vi.fn(() => new Promise<{ channelUserId: string }>(() => {}));
-    const guardianLinked = vi.fn(async () => true);
-    const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
+    const probeBotIdentity = rs.fn(async () => ({ botId: "1", botUsername: "@ok" }));
+    const waitForGuardianLink = rs.fn(() => new Promise<{ channelUserId: string }>(() => {}));
+    const guardianLinked = rs.fn(async () => true);
+    const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const fn = makeTelegramSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -165,7 +165,7 @@ describe("makeTelegramSetup", () => {
 
     // No getUpdates probe runs (it would 409 against the live adapter); the
     // conferral lands immediately with no guardian mapping in it.
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(waitForGuardianLink).not.toHaveBeenCalled();
     expect(commit).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls[0][0]).toEqual({
@@ -176,11 +176,11 @@ describe("makeTelegramSetup", () => {
   });
 
   it("re-prompts with the error when the token probe is refused", async () => {
-    const probeBotIdentity = vi
+    const probeBotIdentity = rs
       .fn<(token: string) => Promise<{ botId: string; botUsername: string }>>()
       .mockRejectedValueOnce(new Error("Invalid bot token"))
       .mockResolvedValueOnce({ botId: "1", botUsername: "@ok" });
-    const waitForGuardianLink = vi.fn(() => new Promise<{ channelUserId: string }>(() => {}));
+    const waitForGuardianLink = rs.fn(() => new Promise<{ channelUserId: string }>(() => {}));
     const fn = makeTelegramSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -209,16 +209,16 @@ describe("makeTelegramSetup", () => {
   });
 
   it("interrupts the guardian-link wait on cancel, running no commit", async () => {
-    const probeBotIdentity = vi.fn(async () => ({ botId: "1", botUsername: "@ok" }));
+    const probeBotIdentity = rs.fn(async () => ({ botId: "1", botUsername: "@ok" }));
     let linkSignal: AbortSignal | undefined;
-    const waitForGuardianLink = vi.fn(
+    const waitForGuardianLink = rs.fn(
       (_token: string, _code: string, signal: AbortSignal) =>
         new Promise<{ channelUserId: string }>((_resolve, reject) => {
           linkSignal = signal;
           signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const commit = vi.fn(async () => {});
+    const commit = rs.fn(async () => {});
     const fn = makeTelegramSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -239,15 +239,15 @@ describe("makeTelegramSetup", () => {
 
   it("interrupts an in-flight token probe on cancel (no re-prompt), running no commit", async () => {
     let probeSignal: AbortSignal | undefined;
-    const probeBotIdentity = vi.fn(
+    const probeBotIdentity = rs.fn(
       (_token: string, signal?: AbortSignal) =>
         new Promise<{ botId: string; botUsername: string }>((_resolve, reject) => {
           probeSignal = signal;
           signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
         }),
     );
-    const waitForGuardianLink = vi.fn(() => new Promise<{ channelUserId: string }>(() => {}));
-    const commit = vi.fn(async () => {});
+    const waitForGuardianLink = rs.fn(() => new Promise<{ channelUserId: string }>(() => {}));
+    const commit = rs.fn(async () => {});
     const fn = makeTelegramSetup({
       probeBotIdentity,
       waitForGuardianLink,
@@ -258,7 +258,7 @@ describe("makeTelegramSetup", () => {
 
     await session.started();
     void session.provideInput({ token: "good" });
-    await vi.waitFor(() => expect(probeBotIdentity).toHaveBeenCalled());
+    await rs.waitFor(() => expect(probeBotIdentity).toHaveBeenCalled());
 
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });

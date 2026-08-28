@@ -7,7 +7,7 @@
 //
 // The suite runs against the drizzle-backed ledger (fresh test db per test).
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@rstest/core";
 import { ConnectionRegistry } from "./registry.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { createTestDb } from "../test/helpers.js";

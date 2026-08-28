@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { escapeForInlineScript } from "./inline-script.js";
 
 describe("escapeForInlineScript", () => {

@@ -9,6 +9,12 @@ import { AREA_PATHS, AREAS, allAreas, areasForFiles } from "./ci-changed-areas.m
  * builds against, so they carry no floor beyond ES modules themselves.
  */
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const TEST_CONFIGS = [
+  "rstest.config.ts",
+  "rstest.config.mts",
+  "vitest.config.ts",
+  "vitest.config.mts",
+];
 
 test("a change confined to core's own package leaves the other shards idle", () => {
   assert.deepEqual(areasForFiles(["packages/core/src/db/schema.ts"]), {
@@ -233,7 +239,7 @@ test("each shard job guards its steps on its own detection output", async () => 
 
 /**
  * Trees a shard collects tests from that lie outside the packages it filters
- * on, read off the vitest configs. The core suite's `include` reaches
+ * on, read off the test runner configs. The core suite's `include` reaches
  * rome_apps, scripts, and infra, so its dependency closure does not describe
  * everything it reads. A shard whose tests all live in its own packages
  * contributes nothing here.
@@ -249,7 +255,7 @@ async function extraIncludeRoots(shard) {
     const entry = workspace.get(name);
     if (!entry) continue;
 
-    for (const config of ["vitest.config.ts", "vitest.config.mts"]) {
+    for (const config of TEST_CONFIGS) {
       const path = join(repoRoot, entry.dir, config);
       if (!existsSync(path)) continue;
 
@@ -356,7 +362,7 @@ test("each shard covers the launcher scripts its packages invoke", async () => {
   }
 });
 
-test("each shard covers the collection roots its vitest configs declare", async () => {
+test("each shard covers the collection roots its test runner configs declare", async () => {
   const { readFileSync, existsSync } = await import("node:fs");
   const { join, normalize } = await import("node:path");
   const repoRoot = REPO_ROOT;
@@ -369,7 +375,7 @@ test("each shard covers the collection roots its vitest configs declare", async 
       const entry = workspace.get(name);
       if (!entry) continue;
 
-      for (const config of ["vitest.config.ts", "vitest.config.mts"]) {
+      for (const config of TEST_CONFIGS) {
         const path = join(repoRoot, entry.dir, config);
         if (!existsSync(path)) continue;
 
@@ -391,7 +397,7 @@ test("each shard covers the collection roots its vitest configs declare", async 
     }
   }
 
-  assert.ok(checked > 0, "no vitest include globs were resolved, so this asserted nothing");
+  assert.ok(checked > 0, "no test include globs were resolved, so this asserted nothing");
 });
 
 /** Every root script a shard's chain reaches, following `pnpm <script>` hops. */

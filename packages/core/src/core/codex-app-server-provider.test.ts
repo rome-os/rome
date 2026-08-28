@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
 import type {
   ModelSession,
@@ -17,13 +17,13 @@ const {
   startMock,
   closeMock,
   captured,
-} = vi.hoisted(() => ({
-  getCodexCliStatusMock: vi.fn(),
-  markCodexAuthRevokedMock: vi.fn(),
-  requestMock: vi.fn(),
-  notifyMock: vi.fn(),
-  startMock: vi.fn(),
-  closeMock: vi.fn(),
+} = rs.hoisted(() => ({
+  getCodexCliStatusMock: rs.fn(),
+  markCodexAuthRevokedMock: rs.fn(),
+  requestMock: rs.fn(),
+  notifyMock: rs.fn(),
+  startMock: rs.fn(),
+  closeMock: rs.fn(),
   captured: {
     onNotification: undefined as undefined | ((m: string, p: unknown) => void),
     onExit: undefined as undefined | ((code: number | null) => void),
@@ -34,13 +34,13 @@ const {
   },
 }));
 
-vi.mock("../lib/codex-cli-auth.js", () => ({
+rs.mock("../lib/codex-cli-auth.js", () => ({
   getCodexCliStatus: getCodexCliStatusMock,
   markCodexAuthRevoked: markCodexAuthRevokedMock,
 }));
 
-vi.mock("./codex/app-server-client.js", () => ({
-  AppServerClient: vi.fn().mockImplementation((opts) => {
+rs.mock("./codex/app-server-client.js", () => ({
+  AppServerClient: rs.fn().mockImplementation((opts) => {
     captured.onNotification = (method, params) => {
       if (method === "thread/started") {
         const id = (params as { thread?: { id?: unknown } })?.thread?.id;
@@ -150,7 +150,7 @@ describe("CodexAppServerProvider", () => {
     const session = await new CodexAppServerProvider().openSession(buildParams());
     await session.sendUserInput({ text: "first", inputId: "a" });
     const steering = session.steerUserInput!({ text: "second", inputId: "b" });
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
     );
     expect(requestMock).not.toHaveBeenCalledWith("turn/steer", expect.anything());
@@ -197,7 +197,7 @@ describe("CodexAppServerProvider", () => {
     const session = await new CodexAppServerProvider().openSession(buildParams());
     await session.sendUserInput({ text: "first", inputId: "a" });
     const steering = session.steerUserInput!({ text: "second", inputId: "b" });
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
     );
     captured.onNotification?.("turn/completed", {
@@ -211,7 +211,7 @@ describe("CodexAppServerProvider", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
     getCodexCliStatusMock.mockResolvedValue({ loggedIn: true });
     markCodexAuthRevokedMock.mockResolvedValue(undefined);
     captured.onNotification = undefined;
@@ -284,8 +284,8 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("shares one initialized client while routing different thread tool catalogs", async () => {
-    const alphaExecute = vi.fn(async () => "alpha result");
-    const betaExecute = vi.fn(async () => "beta result");
+    const alphaExecute = rs.fn(async () => "alpha result");
+    const betaExecute = rs.fn(async () => "beta result");
     requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
       const payload = requestParams as {
         threadId?: string;
@@ -603,8 +603,8 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("routes dynamic subagent calls in a borrowed exact fork to the fork executor", async () => {
-    const sourceExecuteSubagent = vi.fn(async () => "source result");
-    const forkExecuteSubagent = vi.fn(async () => ({
+    const sourceExecuteSubagent = rs.fn(async () => "source result");
+    const forkExecuteSubagent = rs.fn(async () => ({
       status: "completed",
       sessionId: "fork-child-session",
       turnId: "fork-child-turn",
@@ -922,7 +922,7 @@ describe("CodexAppServerProvider", () => {
     const exactSession = await exactFork.open(buildForkOpenParams());
     const exactCollected = collectUntilTerminal(exactSession);
     await exactSession.sendUserInput({ text: "feedback" });
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
     );
     expect(
@@ -1011,7 +1011,7 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("uses dynamic tools so subagents receive the exact provider callId before execution", async () => {
-    const executeSubagent = vi.fn(async () => ({
+    const executeSubagent = rs.fn(async () => ({
       status: "completed",
       sessionId: "child-1",
       turnId: "child-turn-1",
@@ -1604,7 +1604,7 @@ describe("CodexAppServerProvider", () => {
   });
 
   it("tags a usage-limit turn failure with code:usage_limit (structured codexErrorInfo)", async () => {
-    const onQuotaExhausted = vi.fn();
+    const onQuotaExhausted = rs.fn();
     const provider = new CodexAppServerProvider({ onQuotaExhausted });
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult } from "@rome-os/app-runtime";
 import { createSummonAction } from "./index.js";
 import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
@@ -252,7 +252,7 @@ describe("summon", () => {
         yield { type: "result" as const, content: "done" };
       },
     } as unknown as AgentRunner;
-    const resolveArtifactReference = vi.fn(({ value }: { value: string }) => value);
+    const resolveArtifactReference = rs.fn(({ value }: { value: string }) => value);
     const tool = createSummonAction(actionConfig, {
       agentRunner: runner,
       resolveArtifactReference,
@@ -323,7 +323,7 @@ describe("summon", () => {
   });
 
   it("canonicalizes interactive handoff references before returning the directive", async () => {
-    const resolveArtifactReference = vi.fn(({ kind }: { kind: "agent" | "action" }) =>
+    const resolveArtifactReference = rs.fn(({ kind }: { kind: "agent" | "action" }) =>
       kind === "agent" ? "workflow-studio:designer" : "workflow-studio:validate-design",
     );
     const tool = createSummonAction(actionConfig, {

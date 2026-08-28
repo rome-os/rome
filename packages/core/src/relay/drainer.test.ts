@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -93,7 +93,7 @@ const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
 /** Keep the production retry schedule fixed while making black-box WS tests fast. */
 function speedUpDeliveryRetryTimers(): void {
   const realSetTimeout = globalThis.setTimeout;
-  vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) =>
+  rs.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) =>
     realSetTimeout(
       callback,
       FIXED_DELIVERY_RETRY_DELAYS_MS.has(Number(delay)) ? 1 : delay,
@@ -111,7 +111,7 @@ describe("RelayDrainer", () => {
     drainer = null;
     relay?.wss.close();
     relay = null;
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
   });
 
   it("delivers buffered events in seq order with decoded body and acks each", async () => {
@@ -233,7 +233,7 @@ describe("RelayDrainer", () => {
     relay = startFakeRelay([{ seq: 1, body: "{}" }]);
     const realSetTimeout = globalThis.setTimeout;
     const scheduledDelays: number[] = [];
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
+    rs.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
       const delayMs = Number(delay);
       scheduledDelays.push(delayMs);
       return realSetTimeout(callback, delayMs > 100_000 ? 60_000 : delay, ...args);
@@ -366,19 +366,19 @@ describe("RelayDrainer", () => {
   });
 
   it("uses WebSocket control frames for periodic heartbeats", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
       relay = startFakeRelay([]);
       drainer = new RelayDrainer([relay.drain()], async () => ({ status: 200 }));
       drainer.start();
 
       await waitFor(() => drainer!.getStatus()[0]?.connected === true);
-      await vi.advanceTimersByTimeAsync(30_000);
+      await rs.advanceTimersByTimeAsync(30_000);
       await waitFor(() => relay!.protocolPings() === 1);
     } finally {
       await drainer?.stop();
       drainer = null;
-      vi.useRealTimers();
+      rs.useRealTimers();
     }
   });
 

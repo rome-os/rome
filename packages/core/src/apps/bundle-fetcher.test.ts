@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { createBundleFetcher } from "./bundle-fetcher.js";
 import type { AppstoreSource } from "./lockfile.js";
 

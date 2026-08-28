@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -135,7 +135,7 @@ describe("Projects files API", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    rs.useRealTimers();
     testDb.close();
     rmSync(sandboxDir, { recursive: true, force: true });
     for (const key of ENV_KEYS) {
@@ -186,7 +186,7 @@ describe("Projects files API", () => {
         "projects/demo/src/index.ts",
       ]);
       await reader.cancel();
-    });
+    }, 30_000);
   });
 
   describe("GET /projects/tree", () => {
@@ -239,29 +239,29 @@ describe("Projects files API", () => {
 
   describe("GET /projects/dashboard", () => {
     it("returns usage stats, chats, and cache hit rate for DB-backed projects", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-05-15T11:59:00.000Z"));
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2026-05-15T11:59:00.000Z"));
       mkdirSync(join(projectsRoot, "demo", "src"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo", "node_modules", "ignored"), { recursive: true });
       writeFileSync(join(projectsRoot, "demo", "src", "index.ts"), "export {};\n");
       writeFileSync(join(projectsRoot, "demo", "node_modules", "ignored", "index.js"), "");
 
       await webchatRepo.createSession("sess-1", "Demo chat", undefined, "demo", null, "demo");
-      vi.setSystemTime(new Date("2026-05-15T11:59:10.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:59:10.000Z"));
       await webchatRepo.addMessage(
         "msg-user",
         "sess-1",
         "user",
         textMessage("Please inspect this project."),
       );
-      vi.setSystemTime(new Date("2026-05-15T11:59:20.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:59:20.000Z"));
       await webchatRepo.addMessage(
         "msg-assistant",
         "sess-1",
         "assistant",
         textMessage("Found the issue."),
       );
-      vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
       await webchatRepo.addMessage(
         "msg-trace",
         "sess-1",
@@ -320,8 +320,8 @@ describe("Projects files API", () => {
     });
 
     it("returns aggregate usage stats and recent chats for the projects root", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-05-15T11:00:00.000Z"));
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2026-05-15T11:00:00.000Z"));
       mkdirSync(join(projectsRoot, "alpha"), { recursive: true });
       mkdirSync(join(projectsRoot, "beta"), { recursive: true });
 
@@ -333,14 +333,14 @@ describe("Projects files API", () => {
         null,
         "alpha",
       );
-      vi.setSystemTime(new Date("2026-05-15T11:00:10.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:00:10.000Z"));
       await webchatRepo.addMessage(
         "msg-alpha",
         "sess-alpha",
         "user",
         textMessage("Message for sess-alpha"),
       );
-      vi.setSystemTime(new Date("2026-05-15T11:00:20.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:00:20.000Z"));
       await webchatRepo.addMessage(
         "msg-alpha-trace",
         "sess-alpha",
@@ -353,7 +353,7 @@ describe("Projects files API", () => {
           cacheWriteTokens: 3,
         }),
       );
-      vi.setSystemTime(new Date("2026-05-15T11:01:00.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:01:00.000Z"));
       await webchatRepo.createSession(
         "sess-legacy",
         "Legacy chat",
@@ -362,14 +362,14 @@ describe("Projects files API", () => {
         null,
         null,
       );
-      vi.setSystemTime(new Date("2026-05-15T11:01:10.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T11:01:10.000Z"));
       await webchatRepo.addMessage(
         "msg-legacy",
         "sess-legacy",
         "user",
         textMessage("Message for sess-legacy"),
       );
-      vi.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
+      rs.setSystemTime(new Date("2026-05-15T12:00:00.000Z"));
 
       const res = await buildApp({ webchatRepo }).request("/projects/dashboard?path=projects");
 
@@ -406,10 +406,10 @@ describe("Projects files API", () => {
     });
 
     it("reports root dashboard chat totals from all sessions when recent chats are truncated", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const base = new Date("2026-05-15T12:00:00.000Z").getTime();
       for (let index = 1; index <= 25; index += 1) {
-        vi.setSystemTime(new Date(base - index * 60_000));
+        rs.setSystemTime(new Date(base - index * 60_000));
         await webchatRepo.createSession(
           `sess-alpha-${String(index).padStart(2, "0")}`,
           `Alpha chat ${index}`,
@@ -419,7 +419,7 @@ describe("Projects files API", () => {
           "alpha",
         );
       }
-      vi.setSystemTime(new Date(base - 26 * 60_000));
+      rs.setSystemTime(new Date(base - 26 * 60_000));
       await webchatRepo.createSession(
         "sess-beta-1",
         "Beta chat 1",
@@ -428,7 +428,7 @@ describe("Projects files API", () => {
         null,
         "beta",
       );
-      vi.setSystemTime(new Date(base));
+      rs.setSystemTime(new Date(base));
 
       const app = buildApp({ webchatRepo });
       const res = await app.request("/projects/dashboard?path=projects");
@@ -467,8 +467,8 @@ describe("Projects files API", () => {
     });
 
     it("keeps aggregate usage on one day window when a root request crosses midnight", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-18T12:00:00.000Z"));
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2026-04-18T12:00:00.000Z"));
       mkdirSync(join(projectsRoot, "alpha"), { recursive: true });
       await webchatRepo.createSession(
         "sess-usage",
@@ -485,7 +485,7 @@ describe("Projects files API", () => {
         traceMessage({ costUsd: 0.4, inputTokens: 40, outputTokens: 4 }),
       );
       await settingsRepo.set("guardianTimezone", "UTC");
-      vi.setSystemTime(new Date("2026-05-01T23:59:59.000Z"));
+      rs.setSystemTime(new Date("2026-05-01T23:59:59.000Z"));
 
       // The clock jumps past midnight while the usage query runs; the
       // response must keep the day window computed at request start.
@@ -494,7 +494,7 @@ describe("Projects files API", () => {
         getProjectUsageTotals: (projectPath, options) =>
           webchatRepo.getProjectUsageTotals(projectPath, options),
         getUsageTotals: (options) => {
-          vi.setSystemTime(new Date("2026-05-02T00:00:01.000Z"));
+          rs.setSystemTime(new Date("2026-05-02T00:00:01.000Z"));
           return webchatRepo.getUsageTotals(options);
         },
         archiveProjectsByPathPrefix: (projectPath, options) =>
@@ -533,21 +533,21 @@ describe("Projects files API", () => {
     });
 
     it("buckets usage and monthly spend in the guardian timezone", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
+      rs.useFakeTimers();
+      rs.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
       mkdirSync(join(projectsRoot, "demo"), { recursive: true });
       await webchatRepo.createSession("sess-1", "Demo chat", undefined, "demo", null, "demo");
 
       // 14:00Z is 23:00 in Tokyo (April 30, previous month); 16:00Z is 01:00
       // in Tokyo (May 1). UTC bucketing would put both on April 30.
-      vi.setSystemTime(new Date("2026-04-30T14:00:00.000Z"));
+      rs.setSystemTime(new Date("2026-04-30T14:00:00.000Z"));
       await webchatRepo.addMessage(
         "msg-trace-april",
         "sess-1",
         "trace",
         traceMessage({ costUsd: 0.1, inputTokens: 7, outputTokens: 1 }),
       );
-      vi.setSystemTime(new Date("2026-04-30T16:00:00.000Z"));
+      rs.setSystemTime(new Date("2026-04-30T16:00:00.000Z"));
       await webchatRepo.addMessage(
         "msg-trace-may",
         "sess-1",
@@ -561,7 +561,7 @@ describe("Projects files API", () => {
         }),
       );
       await settingsRepo.set("guardianTimezone", "Asia/Tokyo");
-      vi.setSystemTime(new Date("2026-05-01T00:30:00.000Z"));
+      rs.setSystemTime(new Date("2026-05-01T00:30:00.000Z"));
 
       const res = await buildApp({ settingsRepo, webchatRepo }).request(
         "/projects/dashboard?path=projects/demo",
@@ -585,10 +585,10 @@ describe("Projects files API", () => {
     });
 
     it("returns only the first 20 dashboard chats and loads later pages separately", async () => {
-      vi.useFakeTimers();
+      rs.useFakeTimers();
       const base = new Date("2026-05-15T12:00:00.000Z").getTime();
       for (let index = 1; index <= 25; index += 1) {
-        vi.setSystemTime(new Date(base - index * 60_000));
+        rs.setSystemTime(new Date(base - index * 60_000));
         await webchatRepo.createSession(
           `sess-${String(index).padStart(2, "0")}`,
           `Demo chat ${index}`,
@@ -598,7 +598,7 @@ describe("Projects files API", () => {
           "demo",
         );
       }
-      vi.setSystemTime(new Date(base));
+      rs.setSystemTime(new Date(base));
       mkdirSync(join(projectsRoot, "demo"), { recursive: true });
 
       const app = buildApp({ webchatRepo });
@@ -1451,8 +1451,8 @@ describe("Projects files API", () => {
         layout: "[]",
         projectPath: "demo",
       });
-      const closeMain = vi.fn(async () => undefined);
-      const closeChild = vi.fn(async () => undefined);
+      const closeMain = rs.fn(async () => undefined);
+      const closeChild = rs.fn(async () => undefined);
       type LiveAgentSession = NonNullable<
         ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["peek"]>
       >;

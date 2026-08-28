@@ -1,15 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 
 import { createCodingTaskAction } from "./index.js";
 
 describe("coding_task", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    rs.clearAllMocks();
   });
 
   it("delegates to summon with the coding agent", async () => {
-    const runAction = vi.fn().mockResolvedValue({
+    const runAction = rs.fn().mockResolvedValue({
       status: "ok",
       data: { result: "done", sessionId: "s1" },
     });

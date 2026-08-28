@@ -9,7 +9,7 @@
 // commit call. QR refresh loops via repeated `show`; cancel genuinely
 // interrupts the in-flight poll wait.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { WechatSettings } from "../../channels/wechat.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral, SetupState } from "../setup/types.js";
@@ -40,10 +40,10 @@ function deferred<T>() {
  *  (`qr-1`, `qr-2`, …); each `pollLogin` pops the next scripted status. A
  *  promise entry lets a test hold the loop at an intermediate state until it
  *  has asserted the presented view (the loop is otherwise faster than
- *  `vi.waitFor` can observe). */
+ *  `rs.waitFor` can observe). */
 function makeAuthFake(script: Array<PollResult | Promise<PollResult>>) {
   let attempts = 0;
-  const startLogin = vi.fn(async () => {
+  const startLogin = rs.fn(async () => {
     attempts += 1;
     return {
       attemptId: `attempt-${attempts}`,
@@ -51,8 +51,8 @@ function makeAuthFake(script: Array<PollResult | Promise<PollResult>>) {
       expiresAt: new Date(0).toISOString(),
     };
   });
-  const pollLogin = vi.fn(async (): Promise<PollResult> => script.shift() ?? { status: "wait" });
-  const completeLogin = vi.fn();
+  const pollLogin = rs.fn(async (): Promise<PollResult> => script.shift() ?? { status: "wait" });
+  const completeLogin = rs.fn();
   return { startLogin, pollLogin, completeLogin };
 }
 
@@ -60,7 +60,7 @@ function makeSetupSession(
   auth: WechatLoginService,
   opts: { pollIntervalMs?: number; commit?: (c: SetupConferral) => Promise<void> } = {},
 ) {
-  const commit = vi.fn(async (_c: SetupConferral, _s: AbortSignal) => {
+  const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {
     await opts.commit?.(_c);
   });
   const fn = makeWechatSetup({
@@ -93,7 +93,7 @@ describe("makeWechatSetup", () => {
     expect(view.links).toEqual([{ label: "Open QR link", url: "qr-content-1" }]);
     expect(view.progress).toBe(true);
 
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     const conferral = commit.mock.calls[0][0];
     // Material parity with WECHAT_SETTINGS_IMPORT_ROW: token + coordinates,
@@ -125,7 +125,7 @@ describe("makeWechatSetup", () => {
     const { session, commit } = makeSetupSession(auth);
 
     await session.started();
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     const conferral = commit.mock.calls[0][0];
     expect(conferral.credential.material).toEqual({
       token: "w-tok",
@@ -150,12 +150,12 @@ describe("makeWechatSetup", () => {
       { text: "Confirm the login on your phone" },
     ]);
 
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       const view = presentingView(session.state);
       expect(view.steps?.[0]).toEqual({ text: "Scan the QR code with WeChat", done: true });
     });
     confirm.resolve({ status: "confirmed", account: { ...ACCOUNT } });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
   });
 
   it("refreshes the QR via a repeated show when the attempt expires", async () => {
@@ -164,13 +164,13 @@ describe("makeWechatSetup", () => {
     const { session, commit } = makeSetupSession(auth);
 
     await session.started();
-    await vi.waitFor(() => {
+    await rs.waitFor(() => {
       // The second attempt's QR replaces the first in the presented view.
       const view = presentingView(session.state);
       expect(view.qr).toBe("data:image/png;qr-of-qr-content-2");
     });
     confirm.resolve({ status: "confirmed", account: { ...ACCOUNT } });
-    await vi.waitFor(() => expect(session.state.status).toBe("done"));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(auth.startLogin).toHaveBeenCalledTimes(2);
     expect(commit).toHaveBeenCalledTimes(1);
     expect(auth.completeLogin).toHaveBeenCalledExactlyOnceWith("attempt-2");
@@ -181,7 +181,7 @@ describe("makeWechatSetup", () => {
     const { session, commit } = makeSetupSession(auth);
 
     await session.started();
-    await vi.waitFor(() => expect(session.state.status).toBe("failed"));
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
     expect(session.state).toEqual({
       status: "failed",
       reason: "WeChat QR login expired. Start the setup again.",
@@ -196,7 +196,7 @@ describe("makeWechatSetup", () => {
     const { session, commit } = makeSetupSession(auth, { pollIntervalMs: 60_000 });
 
     await session.started();
-    await vi.waitFor(() => expect(auth.pollLogin).toHaveBeenCalled());
+    await rs.waitFor(() => expect(auth.pollLogin).toHaveBeenCalled());
 
     const state = await session.cancel();
     expect(state).toEqual({ status: "cancelled" });
@@ -213,7 +213,7 @@ describe("makeWechatSetup", () => {
     const { session, commit } = makeSetupSession(auth);
 
     await session.started();
-    await vi.waitFor(() => expect(session.state.status).toBe("failed"));
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
     expect(session.state).toEqual({ status: "failed", reason: "ilinkai unreachable" });
     expect(commit).not.toHaveBeenCalled();
   });
