@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.6.1](https://github.com/rome-os/rome/compare/app-runtime-v0.6.0...app-runtime-v0.6.1) (2026-08-28)
+
+
+### Features
+
+* add app keys for guardian-entered app credentials ([#91](https://github.com/rome-os/rome/issues/91)) ([3576f96](https://github.com/rome-os/rome/commit/3576f9689b04279bb938647c07be1c093d7267be))
+
 ## [0.6.0](https://github.com/amantru/rome-internal/compare/app-runtime-v0.5.10...app-runtime-v0.6.0) (2026-08-15)
 
 

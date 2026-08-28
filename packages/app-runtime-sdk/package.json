@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-runtime",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Runtime SDK for Rome apps",
   "license": "MIT",
   "type": "module",

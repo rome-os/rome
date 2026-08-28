@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.22](https://github.com/rome-os/rome/compare/app-web-sdk-v0.2.21...app-web-sdk-v0.2.22) (2026-08-28)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.2.2
+
 ## [0.2.21](https://github.com/amantru/rome-internal/compare/app-web-sdk-v0.2.20...app-web-sdk-v0.2.21) (2026-08-19)
 
 
