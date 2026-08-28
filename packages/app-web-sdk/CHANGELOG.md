@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/rome-os/rome/compare/app-web-sdk-v0.2.22...app-web-sdk-v0.3.0) (2026-08-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-web-sdk:** apps that import `@rome-os/app-web-sdk/styles` must declare `@rome-os/ui` themselves.
+
+### Features
+
+* **app-web-sdk:** take the component kit as a peer dependency ([#102](https://github.com/rome-os/rome/issues/102)) ([33d4cb3](https://github.com/rome-os/rome/commit/33d4cb360b3bd0927971d054d4361b5363414af4))
+
 ## [0.2.22](https://github.com/rome-os/rome/compare/app-web-sdk-v0.2.21...app-web-sdk-v0.2.22) (2026-08-28)
 
 

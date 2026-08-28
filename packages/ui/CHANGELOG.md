@@ -5,6 +5,13 @@
 
 ### Bug Fixes
 
+* **ui:** give ghost and outline buttons a resting text color ([#103](https://github.com/rome-os/rome/issues/103)) ([786f9cb](https://github.com/rome-os/rome/commit/786f9cbe77a9bea3e859a2c6a1aca982c4481a8a))
+
+## [0.2.2](https://github.com/rome-os/rome/compare/ui-v0.2.2...ui-v0.2.2) (2026-08-28)
+
+
+### Bug Fixes
+
 * **ui:** keep the inline code tint inside its prose line ([#84](https://github.com/rome-os/rome/issues/84)) ([a5ce6a7](https://github.com/rome-os/rome/commit/a5ce6a70e74ee19a5ecf90e177db01021d7c8bbd))
 
 ## [0.2.2](https://github.com/amantru/rome-internal/compare/ui-v0.2.1...ui-v0.2.2) (2026-08-19)
