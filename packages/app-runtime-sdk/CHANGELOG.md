@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.6.2](https://github.com/rome-os/rome/compare/app-runtime-v0.6.1...app-runtime-v0.6.2) (2026-08-29)
+
+
+### Features
+
+* add Store Remix entry without installing source apps ([#90](https://github.com/rome-os/rome/issues/90)) ([bddf60f](https://github.com/rome-os/rome/commit/bddf60f9f5d523fea6c4e75cf144c0cc0071f365))
+
 ## [0.6.1](https://github.com/rome-os/rome/compare/app-runtime-v0.6.0...app-runtime-v0.6.1) (2026-08-28)
 
 

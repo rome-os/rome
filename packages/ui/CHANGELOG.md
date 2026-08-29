@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/rome-os/rome/compare/ui-v0.2.2...ui-v0.2.3) (2026-08-29)
+
+
+### Bug Fixes
+
+* **ui:** give ghost and outline buttons a resting text color ([#103](https://github.com/rome-os/rome/issues/103)) ([786f9cb](https://github.com/rome-os/rome/commit/786f9cbe77a9bea3e859a2c6a1aca982c4481a8a))
+
 ## [0.2.2](https://github.com/rome-os/rome/compare/ui-v0.2.2...ui-v0.2.2) (2026-08-28)
 
 
