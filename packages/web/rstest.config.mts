@@ -17,6 +17,8 @@ export default defineConfig({
   // leak in. React's production build omits `act`, which breaks every
   // @testing-library render.
   env: { NODE_ENV: "test" },
+  // Testing Library uses the global hooks to enable React's act warnings.
+  globals: true,
   // Keep the fast logic suite on Node; component tests opt into jsdom through
   // a per-file `// @rstest-environment jsdom` docblock.
   testEnvironment: {
