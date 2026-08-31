@@ -6,7 +6,7 @@
 //
 // jsdom is this package's default environment, but the `typeof window` guard
 // keeps the setup safe for a file that opts into the node environment with a
-// `// @vitest-environment node` docblock — same guard `packages/web` uses.
+// `// @rstest-environment node` docblock — the same guard `packages/web` uses.
 if (typeof window !== "undefined") {
   if (typeof globalThis.ResizeObserver === "undefined") {
     globalThis.ResizeObserver = class ResizeObserver {

@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { FilterChipGroup, type FilterChipOption } from "./filter-chip-group.js";
 
 afterEach(cleanup);
@@ -48,7 +48,7 @@ describe("FilterChipGroup", () => {
   });
 
   it("reports the chosen value", async () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     const user = userEvent.setup();
     renderGroup("all", onValueChange);
 
@@ -84,7 +84,7 @@ describe("FilterChipGroup", () => {
   });
 
   it("moves the selection with the arrow keys", async () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     const user = userEvent.setup();
     renderGroup("all", onValueChange);
 

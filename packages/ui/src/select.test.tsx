@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { SettingsIcon } from "lucide-react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { Select, SelectTrigger, SelectValue } from "./select.js";
 
 afterEach(cleanup);

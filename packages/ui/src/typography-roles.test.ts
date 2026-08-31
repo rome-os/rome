@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { compile } from "tailwindcss";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "@rstest/core";
 import { TYPOGRAPHY_ROLES } from "./typography-roles.js";
 
 // Each role names the step it reads, and the scales below hold the literals —

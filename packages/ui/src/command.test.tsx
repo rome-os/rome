@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { Command, CommandInput, CommandItem, CommandList } from "./command.js";
 
 afterEach(cleanup);
@@ -68,10 +68,10 @@ describe("Command search field", () => {
       <Command shouldFilter={false}>
         <CommandInput placeholder="Search…" />
         <CommandList>
-          <CommandItem value="first" onSelect={vi.fn()}>
+          <CommandItem value="first" onSelect={rs.fn()}>
             First
           </CommandItem>
-          <CommandItem value="second" onSelect={vi.fn()}>
+          <CommandItem value="second" onSelect={rs.fn()}>
             Second
           </CommandItem>
         </CommandList>
@@ -92,8 +92,8 @@ describe("Command search field", () => {
 
 describe("Command trailing input content", () => {
   it("activates a focused trailing button on Enter rather than the highlighted item", async () => {
-    const onSelect = vi.fn();
-    const onClear = vi.fn();
+    const onSelect = rs.fn();
+    const onClear = rs.fn();
     const user = userEvent.setup();
     renderCommand({ onSelect, onClear });
 
@@ -105,8 +105,8 @@ describe("Command trailing input content", () => {
   });
 
   it("still selects the highlighted item on Enter from the search field", async () => {
-    const onSelect = vi.fn();
-    const onClear = vi.fn();
+    const onSelect = rs.fn();
+    const onClear = rs.fn();
     const user = userEvent.setup();
     renderCommand({ onSelect, onClear });
 

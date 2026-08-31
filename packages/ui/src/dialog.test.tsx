@@ -1,12 +1,12 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { Dialog, DialogBody, DialogDescription, DialogTitle } from "./dialog.js";
 import { mountShadowApp } from "./test/shadow-app.js";
 
 afterEach(() => {
   cleanup();
   document.body.innerHTML = "";
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function openDialog(title = "Delete project") {
@@ -60,7 +60,7 @@ describe("Dialog", () => {
 
   it("does not report a missing title for a titled dialog", () => {
     const errors: unknown[] = [];
-    vi.spyOn(console, "error").mockImplementation((...args) => errors.push(args[0]));
+    rs.spyOn(console, "error").mockImplementation((...args) => errors.push(args[0]));
 
     render(openDialog());
 

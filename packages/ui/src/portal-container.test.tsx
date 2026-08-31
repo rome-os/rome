@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { resolvePortalContainer } from "./portal-container.js";
 import { mountShadowApp } from "./test/shadow-app.js";
 

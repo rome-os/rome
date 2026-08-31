@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 
 // Comments are stripped so a selector fragment can never match prose about it.
 const markdownCss = readFileSync(join(import.meta.dirname, "markdown.css"), "utf8").replace(

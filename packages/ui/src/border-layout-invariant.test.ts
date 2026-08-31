@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 
 /**
  * The kit's border rule, enforced against every component's class strings.

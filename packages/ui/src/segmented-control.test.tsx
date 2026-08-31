@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { SegmentedControl, type SegmentedControlOption } from "./segmented-control.js";
 
 afterEach(cleanup);
@@ -70,7 +70,7 @@ describe("SegmentedControl", () => {
   });
 
   it("reports the newly picked value to the caller", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     render(
       <SegmentedControl
         aria-label="Sessions view"
@@ -117,7 +117,7 @@ describe("SegmentedControl", () => {
   });
 
   it("does not report a change for a disabled segment", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     render(
       <SegmentedControl
         aria-label="Sessions view"
@@ -133,7 +133,7 @@ describe("SegmentedControl", () => {
   });
 
   it("does not report a change from any segment while the group is disabled", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     render(
       <SegmentedControl
         aria-label="Sessions view"
@@ -153,7 +153,7 @@ describe("SegmentedControl", () => {
   });
 
   it("leaves the other segments enabled when only one option is disabled", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     render(
       <SegmentedControl
         aria-label="Sessions view"
@@ -220,7 +220,7 @@ describe("SegmentedControl", () => {
   });
 
   it("still reports changes for a segment carrying a title", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = rs.fn();
     render(
       <SegmentedControl
         aria-label="Epic filter"

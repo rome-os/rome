@@ -1,6 +1,6 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import type { CSSProperties } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { toast } from "sonner";
 import { Toaster } from "./sonner.js";
 import { mountShadowApp } from "./test/shadow-app.js";

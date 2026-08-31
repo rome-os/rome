@@ -1,6 +1,6 @@
 {
   // The build config excludes tests so they stay out of `dist`, which also left
-  // them unchecked — and vitest transpiles without type-checking, so a type
+  // them unchecked — and Rstest transpiles without type-checking, so a type
   // error in a component test would reach CI green. This config type-checks the
   // same sources *plus* the tests; `typecheck` runs both. `packages/web`
   // excludes its tests, but this package exists to host component tests, so
@@ -8,11 +8,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // Nothing is emitted here, so widen `rootDir` past `src` to let the vitest
+    // Nothing is emitted here, so widen `rootDir` past `src` to let the Rstest
     // config into the program too.
-    "rootDir": ".",
-    "types": ["vitest/globals"]
+    "rootDir": "."
   },
-  "include": ["src/**/*", "vitest.config.mts"],
+  "include": ["src/**/*", "rstest.config.mts"],
   "exclude": ["node_modules", "dist"]
 }

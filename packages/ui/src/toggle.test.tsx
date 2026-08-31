@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState, type FormEvent } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { Button } from "./button.js";
 import { mountShadowApp } from "./test/shadow-app.js";
 import { Toggle, type ToggleProps } from "./toggle.js";
@@ -45,7 +45,7 @@ function press(name: string) {
 
 describe("Toggle", () => {
   it("reports the state the caller should move to", () => {
-    const onPressedChange = vi.fn();
+    const onPressedChange = rs.fn();
     const { rerender } = render(
       <Toggle pressed={false} onPressedChange={onPressedChange}>
         Auto-start
@@ -115,7 +115,7 @@ describe("Toggle", () => {
   });
 
   it("does not report a change while disabled", () => {
-    const onPressedChange = vi.fn();
+    const onPressedChange = rs.fn();
     render(
       <Toggle pressed={false} onPressedChange={onPressedChange} disabled>
         Auto-start
@@ -144,7 +144,7 @@ describe("Toggle", () => {
   });
 
   it("never submits the form it sits in", () => {
-    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    const onSubmit = rs.fn((event: FormEvent) => event.preventDefault());
     render(
       <form onSubmit={onSubmit}>
         <Toggle pressed={false} onPressedChange={() => {}}>

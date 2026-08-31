@@ -1,6 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { Alert, AlertDescription, AlertTitle } from "./alert.js";
 import { mountShadowApp } from "./test/shadow-app.js";
 

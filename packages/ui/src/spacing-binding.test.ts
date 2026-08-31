@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 
 export const SPACING_STEPS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, 20, 24] as const;
 const spacingSteps = new Set<number>(SPACING_STEPS);

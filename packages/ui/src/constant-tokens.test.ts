@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 
 const stylesheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
