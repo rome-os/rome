@@ -9,6 +9,11 @@ import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 const PHONE = "1555@s.whatsapp.net";
 const LID = "77@lid";
 const MEMBER = "ACoAA1";
+// A group: addressed by neither of the two who speak in it, so its messages
+// name the conversation themselves.
+const GROUP = "wa-group";
+const IN_GROUP_ONE = "9998@s.whatsapp.net";
+const IN_GROUP_TWO = "9997@s.whatsapp.net";
 
 const entry = (
   source: string,
@@ -30,6 +35,25 @@ const held: HeldMessage[] = [
   // same string as a WhatsApp address on a channel that is not WhatsApp.
   { channel: "whatsapp", address: "9999@s.whatsapp.net", entry: entry("whatsapp", 600, "wa:x") },
   { channel: "linkedin", address: PHONE, entry: entry("linkedin", 700, "li:x") },
+  // The group, reachable only by naming it. Two of its lines arrived at the
+  // address that said them and name the conversation, and two name it by
+  // arriving at the group itself — which is what a message with no conversation
+  // of its own says.
+  {
+    channel: "whatsapp",
+    address: IN_GROUP_ONE,
+    conversation: GROUP,
+    entry: entry("whatsapp", 800, "wa:g1"),
+  },
+  {
+    channel: "whatsapp",
+    address: IN_GROUP_TWO,
+    conversation: GROUP,
+    entry: entry("whatsapp", 900, "wa:g2"),
+  },
+  // The same second as wa:g2; the direction settles the tie.
+  { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 900, "wa:g3", "outbound") },
+  { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 1000, "wa:g4") },
 ];
 
 const accounts = [
@@ -41,6 +65,8 @@ testMessagesContract("memoryMessages", () => ({
   messages: memoryMessages(held),
   accounts,
   silent: [{ channel: "whatsapp", addresses: ["4444@s.whatsapp.net"] }],
+  conversation: { channel: "whatsapp", id: GROUP },
+  silentConversation: { channel: "whatsapp", id: "wa-quiet-group" },
 }));
 
 describe("memoryMessages", () => {
@@ -65,6 +91,44 @@ describe("memoryMessages", () => {
       { channel: "whatsapp", addresses: [PHONE, LID] },
     ];
     expect(await messages.count(shared)).toBe(4);
+  });
+
+  it("answers a conversation nothing in it is addressed by", async () => {
+    const page = await messages.readConversation({
+      conversation: { channel: "whatsapp", id: GROUP },
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((e) => e.ref)).toEqual(["wa:g4", "wa:g3", "wa:g2", "wa:g1"]);
+  });
+
+  it("answers a conversation to no account that names one of its speakers", async () => {
+    const speakers = [
+      { channel: "whatsapp", addresses: [IN_GROUP_ONE, IN_GROUP_TWO] },
+      ...accounts,
+    ];
+    const page = await messages.read({ accounts: speakers, limit: WHOLE_HISTORY });
+    // Each speaker's own line reaches the address it arrived at — a memory
+    // store subtracts nothing — and the two the group itself holds reach
+    // nobody, which is what an address that names no account means.
+    expect(page.map((e) => e.ref)).not.toContain("wa:g3");
+    expect(page.map((e) => e.ref)).not.toContain("wa:g4");
+  });
+
+  it("reads a direct conversation under the address that names it", async () => {
+    const page = await messages.readConversation({
+      conversation: { channel: "whatsapp", id: PHONE },
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((e) => e.ref)).toEqual(["wa:e", "wa:c", "wa:a"]);
+  });
+
+  it("scopes a conversation by the channel and the id together", async () => {
+    expect(
+      await messages.readConversation({
+        conversation: { channel: "linkedin", id: GROUP },
+        limit: WHOLE_HISTORY,
+      }),
+    ).toEqual([]);
   });
 
   it("holds nothing for an empty scope", async () => {

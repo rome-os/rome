@@ -3,7 +3,7 @@ import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
 import { waMessages } from "../db/schema.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
-import type { MessageAccount } from "./messages.js";
+import type { MessageAccount, MessageConversation } from "./messages.js";
 
 // `wa_messages` as a `Messages` store. What it must answer is the contract
 // suite's; what it must leave out is the mirror's own scoping — a group thread,
@@ -19,6 +19,8 @@ const GROUP = "1200000@g.us";
 const account = { channel: "whatsapp", addresses: [PHONE, LID] };
 const accounts = [account];
 const silent = [{ channel: "whatsapp", addresses: ["15554444@s.whatsapp.net"] }];
+const groupChat: MessageConversation = { channel: "whatsapp", id: GROUP };
+const emptyChat: MessageConversation = { channel: "whatsapp", id: "1299999@g.us" };
 
 interface Seed {
   id: string;
@@ -36,10 +38,16 @@ const seeds: Seed[] = [
   // settles the tie, and both have to survive a page boundary.
   { id: "d", chat: LID, at: 300, text: "and on the lid" },
   { id: "e", chat: PHONE, at: 500, text: "latest" },
-  // Out of scope, each for its own reason.
+  // Out of every account's scope, each for its own reason.
   { id: "r", chat: PHONE, at: 600, type: "reaction", text: "👍" },
-  { id: "g", chat: GROUP, at: 700, text: "in the group" },
   { id: "o", chat: OTHER, at: 800, text: "another contact" },
+  // The group, which only a conversation read reaches. Enough of it to page,
+  // and a second in it said twice so the ordering has a tie to settle.
+  { id: "g", chat: GROUP, at: 700, text: "in the group" },
+  { id: "g2", chat: GROUP, at: 700, fromMe: true, text: "answered the group" },
+  { id: "g3", chat: GROUP, at: 750, text: "and again" },
+  { id: "g4", chat: GROUP, at: 760, text: "latest in the group" },
+  { id: "gr", chat: GROUP, at: 770, type: "reaction", text: "👍" },
 ];
 
 function seedMirror(testDb: TestDb): void {
@@ -100,6 +108,48 @@ describe("whatsAppMessages", () => {
     const group: MessageAccount[] = [{ channel: "whatsapp", addresses: [GROUP] }];
     expect(await messages.latest(group)).toBeNull();
     expect(await messages.count(group)).toBe(0);
+  });
+
+  // The chat is the conversation: a WhatsApp message hangs off it, and a group
+  // chat is the one no account can name.
+  it("answers a group chat asked for as a conversation", async () => {
+    const messages = whatsAppMessages(testDb.db);
+    const page = await messages.readConversation({ conversation: groupChat, limit: WHOLE_HISTORY });
+    // Newest first, the tie at 700 settled by direction, and the group's own
+    // reaction left out the way every read leaves one out.
+    expect(refs(page)).toEqual([`${GROUP}:g4`, `${GROUP}:g3`, `${GROUP}:g2`, `${GROUP}:g`]);
+  });
+
+  it("answers a group chat's messages to no account read", async () => {
+    const messages = whatsAppMessages(testDb.db);
+    const held = await messages.read({ accounts, limit: WHOLE_HISTORY });
+    expect(refs(held).some((ref) => ref.startsWith(GROUP))).toBe(false);
+    // Nor to a caller that hands the group's own JID over as an address.
+    const asAccount: MessageAccount[] = [{ channel: "whatsapp", addresses: [GROUP] }];
+    expect(await messages.read({ accounts: asAccount, limit: WHOLE_HISTORY })).toEqual([]);
+    expect(await messages.count(asAccount)).toBe(0);
+    expect(await messages.latest(asAccount)).toBeNull();
+  });
+
+  it("answers a direct chat asked for as a conversation", async () => {
+    const messages = whatsAppMessages(testDb.db);
+    // A direct chat is addressed by the contact, so its id is the address the
+    // account already reads under — one store asked a second way.
+    const page = await messages.readConversation({
+      conversation: { channel: "whatsapp", id: PHONE },
+      limit: WHOLE_HISTORY,
+    });
+    expect(refs(page)).toEqual([`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`]);
+  });
+
+  it("holds nothing for a conversation on another channel", async () => {
+    const messages = whatsAppMessages(testDb.db);
+    expect(
+      await messages.readConversation({
+        conversation: { channel: "linkedin", id: GROUP },
+        limit: WHOLE_HISTORY,
+      }),
+    ).toEqual([]);
   });
 
   it("holds nothing for an account on another channel", async () => {
@@ -188,5 +238,11 @@ describe("whatsAppMessages", () => {
 testMessagesContract("whatsAppMessages", () => {
   const testDb = createTestDb();
   seedMirror(testDb);
-  return { messages: whatsAppMessages(testDb.db), accounts, silent };
+  return {
+    messages: whatsAppMessages(testDb.db),
+    accounts,
+    silent,
+    conversation: groupChat,
+    silentConversation: emptyChat,
+  };
 });

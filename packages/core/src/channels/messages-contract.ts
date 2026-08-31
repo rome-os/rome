@@ -10,7 +10,7 @@ import {
   timelineCursor,
   type TimelineEntry,
 } from "@rome/api-types/people";
-import type { MessageAccount, Messages } from "./messages.js";
+import type { MessageAccount, MessageConversation, Messages } from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
  *  messages.ts calls the full read. */
@@ -29,6 +29,17 @@ export interface MessagesContractSubject {
   accounts: MessageAccount[];
   /** Accounts on the store's own channels that it holds nothing for. */
   silent: MessageAccount[];
+  /**
+   * A conversation the store holds, enrolled on the same terms as `accounts`:
+   * at least four messages, two of them in the same second.
+   *
+   * A group wherever the store can hold one. A group is the conversation no
+   * account read reaches, so enrolling one is what proves the verb answers
+   * more than the account reads already did.
+   */
+  conversation: MessageConversation;
+  /** A conversation on one of the store's channels that it holds nothing of. */
+  silentConversation: MessageConversation;
 }
 
 /** Page size the paging assertions walk with. Smaller than the history the
@@ -139,6 +150,87 @@ export function testMessagesContract(
       expect(await store.messages.read({ accounts: store.silent, limit: WHOLE_HISTORY })).toEqual(
         [],
       );
+    });
+
+    // The conversation read pages the same store the account reads page, so it
+    // owes the same page: the order, the cursor and the exhaustion are asserted
+    // over again rather than assumed to carry across. A store is free to answer
+    // the two from two queries — four of the five do — and the query that only
+    // the conversation read reaches is the one nothing else here covers.
+    const fullConversation = async ({ messages, conversation }: MessagesContractSubject) =>
+      messages.readConversation({ conversation, limit: WHOLE_HISTORY });
+
+    it("holds enough of a conversation to prove the law", async () => {
+      const store = await subject();
+      const full = await fullConversation(store);
+      expect(full.length).toBeGreaterThanOrEqual(4);
+      expect(new Set(full.map((entry) => entry.timestamp)).size).toBeLessThan(full.length);
+    });
+
+    it("answers a conversation page newest first, no longer than its limit", async () => {
+      const store = await subject();
+      const page = await store.messages.readConversation({
+        conversation: store.conversation,
+        limit: PAGE,
+      });
+      expect(page.length).toBeLessThanOrEqual(PAGE);
+      expect(page).toEqual([...page].sort(compareTimelineEntries));
+    });
+
+    it("answers only messages of a conversation strictly after the cursor", async () => {
+      const store = await subject();
+      const first = await store.messages.readConversation({
+        conversation: store.conversation,
+        limit: PAGE,
+      });
+      const cursor = first.at(-1);
+      if (!cursor) throw new Error("the store answered no first page to resume from");
+      const next = await store.messages.readConversation({
+        conversation: store.conversation,
+        after: cursor,
+        limit: WHOLE_HISTORY,
+      });
+      expect(next.every((entry) => isAfterTimelineCursor(entry, cursor))).toBe(true);
+    });
+
+    it("pages a conversation to exhaustion over exactly its full read", async () => {
+      const store = await subject();
+      const full = await fullConversation(store);
+
+      const walked: TimelineEntry[] = [];
+      let after: TimelineEntry | null = null;
+      for (let page = 0; page <= Math.ceil(full.length / PAGE); page++) {
+        const entries: TimelineEntry[] = await store.messages.readConversation({
+          conversation: store.conversation,
+          after,
+          limit: PAGE,
+        });
+        if (entries.length === 0) break;
+        walked.push(...entries);
+        after = entries[entries.length - 1] ?? null;
+      }
+
+      expect(walked).toEqual(full);
+    });
+
+    it("gives every message of a conversation its own cursor position", async () => {
+      const store = await subject();
+      const full = await fullConversation(store);
+      expect(new Set(full.map(timelineCursor)).size).toBe(full.length);
+    });
+
+    // An empty page rather than a failure or a null: a conversation the store
+    // has never heard of and one it holds empty are one answer, so a caller
+    // asking about a thread the mirror has not caught up with reads it as a
+    // history with nothing in it yet.
+    it("holds nothing for a silent conversation", async () => {
+      const store = await subject();
+      expect(
+        await store.messages.readConversation({
+          conversation: store.silentConversation,
+          limit: WHOLE_HISTORY,
+        }),
+      ).toEqual([]);
     });
   });
 }
