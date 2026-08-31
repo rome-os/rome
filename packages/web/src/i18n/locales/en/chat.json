@@ -58,6 +58,7 @@
     "hide": "Hide timeline",
     "show": "Show timeline"
   },
+  "jumpToLatest": "Jump to the latest message",
   "roles": {
     "agent": "Assistant"
   },

@@ -38,6 +38,9 @@ vi.mock("@/pages/free/use-free-cells", () => ({
   useFreeCells: () => ({ addWidget: vi.fn(), placements: [] }),
 }));
 
+// Mutable so a test can put the viewport away from the tail; reset in beforeEach.
+const stickToBottom = vi.hoisted(() => ({ isAtBottom: true, scrollToBottom: vi.fn() }));
+
 vi.mock("@/hooks/use-stick-to-bottom", () => ({
   // Callback refs, matching the real hook. Chat composes these with its own
   // refs and CALLS them, so a ref object here would throw on mount — and a
@@ -46,7 +49,8 @@ vi.mock("@/hooks/use-stick-to-bottom", () => ({
   useStickToBottom: () => ({
     contentRef: vi.fn(),
     scrollRef: vi.fn(),
-    scrollToBottom: vi.fn(),
+    isAtBottom: stickToBottom.isAtBottom,
+    scrollToBottom: stickToBottom.scrollToBottom,
   }),
 }));
 
@@ -170,6 +174,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  stickToBottom.isAtBottom = true;
   mockUseSessionIdentity.mockReturnValue({
     sessionName: null,
     pinnedAgentMention: null,
@@ -412,5 +417,26 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+});
+
+describe("Chat jump to latest", () => {
+  it("hides the control while the viewport is already at the tail", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByLabelText("jumpToLatest").className).toContain("invisible");
+  });
+
+  it("jumps instantly once the viewport has left the tail", async () => {
+    stickToBottom.isAtBottom = false;
+    renderChat(<Chat sessionId="session-1" />);
+
+    const control = screen.getByLabelText("jumpToLatest");
+    expect(control.className).not.toContain("invisible");
+    await userEvent.click(control);
+
+    // "auto", not "smooth": a smooth animation's first scroll event lands inside
+    // the hook's user-gesture window while still short of the bottom, and is read
+    // as the user scrolling away — releasing the pin this click just re-engaged.
+    expect(stickToBottom.scrollToBottom).toHaveBeenCalledWith("auto");
   });
 });

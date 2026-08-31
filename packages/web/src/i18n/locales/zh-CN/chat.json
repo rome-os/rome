@@ -58,6 +58,7 @@
     "hide": "隐藏时间线",
     "show": "显示时间线"
   },
+  "jumpToLatest": "回到最新消息",
   "roles": {
     "agent": "助手"
   },
