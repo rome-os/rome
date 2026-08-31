@@ -1,6 +1,6 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { useHostNavigation } from "./use-host-navigation";
 

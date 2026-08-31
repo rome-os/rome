@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import type { ApiConnection, GrantDisplay } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";

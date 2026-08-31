@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "@/i18n";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
@@ -12,8 +12,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
   // Assigned directly rather than through `stubGlobal` so it cannot leak into a
   // later test as a phantom desktop shell.
   Reflect.deleteProperty(window, "rome");
@@ -33,7 +33,7 @@ function inDesktopShell(): void {
  */
 function parkedAtRedirect(url: string) {
   const state = { status: "awaiting-redirect", url };
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  return rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const requested = typeof input === "string" ? input : (input as Request).url;
     const body = requested.endsWith("/setup")
       ? { cid: "setup-parked", reattached: false, state }
@@ -164,9 +164,9 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("Connect starts the setup and hands off to the broker redirect", async () => {
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(
           JSON.stringify({
@@ -188,10 +188,10 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("does NOT auto-forward on a passive reattach; offers manual resume + cancel", async () => {
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
     // The reattach poll returns a setup still parked at the broker hand-off.
-    vi.spyOn(globalThis, "fetch").mockImplementation(
+    rs.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(
           JSON.stringify({
@@ -210,10 +210,10 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("Disconnect revokes the grant via the registry-native DELETE and refreshes", async () => {
-    const fetchMock = vi
+    const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => new Response("{}", { status: 200 }));
-    const onRefresh = vi.fn();
+    const onRefresh = rs.fn();
     renderSection(
       githubCard("authorized", {
         display: { displayName: "Ada Lovelace", handle: null, email: null, avatarUrl: null },
@@ -229,9 +229,9 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("Reconnect force-starts the setup and hands off to a fresh broker redirect", async () => {
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation(
       async () =>
         new Response(
           JSON.stringify({
@@ -260,10 +260,10 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("hands Connect to the system browser in the desktop shell", async () => {
-    const assign = vi.fn();
-    const open = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    vi.stubGlobal("open", open);
+    const assign = rs.fn();
+    const open = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    rs.stubGlobal("open", open);
     inDesktopShell();
     parkedAtRedirect("https://broker/authorize?state=xyz");
 
@@ -277,8 +277,8 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("hands the manual resume to the system browser too, not just the first attempt", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
+    const open = rs.fn();
+    rs.stubGlobal("open", open);
     inDesktopShell();
     parkedAtRedirect("https://broker/authorize?state=parked");
 
@@ -294,10 +294,10 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("keeps the manual resume a same-window navigation in a browser", async () => {
-    const assign = vi.fn();
-    const open = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    vi.stubGlobal("open", open);
+    const assign = rs.fn();
+    const open = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
+    rs.stubGlobal("open", open);
     parkedAtRedirect("https://broker/authorize?state=parked");
 
     renderSection(githubCard("unauthorized", { activeSetupCid: "setup-parked" }));
@@ -311,8 +311,8 @@ describe("OAuthConnectionSection", () => {
   });
 
   it("parks Reconnect on the pending controls instead of leaving a re-clickable button", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
+    const open = rs.fn();
+    rs.stubGlobal("open", open);
     inDesktopShell();
     parkedAtRedirect("https://broker/authorize?state=reauth");
 

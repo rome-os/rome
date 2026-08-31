@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { useEffect } from "react";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function Navigator({ to }: { to: string }) {
@@ -33,7 +33,7 @@ function Navigator({ to }: { to: string }) {
 }
 
 function makeFetchSpy() {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  return rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url === "/api/health") {
       return new Response(JSON.stringify({ status: "ok" }), { status: 200 });

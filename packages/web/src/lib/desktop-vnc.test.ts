@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import {
   buildPasteKeySequence,
   computeFitTransform,
@@ -47,14 +47,14 @@ describe("isPasteShortcut", () => {
 describe("createDeferredPasteController", () => {
   it("waits until modifiers are released before sending pasted text", async () => {
     let resolveClipboardText = () => {};
-    const readClipboardText = vi.fn(
+    const readClipboardText = rs.fn(
       () =>
         new Promise((resolve) => {
           resolveClipboardText = () => resolve("PA");
         }),
     );
-    const onPasteText = vi.fn();
-    const onPasteError = vi.fn();
+    const onPasteText = rs.fn();
+    const onPasteError = rs.fn();
     const controller = createDeferredPasteController({
       readClipboardText,
       onPasteText,
@@ -79,10 +79,10 @@ describe("createDeferredPasteController", () => {
   });
 
   it("reports an empty clipboard once the paste shortcut fully releases", async () => {
-    const onPasteText = vi.fn();
-    const onPasteError = vi.fn();
+    const onPasteText = rs.fn();
+    const onPasteError = rs.fn();
     const controller = createDeferredPasteController({
-      readClipboardText: vi.fn().mockResolvedValue(""),
+      readClipboardText: rs.fn().mockResolvedValue(""),
       onPasteText,
       onPasteError,
     });
@@ -181,8 +181,8 @@ function createKeyEvent(overrides = {}) {
     metaKey: false,
     altKey: false,
     shiftKey: false,
-    preventDefault: vi.fn(),
-    stopPropagation: vi.fn(),
+    preventDefault: rs.fn(),
+    stopPropagation: rs.fn(),
     ...overrides,
   };
 }

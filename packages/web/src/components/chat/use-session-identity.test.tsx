@@ -1,13 +1,13 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { AgentCatalogGroup, ChatSession } from "@/lib/chat-types";
 import { setPresentationMode } from "@/lib/presentation-mode";
 import { useSessionIdentity } from "./use-session-identity";
 
-vi.mock("@/lib/chat-api", () => ({
-  getSession: vi.fn(),
-  listChatAgents: vi.fn(),
+rs.mock("@/lib/chat-api", () => ({
+  getSession: rs.fn(),
+  listChatAgents: rs.fn(),
 }));
 
 import { getSession, listChatAgents } from "@/lib/chat-api";
@@ -40,13 +40,13 @@ const groups: AgentCatalogGroup[] = [
 
 afterEach(() => {
   window.localStorage.clear();
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 describe("useSessionIdentity presentation mode", () => {
   it("masks the pinned-agent mention while presentation mode is on, and restores it when off", async () => {
-    vi.mocked(getSession).mockResolvedValue(session);
-    vi.mocked(listChatAgents).mockResolvedValue(groups);
+    rs.mocked(getSession).mockResolvedValue(session);
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
 
     const { result } = renderHook(() => useSessionIdentity("s1"));
     await waitFor(() => expect(result.current.pinnedAgentMention?.appLabel).toBe("Replay"));
@@ -61,13 +61,13 @@ describe("useSessionIdentity presentation mode", () => {
     // Purely a rendering mask: toggling off restores the mention without a refetch.
     act(() => setPresentationMode(false));
     expect(result.current.pinnedAgentMention?.appLabel).toBe("Replay");
-    expect(vi.mocked(getSession)).toHaveBeenCalledTimes(1);
+    expect(rs.mocked(getSession)).toHaveBeenCalledTimes(1);
   });
 
   it("resolves as masked when presentation mode was already on at mount", async () => {
     setPresentationMode(true);
-    vi.mocked(getSession).mockResolvedValue(session);
-    vi.mocked(listChatAgents).mockResolvedValue(groups);
+    rs.mocked(getSession).mockResolvedValue(session);
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
 
     const { result } = renderHook(() => useSessionIdentity("s1"));
     await waitFor(() => expect(result.current.sessionName).toBe("Planning the launch"));

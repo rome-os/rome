@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -19,8 +19,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
 });
 
 function LocationProbe() {
@@ -29,7 +29,7 @@ function LocationProbe() {
 }
 
 function mockIdentity(identity: DashboardIdentity) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  return rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/auth/me") {
       return new Response(JSON.stringify(identity), {
@@ -129,8 +129,8 @@ describe("ProfileMenu", () => {
       displayName: "Evan",
       avatarUrl: null,
     });
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
+    const assign = rs.fn();
+    rs.stubGlobal("location", { ...window.location, assign });
     renderMenu();
 
     await userEvent.click(screen.getByRole("button", { name: "Account" }));
@@ -152,7 +152,7 @@ describe("ProfileMenu", () => {
       naturalWidth = 32;
       src = "";
     }
-    vi.stubGlobal("Image", LoadedImage);
+    rs.stubGlobal("Image", LoadedImage);
     mockIdentity({
       kind: "guardian",
       userId: "u1",

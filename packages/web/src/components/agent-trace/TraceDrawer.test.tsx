@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { UsageSummaryBlock } from "@/components/chat/blocks/UsageSummaryBlock";
 import {
   TraceDrawer,
@@ -10,7 +10,7 @@ import {
 } from "./TraceDrawer";
 
 const translate = (key: string) => key;
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: translate }),
 }));
 
@@ -108,7 +108,7 @@ describe("traceDrawerOpenPlacementClass", () => {
 
 describe("TraceDrawer subagent usage", () => {
   it("loads included usage by default and refetches when the switch is disabled", async () => {
-    const loadStoredTrace = vi.fn(async (_messageId: string, include: boolean) =>
+    const loadStoredTrace = rs.fn(async (_messageId: string, include: boolean) =>
       usageSnapshot(include),
     );
     render(

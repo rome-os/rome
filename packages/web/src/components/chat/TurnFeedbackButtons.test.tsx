@@ -1,13 +1,13 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { TurnFeedbackButtons } from "./TurnFeedbackButtons";
 
-const autoPlaceApp = vi.fn();
-vi.mock("@/pages/free/use-free-cells", () => ({
+const autoPlaceApp = rs.fn();
+rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
 }));
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
@@ -24,19 +24,19 @@ class InertIntersectionObserver {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("IntersectionObserver", InertIntersectionObserver);
+  rs.stubGlobal("IntersectionObserver", InertIntersectionObserver);
 });
 
 afterEach(() => {
   cleanup();
   autoPlaceApp.mockClear();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
 });
 
 describe("TurnFeedbackButtons", () => {
   it("opens the feedback processing session returned by the server", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
         feedback: { rating: "negative", comment: "Too long", updatedAt: 1 },
         processing: { appId: "sessions", route: "feedback-fork-session" },

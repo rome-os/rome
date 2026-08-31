@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { describeToolSummary, toolStepDotClass } from "./ToolStepBlock";
 
 const t = (key: string) => key;

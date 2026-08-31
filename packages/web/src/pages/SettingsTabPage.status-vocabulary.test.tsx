@@ -1,26 +1,26 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import SettingsPage from "./SettingsTabPage";
 
-vi.mock("@/components/system-upgrade-section", () => ({
+rs.mock("@/components/system-upgrade-section", () => ({
   SystemUpgradeSection: () => null,
 }));
 
-vi.mock("@/components/system-diagnosis-section", () => ({
+rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-vi.mock("@/hooks/use-tailscale-connect", () => ({
+rs.mock("@/hooks/use-tailscale-connect", () => ({
   useTailscaleConnect: () => ({
     authUrl: null,
     connecting: false,
     error: null,
-    handleConnect: vi.fn(),
-    clearAuthUrl: vi.fn(),
+    handleConnect: rs.fn(),
+    clearAuthUrl: rs.fn(),
   }),
 }));
 
@@ -30,7 +30,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function response(json: unknown): Response {
@@ -42,7 +42,7 @@ function response(json: unknown): Response {
 }
 
 function renderAdvanced(tailscale: Record<string, unknown>, relay: Record<string, unknown> | null) {
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/settings") return response({});
     if (url === "/api/tailscale/devices") return response(tailscale);

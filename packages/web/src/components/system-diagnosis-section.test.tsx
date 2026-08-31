@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 type Diagnosis = {
@@ -52,7 +52,7 @@ function diagnosis(overrides: Partial<Diagnosis> = {}): Diagnosis {
 
 function mockDiagnosis(...responses: Array<{ status: number; body: unknown }>) {
   const queue = [...responses];
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     if (String(input) !== "/api/diagnosis") throw new Error(`unexpected request: ${input}`);
     const next = queue.length > 1 ? queue.shift()! : queue[0];
     return new Response(JSON.stringify(next.body), {

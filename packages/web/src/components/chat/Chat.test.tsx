@@ -1,9 +1,10 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
 import {
   deleteSession,
@@ -14,64 +15,64 @@ import {
 } from "@/lib/chat-api";
 
 const t = (key: string) => key;
-const mockUseSessionIdentity = vi.hoisted(() => vi.fn());
+const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
 }));
 
-vi.mock("@/components/chat/use-session-identity", () => ({
+rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
 
-vi.mock("@/pages/free/workspace-context", () => ({
+rs.mock("@/pages/free/workspace-context", () => ({
   snapshotWorkspaceForSend: () => null,
   useWorkspaceContextRegistry: () => null,
 }));
 
-vi.mock("@/pages/free/workspace-event-bus", () => ({
+rs.mock("@/pages/free/workspace-event-bus", () => ({
   useWorkspaceEventBus: () => null,
 }));
 
-vi.mock("@/pages/free/use-free-cells", () => ({
-  autoPlaceApp: vi.fn(),
-  useFreeCells: () => ({ addWidget: vi.fn(), placements: [] }),
+rs.mock("@/pages/free/use-free-cells", () => ({
+  autoPlaceApp: rs.fn(),
+  useFreeCells: () => ({ addWidget: rs.fn(), placements: [] }),
 }));
 
-vi.mock("@/hooks/use-stick-to-bottom", () => ({
+rs.mock("@/hooks/use-stick-to-bottom", () => ({
   // Callback refs, matching the real hook. Chat composes these with its own
   // refs and CALLS them, so a ref object here would throw on mount — and a
-  // vi.mock factory is not checked against the module's real shape, so nothing
+  // rs.mock factory is not checked against the module's real shape, so nothing
   // but a test run would catch it.
   useStickToBottom: () => ({
-    contentRef: vi.fn(),
-    scrollRef: vi.fn(),
-    scrollToBottom: vi.fn(),
+    contentRef: rs.fn(),
+    scrollRef: rs.fn(),
+    scrollToBottom: rs.fn(),
   }),
 }));
 
-vi.mock("@/hooks/use-smooth-text", () => ({
+rs.mock("@/hooks/use-smooth-text", () => ({
   useSmoothText: (text: string) => text,
 }));
 
-vi.mock("@/components/agent-trace/TraceDrawer", () => ({
+rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
   traceDrawerContentInsetClass: () => "",
 }));
 
-vi.mock("@/components/chat/AgentAvatar", () => ({
+rs.mock("@/components/chat/AgentAvatar", () => ({
   AgentAvatar: () => null,
 }));
 
-vi.mock("@/components/chat/ShareBar", () => ({
+rs.mock("@/components/chat/ShareBar", () => ({
   ShareBar: () => null,
 }));
 
-vi.mock("@/pages/free/WidgetPicker", () => ({
+rs.mock("@/pages/free/WidgetPicker", () => ({
   WidgetPicker: () => null,
 }));
 
-vi.mock("@/components/chat/MessageList", () => ({
+rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({ live }: { live: { identity: { name: string } } }) => (
     <div data-testid="message-list">{live.identity.name}</div>
   ),
@@ -80,7 +81,7 @@ vi.mock("@/components/chat/MessageList", () => ({
   hasPendingApprovalConfirmation: () => false,
 }));
 
-vi.mock("@/components/chat/ChatComposer", () => ({
+rs.mock("@/components/chat/ChatComposer", () => ({
   // Expose the streaming state + Stop wiring so tests can drive stopMessage
   // the way the real composer's Stop button does.
   ChatComposer: (props: { isStreaming?: boolean; onStop?: () => void }) => (
@@ -92,25 +93,24 @@ vi.mock("@/components/chat/ChatComposer", () => ({
   ),
 }));
 
-vi.mock("@/components/chat/blocks", () => ({
+rs.mock("@/components/chat/blocks", () => ({
   renderFlatBlocks: () => null,
   renderSingleBlock: () => null,
 }));
 
-vi.mock("@/lib/chat-api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/chat-api")>();
+rs.mock("@/lib/chat-api", () => {
   return {
-    ...actual,
-    deleteSession: vi.fn(),
-    interruptTurn: vi.fn(),
-    listSessionMessages: vi.fn().mockResolvedValue([]),
-    listSessionTurns: vi.fn().mockResolvedValue([{ turnId: "turn-1", status: "running" }]),
-    markSessionRead: vi.fn().mockResolvedValue({
+    ...chatApiModule,
+    deleteSession: rs.fn(),
+    interruptTurn: rs.fn(),
+    listSessionMessages: rs.fn().mockResolvedValue([]),
+    listSessionTurns: rs.fn().mockResolvedValue([{ turnId: "turn-1", status: "running" }]),
+    markSessionRead: rs.fn().mockResolvedValue({
       sessionId: "session-1",
       lastSeenActivityAt: null,
       unread: false,
     }),
-    openTurnStream: vi.fn((_turnId: string, signal?: AbortSignal) => {
+    openTurnStream: rs.fn((_turnId: string, signal?: AbortSignal) => {
       const body = new ReadableStream({
         start(controller) {
           signal?.addEventListener(
@@ -122,8 +122,8 @@ vi.mock("@/lib/chat-api", async (importOriginal) => {
       });
       return Promise.resolve(new Response(body));
     }),
-    postSessionTurn: vi.fn(),
-    postSessionTurnJson: vi.fn(),
+    postSessionTurn: rs.fn(),
+    postSessionTurnJson: rs.fn(),
   };
 });
 
@@ -178,10 +178,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
+  rs.useRealTimers();
   cleanup();
-  vi.clearAllMocks();
-  vi.unstubAllGlobals();
+  rs.clearAllMocks();
+  rs.unstubAllGlobals();
   MockEventSource.instances = [];
 });
 
@@ -212,8 +212,8 @@ describe("Chat agent identity", () => {
 
 describe("Chat session events", () => {
   it("delivers a validated inserted message to the active session", async () => {
-    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-    const onSessionMessage = vi.fn();
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const onSessionMessage = rs.fn();
     renderChat(<Chat sessionId="session-1" onSessionMessage={onSessionMessage} />);
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
@@ -232,8 +232,8 @@ describe("Chat session events", () => {
   });
 
   it("refreshes the session list when a generated name arrives", async () => {
-    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-    const onSessionsChanged = vi.fn();
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const onSessionsChanged = rs.fn();
     renderChat(<Chat sessionId="session-1" onSessionsChanged={onSessionsChanged} />);
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
@@ -249,12 +249,12 @@ describe("Chat session events", () => {
   });
 
   it("resyncs messages after reconnect and when the session event stream closes", async () => {
-    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     renderChat(<Chat sessionId="session-1" />);
 
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
-    vi.mocked(listSessionMessages).mockClear();
+    rs.mocked(listSessionMessages).mockClear();
     const source = MockEventSource.instances[0]!;
 
     act(() => {
@@ -266,7 +266,7 @@ describe("Chat session events", () => {
     act(() => source.emitLifecycle("open", MockEventSource.OPEN));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
 
-    vi.mocked(listSessionMessages).mockClear();
+    rs.mocked(listSessionMessages).mockClear();
     act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
   });
@@ -291,7 +291,7 @@ describe("Chat turn stream lifecycle", () => {
     const { unmount } = renderChat(<Chat sessionId="session-1" />);
 
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
-    const signal = vi.mocked(openTurnStream).mock.calls[0]?.[1];
+    const signal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
     expect(signal?.aborted).toBe(false);
 
     unmount();
@@ -310,14 +310,14 @@ describe("Chat turn stream lifecycle", () => {
     // The reattach poll installs the streaming entry for turn-1; the mocked
     // stream never emits, mirroring a dead connection.
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
-    const signal = vi.mocked(openTurnStream).mock.calls[0]?.[1];
+    const signal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
     expect(signal?.aborted).toBe(false);
 
     // The turn is over server-side: interrupt 404s and the turn list is empty
     // (so the reattach poll can't resurrect the entry).
-    vi.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
-    const reloadsBeforeStop = vi.mocked(listSessionMessages).mock.calls.length;
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    const reloadsBeforeStop = rs.mocked(listSessionMessages).mock.calls.length;
 
     fireEvent.click(screen.getByTestId("stop-button"));
 
@@ -330,30 +330,30 @@ describe("Chat turn stream lifecycle", () => {
     );
     expect(signal?.aborted).toBe(true);
     await waitFor(() =>
-      expect(vi.mocked(listSessionMessages).mock.calls.length).toBeGreaterThan(reloadsBeforeStop),
+      expect(rs.mocked(listSessionMessages).mock.calls.length).toBeGreaterThan(reloadsBeforeStop),
     );
   });
 
   it("keeps Stop available while the server still reports the turn running", async () => {
-    vi.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
-    vi.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 202 }));
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
-    const signal = vi.mocked(openTurnStream).mock.calls[0]?.[1];
+    const signal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
 
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     fireEvent.click(screen.getByTestId("stop-button"));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_500);
+      await rs.advanceTimersByTimeAsync(2_500);
     });
     expect(signal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
 
     // Retry is real, and a missed done can still be recovered once confirmed.
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getByTestId("stop-button"));
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_500);
+      await rs.advanceTimersByTimeAsync(2_500);
     });
     expect(interruptTurn).toHaveBeenCalledTimes(2);
     expect(signal?.aborted).toBe(true);
@@ -362,8 +362,8 @@ describe("Chat turn stream lifecycle", () => {
 
   it("does not let a delayed force-release abort a fresh stream for the same turn", async () => {
     const streamControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
-    vi.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-    vi.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           streamControllers.push(controller);
@@ -376,15 +376,15 @@ describe("Chat turn stream lifecycle", () => {
       });
       return Promise.resolve(new Response(body));
     });
-    vi.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 200 }));
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 200 }));
     renderChat(<Chat sessionId="session-1" />);
 
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
-    const originalSignal = vi.mocked(openTurnStream).mock.calls[0]?.[1];
+    const originalSignal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
     expect(originalSignal?.aborted).toBe(false);
 
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     fireEvent.click(screen.getByTestId("stop-button"));
     await act(async () => {
       await Promise.resolve();
@@ -399,16 +399,16 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(openTurnStream).toHaveBeenCalledTimes(2);
-    const replacementSignal = vi.mocked(openTurnStream).mock.calls[1]?.[1];
+    const replacementSignal = rs.mocked(openTurnStream).mock.calls[1]?.[1];
     expect(replacementSignal?.aborted).toBe(false);
 
     // The old Stop timer fires at 2.5s. It must recognize that the controller
     // changed instead of aborting the healthy replacement.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(500);
+      await rs.advanceTimersByTimeAsync(500);
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");

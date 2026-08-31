@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { ActionInputSchema } from "@/hooks/use-action-catalog";
 import {
   buildArgsTemplate,

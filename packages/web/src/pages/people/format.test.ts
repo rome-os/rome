@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, vi } from "vitest";
+import { describe, expect, it, afterEach, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import { dayLabel, startOfDay } from "./format";
 
@@ -14,10 +14,12 @@ function localNoon(year: number, month: number, day: number): number {
 }
 
 describe("dayLabel", () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    rs.useRealTimers();
+  });
 
   it("carries the year only once a date needs it to be unambiguous", () => {
-    vi.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
+    rs.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
     // Inside this year the shorter label is unambiguous, so it stays short.
     expect(dayLabel(t, startOfDay(localNoon(2026, 3, 5)), "en")).toBe("Mar 5");
     // Past it, a timeline paging backwards reaches days that share a label
@@ -26,7 +28,7 @@ describe("dayLabel", () => {
   });
 
   it("names today and yesterday", () => {
-    vi.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
+    rs.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
     expect(dayLabel(t, startOfDay(localNoon(2026, 6, 10)), "en")).toBe("timeline.today");
     expect(dayLabel(t, startOfDay(localNoon(2026, 6, 9)), "en")).toBe("timeline.yesterday");
   });
@@ -34,12 +36,12 @@ describe("dayLabel", () => {
   it("still says yesterday across a daylight-saving change", () => {
     // US DST ends 2026-11-01, so 2026-11-01 local is 25 hours long: the day
     // before 11-02 is not "now minus 86,400 seconds".
-    vi.useFakeTimers().setSystemTime(new Date(2026, 10, 2, 9, 0, 0));
+    rs.useFakeTimers().setSystemTime(new Date(2026, 10, 2, 9, 0, 0));
     expect(dayLabel(t, startOfDay(localNoon(2026, 11, 1)), "en")).toBe("timeline.yesterday");
   });
 
   it("falls back to a date for anything older", () => {
-    vi.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
+    rs.useFakeTimers().setSystemTime(new Date(2026, 5, 10, 9, 0, 0));
     expect(dayLabel(t, startOfDay(localNoon(2026, 6, 8)), "en")).not.toBe("timeline.yesterday");
   });
 });

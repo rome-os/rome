@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ChatLink } from "./ChatLink";
@@ -14,8 +14,8 @@ import {
   type WorkspaceEventBus,
 } from "@/pages/free/workspace-event-bus";
 
-const autoPlaceApp = vi.fn();
-vi.mock("@/pages/free/use-free-cells", () => ({
+const autoPlaceApp = rs.fn();
+rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
 }));
 

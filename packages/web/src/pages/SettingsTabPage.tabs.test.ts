@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { normalizeTab, TABS, VISIBLE_TABS } from "./SettingsTabPage";
 
 describe("SettingsTabPage tabs (Connection migration)", () => {

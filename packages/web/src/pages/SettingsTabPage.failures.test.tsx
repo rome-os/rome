@@ -1,20 +1,20 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { toast } from "sonner";
 import i18n from "@/i18n";
 import SettingsPage from "./SettingsTabPage";
 
-vi.mock("sonner", () => ({
+rs.mock("sonner", () => ({
   toast: Object.assign(
-    vi.fn(() => "toast-id"),
+    rs.fn(() => "toast-id"),
     {
-      success: vi.fn(),
-      error: vi.fn(),
-      dismiss: vi.fn(),
+      success: rs.fn(),
+      error: rs.fn(),
+      dismiss: rs.fn(),
     },
   ),
 }));
@@ -25,8 +25,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
+  rs.restoreAllMocks();
+  rs.clearAllMocks();
 });
 
 function response(ok: boolean, status: number, json: unknown): Response {
@@ -74,7 +74,7 @@ function renderSettings(path = "/settings/advanced") {
 describe("SettingsPage failures", () => {
   it("replaces settings content with the load error and retries the request", async () => {
     let settingsLoads = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") {
         settingsLoads += 1;
@@ -101,7 +101,7 @@ describe("SettingsPage failures", () => {
 
   it("shows a save failure toast whose retry action reissues the rejected patch", async () => {
     let putAttempts = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -123,7 +123,7 @@ describe("SettingsPage failures", () => {
     await userEvent.click(await screen.findByText("Route large models to Fable"));
 
     await waitFor(() =>
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+      expect(rs.mocked(toast.error)).toHaveBeenCalledWith(
         "Save exploded",
         expect.objectContaining({
           action: expect.objectContaining({ label: "Retry", onClick: expect.any(Function) }),
@@ -131,10 +131,10 @@ describe("SettingsPage failures", () => {
       ),
     );
 
-    const retry = vi.mocked(toast.error).mock.calls[0]?.[1]?.action as { onClick: () => void };
+    const retry = rs.mocked(toast.error).mock.calls[0]?.[1]?.action as { onClick: () => void };
     act(() => retry.onClick());
 
     await waitFor(() => expect(putAttempts).toBe(2));
-    expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Settings saved");
+    expect(rs.mocked(toast.success)).toHaveBeenCalledWith("Settings saved");
   });
 });

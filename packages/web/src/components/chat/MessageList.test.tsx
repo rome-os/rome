@@ -1,16 +1,16 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 // RomeLogo (the avatar fallback) renders an SVG mask that jsdom can't construct;
 // stub it so the transcript renders. Same approach as ChatComponent.test.tsx.
-vi.mock("@/components/logo", () => ({
+rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
-vi.mock("@/components/chat/TurnBranchButton", () => ({
+rs.mock("@/components/chat/TurnBranchButton", () => ({
   TurnBranchButton: () => <button type="button">side-chat-branch</button>,
 }));
-vi.mock("@/components/chat/TurnFeedbackButtons", () => ({
+rs.mock("@/components/chat/TurnFeedbackButtons", () => ({
   TurnFeedbackButtons: () => null,
 }));
 import {

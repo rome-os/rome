@@ -1,9 +1,9 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
 import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
@@ -14,19 +14,19 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
 });
 
 /** jsdom has no matchMedia; stub one whose coarse-pointer query answers `matches`. */
 function stubCoarsePointer(matches: boolean) {
-  vi.stubGlobal(
+  rs.stubGlobal(
     "matchMedia",
-    vi.fn((query: string) => ({
+    rs.fn((query: string) => ({
       matches: query === "(hover: none) and (pointer: coarse)" ? matches : false,
       media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: rs.fn(),
+      removeEventListener: rs.fn(),
     })),
   );
 }
@@ -54,7 +54,7 @@ interface RenderComposerOptions {
 function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
   ) => {
     const url = String(input);
@@ -87,7 +87,7 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     ...render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <ChatComposer onSend={vi.fn()} {...props} />
+          <ChatComposer onSend={rs.fn()} {...props} />
         </QueryClientProvider>
       </MemoryRouter>,
     ),
@@ -163,7 +163,7 @@ describe("composer error status", () => {
 // its × (there is no separate "Collaborating with" bar anymore).
 describe("composer handoff bar", () => {
   it("offers Approve when the specialist has a pending submission", () => {
-    const onApprove = vi.fn();
+    const onApprove = rs.fn();
     renderComposer({ designingInteraction: { agentLabel: "Workflow author", onApprove } });
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
@@ -171,7 +171,7 @@ describe("composer handoff bar", () => {
   });
 
   it("hosts Cancel on the floor agent chip (no Approve) before a submission", () => {
-    const onCancel = vi.fn();
+    const onCancel = rs.fn();
     renderComposer({
       // During a handoff the floor agent is pinned — that chip carries the ×.
       pinnedAgentMention: {
@@ -199,7 +199,7 @@ describe("composer handoff bar", () => {
 describe("composer Enter key", () => {
   it("sends on Enter on desktop (fine pointer)", () => {
     stubCoarsePointer(false);
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = rs.fn().mockResolvedValue(undefined);
     renderComposer({ onSend });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
@@ -212,7 +212,7 @@ describe("composer Enter key", () => {
 
   it("does not send on Enter on touch-first devices (Enter is a newline there)", () => {
     stubCoarsePointer(true);
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = rs.fn().mockResolvedValue(undefined);
     renderComposer({ onSend });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
@@ -230,7 +230,7 @@ describe("composer Enter key", () => {
 
 describe("composer scoped slash skill", () => {
   it("keeps the picker open through a scoped canonical id and submits its full name", async () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = rs.fn().mockResolvedValue(undefined);
     renderComposer({ onSend });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
@@ -268,7 +268,7 @@ describe("composer textarea height", () => {
   // stayed at whatever it had grown to. The fix syncs the height from a
   // useEffect on `inputText`, so the post-send reset shrinks the box.
   it("shrinks back to one line box after sending a multi-line message", () => {
-    const onSend = vi.fn().mockResolvedValue(undefined);
+    const onSend = rs.fn().mockResolvedValue(undefined);
     renderComposer({ onSend });
 
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;

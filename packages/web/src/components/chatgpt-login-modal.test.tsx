@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ChatGPTLoginModal } from "./chatgpt-login-modal";
 
@@ -15,12 +15,12 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 describe("ChatGPTLoginModal", () => {
   it("shows an asynchronous browser-login failure returned by AI tool status", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/desktop/navigate-chatgpt" && init?.method === "POST") {
         return Response.json({ ok: true });

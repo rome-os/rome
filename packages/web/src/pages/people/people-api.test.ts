@@ -12,8 +12,8 @@
  * wire. Dismissal reads as `state: "dismissed"` with a null person, and no
  * /api/people route resolves the sentinel id.
  */
-// @vitest-environment jsdom
-import { afterAll, beforeAll, expect, test } from "vitest";
+// @rstest-environment jsdom
+import { afterAll, beforeAll, expect, test } from "@rstest/core";
 import { setupServer } from "msw/node";
 import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
 import { channelMirrorHandlers } from "../../../mock/handlers/people";

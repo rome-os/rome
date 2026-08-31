@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// @rstest-environment jsdom
+import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";

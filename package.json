@@ -72,8 +72,8 @@
   "devDependencies": {
     "@biomejs/biome": "2.3.6",
     "@inquirer/prompts": "^8.4.2",
-    "@rstest/core": "^0.11.10",
-    "@rstest/coverage-v8": "^0.11.10",
+    "@rstest/core": "^0.11.11",
+    "@rstest/coverage-v8": "^0.11.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
     "@types/qrcode": "^1.5.6",

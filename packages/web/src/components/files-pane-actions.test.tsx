@@ -1,6 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import {
   FileActionDropdownMenuItems,
   FileActionSheet,
@@ -36,15 +37,15 @@ function createActions(): ContextMenuActions {
     logicalRootPath: "/projects",
     rootLabel: "projects",
     canStartChatFromFolder: true,
-    onCreatePath: vi.fn(),
-    onCopyPath: vi.fn(),
-    onDownloadPaths: vi.fn(),
-    onUploadForFolder: vi.fn(),
-    onUploadFolderForFolder: vi.fn(),
-    onStartChatHere: vi.fn(),
-    onRenamePath: vi.fn(),
-    onRequestMovePath: vi.fn(),
-    onRequestDeletePaths: vi.fn(),
+    onCreatePath: rs.fn(),
+    onCopyPath: rs.fn(),
+    onDownloadPaths: rs.fn(),
+    onUploadForFolder: rs.fn(),
+    onUploadFolderForFolder: rs.fn(),
+    onStartChatHere: rs.fn(),
+    onRenamePath: rs.fn(),
+    onRequestMovePath: rs.fn(),
+    onRequestDeletePaths: rs.fn(),
     labelSelectedItems: (count) => `${count} selected`,
     labelNewFile: "New file",
     labelNewFolder: "New folder",
@@ -71,13 +72,13 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  rs.useRealTimers();
 });
 
 describe("compact file item actions", () => {
   it("opens from the visible action button without selecting the file", () => {
-    const onSelect = vi.fn();
-    const onOpenActions = vi.fn();
+    const onSelect = rs.fn();
+    const onOpenActions = rs.fn();
     render(
       <FileRow
         node={fileNode}
@@ -94,9 +95,9 @@ describe("compact file item actions", () => {
   });
 
   it("opens after a touch long-press and suppresses the release click", () => {
-    vi.useFakeTimers();
-    const onSelect = vi.fn();
-    const onOpenActions = vi.fn();
+    rs.useFakeTimers();
+    const onSelect = rs.fn();
+    const onOpenActions = rs.fn();
     render(
       <FileRow
         node={fileNode}
@@ -108,7 +109,7 @@ describe("compact file item actions", () => {
     const fileButton = screen.getByRole("button", { name: "notes.md" });
 
     fireEvent.pointerDown(fileButton, { pointerType: "touch" });
-    act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
+    act(() => rs.advanceTimersByTime(LONG_PRESS_MS));
     expect(onOpenActions).toHaveBeenCalledWith(fileNode);
 
     fireEvent.pointerUp(fileButton, { pointerType: "touch" });
@@ -117,12 +118,12 @@ describe("compact file item actions", () => {
   });
 
   it("cancels long-press when the pointer moves or lifts early", () => {
-    vi.useFakeTimers();
-    const onOpenActions = vi.fn();
+    rs.useFakeTimers();
+    const onOpenActions = rs.fn();
     const { rerender } = render(
       <FileRow
         node={fileNode}
-        onSelect={vi.fn()}
+        onSelect={rs.fn()}
         onOpenActions={onOpenActions}
         actions={createActions()}
       />,
@@ -135,13 +136,13 @@ describe("compact file item actions", () => {
       clientX: LONG_PRESS_MOVE_TOLERANCE_PX + 1,
       clientY: 0,
     });
-    act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
+    act(() => rs.advanceTimersByTime(LONG_PRESS_MS));
     expect(onOpenActions).not.toHaveBeenCalled();
 
     rerender(
       <FileRow
         node={fileNode}
-        onSelect={vi.fn()}
+        onSelect={rs.fn()}
         onOpenActions={onOpenActions}
         actions={createActions()}
       />,
@@ -149,13 +150,13 @@ describe("compact file item actions", () => {
     fileButton = screen.getByRole("button", { name: "notes.md" });
     fireEvent.pointerDown(fileButton, { pointerType: "pen" });
     fireEvent.pointerUp(fileButton, { pointerType: "pen" });
-    act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
+    act(() => rs.advanceTimersByTime(LONG_PRESS_MS));
     expect(onOpenActions).not.toHaveBeenCalled();
   });
 
   it("opens from desktop contextmenu without suppressing a later click", () => {
-    const onSelect = vi.fn();
-    const onOpenActions = vi.fn();
+    const onSelect = rs.fn();
+    const onOpenActions = rs.fn();
     render(
       <FileRow
         node={fileNode}
@@ -179,9 +180,9 @@ describe("compact file item actions", () => {
   });
 
   it("does not suppress a later mouse click after a touch press leaves the row", () => {
-    vi.useFakeTimers();
-    const onSelect = vi.fn();
-    const onOpenActions = vi.fn();
+    rs.useFakeTimers();
+    const onSelect = rs.fn();
+    const onOpenActions = rs.fn();
     render(
       <FileRow
         node={fileNode}
@@ -198,7 +199,7 @@ describe("compact file item actions", () => {
     // later: the press is over, so the click that follows belongs to the user.
     fireEvent.pointerDown(fileButton, { pointerType: "touch" });
     fireEvent.pointerLeave(row as HTMLElement, { pointerType: "touch" });
-    act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
+    act(() => rs.advanceTimersByTime(LONG_PRESS_MS));
     expect(onOpenActions).not.toHaveBeenCalled();
 
     row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
@@ -209,14 +210,14 @@ describe("compact file item actions", () => {
   });
 
   it("keeps grid cards clean while preserving touch long-press actions", () => {
-    vi.useFakeTimers();
-    const onOpenActions = vi.fn();
-    render(<FileGridCard node={fileNode} onSelect={vi.fn()} onOpenActions={onOpenActions} />);
+    rs.useFakeTimers();
+    const onOpenActions = rs.fn();
+    render(<FileGridCard node={fileNode} onSelect={rs.fn()} onOpenActions={onOpenActions} />);
     const fileButton = screen.getByRole("button", { name: "notes.md" });
 
     expect(screen.queryByRole("button", { name: "More actions for notes.md" })).toBeNull();
     fireEvent.pointerDown(fileButton, { pointerType: "touch" });
-    act(() => vi.advanceTimersByTime(LONG_PRESS_MS));
+    act(() => rs.advanceTimersByTime(LONG_PRESS_MS));
     expect(onOpenActions).toHaveBeenCalledWith(fileNode);
   });
 });
@@ -253,7 +254,7 @@ describe("shared file action model", () => {
 
   it("renders the shared actions in the compact action sheet", () => {
     const actions = createActions();
-    const onClose = vi.fn();
+    const onClose = rs.fn();
     render(
       <FileActionSheet
         open
@@ -283,7 +284,7 @@ describe("shared file action model", () => {
         path={fileNode.path}
         paths={[fileNode.path]}
         actions={createActions()}
-        onClose={vi.fn()}
+        onClose={rs.fn()}
       />,
     );
 
@@ -319,7 +320,7 @@ describe("shared file action model", () => {
         path={fileNode.path}
         paths={[fileNode.path]}
         actions={createActions()}
-        onClose={vi.fn()}
+        onClose={rs.fn()}
       />,
     );
 
@@ -339,7 +340,7 @@ describe("shared file action model", () => {
         path={fileNode.path}
         paths={[fileNode.path]}
         actions={createActions()}
-        onClose={vi.fn()}
+        onClose={rs.fn()}
       />,
     );
 

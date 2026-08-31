@@ -1,6 +1,6 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { raw, useSseEvent, useSseEvents } from "./use-sse-events";
 
@@ -12,7 +12,7 @@ class MockEventSource {
 
   readonly url: string;
   readonly withCredentials: boolean;
-  readonly close = vi.fn();
+  readonly close = rs.fn();
   readyState = MockEventSource.OPEN;
   private readonly listeners = new Map<string, Set<EventListener>>();
 
@@ -51,23 +51,22 @@ class MockEventSource {
 describe("useSseEvents", () => {
   beforeEach(() => {
     MockEventSource.instances = [];
-    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
   });
 
   afterEach(() => {
     cleanup();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
+    rs.unstubAllGlobals();
+    rs.restoreAllMocks();
   });
 
   it("parses, validates, and dispatches default messages", () => {
-    const handler = vi.fn();
+    const handler = rs.fn();
 
     renderHook(() =>
       useSseEvent("/events", {
         schema: z.object({ count: z.number() }),
         fn: (value) => {
-          expectTypeOf(value).toEqualTypeOf<{ count: number }>();
           handler(value);
         },
       }),
@@ -84,22 +83,20 @@ describe("useSseEvents", () => {
   });
 
   it("dispatches multiple named event schemas over one connection", () => {
-    const countHandler = vi.fn();
-    const labelHandler = vi.fn();
+    const countHandler = rs.fn();
+    const labelHandler = rs.fn();
 
     renderHook(() =>
       useSseEvents("/events", {
         count: {
           schema: z.object({ value: z.number() }),
           fn: (value) => {
-            expectTypeOf(value).toEqualTypeOf<{ value: number }>();
             countHandler(value);
           },
         },
         label: {
           schema: z.object({ value: z.string() }),
           fn: (value) => {
-            expectTypeOf(value).toEqualTypeOf<{ value: string }>();
             labelHandler(value);
           },
         },
@@ -118,8 +115,8 @@ describe("useSseEvents", () => {
   });
 
   it("drops malformed and schema-invalid payloads without logging raw data", () => {
-    const handler = vi.fn();
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const handler = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
     renderHook(() =>
       useSseEvents("/events", {
         update: { schema: z.object({ count: z.number() }), fn: handler },
@@ -143,11 +140,11 @@ describe("useSseEvents", () => {
 
   it("redacts payload-derived Zod paths and messages from validation logs", () => {
     const secret = "private-validation-value";
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
     renderHook(() =>
       useSseEvent("/events", {
         schema: z.string().refine(() => false, { message: `Rejected ${secret}` }),
-        fn: vi.fn(),
+        fn: rs.fn(),
       }),
     );
 
@@ -173,7 +170,7 @@ describe("useSseEvents", () => {
     ["boolean", false],
     ["null", null],
   ])("raw accepts valid JSON %s values", (_category, value) => {
-    const handler = vi.fn();
+    const handler = rs.fn();
     renderHook(() => useSseEvent("/events", { schema: raw, fn: handler }));
 
     act(() => MockEventSource.instances[0].emit("message", JSON.stringify(value)));
@@ -182,8 +179,8 @@ describe("useSseEvents", () => {
   });
 
   it("uses updated schemas and callbacks without reconnecting", () => {
-    const firstHandler = vi.fn();
-    const secondHandler = vi.fn();
+    const firstHandler = rs.fn();
+    const secondHandler = rs.fn();
     const { rerender } = renderHook(
       ({ useSecond }: { useSecond: boolean }) =>
         useSseEvent("/events", {
@@ -203,8 +200,8 @@ describe("useSseEvents", () => {
   });
 
   it("uses updated named callbacks without reconnecting", () => {
-    const alpha = vi.fn();
-    const updatedAlpha = vi.fn();
+    const alpha = rs.fn();
+    const updatedAlpha = rs.fn();
     const { rerender } = renderHook(
       ({ updated }: { updated: boolean }) =>
         useSseEvents("/events", {
@@ -223,7 +220,7 @@ describe("useSseEvents", () => {
   });
 
   it("opens and closes connections when enabled or the URL changes", () => {
-    const handler = vi.fn();
+    const handler = rs.fn();
     const { rerender } = renderHook(
       ({ enabled, url }: { enabled: boolean; url: string }) =>
         useSseEvent(url, { schema: z.string(), fn: handler }, { enabled }),
@@ -247,13 +244,13 @@ describe("useSseEvents", () => {
   });
 
   it("calls the latest reconnect callback only after the first successful open", () => {
-    const firstReconnect = vi.fn();
-    const secondReconnect = vi.fn();
+    const firstReconnect = rs.fn();
+    const secondReconnect = rs.fn();
     const { rerender } = renderHook(
       ({ latest }: { latest: boolean }) =>
         useSseEvent(
           "/events",
-          { schema: z.string(), fn: vi.fn() },
+          { schema: z.string(), fn: rs.fn() },
           { onReconnect: latest ? secondReconnect : firstReconnect },
         ),
       { initialProps: { latest: false } },
@@ -271,13 +268,13 @@ describe("useSseEvents", () => {
   });
 
   it("reports transport errors to the latest callback without replacing the connection", () => {
-    const firstError = vi.fn();
-    const secondError = vi.fn();
+    const firstError = rs.fn();
+    const secondError = rs.fn();
     const { rerender } = renderHook(
       ({ latest }: { latest: boolean }) =>
         useSseEvent(
           "/events",
-          { schema: z.string(), fn: vi.fn() },
+          { schema: z.string(), fn: rs.fn() },
           { onError: latest ? secondError : firstError },
         ),
       { initialProps: { latest: false } },
@@ -300,11 +297,11 @@ describe("useSseEvents", () => {
     const first = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const handler = vi
+    const handler = rs
       .fn<() => Promise<void>>()
       .mockReturnValueOnce(first)
       .mockRejectedValueOnce(new Error("handler failed"));
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
     renderHook(() => useSseEvent("/events", { schema: z.number(), fn: handler }));
     const source = MockEventSource.instances[0];
 
@@ -323,7 +320,7 @@ describe("useSseEvents", () => {
   });
 
   it("removes listeners and closes the connection on unmount", () => {
-    const handler = vi.fn();
+    const handler = rs.fn();
     const { unmount } = renderHook(() =>
       useSseEvents("/events", { changed: { schema: z.string(), fn: handler } }),
     );

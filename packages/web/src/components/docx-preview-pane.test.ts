@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import {
   DOCX_PREVIEW_LAYOUT_CSS,
   DOCX_PREVIEW_OPTIONS,

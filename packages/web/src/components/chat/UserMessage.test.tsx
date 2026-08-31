@@ -1,11 +1,11 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
 import { UserMessage } from "./UserMessage";
 
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
@@ -95,7 +95,7 @@ describe("UserMessage input state", () => {
   });
 
   it("copies only the message, not its delivery status", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const writeText = rs.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },

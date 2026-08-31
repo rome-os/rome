@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -18,7 +18,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function renderDialog(onClose: () => void = () => {}) {
@@ -48,7 +48,7 @@ describe("ShareFeedbackDialog", () => {
 
   it("given typed feedback, when submitted, then it POSTs the body plus client context (route, theme) to /api/feedback and closes", async () => {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -59,7 +59,7 @@ describe("ShareFeedbackDialog", () => {
       return { ok: true, status: 201, json: async () => ({ ok: true }) } as Response;
     }) as typeof fetch);
 
-    const onClose = vi.fn();
+    const onClose = rs.fn();
     const user = userEvent.setup();
     renderDialog(onClose);
 

@@ -23,11 +23,11 @@ importers:
         specifier: ^8.4.2
         version: 8.4.2(@types/node@25.2.3)
       '@rstest/core':
-        specifier: ^0.11.10
-        version: 0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
+        specifier: ^0.11.11
+        version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
       '@rstest/coverage-v8':
-        specifier: ^0.11.10
-        version: 0.11.10(@rstest/core@0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1))
+        specifier: ^0.11.11
+        version: 0.11.11(@rstest/core@0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1))
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -673,8 +673,8 @@ importers:
         specifier: ^2.0.1
         version: 2.0.1(@rsbuild/core@2.2.1(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0))(@rspack/core@2.2.1(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))
       '@rstest/core':
-        specifier: ^0.11.10
-        version: 0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
+        specifier: ^0.11.11
+        version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
       '@streamdown/code':
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.6)
@@ -877,6 +877,9 @@ importers:
       '@rsbuild/plugin-svgr':
         specifier: ^2.0.2
         version: 2.0.2(@rsbuild/core@2.0.7(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0))(@rspack/core@2.2.1(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.21))(typescript@5.9.3)
+      '@rstest/core':
+        specifier: ^0.11.11
+        version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
       '@tailwindcss/postcss':
         specifier: ^4.1.0
         version: 4.1.18
@@ -5753,8 +5756,8 @@ packages:
   '@rspack/resolver@0.4.0':
     resolution: {integrity: sha512-B4AgBTxmZJvxiOlQBNlJaWm8gnYczMlejBcPlhltv1DbL+WmBOnhhfBKmoUxOCb4+NJF70BWv5uYQNkGxj0tFQ==}
 
-  '@rstest/core@0.11.10':
-    resolution: {integrity: sha512-x/PNGPdyKQWbiVhpoOQco8xXevh4P/QamuyJ0/YdTrdEiUcUglT6tGSnxaudwyrQr8e/5gwWuOt6zykZKWmSUg==}
+  '@rstest/core@0.11.11':
+    resolution: {integrity: sha512-7Ii2/2/ex1Oa0Kg5Qk5RKx2+e0I83BHLwH0/gn1B7IDwXCh5msFCF7yTyVGFuMltlm3E8Cf4QD7jadOEaBfXfw==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -5766,8 +5769,8 @@ packages:
       jsdom:
         optional: true
 
-  '@rstest/coverage-v8@0.11.10':
-    resolution: {integrity: sha512-luVEx4OK6QV3ulKDZoCAylVo7UsgHN4akCODHaUe+5gSUyDhWcflvxLTlAOahVOjWXMzlXoeY//uW1Z68iOeCA==}
+  '@rstest/coverage-v8@0.11.11':
+    resolution: {integrity: sha512-66nrUdJWGJVue5d3GAy+EFLV9exBuGlZPn/6No7mgFzCD7DQ36Qyj9f6RZnA2XBrGWzOXXFRgjukG86x04ILvg==}
     peerDependencies:
       '@rstest/core': ^0.11.3
 
@@ -17120,7 +17123,7 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  '@rstest/core@0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)':
+  '@rstest/core@0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)':
     dependencies:
       '@rsbuild/core': 2.2.1(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)
       '@types/chai': 5.2.3
@@ -17130,10 +17133,10 @@ snapshots:
       - '@module-federation/runtime-tools'
       - core-js
 
-  '@rstest/coverage-v8@0.11.10(@rstest/core@0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1))':
+  '@rstest/coverage-v8@0.11.11(@rstest/core@0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
-      '@rstest/core': 0.11.10(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
+      '@rstest/core': 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
       istanbul-lib-coverage: 3.2.2
       istanbul-lib-report: 3.0.1
       istanbul-reports: 3.2.0

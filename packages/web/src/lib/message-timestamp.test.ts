@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { formatMessageTimestamp } from "./message-timestamp";
 
 // The reference "now": July 10, 2026, 20:00 local time.

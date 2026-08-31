@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && rsbuild build",
     "typecheck": "tsc --noEmit",
     "preview": "rsbuild preview",
-    "test": "../../scripts/test-env.sh vitest run --config vitest.config.mts",
+    "test": "../../scripts/test-env.sh rstest",
     "test:layout": "playwright test"
   },
   "dependencies": {
@@ -64,6 +64,7 @@
     "@rsbuild/core": "^2.0.7",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rsbuild/plugin-svgr": "^2.0.2",
+    "@rstest/core": "^0.11.11",
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

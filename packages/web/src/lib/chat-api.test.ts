@@ -1,15 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { postSessionTurn } from "./chat-api";
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  rs.unstubAllGlobals();
 });
 
 describe("postSessionTurn", () => {
   it("preserves structured model resolution errors from the server", async () => {
-    vi.stubGlobal(
+    rs.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      rs.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
             error: "Selected model provider is unavailable: Codex",

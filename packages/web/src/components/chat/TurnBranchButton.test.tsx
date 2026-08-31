@@ -1,25 +1,25 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { TurnBranchButton } from "./TurnBranchButton";
 
-const autoPlaceApp = vi.fn();
-vi.mock("@/pages/free/use-free-cells", () => ({
+const autoPlaceApp = rs.fn();
+rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
 }));
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 afterEach(() => {
   cleanup();
   autoPlaceApp.mockClear();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 describe("TurnBranchButton", () => {
   it("quick-sends a suggested prompt and opens the returned Sessions route", async () => {
-    const fetchMock = vi
+    const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         Response.json(
@@ -45,7 +45,7 @@ describe("TurnBranchButton", () => {
   });
 
   it("submits a trimmed custom prompt", async () => {
-    const fetchMock = vi
+    const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         Response.json(

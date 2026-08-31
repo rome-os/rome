@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RoutineDraftCard } from "./RoutineDraftCard";
@@ -8,13 +8,13 @@ import type { RoutineDraftSpec } from "@/lib/chat-types";
 
 // The card reaches the backend through exactly these two calls; stub them so
 // the component renders from fixture data alone — no agent, no server.
-vi.mock("@/lib/chat-api", () => ({
-  createRoutine: vi.fn(),
-  listRoutineNames: vi.fn(),
+rs.mock("@/lib/chat-api", () => ({
+  createRoutine: rs.fn(),
+  listRoutineNames: rs.fn(),
 }));
 
-const mockCreate = vi.mocked(createRoutine);
-const mockList = vi.mocked(listRoutineNames);
+const mockCreate = rs.mocked(createRoutine);
+const mockList = rs.mocked(listRoutineNames);
 
 const eventDraft: RoutineDraftSpec = {
   sentence: "When you get an email from Dana, Rome will summarize it and text you.",
@@ -54,7 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 describe("RoutineDraftCard", () => {

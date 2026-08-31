@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import type { AppLifecycle } from "@/hooks/use-app-lifecycle";
@@ -46,13 +46,13 @@ function makeLifecycle(overrides: Partial<AppLifecycle> = {}): AppLifecycle {
     actingLabelFor: () => null,
     freshCandidate: () => undefined,
     upgradeTargets: [],
-    toggle: vi.fn(),
-    upgrade: vi.fn(),
-    upgradeAll: vi.fn(),
-    requestUninstall: vi.fn(),
-    requestPublish: vi.fn(),
-    requestAccess: vi.fn(),
-    startChatToUpdate: vi.fn(),
+    toggle: rs.fn(),
+    upgrade: rs.fn(),
+    upgradeAll: rs.fn(),
+    requestUninstall: rs.fn(),
+    requestPublish: rs.fn(),
+    requestAccess: rs.fn(),
+    startChatToUpdate: rs.fn(),
     dialogs: null,
     ...overrides,
   };
@@ -67,7 +67,7 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: { pinned: false, onToggle: vi.fn() },
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: null,
     });
     expect(keysOf(entries)).toEqual([
@@ -100,7 +100,7 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: { pinned: false, onToggle: vi.fn() },
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: null,
     });
     expect(keysOf(entries)).toEqual(["details"]);
@@ -118,7 +118,7 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle({ freshCandidate: () => candidate }),
       t,
       disabled: false,
-      pin: { pinned: false, onToggle: vi.fn() },
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: null,
     });
     expect(keysOf(entries).slice(0, 3)).toEqual(["upgrade", "upgrade-separator", "details"]);
@@ -132,7 +132,7 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: false,
       pin: null,
-      onRemix: vi.fn(),
+      onRemix: rs.fn(),
     });
     expect(keysOf(withHandler).slice(0, 2)).toEqual(["remix", "remix-separator"]);
 
@@ -152,7 +152,7 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: false,
       pin: null,
-      onRemix: vi.fn(),
+      onRemix: rs.fn(),
     });
     expect(keysOf(notRemixable)).not.toContain("remix");
   });
@@ -163,7 +163,7 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: { pinned: false, onToggle: vi.fn() },
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: null,
     });
     expect(keysOf(noFrontend)).not.toContain("pin");
@@ -185,7 +185,7 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle(),
       t,
       disabled: true,
-      pin: { pinned: false, onToggle: vi.fn() },
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: null,
     });
     const byKey = new Map(entries.map((entry) => [entry.key, entry]));
