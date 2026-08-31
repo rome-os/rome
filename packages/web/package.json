@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && rsbuild build",
     "typecheck": "tsc --noEmit",
     "preview": "rsbuild preview",
-    "test": "../../scripts/test-env.sh rstest",
+    "test": "../../scripts/test-env.sh rstest --silent passed-only",
     "test:layout": "playwright test"
   },
   "dependencies": {
