@@ -1754,17 +1754,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                     the END of the transition, so the faded-out button stops taking
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
-                <button
-                  type="button"
+                <IconButton
+                  size="md"
+                  label={t("jumpToLatest")}
+                  icon={<ArrowDown />}
+                  // IconButton mirrors its label into `title`, which the browser
+                  // renders as a native tooltip. The aria-label already names the
+                  // control, and a lone arrow above the composer needs no gloss.
+                  title={undefined}
                   onClick={() => scrollToBottom("auto")}
-                  aria-label={t("jumpToLatest")}
                   className={cn(
-                    "pointer-events-auto absolute bottom-full left-1/2 mb-3 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring motion-reduce:transition-none",
+                    // `touch-target` because this control, unlike the timeline
+                    // rail, has no width gate: it is reachable on a phone, where
+                    // the 36px step is under the 44px floor.
+                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
                     isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                   )}
-                >
-                  <ArrowDown className="size-4" />
-                </button>
+                />
                 <div className="pointer-events-auto mx-auto max-w-5xl">
                   {shareMode ? (
                     <ShareBar

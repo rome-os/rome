@@ -429,6 +429,10 @@ describe("Chat jump to latest", () => {
   it("jumps instantly once the viewport has left the tail", async () => {
     stickToBottom.isAtBottom = false;
     renderChat(<Chat sessionId="session-1" />);
+    // Chat's session-switch effect has already logged its own scrollToBottom
+    // ("auto") by now, which would satisfy the assertion below on its own —
+    // leaving the click free to pass anything. Only the click's call may count.
+    stickToBottom.scrollToBottom.mockClear();
 
     const control = screen.getByLabelText("jumpToLatest");
     expect(control.className).not.toContain("invisible");
