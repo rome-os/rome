@@ -19,7 +19,7 @@ The issue format — title, body sections, the `ready-for-agent` bar — is defi
 ## 2. Draft
 
 1. Name the project after the outcome the set delivers, not after the conversation.
-2. Split the todos into in-scope and out-of-scope. An out-of-scope todo files as a plain issue, stays out of the project, and carries no label.
+2. Split the todos into in-scope and out-of-scope. An out-of-scope todo files under its issue type with the type label, stays out of the project, and never carries `ready-for-agent`.
 3. Draft each in-scope issue as a task spec in the github-issues-task-spec.md format, title included.
 4. Wire the dependencies. Issue X is blocked by issue Y when X cannot start before Y merges. Record each edge as a **Blocked by** line in X's body.
 5. Check the edge graph for cycles. A cycle is a decomposition error — re-split the todos until the graph is acyclic.
@@ -31,12 +31,12 @@ The draft stays out of chat. Ask for the go-ahead in one line — the project ti
 
 ## 4. Create
 
-If `gh label list` does not show `ready-for-agent`, create it with `gh label create ready-for-agent`.
+If `gh label list` does not show `task` or `ready-for-agent`, create the missing label with `gh label create`.
 
 1. Resolve the repo and owner: `gh repo view --json nameWithOwner`.
 2. Create the project: `gh project create --owner <owner> --title "<title>"`.
 3. Link the project to the repo so it shows up under the repo's Projects tab: `gh project link <project-number> --owner <owner> --repo <owner>/<repo>`.
-4. Create the issues in dependency order, blockers first, so every **Blocked by** line names a real issue number: `gh issue create --title "<title>" --body "<body>" --label ready-for-agent`.
+4. Create the issues in dependency order, blockers first, so every **Blocked by** line names a real issue number: `gh issue create --title "<title>" --body "<body>" --label task --label ready-for-agent`. Drop `ready-for-agent` where step 2.6 withheld it.
 5. Add each in-scope issue to the project: `gh project item-add <project-number> --owner <owner> --url <issue-url>`.
 6. Mirror every edge into GitHub's native relation. The `issue_id` is the blocking issue's numeric REST id (`gh api repos/<owner>/<repo>/issues/<number> --jq .id`), not its issue number:
 

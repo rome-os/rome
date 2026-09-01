@@ -2,6 +2,8 @@
 
 A **GitHub issue** is one tracked unit of work on the repo's issue tracker. This file holds the rules every issue shares. Each issue type has its own rulebook, and this file wins where a rule there conflicts with it. Prose rules come from [WRITING.md](WRITING.md).
 
+A report an automation files on the tracker, such as a reconciliation loop report, is not a unit of work. It follows its skill's rules and carries its skill's labels, and no rule below applies to it.
+
 ## Issue types
 
 Every issue is one of three types. The type names the next action the issue asks for, not the kind of change.
