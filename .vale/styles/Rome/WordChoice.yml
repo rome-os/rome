@@ -2,9 +2,10 @@
 # docs/authoring/WRITING.md. Every pair here is a choice this repo has made, so
 # this rule is an error. Rome.PlainLanguage holds the wider advisory list.
 #
-# Each key also matches the inflections a doc actually uses ("commences",
-# "obtained"). The replacement stays in base form — the message names the word
-# to reach for, not the exact string to paste.
+# Each key matches the ordinary inflections, gerund included: a rule that reads
+# "ensure" and misses "ensuring" gates half the prose that uses the word. The
+# replacement stays in base form — the message names the word to reach for, not
+# the exact string to paste.
 #
 # WRITING.md also prefers "start" over "begin" and "initiate", and "get" over
 # "acquire". Those three are absent here on purpose: each has a technical sense
@@ -18,15 +19,15 @@ message: "Use '%s', not '%s'."
 level: error
 ignorecase: true
 swap:
-  'commence(?:s|d)?': start
-  'utili[sz]e(?:s|d)?': use
+  'commenc(?:e|es|ed|ing)': start
+  'utili[sz](?:e|es|ed|ing)': use
   'utili[sz]ation': use
-  'leverage(?:s|d)?': use
-  'facilitate(?:s|d)?': help
-  'ensure(?:s|d)?': make sure
+  'leverag(?:e|es|ed|ing)': use
+  'facilitat(?:e|es|ed|ing)': help
+  'ensur(?:e|es|ed|ing)': make sure
   'prior to': before
-  'obtain(?:s|ed)?': get
-  'demonstrate(?:s|d)?': show
+  'obtain(?:s|ed|ing)?': get
+  'demonstrat(?:e|es|ed|ing)': show
   'additionally': also
   'furthermore': also
   'moreover': also

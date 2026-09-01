@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { diffAgainstBaseline, renderBaseline, tally } from "./check-prose.mjs";
+import { PASSES, diffAgainstBaseline, passFiles, renderBaseline, tally } from "./check-prose.mjs";
 
 // Vale's own output, trimmed to the fields the script reads. The tests run
 // without vale on PATH, so the parsing and the verdict are covered here and the
-// binary is exercised by `pnpm lint:docs` in CI.
+// binary is exercised by `pnpm lint:prose` in CI.
 const report = {
   "docs/a.md": [
     { Check: "Rome.Semicolons", Severity: "error", Match: ";", Line: 3 },
@@ -68,4 +68,33 @@ test("the rendered baseline is a module that round-trips", async () => {
   const source = renderBaseline(counts);
   const { BASELINE } = await import(`data:text/javascript,${encodeURIComponent(source)}`);
   assert.deepEqual(BASELINE, counts);
+});
+
+// The file list comes from git rather than a hard-coded set of directories, so
+// what these assert is coverage, not a roster: a gate that reaches no files
+// reports success over prose nobody checked.
+test("the docs pass reaches every tracked doc", () => {
+  const files = passFiles(PASSES.find((p) => p.name === "docs").pathspecs);
+  assert.ok(files.length > 50, `expected the docs tree, found ${files.length} files`);
+  assert.ok(files.every((f) => f.startsWith("docs/") && f.endsWith(".md")));
+});
+
+test("the sources pass reaches tracked TypeScript outside packages/", () => {
+  const files = passFiles(PASSES.find((p) => p.name === "sources").pathspecs);
+  assert.ok(files.length > 1000, `expected the source trees, found ${files.length} files`);
+
+  // One root per line of defence that a directory-list version of this would
+  // have had to name by hand. `scripts/` shipped a real violation the gate
+  // missed while the list was ["packages", "rome_apps"].
+  for (const root of ["packages/", "rome_apps/", "scripts/", "example_apps/", ".claude/"]) {
+    assert.ok(
+      files.some((f) => f.startsWith(root)),
+      `no tracked source found under ${root}`,
+    );
+  }
+});
+
+test("the sources pass excludes generated output", () => {
+  const files = passFiles(PASSES.find((p) => p.name === "sources").pathspecs);
+  assert.ok(!files.some((f) => f.includes("/dist/") || f.includes("/node_modules/")));
 });

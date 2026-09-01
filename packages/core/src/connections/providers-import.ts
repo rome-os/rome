@@ -263,7 +263,7 @@ export async function reconcileProviderAccounts(
     // Fresh instance: a legacy row but no ledger connection yet. Mint the
     // connection row directly, then `ensureGrant` + authorize its single grant. Each
     // OAuth provider descriptor declares exactly one grant (OAUTH_PROVIDER_GRANTS),
-    // so ensuring that one is the whole grant set — `load()` then rehydrates a
+    // so that one grant is the whole set — `load()` then rehydrates a
     // complete connection with no separate import step.
     if (!existing) {
       const id = crypto.randomUUID();

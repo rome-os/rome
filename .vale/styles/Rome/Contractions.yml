@@ -2,8 +2,11 @@
 #
 # Spelled out one by one rather than matched as `\w+'\w+`, because that pattern
 # cannot tell a contraction from a possessive: "the daemon's config" is allowed
-# and "it's running" is not. Both apostrophes are accepted — an editor that
-# smart-quotes on paste produces U+2019.
+# and "it's running" is not. The cost of spelling them out is that a form left
+# off the list passes silently, so the list covers every pronoun crossed with
+# every auxiliary rather than the ones that happen to appear today. Both
+# apostrophes are accepted — an editor that smart-quotes on paste produces
+# U+2019.
 extends: substitution
 message: "Write '%s', not the contraction '%s'."
 level: error
@@ -39,3 +42,20 @@ swap:
   "you['’]ve": you have
   "we['’]ve": we have
   "they['’]ve": they have
+  "I['’]m": I am
+  "I['’]ve": I have
+  "I['’]ll": I will
+  "I['’]d": I would
+  "he['’]s": he is
+  "she['’]s": she is
+  "he['’]ll": he will
+  "she['’]ll": she will
+  "he['’]d": he would
+  "she['’]d": she would
+  "we['’]d": we would
+  "you['’]d": you would
+  "they['’]d": they would
+  "it['’]d": it would
+  "they['’]ll": they will
+  "who['’]s": who is
+  "who['’]ll": who will

@@ -14,6 +14,12 @@
  * prose does, in both directions: a new violation raises it and fails, and a
  * fixed one lowers it and also fails, which is what keeps the baseline from
  * outliving the debt.
+ *
+ * What a count cannot see is a swap: one alert removed and another of the same
+ * rule added in the same file nets to zero. That needs a baseline entry to
+ * reach, and the baseline is empty — from zero, every new alert raises the
+ * count. Anything added here carries that limit, so an entry is worth one
+ * only while the prose behind it cannot be fixed instead.
  */
 
 import { execFileSync } from "node:child_process";
@@ -25,36 +31,60 @@ export const repoRoot = join(import.meta.dirname, "..");
 
 /**
  * One pass per format, because Vale matches a section by file name rather than
- * by path. A single pass over the source trees would put `[*.md]` — the full
- * docs rule set — onto every package README and Markdown test fixture under
- * them. The glob keeps each pass to the files its rules were written for.
+ * by path. Handing Vale a source tree would put `[*.md]` — the full docs rule
+ * set — onto every package README and Markdown test fixture inside it.
+ *
+ * Markdown is scoped to `docs/`, which is where WRITING.md scopes its rules.
+ * Sources are every tracked `.ts` and `.tsx`, with no directory list to keep
+ * current: a new source root is covered the day it is committed.
  */
 export const PASSES = [
-  { glob: "*.md", targets: ["docs"] },
-  { glob: "*.{ts,tsx}", targets: ["packages", "rome_apps"] },
+  { name: "docs", pathspecs: ["docs/*.md"] },
+  { name: "sources", pathspecs: ["*.ts", "*.tsx"] },
 ];
+
+/**
+ * Tracked paths for a pass. Reading the file list from git rather than walking
+ * a directory keeps generated output — `dist/`, a stale `.d.ts` — out of the
+ * gate, and means the set cannot drift from what the repo actually holds.
+ */
+export function passFiles(pathspecs, root = repoRoot) {
+  const stdout = execFileSync("git", ["ls-files", "-z", "--", ...pathspecs], {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return stdout.split("\0").filter(Boolean);
+}
+
+// Vale takes the paths as arguments, so a large repo could otherwise push the
+// command past the system argument limit.
+const CHUNK = 400;
 
 /** Vale exits 1 when it reports alerts, which is a normal outcome here. */
 export function runVale(passes = PASSES, root = repoRoot) {
   const merged = {};
-  for (const { glob, targets } of passes) {
-    let stdout;
-    try {
-      stdout = execFileSync("vale", ["--output=JSON", "--no-exit", `--glob=${glob}`, ...targets], {
-        cwd: root,
-        encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
-      });
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        throw new Error(
-          "vale not found on PATH. Run `nix develop` for the host toolchain — see flake.nix.",
+  for (const { pathspecs } of passes) {
+    const files = passFiles(pathspecs, root);
+    for (let i = 0; i < files.length; i += CHUNK) {
+      let stdout;
+      try {
+        stdout = execFileSync(
+          "vale",
+          ["--output=JSON", "--no-exit", ...files.slice(i, i + CHUNK)],
+          { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
         );
+      } catch (error) {
+        if (error.code === "ENOENT") {
+          throw new Error(
+            "vale not found on PATH. Run `nix develop` for the host toolchain — see flake.nix.",
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
-    for (const [file, alerts] of Object.entries(JSON.parse(stdout))) {
-      merged[file] = [...(merged[file] ?? []), ...alerts];
+      for (const [file, alerts] of Object.entries(JSON.parse(stdout))) {
+        merged[file] = [...(merged[file] ?? []), ...alerts];
+      }
     }
   }
   return merged;

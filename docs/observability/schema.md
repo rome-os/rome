@@ -315,7 +315,7 @@ FORMAT JSONEachRow
 
 HyperDX at `$OBS_UI_URL` (dev: `http://obs.rome.localhost:3000`). Same
 tables, same attributes, same filters — the UI exposes a search form over
-the SQL you'd write here. Slice by `service.instance.id` to scope to one
+the SQL you would write here. Slice by `service.instance.id` to scope to one
 worktree (dev) or tenant (prod).
 
 Curated agent-trace dashboards are defined as code in
