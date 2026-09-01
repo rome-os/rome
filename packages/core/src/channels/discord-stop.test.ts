@@ -54,7 +54,7 @@ describe("Discord stop command", () => {
       service: "discord",
       senderId: "user-1",
     });
-    expect(editReply).toHaveBeenCalledWith({ content: "Stop requested." });
+    expect(editReply).toHaveBeenCalledWith({ content: "Stopped." });
     expect(isGuardian).not.toHaveBeenCalled();
   });
 });

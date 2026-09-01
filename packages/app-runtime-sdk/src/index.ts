@@ -1409,7 +1409,7 @@ export interface ChatStopResult {
 export function chatStopReceipt(status: ChatStopStatus): string {
   switch (status) {
     case "stop_requested":
-      return "Stop requested.";
+      return "Stopped.";
     case "forbidden":
       return "You can only stop a response that you started.";
     case "idle":

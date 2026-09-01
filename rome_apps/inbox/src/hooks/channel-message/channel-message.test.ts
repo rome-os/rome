@@ -153,7 +153,7 @@ describe("ChannelMessageHook", () => {
       senderId: "user-1",
     });
     expect(harness.send).toHaveBeenCalledWith(TELEGRAM_ID, "chat-1", {
-      text: "Stop requested.",
+      text: "Stopped.",
     });
     expect(harness.get).not.toHaveBeenCalled();
     expect(harness.run).not.toHaveBeenCalled();

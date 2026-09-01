@@ -8,7 +8,7 @@ describe("chat stop contract", () => {
     expect(isStopCommand("please /stop")).toBe(false);
   });
 
-  it("reports that interruption was requested without claiming termination", () => {
-    expect(chatStopReceipt("stop_requested")).toBe("Stop requested.");
+  it("confirms the interruption", () => {
+    expect(chatStopReceipt("stop_requested")).toBe("Stopped.");
   });
 });
