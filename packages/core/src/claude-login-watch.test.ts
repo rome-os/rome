@@ -68,7 +68,7 @@ const LOGIN_OUTPUT =
   "\x1b[38;2;177;185;249m❯\x1b[4CClaude account with subscription · \x1b[38;2;153;153;153mPro, Max, Team, or Enterprise\r\n";
 
 const NOT_LOGGED_IN_OUTPUT =
-  "\x1b[2m╭─── Claude Code v2.1.89 ──────────────────────────────────────────────────────╮\r\n" +
+  "\x1b[2m╭─── Claude Code v2.1.251 ─────────────────────────────────────────────────────╮\r\n" +
   "\x1b[2m│\x1b[22m Opus 4.7 (1M context) · API Usage Billing                            \x1b[2m│\r\n" +
   "\x1b[2m╰──────────────────────────────────────────────────────────────────────────────╯\r\n" +
   "\x1b[1C?\x1b[1Cfor\x1b[1Cshortcuts\x1b[1CNot\x1b[1Clogged\x1b[1Cin\x1b[1C·\x1b[1CRun\x1b[1C/login\r\n";

@@ -52,7 +52,7 @@ RUN mkdir -p /rome-home && chmod 0777 /rome-home
 # terminal-server (claude /login, codex login, opencli usage) finds them on
 # PATH inside the dev container.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g @anthropic-ai/claude-code@2.1.89 @openai/codex@0.144.5 @yunfanye/opencli@1.8.7
+    npm install -g @anthropic-ai/claude-code@2.1.251 @openai/codex@0.144.5 @yunfanye/opencli@1.8.7
 
 # The container's browser is the server-side Chrome (the `chrome` sidecar,
 # which shares this container's network namespace — compose.dev.yml): BROWSER
