@@ -1234,8 +1234,9 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     setLoading(true);
     setError(null);
     // Reset before the fetches: navigating between two side chats must not
-    // briefly show the previous one's composer.
+    // briefly show the previous one's composer, nor its send error.
     setContinuable(false);
+    setSendError(null);
     Promise.all([getRomeSession(sessionId), listRomeSessionMessages(sessionId)])
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
@@ -1309,7 +1310,19 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       };
       publish();
       const response = await openTurnStream(active.turnId, controller.signal);
-      if (!response.ok || !response.body || cancelled) return;
+      if (!response.ok || !response.body) {
+        // The turn is accepted and running; only the attach failed. Release the
+        // composer rather than leaving it disabled until the view remounts, and
+        // refresh so the reply still lands once the turn finishes.
+        if (!cancelled) {
+          setLiveTurn(null);
+          setSending(false);
+          setSendError("Lost the live connection to this turn. Reload to see its reply.");
+          await reloadMessages();
+        }
+        return;
+      }
+      if (cancelled) return;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";

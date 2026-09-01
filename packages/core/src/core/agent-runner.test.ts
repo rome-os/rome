@@ -756,6 +756,34 @@ describe("AgentRunner", () => {
       });
     });
 
+    it("withholds defer from a continuable fork's own turn", async () => {
+      // The first branch turn still carries the source's thread context, so a
+      // wake-up scheduled here would resume the fork session and deliver into
+      // the parent transcript. A one-shot fork keeps defer: it cannot be
+      // resumed at all, so nothing can answer into the wrong place.
+      const openParams: ModelSessionForkOpenParams[] = [];
+      const runFork = (fork: Partial<ForkRunParams>) =>
+        runForkAgainstLiveSession(
+          (params) => {
+            openParams.push(params);
+            return forkSessionStub({
+              providerThreadId: "fork-provider-thread",
+              events: (async function* (): AsyncIterable<AgentMessage> {
+                yield { type: "result", content: "Fork answer" };
+              })(),
+            });
+          },
+          { sourceProviderThreadId: "source-provider-thread", fork: { mode: "exact", ...fork } },
+        );
+
+      await runFork({ persistThreadKey: (id: string) => `webchat:${id}` });
+      await runFork({});
+
+      expect(openParams).toHaveLength(2);
+      expect(openParams[0].executeDefer).toBeUndefined();
+      expect(openParams[1].executeDefer).toBeDefined();
+    });
+
     it("stays one-shot when the fork borrowed the source's thread", async () => {
       // Codex's borrowed exact fork reports the SOURCE thread id: it runs the
       // turn in the parent conversation and rolls it back out. Persisting that

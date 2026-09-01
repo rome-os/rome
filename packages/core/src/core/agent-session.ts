@@ -710,6 +710,12 @@ interface ForkTurnContext {
    * Interleave an out-of-band message into the forked turn's stream.
    */
   emit: (msg: StreamAgentMessage) => void;
+  /**
+   * Whether this fork will be left resumable. A continuable fork gets no
+   * `defer`: its wake-up would resume the fork session while delivering under
+   * the thread context this turn inherited, which is still the source's.
+   */
+  continuable: boolean;
 }
 
 /**
@@ -1480,7 +1486,7 @@ async function openSession(
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
-        executeDefer: deferEnabled ? makeExecuteDefer(refs) : undefined,
+        executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade
@@ -2733,6 +2739,7 @@ class AgentSessionImpl implements AgentSession {
             model: forkModel?.model ?? sourceModelSession.model,
             threadContext: input.threadContext,
             emit: (msg) => outbound.push(msg),
+            continuable: !!input.persistThreadKey,
           });
           return { fork, forkOpen, outbound };
         });

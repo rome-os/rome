@@ -403,6 +403,19 @@ describe("SessionsPage live fork details", () => {
     expect(screen.getByTestId("side-chat-composer")).toBeTruthy();
   });
 
+  it("releases the composer when the live-turn stream cannot be attached", async () => {
+    // The turn is accepted and running; only the attach failed. Leaving the
+    // composer disabled would strand the branch until the view remounts.
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    rs.mocked(openTurnStream).mockResolvedValue(new Response(null, { status: 502 }));
+
+    renderDetail();
+
+    const composer = await screen.findByTestId("side-chat-composer");
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
+    await waitFor(() => expect((composer as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("refuses a second send while the first is still in flight", async () => {
     // This view follows only the first running turn, so a queued second turn
     // would run server-side and never render.
