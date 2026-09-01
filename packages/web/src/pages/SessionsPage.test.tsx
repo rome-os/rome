@@ -362,6 +362,47 @@ describe("SessionsPage live fork details", () => {
     });
   });
 
+  it("attaches to an accepted follow-up that is still queued", async () => {
+    // The turns endpoint reports a turn as `queued` until it becomes the
+    // session's current turn. Skipping those loses the reply: the turn runs
+    // server-side and nothing ever opens its stream.
+    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    vi.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "queued-follow-up",
+        streamId: "queued-follow-up",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        status: "queued",
+      },
+    ]);
+    mockFinishableTurnStream();
+
+    renderDetail();
+
+    await waitFor(() => {
+      expect(openTurnStream).toHaveBeenCalledWith("queued-follow-up", expect.any(AbortSignal));
+    });
+  });
+
+  it("keeps the composer through a transient probe failure", async () => {
+    // `getSession` returns null only on 404. Anything else — a 500, a network
+    // blip — throws, and treating that as "not continuable" would drop the
+    // composer off a live branch until the next probe.
+    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    vi.mocked(getSession)
+      .mockResolvedValueOnce({ id: "feedback-fork-session" } as never)
+      .mockRejectedValue(new Error("boom"));
+
+    renderDetail();
+
+    const composer = await screen.findByTestId("side-chat-composer");
+    await act(async () => {
+      fireEvent.click(composer);
+    });
+
+    expect(screen.getByTestId("side-chat-composer")).toBeTruthy();
+  });
+
   it("refuses a second send while the first is still in flight", async () => {
     // This view follows only the first running turn, so a queued second turn
     // would run server-side and never render.

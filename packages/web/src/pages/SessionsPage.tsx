@@ -1169,7 +1169,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       try {
         setContinuable((await getSession(sessionId)) !== null);
       } catch {
-        setContinuable(false);
+        // `getSession` returns null only on 404 — the definitive "this branch
+        // is read-only". Anything else is transient, and collapsing to
+        // read-only here would drop the composer off a live branch until the
+        // next probe. Leave the current answer standing.
       }
     },
     [sessionId],
@@ -1266,7 +1269,12 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     let cancelled = false;
     void (async () => {
       const turns = await listSessionTurns(sessionId);
-      const active = turns?.find((turn) => turn.status === "running");
+      // A turn is reported `queued` until it becomes the session's current
+      // turn. It is already accepted and its stream is already addressable, so
+      // skipping it would leave an answer running with nothing rendering it.
+      const active =
+        turns?.find((turn) => turn.status === "running") ??
+        turns?.find((turn) => turn.status === "queued");
       if (!active || cancelled) {
         // The turn may have completed between the initial message snapshot and
         // this active-turn lookup. Refresh once to close that race instead of
