@@ -210,6 +210,14 @@ export interface AgentSessionInit {
   /** Optional exact model selection, used by the WebChat model selector. */
   selectionId?: ModelSelectionId;
   reasoningEffort?: ModelReasoningEffort;
+  /**
+   * Open this session with the same tool catalog and system prompt but no live
+   * interactive surface: the interactive built-ins fall back to prose instead
+   * of parking a turn on a card nobody can answer. Set for a side chat's
+   * follow-up turns, which render in the read-only Sessions detail view — the
+   * same degradation an exact fork's own turn already gets.
+   */
+  interactiveSurfaceDetached?: boolean;
   /** Existing inbound platform message id, when this acquire starts its turn. */
   platformMessageId?: string;
   /**
@@ -952,7 +960,11 @@ async function openSession(
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
-    supportsInteractiveSurface,
+    // Action results that hand back UI (pending_interaction, handoff,
+    // place_widget) read this, not the facade flag on ModelSessionParams. A
+    // detached session must degrade both, or the agent still parks on a
+    // component nobody can mount. Same combination an exact fork runs with.
+    supportsInteractiveSurface: supportsInteractiveSurface && !init.interactiveSurfaceDetached,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
     captureSubmittedOutput: (payload) => impl.captureSubmittedOutput(payload),
@@ -1293,6 +1305,7 @@ async function openSession(
     executeSubmitOutput,
     executeDefer,
     supportsInteractiveSurface,
+    interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });
 
   // Captured on every successful open (including reopens) so exact-mode forks

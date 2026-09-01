@@ -1302,6 +1302,49 @@ describe("AgentRunner", () => {
       expect((actionResult as { message: string }).message).toContain("Pick a time slot");
     });
 
+    it("takes the non-interactive fallback for action results when opened detached", async () => {
+      // A side chat's follow-up runs on a `webchat:` key, so the surface check
+      // would otherwise say it can mount UI — but it renders in the read-only
+      // Sessions detail view, where nobody can answer a card.
+      registerDemoAction(async () => ({
+        status: "pending_interaction",
+        interaction: {
+          appId: "demo-app",
+          promptText: "Pick a time slot",
+          render: { kind: "inline", componentId: "slot-picker" },
+        },
+      }));
+
+      let actionResult: unknown;
+      const runImpl = async function* (
+        params: import("./agent-runner.js").ModelRunParams,
+      ): AsyncIterable<AgentMessage> {
+        actionResult = await params.executeAction("demo_action", {});
+        yield { type: "result", content: "done" };
+      };
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-detached",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", runImpl),
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
+      const session = await manager.acquire(
+        { agentName: "test-main", channelThreadKey: "webchat:detached-follow-up" },
+        { interactiveSurfaceDetached: true },
+      );
+      await collectMessages(session.sendTurn({ prompt: "continue" }).events);
+
+      expect(actionResult).toMatchObject({
+        message: expect.stringContaining("cannot render an interactive UI"),
+      });
+      expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
+
+      await session.close("shutdown");
+    });
+
     it("exact forks of a handback session reject submit_output instead of claiming guardian review", async () => {
       let forkOpen: ModelSessionForkOpenParams | undefined;
       let submitResponse: unknown;

@@ -693,6 +693,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return { session };
   };
 
+  /**
+   * Session lookup for the two routes a side chat needs: the client's
+   * continuability probe and the follow-up send. A fork qualifies only once it
+   * has left a resumable provider thread behind (see
+   * `AgentSession.persistForkThread`) — which is also how the client tells a
+   * live side chat from a read-only trajectory, since the probe 404s for one
+   * and 200s for the other. A legacy branch, an errored one, and one that
+   * borrowed its source's thread all stay read-only.
+   *
+   * Deliberately NOT folded into `getStoredWebchatSession`: that helper gates
+   * nine routes, including nested forks and turn feedback, and none of those
+   * were designed for a branch.
+   */
+  const getContinuableSession = async (
+    c: Context,
+    sessionId: string,
+  ): Promise<SessionLookupResult> => {
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (session && isStoredWebchatSession(session)) return { session };
+    if (session?.type === "fork") {
+      const row = await deps.sessionManager.findReusableSession(
+        buildWebchatChannelThreadKey(session.id, null),
+        session.agentName ?? "main",
+      );
+      if (row?.providerThreadId) return { session };
+    }
+    return { response: c.json({ error: "Session not found" }, 404) as Response };
+  };
+
   /** Append a stream to the per-session FIFO queue and the turnId index. */
   const enqueueStream = (sessionId: string, stream: ActiveWebchatStream): void => {
     const list = activeStreams.get(sessionId);
@@ -1130,6 +1159,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     prompt: string;
     label: string;
     initiator: string;
+    /**
+     * Whether the guardian is meant to keep talking to this fork. A side chat
+     * is a conversation and asks for a resumable thread; the private learning
+     * fork behind turn feedback is a background errand and stays one-shot.
+     */
+    continuable: boolean;
   }): Promise<ForkSessionPlacement | null> => {
     if (!deps.agentRunner.runForked) {
       log.warn("turn fork unavailable: runner cannot fork", {
@@ -1242,6 +1277,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
+        // Keyed by the fork's own id with no model-selection suffix — exactly
+        // what `handleChatSend` will derive for it later, since a fork row
+        // carries no stored selection.
+        ...(input.continuable
+          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id, null) }
+          : {}),
       })
       [Symbol.asyncIterator]();
 
@@ -1359,6 +1400,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       prompt: buildTurnFeedbackProcessingPrompt(input.rating, input.comment, ratedExchange),
       label: "feedback",
       initiator: "system:turn-feedback",
+      continuable: false,
     });
   };
 
@@ -2042,7 +2084,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.get("/chat/sessions/:id", async (c) => {
     const sessionId = c.req.param("id");
-    const lookup = await getStoredWebchatSession(c, sessionId);
+    const lookup = await getContinuableSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
@@ -2386,6 +2428,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       prompt,
       label: "branch",
       initiator: "system:turn-branch",
+      continuable: true,
     });
     if (!placement) {
       return c.json({ error: "Couldn't start side chat from this conversation" }, 409);
@@ -2788,7 +2831,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "session id and text or files are required" }, 400);
     }
 
-    const lookup = await getStoredWebchatSession(c, sessionId);
+    const lookup = await getContinuableSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
 
@@ -3011,6 +3054,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           handback,
           selectionId: modelSelection?.id,
           reasoningEffort,
+          // A side chat's follow-ups render in the read-only Sessions detail
+          // view, whose interaction handlers are all no-ops. Without this the
+          // session would advertise a live surface (its key starts with
+          // "webchat:") and could park a turn on a card nobody can answer —
+          // dead-ending the conversation this is meant to keep alive.
+          interactiveSurfaceDetached: session.type === "fork",
         },
       );
     } catch (err) {
