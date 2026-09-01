@@ -84,19 +84,25 @@ The owning app is the app that owns the agent attached to the session. Core agen
 
 ## Forked turns
 
-A forked turn is a one-shot side conversation branched from a live session's full context: the fork sees everything the source conversation has seen, but nothing it does can mutate the source. Forks are closed after their single turn completes.
+A forked turn is a side conversation branched from a live session's full context: the fork sees everything the source conversation has seen, but nothing it does can mutate the source.
 
 The caller creating the fork chooses one of two modes:
 
 - **Isolated** (the default) — the fork opens with an empty tool surface: no actions, skills, subagents, or builtin tools. It can only read the inherited conversation and answer. This is the right mode for side-channel turns that must not act.
 - **Exact** — the fork opens with the source session's exact configuration, so the conversation prefix the model sees (system prompt, tool catalog, transcript) is identical to the source. Tools remain callable. Anything the fork executes is attributed to the fork's own session and turn — never the source's — and subagent output streams into the fork, not the source conversation. This is the mode for branch-style features that need the fork to behave as a true continuation of the conversation.
 
+The caller also chooses how long the fork's provider branch lives:
+
+- **One-shot** (the default) — the provider branch is disposable. It closes when the single turn completes, and nothing can resume it. Recap and turn-feedback forks run this way.
+- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a conversation the guardian can keep talking to. A side chat runs this way.
+
 **Contracts:**
 
 - In both modes the source conversation is untouched: its next turn never sees the fork's prompt, output, or tool calls.
-- The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. Forks never write [model pins](#model-pin).
+- The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. A fork never writes a [model pin](#model-pin) onto its source. A continuable fork records provider and model on its own agent session, which is what a later turn resumes from.
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
+- A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
 
 **Not to be confused with:**
 

@@ -706,18 +706,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * nine routes, including nested forks and turn feedback, and none of those
    * were designed for a branch.
    */
+  const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
+    if (session.type !== "fork") return false;
+    const row = await deps.sessionManager.findReusableSession(
+      buildWebchatChannelThreadKey(session.id, null),
+      session.agentName ?? "main",
+    );
+    return !!row?.providerThreadId;
+  };
+
   const getContinuableSession = async (
     c: Context,
     sessionId: string,
   ): Promise<SessionLookupResult> => {
     const session = await deps.webchatRepo.getSession(sessionId);
-    if (session && isStoredWebchatSession(session)) return { session };
-    if (session?.type === "fork") {
-      const row = await deps.sessionManager.findReusableSession(
-        buildWebchatChannelThreadKey(session.id, null),
-        session.agentName ?? "main",
-      );
-      if (row?.providerThreadId) return { session };
+    if (!session) {
+      return { response: c.json({ error: "Session not found" }, 404) as Response };
+    }
+    if (isStoredWebchatSession(session) || (await isContinuableFork(session))) {
+      return { session };
     }
     return { response: c.json({ error: "Session not found" }, 404) as Response };
   };
@@ -3613,7 +3620,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // addressable via /turns/:turnId/stream like a user-initiated turn.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
-    if (!session || !isStoredWebchatSession(session)) {
+    // A side chat reaches this host too: it can hold an approved action or a
+    // `defer` wake-up, and both resume through here. Rejecting it would claim
+    // the approval without executing it and drop the wake-up, both silently.
+    if (!session || !(isStoredWebchatSession(session) || (await isContinuableFork(session)))) {
       throw new Error(`Webchat session "${sessionId}" not found`);
     }
     const stream = await createStream(

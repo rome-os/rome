@@ -3794,6 +3794,42 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
+    it("runs a backend continuation on a continuable side chat", async () => {
+      // An approved action and a `defer` wake-up both resume through
+      // `enqueueSessionTask`. A side chat can reach either, so rejecting its
+      // session type here would claim the approval and never execute it, and
+      // lose the wake-up — both silently.
+      const forkId = "sess-fork-backend-continuation";
+      await deps.webchatRepo.ensureRomeSession({
+        id: forkId,
+        type: "fork",
+        name: "branch: Parent chat",
+        agentName: null,
+        trigger: { triggerKind: "fork", triggerName: "branch" },
+        parentSessionId: "parent-chat",
+        parentTurnId: "parent-turn",
+      });
+      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue({
+        id: forkId,
+        provider: "anthropic",
+        providerThreadId: "fork-provider-thread",
+        model: "claude",
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
+      const { runtime } = createWebchatRuntime(deps);
+
+      await runtime.enqueueSessionTask(forkId, async ({ emit }) => {
+        emit({ type: "result", content: "Sent the message you approved." });
+      });
+
+      const assistantReplies = (await deps.webchatRepo.getMessages(forkId)).filter(
+        (m) => m.role === "assistant",
+      );
+      expect(assistantReplies).toHaveLength(1);
+      expect(assistantReplies[0]!.content).toContain("Sent the message you approved.");
+    });
+
     it("persists an ask_question card emitted by a deferred backend continuation", async () => {
       // A `defer` wake-up resumes through enqueueSessionTask rather than the
       // foreground HTTP turn drain. The resumed agent must still be able to
