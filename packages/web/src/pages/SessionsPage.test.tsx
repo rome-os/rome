@@ -4,11 +4,13 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRomeSession,
+  getSession,
   getSessionMetrics,
   listRomeSessionMessages,
   listRomeSessions,
   listSessionTurns,
   openTurnStream,
+  postSessionTurn,
 } from "@/lib/chat-api";
 import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
 import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
@@ -21,6 +23,26 @@ vi.mock("@/components/agent-trace/TraceDrawer", () => ({
 vi.mock("@/components/chat/blocks", () => ({
   renderFlatBlocks: () => null,
   renderSingleBlock: () => null,
+}));
+
+vi.mock("@/components/chat/ChatComposer", () => ({
+  ChatComposer: ({ onSend, disabled }: { onSend: (s: unknown) => void; disabled?: boolean }) => (
+    <button
+      type="button"
+      data-testid="side-chat-composer"
+      disabled={disabled}
+      onClick={() =>
+        onSend({
+          text: "And the failure case?",
+          uploads: [],
+          reasoningEffort: "medium",
+          projectPath: "default",
+        })
+      }
+    >
+      send
+    </button>
+  ),
 }));
 
 vi.mock("@/components/chat/MessageList", () => ({
@@ -36,11 +58,13 @@ vi.mock("@/lib/chat-api", async (importOriginal) => {
   return {
     ...actual,
     getRomeSession: vi.fn(),
+    getSession: vi.fn(),
     getSessionMetrics: vi.fn(),
     listRomeSessionMessages: vi.fn(),
     listRomeSessions: vi.fn(),
     listSessionTurns: vi.fn(),
     openTurnStream: vi.fn(),
+    postSessionTurn: vi.fn(),
   };
 });
 
@@ -140,6 +164,11 @@ beforeEach(() => {
       status: "running",
     },
   ]);
+  vi.mocked(getSession).mockResolvedValue(null);
+  vi.mocked(postSessionTurn).mockResolvedValue({
+    ok: true,
+    data: { turnId: "follow-up-turn", sessionId: "feedback-fork-session", startedAt: "" },
+  });
 });
 
 afterEach(() => {
@@ -257,6 +286,110 @@ describe("SessionsPage live fork details", () => {
     expect(details?.hasAttribute("open")).toBe(true);
     expect(screen.getByText("feedback-fork-session")).toBeTruthy();
     expect(screen.getAllByText("original-chat").length).toBeGreaterThan(0);
+  });
+
+  // The default openTurnStream mock resolves to undefined, so the live-turn
+  // effect bails before its completion branch. Anything that needs the turn to
+  // *finish* has to hand it a real stream.
+  function mockFinishableTurnStream() {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    vi.mocked(openTurnStream).mockImplementation(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+      return new Response(body);
+    });
+    return () =>
+      act(() => {
+        controller?.enqueue(new TextEncoder().encode('event: done\ndata: {"success":true}\n\n'));
+        controller?.close();
+      });
+  }
+
+  it("shows no composer on a fork the backend will not continue", async () => {
+    vi.mocked(listSessionTurns).mockResolvedValue([]);
+
+    renderDetail();
+
+    await screen.findByTestId("session-messages");
+    expect(screen.queryByTestId("side-chat-composer")).toBeNull();
+  });
+
+  it("re-probes continuability once the first branch answer lands", async () => {
+    // The view opens while the fork is still running, so the first probe
+    // legitimately 404s. The composer must appear when the turn ends.
+    vi.mocked(getSession)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: "feedback-fork-session" } as never);
+    const finish = mockFinishableTurnStream();
+
+    renderDetail();
+    await screen.findByTestId("session-messages");
+    expect(screen.queryByTestId("side-chat-composer")).toBeNull();
+
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
+    finish();
+
+    expect(await screen.findByTestId("side-chat-composer")).toBeTruthy();
+  });
+
+  it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {
+    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    vi.mocked(listSessionTurns).mockResolvedValue([]);
+
+    renderDetail();
+
+    const composer = await screen.findByTestId("side-chat-composer");
+    const reloads = vi.mocked(listRomeSessionMessages).mock.calls.length;
+    const turnLookups = vi.mocked(listSessionTurns).mock.calls.length;
+    await act(async () => {
+      fireEvent.click(composer);
+    });
+
+    await waitFor(() => {
+      expect(postSessionTurn).toHaveBeenCalledWith("feedback-fork-session", expect.any(FormData));
+    });
+    const form = vi.mocked(postSessionTurn).mock.calls[0][1];
+    expect(form.get("text")).toBe("And the failure case?");
+    // The guardian's own message shows before the reply does.
+    await waitFor(() => {
+      expect(vi.mocked(listRomeSessionMessages).mock.calls.length).toBeGreaterThan(reloads);
+    });
+    await waitFor(() => {
+      expect(vi.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(turnLookups);
+    });
+  });
+
+  it("refuses a second send while the first is still in flight", async () => {
+    // This view follows only the first running turn, so a queued second turn
+    // would run server-side and never render.
+    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    let release: (() => void) | undefined;
+    vi.mocked(postSessionTurn).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              ok: true,
+              data: { turnId: "follow-up-turn", sessionId: "feedback-fork-session", startedAt: "" },
+            });
+        }),
+    );
+
+    renderDetail();
+
+    const composer = await screen.findByTestId("side-chat-composer");
+    fireEvent.click(composer);
+    await waitFor(() => expect((composer as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(composer);
+
+    expect(postSessionTurn).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      release?.();
+    });
   });
 });
 
