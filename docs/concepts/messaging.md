@@ -29,7 +29,7 @@ A conversation is the thread a [message](#message) was said in, named by the pla
 
 **Not to be confused with:**
 
-- **[Account](people.md#account)** — the account is who Rome is talking to. The conversation is where they said it. On a direct thread the two are named by one string; on a group they are not.
+- **[Account](people.md#account)** — the account is who Rome is talking to. The conversation is where they said it. On a direct thread the two are named by one string. On a group they are not.
 - **Session** — a session is Rome's own working context for a thread. The conversation is the thread itself, which exists whether or not Rome ever opened a session on it.
 
 ## Channels
