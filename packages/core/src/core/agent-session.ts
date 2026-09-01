@@ -250,6 +250,8 @@ export interface ForkedAgentTurnInput extends AgentTurnInput {
    * session's own thread context when absent.
    */
   threadContext?: ThreadContext;
+  /** See `ForkRunParams.persistThreadKey`. */
+  persistThreadKey?: (forkSessionId: string) => string;
 }
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
@@ -2354,6 +2356,55 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /**
+   * Leave a completed fork behind as its own resumable conversation: an
+   * agent-session row keyed by the fork's channel-thread key and pinned to the
+   * provider thread the fork actually ran on.
+   *
+   * Best-effort by construction. The fork's answer has already been delivered,
+   * so a failed write costs only continuability and must never surface as a
+   * turn error. A provider that hands back no thread id has nothing to resume,
+   * so the fork stays one-shot rather than getting a row that cannot open.
+   */
+  private async persistForkThread(
+    channelThreadKey: string,
+    forkSessionId: string,
+    forkSession: ModelSession,
+  ): Promise<void> {
+    const providerThreadId = forkSession.providerThreadId;
+    if (!providerThreadId) {
+      log.info("fork thread not persisted: provider exposed no thread id", {
+        sessionId: this.sessionId,
+        forkSessionId,
+        provider: forkSession.providerId,
+      });
+      return;
+    }
+    try {
+      await this.deps.sessionManager.createSession({
+        id: forkSessionId,
+        agentName: this.key.agentName,
+        channelThreadKey,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+        status: "active",
+      });
+      await this.deps.sessionManager.setProviderInfo(
+        forkSessionId,
+        forkSession.providerId,
+        providerThreadId,
+        forkSession.model,
+      );
+    } catch (err) {
+      log.warn("failed to persist fork thread; the branch stays one-shot", {
+        sessionId: this.sessionId,
+        forkSessionId,
+        channelThreadKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
    * Persist which provider produced the successful turn, its native thread id,
    * and the concrete model that ran (the session model pin).
    */
@@ -2592,6 +2643,9 @@ class AgentSessionImpl implements AgentSession {
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
     let outputSchemaSuspended = false;
+    // Assigned inside the mutex below, after ensureModelSessionForTurn() may
+    // have replaced this.modelSession. See the guard in the `finally`.
+    let sourceProviderThreadId: string | undefined;
     try {
       // Enter the cleanup scope before publishing turn_start. If a caller
       // detaches immediately after that first event, iterator.return() must
@@ -2615,6 +2669,7 @@ class AgentSessionImpl implements AgentSession {
           }
           await this.ensureModelSessionForTurn();
           const sourceModelSession = this.modelSession;
+          sourceProviderThreadId = sourceModelSession.providerThreadId;
           if (input.sourceCheckpoint) {
             if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
               throw new Error(
@@ -2637,7 +2692,12 @@ class AgentSessionImpl implements AgentSession {
             : undefined;
           const fork = await sourceModelSession.fork({
             sessionId: forkSessionId,
-            mode: "ephemeral",
+            // Two different "mode"s meet here — do not confuse them.
+            // `mode` is ModelSessionForkMode (ephemeral | thread): whether the
+            // provider branch is disposable or a thread that may be persisted.
+            // `configurationMode` is ForkRunMode (isolated | exact): the tool
+            // surface the fork opens with.
+            mode: input.persistThreadKey ? "thread" : "ephemeral",
             configurationMode: mode,
             sourceCheckpoint: input.sourceCheckpoint?.checkpointId,
           });
@@ -2731,6 +2791,30 @@ class AgentSessionImpl implements AgentSession {
         agent: this.key.agentName,
       };
     } finally {
+      // Before close(): a closed ModelSession no longer reports the thread this
+      // needs. Each condition is load-bearing:
+      //   • terminalSeen — `status` is initialized to "completed", so a
+      //     consumer that abandons the iterator would otherwise leave a
+      //     resumable row for a branch that produced nothing.
+      //   • status === "completed" — an errored or interrupted branch is not
+      //     offered as resumable.
+      //   • a thread of its own — a fork reporting the SOURCE thread ran inside
+      //     the parent conversation (Codex's borrowed exact fork) and had its
+      //     turn rolled back out. Persisting that would append every follow-up
+      //     to the parent chat.
+      if (
+        forkSession &&
+        input.persistThreadKey &&
+        terminalSeen &&
+        status === "completed" &&
+        forkSession.providerThreadId !== sourceProviderThreadId
+      ) {
+        await this.persistForkThread(
+          input.persistThreadKey(forkSessionId),
+          forkSessionId,
+          forkSession,
+        );
+      }
       // Best-effort: turn_end is the stream's true terminal, so a close-time
       // rejection must not escape to the consumer (and this finally also
       // runs when the consumer abandons the iterator early).

@@ -614,6 +614,7 @@ export class AgentRunner {
         mode: params.mode,
         sourceCheckpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
+        persistThreadKey: params.persistThreadKey,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
