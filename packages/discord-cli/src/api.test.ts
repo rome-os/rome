@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { buildDiscordApiRequest } from "./api.js";
 import { parseDiscordArgs, type ParsedApiCommand } from "./args.js";
 
 const deps = {
-  readFile: vi.fn(async (path: string) => (path === "payload.json" ? '{"embeds":[]}' : "42")),
-  readStdin: vi.fn(async () => "false"),
+  readFile: rs.fn(async (path: string) => (path === "payload.json" ? '{"embeds":[]}' : "42")),
+  readStdin: rs.fn(async () => "false"),
 };
 
 function command(args: string[]): ParsedApiCommand {

@@ -53,7 +53,15 @@ export function publicAccessRoutes(deps: ApiDeps): Hono {
         error instanceof Error && error.message
           ? error.message
           : "Failed to apply proxy configuration";
-      return c.json({ ok: false, error: "Failed to apply proxy configuration", detail }, 500);
+      const reconciliationDetail = [
+        "The stored public-access policy has already been updated, but the proxy may still be using its previous configuration.",
+        "Retry the request or restart Rome to reconcile it.",
+        detail,
+      ].join(" ");
+      return c.json(
+        { ok: false, error: "Failed to apply proxy configuration", detail: reconciliationDetail },
+        500,
+      );
     }
 
     return c.json({ ok: true });

@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QuestionCard } from "./QuestionCard";
@@ -7,7 +7,7 @@ import i18n from "@/i18n";
 
 afterEach(async () => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
   await i18n.changeLanguage("en");
 });
 
@@ -31,7 +31,7 @@ function pressed(name: string): string | null {
   return optionButton(name).getAttribute("aria-pressed");
 }
 
-function renderCard(props: Record<string, unknown>, onSubmit = vi.fn()) {
+function renderCard(props: Record<string, unknown>, onSubmit = rs.fn()) {
   render(<QuestionCard toolUseId="t-1" props={props} onSubmit={onSubmit} onDismiss={() => {}} />);
   return onSubmit;
 }

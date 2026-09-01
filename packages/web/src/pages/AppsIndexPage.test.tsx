@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -12,27 +12,27 @@ import AppsIndexPage from "./AppsIndexPage";
 // Lifecycle failures surface as toasts (the launcher tiles have no room for
 // an inline error strip); mock sonner so tests can assert on them without
 // mounting the Toaster.
-vi.mock("sonner", () => ({
+rs.mock("sonner", () => ({
   toast: Object.assign(
-    vi.fn(() => "toast-id"),
+    rs.fn(() => "toast-id"),
     {
-      success: vi.fn(),
-      error: vi.fn(),
-      dismiss: vi.fn(),
+      success: rs.fn(),
+      error: rs.fn(),
+      dismiss: rs.fn(),
     },
   ),
 }));
 
-vi.mock("@/components/logo", () => ({
+rs.mock("@/components/logo", () => ({
   RomeLogo: ({ className }: { className?: string }) => (
     <span className={className} data-testid="rome-logo" />
   ),
 }));
 
 // The built-in nav grid imports .svg icons that resolve to URL strings under
-// vitest (not React components), which jsdom rejects as element names. The
+// Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
-vi.mock("@/shell/AppGrid", () => ({
+rs.mock("@/shell/AppGrid", () => ({
   APP_NAV: [
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
@@ -83,8 +83,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.clearAllMocks();
+  rs.restoreAllMocks();
+  rs.clearAllMocks();
   localStorage.clear();
 });
 
@@ -144,7 +144,7 @@ function mockBackend(initial: {
 }) {
   const installed = [...initial.installed];
 
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -489,7 +489,7 @@ describe("AppsIndexPage reactivity", () => {
 
     expect(await screen.findByLabelText("More actions for Weather")).toBeTruthy();
     expect(screen.queryByLabelText(/update to v1\.1\.0 available/)).toBeNull();
-    const appInstallCalls = vi.mocked(globalThis.fetch).mock.calls.filter(([url, init]) => {
+    const appInstallCalls = rs.mocked(globalThis.fetch).mock.calls.filter(([url, init]) => {
       return String(url) === "/api/apps" && init?.method === "POST";
     });
     expect(appInstallCalls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
@@ -549,9 +549,9 @@ describe("AppsIndexPage reactivity", () => {
     await waitFor(() => expect((updateAll as HTMLButtonElement).disabled).toBe(false));
     await user.click(updateAll);
 
-    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith("Updated 2 apps."));
+    await waitFor(() => expect(rs.mocked(toast.success)).toHaveBeenCalledWith("Updated 2 apps."));
 
-    const appInstallCalls = vi.mocked(globalThis.fetch).mock.calls.filter(([url, init]) => {
+    const appInstallCalls = rs.mocked(globalThis.fetch).mock.calls.filter(([url, init]) => {
       return String(url) === "/api/apps" && init?.method === "POST";
     });
     expect(appInstallCalls).toHaveLength(2);
@@ -651,8 +651,8 @@ describe("AppsIndexPage reactivity", () => {
       ),
     );
     // Success toast, and no error toast, after a successful publish.
-    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalled());
-    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    await waitFor(() => expect(rs.mocked(toast.success)).toHaveBeenCalled());
+    expect(rs.mocked(toast.error)).not.toHaveBeenCalled();
   });
 
   it("surfaces the store's rejection message as an error toast", async () => {
@@ -670,7 +670,7 @@ describe("AppsIndexPage reactivity", () => {
     await user.click(within(dialog).getByRole("button", { name: "Publish" }));
 
     await waitFor(() =>
-      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+      expect(rs.mocked(toast.error)).toHaveBeenCalledWith(
         "Version 1.0.0 is not strictly higher than 1.0.0",
       ),
     );

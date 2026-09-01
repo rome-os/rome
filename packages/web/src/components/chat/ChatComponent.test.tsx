@@ -1,17 +1,17 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
 
-vi.mock("@/components/logo", () => ({
+rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
 
-vi.mock("./Chat", () => ({
+rs.mock("./Chat", () => ({
   Chat: ({ mainAgentDisplayName }: { mainAgentDisplayName?: string }) => (
     <div data-testid="session-chat">{mainAgentDisplayName}</div>
   ),
@@ -30,7 +30,7 @@ beforeAll(async () => {
 afterEach(async () => {
   cleanup();
   localStorage.clear();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
   await i18n.changeLanguage("en");
 });
 
@@ -62,7 +62,7 @@ function renderChatComponent(
     },
   });
 
-  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -354,7 +354,7 @@ describe("ChatComponent empty home", () => {
 
   it("executes chat, App Store, and link actions from Cloud definitions", async () => {
     const user = userEvent.setup();
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const openSpy = rs.spyOn(window, "open").mockImplementation(() => null);
     const image = "https://public-assets.romeos.cc/assets/daily-summary-2.png";
     renderChatComponent(
       {},

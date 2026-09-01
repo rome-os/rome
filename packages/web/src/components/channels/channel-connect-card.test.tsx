@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 //
 // The single generic channel card is driven by CHANNEL_CONFIGS. Every Talk
 // channel connects through the generic setup surface
@@ -7,7 +7,7 @@
 // cover the shared frame once (via Discord) plus the per-service config
 // variations, the generic conversation-settings link, and Feishu's registered
 // QR renderer.
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function unconnected(grant: string): ConnectionSlot {
@@ -69,7 +69,7 @@ const AWAITING_INPUT = {
 /** Route the fetch mock by URL: setup start/input, grant revoke, and the
  *  auxiliary endpoints DiscordChannelRouting hits on mount (all empty). */
 function stubFetch(overrides: (url: string, init?: RequestInit) => Response | null = () => null) {
-  return vi
+  return rs
     .spyOn(globalThis, "fetch")
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -127,7 +127,7 @@ describe("ChannelConnectCard — shared frame", () => {
 
   it("starts the setup through the generic route, then submits the pasted token", async () => {
     const fetchMock = stubFetch();
-    const onRefresh = vi.fn();
+    const onRefresh = rs.fn();
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.discord}
@@ -185,7 +185,7 @@ describe("ChannelConnectCard — shared frame", () => {
 
   it("Disconnect DELETEs the slot's grant on the connections registry and refreshes", async () => {
     const fetchMock = stubFetch();
-    const onRefresh = vi.fn();
+    const onRefresh = rs.fn();
     renderCard(
       <ChannelConnectCard
         config={CHANNEL_CONFIGS.discord}

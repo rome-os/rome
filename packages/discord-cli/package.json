@@ -14,14 +14,14 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "../../scripts/test-env.sh vitest run"
+    "test": "../../scripts/test-env.sh rstest"
   },
   "dependencies": {
     "@rome/api-types": "workspace:*"
   },
   "devDependencies": {
+    "@rstest/core": "^0.11.11",
     "@types/node": "25.2.3",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.1"
+    "typescript": "^5.9.3"
   }
 }

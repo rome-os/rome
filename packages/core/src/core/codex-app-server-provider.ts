@@ -322,7 +322,7 @@ async function persistCodexAuthRevoked(
 /**
  * Classify a failed codex turn's error into the terminal `ErrorMessage.code`.
  * Usage-limit takes precedence — an exhausted quota is not an auth problem. A
- * revoked credential additionally persists the marker that downgrades the
+ * revoked credential also persists the marker that downgrades the
  * settings badge to "needs re-login" (best-effort; see `markCodexAuthRevoked`).
  */
 function classifyCodexFailure(

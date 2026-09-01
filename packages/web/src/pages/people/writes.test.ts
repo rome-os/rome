@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import { linkConflict, type DirectoryAccount, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
@@ -25,7 +25,7 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => rs.restoreAllMocks());
 
 const t = i18n.getFixedT("en", "people") as TFunction<"people">;
 
@@ -59,7 +59,7 @@ interface Sent {
 /** Answers every request with one payload, and records what was sent. */
 function stubFetch(payload: unknown, status = 200) {
   const sent: Sent[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -136,7 +136,7 @@ describe("people writes — the request each verb sends", () => {
       url: "/api/accounts/whatsapp/6591234472%40s.whatsapp.net/dismiss",
     });
 
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     const restored = stubFetch({ ...ACCOUNT, state: "unlinked" });
     await restoreAccount(REF, t);
     expect(restored[0]).toMatchObject({
@@ -217,7 +217,7 @@ describe("people writes — what an answer becomes", () => {
   });
 
   it("says the server was unreachable rather than throwing at a click handler", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    rs.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
 
     const result = await dismissAccount(REF, t);
 

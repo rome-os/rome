@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
@@ -19,7 +19,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function renderCallback(search: string) {
@@ -56,7 +56,7 @@ function stubFetch(handlers: {
   redeem?: () => Response;
   identity?: () => Response;
 }) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  return rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = typeof input === "string" ? input : (input as Request).url;
     if (url.includes("/api/setups/return")) {
       return (
@@ -114,7 +114,7 @@ describe("CallbackPage error display", () => {
   });
 
   it("translates a bare invalid_grant arriving as a provider error param", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
     renderCallback("?error=invalid_grant");
 
     expect(await screen.findByText(/Rome Cloud rejected this sign-in link/i)).toBeTruthy();
@@ -138,7 +138,7 @@ describe("CallbackPage return-leg routing", () => {
     });
     renderCallback("?handoff=h-setup&state=s-setup-live");
 
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/setups/return"))).toBe(
         true,
       ),
@@ -197,7 +197,7 @@ describe("CallbackPage return-leg routing", () => {
     });
     renderCallback("?handoff=h-signin&state=s-signin");
 
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/oauth/redeem"))).toBe(
         true,
       ),
@@ -234,7 +234,7 @@ describe("CallbackPage return-leg routing", () => {
     });
     renderCallback("?handoff=h-amb&state=s-amb");
 
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/setups/return"))).toBe(
         true,
       ),

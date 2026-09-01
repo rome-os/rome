@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { runDiscordCli } from "./index.js";
 
 function broker(body: unknown, status = 200): typeof fetch {
-  return vi.fn(
+  return rs.fn(
     async () =>
       new Response(JSON.stringify(body), {
         status,
@@ -182,7 +182,7 @@ describe("discord CLI output contract", () => {
   });
 
   it("distinguishes Core unavailability from Discord network failures", async () => {
-    const unavailable = vi.fn(async () => {
+    const unavailable = rs.fn(async () => {
       throw new Error("ECONNREFUSED");
     }) as unknown as typeof fetch;
     const local = await run(["api", "users/@me", "--json"], unavailable);

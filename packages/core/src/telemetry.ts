@@ -166,7 +166,7 @@ export async function withRomeSpan<T>(
 
 /**
  * Create a detached span for long-lived work (e.g., an async generator
- * whose lifetime spans many yields). The caller is responsible for calling
+ * whose lifetime spans many yields). The caller must call
  * `span.end()` and `span.recordException()` / `setStatus(ERROR)` on failure.
  * Session id is stamped at creation time.
  */

@@ -1,0 +1,61 @@
+# "No contractions." — docs/authoring/WRITING.md, "Sentences".
+#
+# Spelled out one by one rather than matched as `\w+'\w+`, because that pattern
+# cannot tell a contraction from a possessive: "the daemon's config" is allowed
+# and "it's running" is not. The cost of spelling them out is that a form left
+# off the list passes silently, so the list covers every pronoun crossed with
+# every auxiliary rather than the ones that happen to appear today. Both
+# apostrophes are accepted — an editor that smart-quotes on paste produces
+# U+2019.
+extends: substitution
+message: "Write '%s', not the contraction '%s'."
+level: error
+ignorecase: true
+swap:
+  "can['’]t": cannot
+  "don['’]t": do not
+  "doesn['’]t": does not
+  "didn['’]t": did not
+  "isn['’]t": is not
+  "aren['’]t": are not
+  "wasn['’]t": was not
+  "weren['’]t": were not
+  "won['’]t": will not
+  "wouldn['’]t": would not
+  "couldn['’]t": could not
+  "shouldn['’]t": should not
+  "hasn['’]t": has not
+  "haven['’]t": have not
+  "hadn['’]t": had not
+  "it['’]s": it is
+  "that['’]s": that is
+  "there['’]s": there is
+  "here['’]s": here is
+  "what['’]s": what is
+  "let['’]s": let us
+  "you['’]re": you are
+  "we['’]re": we are
+  "they['’]re": they are
+  "you['’]ll": you will
+  "we['’]ll": we will
+  "it['’]ll": it will
+  "you['’]ve": you have
+  "we['’]ve": we have
+  "they['’]ve": they have
+  "I['’]m": I am
+  "I['’]ve": I have
+  "I['’]ll": I will
+  "I['’]d": I would
+  "he['’]s": he is
+  "she['’]s": she is
+  "he['’]ll": he will
+  "she['’]ll": she will
+  "he['’]d": he would
+  "she['’]d": she would
+  "we['’]d": we would
+  "you['’]d": you would
+  "they['’]d": they would
+  "it['’]d": it would
+  "they['’]ll": they will
+  "who['’]s": who is
+  "who['’]ll": who will

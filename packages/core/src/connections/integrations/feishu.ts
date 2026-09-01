@@ -270,7 +270,7 @@ function guardianLinkView(appId: string, code: string): SetupView {
 /**
  * Build the Feishu conferral setup. A linear coroutine:
  *   1. prompt the setup mode (agent-ready vs manual) + tenant domain,
- *   2. obtain credentials — manual: re-prompt loop over a tenant-token probe;
+ *   2. get credentials — manual: re-prompt loop over a tenant-token probe;
  *      agent-ready: `ctx.step` around the SDK registerApp QR dance (the QR is
  *      shown mid-step; the SDK mints the app credentials on scan),
  *   3. unless a guardian is already mapped, show the one-time code and

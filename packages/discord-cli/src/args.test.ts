@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { API_HELP, DiscordCliUsageError, parseDiscordArgs } from "./args.js";
 
 describe("discord CLI argument parsing", () => {

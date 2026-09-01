@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -10,7 +10,7 @@ import AppDetailPage from "./AppDetailPage";
 
 // The README renders through the shared markdown pipeline; the details page
 // only needs to prove it hands the fetched source over, so stub the renderer.
-vi.mock("@/components/markdown", () => ({
+rs.mock("@/components/markdown", () => ({
   default: ({ children }: { children?: string }) => <div data-testid="markdown">{children}</div>,
 }));
 
@@ -25,7 +25,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function installedCard(
@@ -69,7 +69,7 @@ function mockBackend(initial: {
   // next GET /api/apps reflects the new truth — what a refetch sees.
   const installed = [...initial.installed];
 
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -302,7 +302,7 @@ describe("AppDetailPage", () => {
     renderPage("notes");
     await screen.findByRole("heading", { name: "Notes" });
     await waitFor(() =>
-      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+      expect(rs.mocked(globalThis.fetch)).toHaveBeenCalledWith(
         "/api/app-readmes/notes",
         expect.anything(),
       ),
@@ -355,7 +355,7 @@ describe("AppDetailPage", () => {
     renderPage("weather");
 
     await screen.findByRole("heading", { name: "Weather" });
-    const urls = vi.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
+    const urls = rs.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
     expect(urls).not.toContain("/api/apps/updates");
   });
 
@@ -492,7 +492,7 @@ describe("AppDetailPage manage section", () => {
     expect(await screen.findByText("weather · v1.1.0")).toBeTruthy();
     await waitFor(() => expect(screen.queryByText("Version 1.1.0 is available.")).toBeNull());
 
-    const urls = vi.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
+    const urls = rs.mocked(globalThis.fetch).mock.calls.map(([input]) => String(input));
     expect(urls).not.toContain("/api/apps/updates");
   });
 });

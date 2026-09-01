@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
-vi.mock("../../logger", () => ({
-  createLogger: () => ({ error: vi.fn(), info: vi.fn(), warn: vi.fn() }),
+rs.mock("../../logger", () => ({
+  createLogger: () => ({ error: rs.fn(), info: rs.fn(), warn: rs.fn() }),
 }));
 
 import { sameImageRef, selectImagesToRemove } from "./lima";

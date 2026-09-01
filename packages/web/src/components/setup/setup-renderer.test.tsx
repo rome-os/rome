@@ -1,9 +1,9 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 //
 // Standard renderers plus the per-(service, state) custom registry.
 // Each state kind renders from its server-authored payload alone; a custom
 // component overrides rendering only for its (service, status) pair.
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -34,9 +34,9 @@ function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
     state,
     busy: false,
     error: null,
-    onSubmit: vi.fn(),
-    onCancel: vi.fn(),
-    onRetry: vi.fn(),
+    onSubmit: rs.fn(),
+    onCancel: rs.fn(),
+    onRetry: rs.fn(),
     ...over,
   };
   // Both call sites live inside the dashboard's router, and an in-app setup
@@ -51,7 +51,7 @@ function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
 
 describe("SetupRenderer standard renderers", () => {
   it("awaiting-input renders the form and submits typed answers", () => {
-    const onSubmit = vi.fn();
+    const onSubmit = rs.fn();
     renderState(
       {
         status: "awaiting-input",
@@ -65,7 +65,7 @@ describe("SetupRenderer standard renderers", () => {
   });
 
   it("awaiting-input submits a choice picked from an options field", async () => {
-    const onSubmit = vi.fn();
+    const onSubmit = rs.fn();
     const user = userEvent.setup();
     renderState(
       {
@@ -119,7 +119,7 @@ describe("SetupRenderer standard renderers", () => {
   });
 
   it("presenting renders the view and offers cancel", () => {
-    const onCancel = vi.fn();
+    const onCancel = rs.fn();
     renderState(
       { status: "presenting", view: { title: "Link your account", body: ["Message the bot"] } },
       { onCancel },
@@ -150,7 +150,7 @@ describe("SetupRenderer standard renderers", () => {
   });
 
   it("failed renders the reason and a retry", () => {
-    const onRetry = vi.fn();
+    const onRetry = rs.fn();
     renderState({ status: "failed", reason: "Ledger write failed." }, { onRetry });
     expect(screen.getByText("Ledger write failed.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -172,9 +172,9 @@ describe("SetupRenderer custom registry", () => {
         state={{ status: "presenting", view: { title: "std" } }}
         busy={false}
         error={null}
-        onSubmit={vi.fn()}
-        onCancel={vi.fn()}
-        onRetry={vi.fn()}
+        onSubmit={rs.fn()}
+        onCancel={rs.fn()}
+        onRetry={rs.fn()}
         registry={{ "discord:presenting": Custom }}
       />,
     );

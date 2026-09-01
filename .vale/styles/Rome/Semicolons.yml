@@ -1,0 +1,13 @@
+# "No semicolons — split into two sentences." — docs/authoring/WRITING.md,
+# "Punctuation".
+#
+# `nonword` turns off the word boundaries Vale wraps a token in, which no
+# punctuation mark can satisfy. Vale's Markdown parser hands over prose only, so
+# semicolons inside fenced blocks, code spans, and HTML entities never reach
+# this rule.
+extends: existence
+message: "Replace the semicolon with two sentences."
+level: error
+nonword: true
+tokens:
+  - ';'

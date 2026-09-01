@@ -13,6 +13,10 @@ import { scopePairs, sqlMessages } from "./messages-sql.js";
  * Both halves share the row's one timestamp, and the ordering puts the reply
  * above the line it answers. Each carries its own `ref`, so the two never
  * collapse to one cursor position.
+ *
+ * A log row names both the sender and the thread, so the two scopes are the
+ * same query over two columns: an account read keys on the sender and a
+ * conversation read on the thread. Only the first has a group to subtract.
  */
 export function sentinelLogMessages(db: DrizzleDb): Messages {
   // No `channel`: the log holds every channel's triage side by side, so it is
@@ -20,13 +24,18 @@ export function sentinelLogMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     db,
     view(scope) {
-      const addressed = scopePairs(scope, sql`l.channel`, sql`l.channel_user_id`);
+      const byThread = scope.by === "conversation";
+      const keyColumn = byThread ? sql`l.thread_id` : sql`l.channel_user_id`;
+      const addressed = scopePairs(scope.keys, sql`l.channel`, keyColumn);
       if (addressed === null) return null;
       // A log row names its sender but not whether they were alone. The
       // session that recorded the same thread does, so a thread Rome knows to
-      // be a group is what the scope subtracts — a row whose thread no session
-      // covers is a direct exchange until something says otherwise.
-      const direct = sql`
+      // be a group is what an account scope subtracts — a row whose thread no
+      // session covers is a direct exchange until something says otherwise. A
+      // conversation scope names the thread itself and subtracts nothing.
+      const direct = byThread
+        ? addressed
+        : sql`
         ${addressed}
         AND NOT EXISTS (
           SELECT 1 FROM rome_sessions s
@@ -38,7 +47,7 @@ export function sentinelLogMessages(db: DrizzleDb): Messages {
       return sql`
         SELECT
           l.channel AS source,
-          l.channel_user_id AS address,
+          ${keyColumn} AS key,
           l.created_at AS at,
           0 AS outbound,
           'sentinel:' || l.id AS ref,
@@ -48,7 +57,7 @@ export function sentinelLogMessages(db: DrizzleDb): Messages {
         UNION ALL
         SELECT
           l.channel,
-          l.channel_user_id,
+          ${keyColumn},
           l.created_at,
           1,
           'sentinel:' || l.id || ':reply',

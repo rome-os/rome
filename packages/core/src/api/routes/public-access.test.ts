@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { publicAccessRoutes } from "./public-access.js";
+import { reconcilePublicAccessAtStartup } from "../../lib/public-access.js";
 import { PublicAccessState } from "../../lib/public-access-state.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -68,6 +69,7 @@ describe("Public-access API", () => {
     );
     chmodSync(fakeCaddy, 0o755);
 
+    // The explicit path is also the startup ownership signal.
     process.env.CADDY_CONFIG_PATH = caddyPath;
     process.env.CADDY_SPY_FILE = spyFile;
     process.env.PATH = `${binDir}:${process.env.PATH}`;
@@ -134,8 +136,46 @@ describe("Public-access API", () => {
     });
   });
 
+  describe("startup reconciliation", () => {
+    it("rewrites the Caddyfile and reloads from the stored normalized policy", async () => {
+      await deps.settingsRepo!.set("publicAccess", {
+        enableAccessControl: true,
+        allowedApps: ["inbox", "inbox", "not a slug"],
+        cloudEmailAccess: { inbox: ["Ada@Example.com"], "not a slug": ["ignored@example.com"] },
+      });
+      writeFileSync(caddyPath, "stale Caddyfile");
+
+      const config = await publicAccessState.load(testDb.db);
+      await reconcilePublicAccessAtStartup(testDb.db, config);
+
+      const caddyfile = readFileSync(caddyPath, "utf-8");
+      expect(caddyfile).not.toContain("stale Caddyfile");
+      expect(caddyfile).toContain("handle /apps/inbox {");
+      expect(caddyfile).not.toContain("not a slug");
+      expect(reloadArgs()).toEqual(["reload", "--config", caddyPath]);
+      expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
+      expect([...publicAccessState.cloudEmailsForApp("inbox")]).toEqual(["ada@example.com"]);
+    });
+
+    it("loads the policy without reconciling when CADDY_CONFIG_PATH is unset", async () => {
+      writeFileSync(caddyPath, "host-owned Caddyfile");
+      delete process.env.CADDY_CONFIG_PATH;
+      await deps.settingsRepo!.set("publicAccess", {
+        enableAccessControl: true,
+        allowedApps: ["inbox"],
+      });
+
+      const config = await publicAccessState.load(testDb.db);
+      await reconcilePublicAccessAtStartup(testDb.db, config);
+
+      expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
+      expect(reloadArgs()).toBeNull();
+      expect(readFileSync(caddyPath, "utf-8")).toBe("host-owned Caddyfile");
+    });
+  });
+
   describe("PUT /public-access", () => {
-    it("persists the normalized config, writes the Caddyfile, and reloads caddy", async () => {
+    it("persists the normalized config, refreshes auth state, writes the Caddyfile, and reloads caddy", async () => {
       const res = await putConfig(
         JSON.stringify({
           enableAccessControl: true,
@@ -163,6 +203,8 @@ describe("Public-access API", () => {
       expect(caddyfile).not.toContain("forward_auth");
 
       expect(reloadArgs()).toEqual(["reload", "--config", caddyPath]);
+      expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
+      expect([...publicAccessState.cloudEmailsForApp("inbox")]).toEqual(["ada@example.com"]);
     });
 
     it("refreshes the auth-edge allowed-apps snapshot", async () => {
@@ -195,6 +237,9 @@ describe("Public-access API", () => {
       const body = (await res.json()) as { ok: boolean; detail: string };
       expect(body.ok).toBe(false);
       expect(body.detail).toContain("caddy");
+      expect(body.detail).toContain("The stored public-access policy has already been updated");
+      expect(body.detail).toContain("the proxy may still be using its previous configuration");
+      expect(body.detail).toContain("Retry the request or restart Rome to reconcile it.");
 
       // The DB write and auth-edge snapshot happen before the reload, so a
       // failed reload must not roll them back — verify stays consistent with

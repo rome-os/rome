@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { artifactLocalName, artifactOwnerId } from "./artifact-name";
 
 describe("artifact presentation names", () => {

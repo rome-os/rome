@@ -1,12 +1,12 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { TraceAccounting } from "@rome/api-types/trace-segments";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { UsageSummaryBlock } from "./UsageSummaryBlock";
 
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string | number>) => {
       if (key === "usage.includedSubagents") return `${params?.count} subagents included`;

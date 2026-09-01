@@ -3327,7 +3327,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // interaction_result back to this call. Fail closed on both kinds —
               // the owning app must actually be installed, and an inline
               // component must be declared in its app.yaml `components:` list. A
-              // handoff additionally mints a dedicated child session for its
+              // handoff also mints a dedicated child session for its
               // design conversation so it never interleaves with this (parent)
               // thread.
               if (msg.type === "tool_result") {

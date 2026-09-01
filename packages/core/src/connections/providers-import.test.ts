@@ -1,5 +1,5 @@
 // Provider OAuth bundle → grant ledger imports (github/slack/
-// google): the credential mapper, the shared ensure-connection import, and the
+// google): the credential mapper, the shared connection import, and the
 // PRE-LOAD reconciler that folds the legacy providerAccounts table into the
 // ledger before the registry loads.
 //

@@ -25,8 +25,8 @@ jobs:
   # ──────────────────────────────────────────
   lint:
     runs-on: ubuntu-latest
-    # Covers the shell-tool downloads and both lint passes on top of the node
-    # chain that previously fit in 5.
+    # Covers the shell and prose tool downloads and every lint pass on top of
+    # the node chain that once fit in 5.
     timeout-minutes: 10
     env:
       # Keep the versions in sync with the flake devShell (flake.nix). The
@@ -36,6 +36,11 @@ jobs:
       SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
       SHFMT_VERSION: v3.12.0
       SHFMT_SHA256: d9fbb2a9c33d13f47e7618cf362a914d029d02a6df124064fff04fd688a745ea
+      # 3.19.0 fixes the line mapping Vale reports for comments inside a
+      # multi-paragraph block. On 3.14.1 the reported line drifts from the
+      # third paragraph on, which points a reader at the wrong code.
+      VALE_VERSION: 3.19.0
+      VALE_SHA256: c8f9d6c8055442bc7e9c121b2498e6f0e3fb670f4665e6ee577f1897f7665cf6
     steps:
       - uses: actions/checkout@v6
 
@@ -77,6 +82,18 @@ jobs:
           shfmt --version
       - run: scripts/lint-shell.sh
 
+      # Prose linting for docs/ and for the comments in .ts/.tsx sources. The
+      # style is vendored under .vale/styles, so this needs no `vale sync` and
+      # no network beyond the binary itself.
+      - name: Install vale
+        run: |
+          curl -fsSL -o vale.tar.gz \
+            "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          echo "${VALE_SHA256}  vale.tar.gz" | sha256sum --check --strict -
+          sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
+          rm vale.tar.gz
+          vale --version
+
       - uses: pnpm/action-setup@v5
       - uses: actions/setup-node@v6
         with:
@@ -84,6 +101,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind
       - run: pnpm lint:agents
       - run: pnpm typecheck

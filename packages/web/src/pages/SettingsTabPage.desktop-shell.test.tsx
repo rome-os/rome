@@ -1,23 +1,23 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import SettingsPage from "./SettingsTabPage";
 
 // Rendered for real — this suite is about whether it mounts at all.
-vi.mock("@/components/system-diagnosis-section", () => ({
+rs.mock("@/components/system-diagnosis-section", () => ({
   SystemDiagnosisSection: () => null,
 }));
 
-vi.mock("@/hooks/use-tailscale-connect", () => ({
+rs.mock("@/hooks/use-tailscale-connect", () => ({
   useTailscaleConnect: () => ({
     authUrl: null,
     connecting: false,
     error: null,
-    handleConnect: vi.fn(),
-    clearAuthUrl: vi.fn(),
+    handleConnect: rs.fn(),
+    clearAuthUrl: rs.fn(),
   }),
 }));
 
@@ -27,12 +27,12 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
   Reflect.deleteProperty(window, "rome");
 });
 
 function renderAdvanced() {
-  vi.spyOn(globalThis, "fetch").mockImplementation(
+  rs.spyOn(globalThis, "fetch").mockImplementation(
     (async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response) as typeof fetch,
   );
 

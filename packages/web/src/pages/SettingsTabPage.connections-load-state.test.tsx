@@ -1,8 +1,8 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import SettingsPage from "./SettingsTabPage";
@@ -13,7 +13,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function ok(json: unknown): Response {
@@ -32,8 +32,8 @@ function failed(status: number, error: string): Response {
 
 function mockConnectionsFetch(
   loadConnections: () => Response | Promise<Response>,
-): ReturnType<typeof vi.spyOn> {
-  return vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+): ReturnType<typeof rs.spyOn> {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/settings") return ok({});
     if (url === "/api/tailscale/devices") {
@@ -70,7 +70,7 @@ describe("Settings connections request states", () => {
 
   it("shows a failed registry request with a retry that reloads the connections", async () => {
     let connectionLoads = 0;
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    rs.spyOn(console, "error").mockImplementation(() => {});
     mockConnectionsFetch(() => {
       connectionLoads += 1;
       if (connectionLoads === 1) return failed(503, "Connections service unavailable");

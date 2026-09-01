@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,7 +14,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function connection(
@@ -62,7 +62,7 @@ function mockApi(
   connections: ApiConnection[] = minimalConnections(),
   composio: ComposioCliStatus | null = null,
 ) {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url === "/api/connections") {
       return new Response(JSON.stringify({ connections }), { status: 200 });
@@ -146,7 +146,7 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
 describe("ConnectionDetailPage — load failure", () => {
   it("stays on the detail route and retries the connections request", async () => {
     let connectionRequests = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url === "/api/connections") {
         connectionRequests += 1;

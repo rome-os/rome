@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { ROLE_CLASS, ROLES } from "./TypographyPage";
 
 // The kit deliberately doesn't export `TYPOGRAPHY_ROLES` (it isn't published

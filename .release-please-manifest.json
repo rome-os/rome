@@ -1,5 +1,5 @@
 {
-  "packages/app-runtime-sdk": "0.6.2",
+  "packages/app-runtime-sdk": "0.6.3",
   "packages/app-web-sdk": "0.3.0",
   "packages/ui": "0.2.3",
   "packages/lib": "0.0.2",

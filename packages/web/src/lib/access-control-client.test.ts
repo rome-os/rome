@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   accessControlChecksPassed,
   describeTailscaleCertError,
@@ -16,12 +16,12 @@ describe("accessControlChecksPassed", () => {
 
 describe("probeTailnetReachable", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
   });
 
   it("returns true when the HTTPS health check succeeds", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn().mockResolvedValue({ ok: true });
+    rs.stubGlobal("fetch", fetchMock);
 
     await expect(probeTailnetReachable("rome.tailnet.ts.net")).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -31,7 +31,7 @@ describe("probeTailnetReachable", () => {
   });
 
   it("returns false when the HTTPS health check fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+    rs.stubGlobal("fetch", rs.fn().mockRejectedValue(new Error("network error")));
 
     await expect(probeTailnetReachable("rome.tailnet.ts.net")).resolves.toBe(false);
   });

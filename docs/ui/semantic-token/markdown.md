@@ -99,7 +99,7 @@ Font weight and letter spacing have no primitive scales. The kit owns their fixe
 - Standard body and Headings 1–5 rise from 16px through 24px in 2px steps. Heading 6 shares the heading floor. `[mech]`
 - Compact body and Headings 1–4 rise from 14px through 20px in 2px steps. Headings 4–6 share the 14px floor. `[mech]`
 - Every heading weighs 500. Size, ink, and position preserve hierarchy when a CJK fallback resolves that weight to Regular. `[mech]`
-- A heading keeps its level typography when nested in a quotation or list; only top-level document blocks receive the outer rhythm tokens. `[mech]`
+- A heading keeps its level typography when nested in a quotation or list. Only top-level document blocks receive the outer rhythm tokens. `[mech]`
 - The first top-level block has no leading margin, including when the document opens with a heading. `[mech]`
 - The `rome-markdown-compact` modifier changes token values only. Element selectors and semantic heading levels stay fixed. `[mech]`
 - Streamdown stock typography and margins never define the result. Markdown CSS owns typography and block rhythm. `[mech]`

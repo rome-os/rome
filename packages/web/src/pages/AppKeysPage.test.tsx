@@ -1,22 +1,22 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import AppKeysPage from "./AppKeysPage";
 import SettingsPage from "./SettingsTabPage";
 
 // The Toaster mounts in App.tsx, outside this tree — spy on the calls instead.
-vi.mock("sonner", () => ({
+rs.mock("sonner", () => ({
   toast: Object.assign(
-    vi.fn(() => "toast-id"),
+    rs.fn(() => "toast-id"),
     {
-      success: vi.fn(),
-      warning: vi.fn(),
-      error: vi.fn(),
-      dismiss: vi.fn(),
+      success: rs.fn(),
+      warning: rs.fn(),
+      error: rs.fn(),
+      dismiss: rs.fn(),
     },
   ),
 }));
@@ -27,7 +27,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function ok(json: unknown): Response {
@@ -48,7 +48,7 @@ function mockAppKeysFetch(
   onWrite?: (call: AppKeysCall) => Response | Promise<Response>,
 ): AppKeysCall[] {
   const writes: AppKeysCall[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -182,7 +182,7 @@ describe("App keys page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
 
     const { toast } = await import("sonner");
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith("Saved. Apps can now read SHOP_DB_PASSWORD."),
     );
     expect(writes).toHaveLength(1);
@@ -228,7 +228,7 @@ describe("App keys page", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
     const { toast } = await import("sonner");
-    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Removed SHOP_DB_PASSWORD."));
+    await rs.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Removed SHOP_DB_PASSWORD."));
     expect(writes).toHaveLength(1);
     expect(writes[0].method).toBe("DELETE");
     expect(writes[0].url).toBe("/api/app-keys/SHOP_DB_PASSWORD");
@@ -254,7 +254,7 @@ describe("App keys page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
 
     const { toast } = await import("sonner");
-    await vi.waitFor(() =>
+    await rs.waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
         "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
       ),

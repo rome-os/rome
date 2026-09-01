@@ -9,7 +9,7 @@ Browse by domain:
 - [`rome-cloud.md`](rome-cloud.md) — Rome Cloud, Instance sign-in, OAuth handoff. *The operator-run service in front of all instances.*
 - [`agents.md`](agents.md) — Agents (incl. the agent hierarchy). *The LLM-backed runtime entities.*
 - [`sessions.md`](sessions.md) — Sessions, Model pin, Agent runs, Owning app, Forked turns. *The durable boundary around agent work.*
-- [`messaging.md`](messaging.md) — Messages, Channels, Policies, Sentinel, Approvals. *How messages flow in and how the system decides what to do with them.*
+- [`messaging.md`](messaging.md) — Messages, Conversations, Channels, Policies, Sentinel, Approvals. *How messages flow in and how the system decides what to do with them.*
 - [`apps.md`](apps.md) — Rome Apps (incl. ids, SDKs, caller identity, lockfile, install sources, app store, handles, app data, hooks). *The extensibility surface.*
 - [`actions.md`](actions.md) — Actions, Action results, Suspensions, Actor. *The primary unit of executable behavior, its result envelope, and the session identity accountable for it.*
 - [`skills.md`](skills.md) — Skills. *Instructional documents that teach agents how to perform tasks.*

@@ -42,7 +42,7 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       // Rome-managed toolkits have no Composio connection — they run through
       // Rome's own integration and are driven by connector_proxy. Redirect before
       // touching Composio so the agent never waits on a sign-in that can't
-      // authorize their tools. GitHub additionally offers gh/git in the shell.
+      // authorize their tools. GitHub also offers gh/git in the shell.
       if (isRomeManagedToolkit(toolkit)) {
         return {
           status: "error",

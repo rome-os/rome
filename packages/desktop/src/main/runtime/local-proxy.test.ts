@@ -1,6 +1,6 @@
 import { request as httpRequest } from "http";
 import { createServer, type Server } from "net";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // Not decoration: logger.ts mkdirSyncs ~/.rome-desktop and opens a winston File
 // transport at module load. Unmocked, this test writes to the user's real
@@ -8,9 +8,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // mock — a closed socket looks the same whether the guard rejected the upgrade
 // or the forward to a dead socket failed, so the log line is what tells them
 // apart.
-const logWarn = vi.hoisted(() => vi.fn());
-vi.mock("../logger", () => ({
-  createLogger: () => ({ error: vi.fn(), info: vi.fn(), warn: logWarn }),
+const logWarn = rs.hoisted(() => rs.fn());
+rs.mock("../logger", () => ({
+  createLogger: () => ({ error: rs.fn(), info: rs.fn(), warn: logWarn }),
 }));
 
 import { startLocalProxy, type LocalProxy } from "./local-proxy";

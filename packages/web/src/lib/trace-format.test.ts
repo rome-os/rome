@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { formatTracePrimitive, normalizeTracePayload } from "@/lib/trace-format";
 
 describe("normalizeTracePayload", () => {

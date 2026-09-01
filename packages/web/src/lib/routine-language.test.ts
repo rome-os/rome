@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { describeOutcome, describeSchedule, type ScheduleTrigger } from "./routine-language";
 
 /** Pin the "browser" timezone that `tzDiffersFromBrowser` reads, without
@@ -6,7 +6,7 @@ import { describeOutcome, describeSchedule, type ScheduleTrigger } from "./routi
  * pass arguments). Only the arg-less `Intl.DateTimeFormat()` is overridden. */
 function mockBrowserTz(tz: string) {
   const Real = Intl.DateTimeFormat;
-  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(((...args: unknown[]) => {
+  rs.spyOn(Intl, "DateTimeFormat").mockImplementation(((...args: unknown[]) => {
     const inst = new (Real as unknown as new (...a: unknown[]) => Intl.DateTimeFormat)(...args);
     if (args.length === 0) {
       return {
@@ -27,7 +27,7 @@ const daily = (extra: Partial<ScheduleTrigger>): ScheduleTrigger => ({
 });
 
 describe("describeSchedule timezone suffix", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => rs.restoreAllMocks());
 
   it("omits the tz suffix for a floating schedule even when tzid differs from the browser", () => {
     mockBrowserTz("UTC");

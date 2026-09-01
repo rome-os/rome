@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import i18n from "@/i18n";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
@@ -12,7 +12,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function status(overrides: Partial<ComposioCliStatus> = {}): ComposioCliStatus {
@@ -86,10 +86,10 @@ describe("ComposioConnectionSection", () => {
   });
 
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {
-    const fetchMock = vi
+    const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => new Response("{}", { status: 200 }));
-    const onRefresh = vi.fn();
+    const onRefresh = rs.fn();
     renderSection(status({ loggedIn: true }), {
       card: composioCard(status({ loggedIn: true })),
       onRefresh,
@@ -105,7 +105,7 @@ describe("ComposioConnectionSection", () => {
   it("Connect opens the login URL and refreshes after the account signs in", async () => {
     // login → returns the login URL; status → immediately reports loggedIn so the
     // poll exits on its first iteration.
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/composio/login")) {
         return Promise.resolve(
@@ -118,8 +118,8 @@ describe("ComposioConnectionSection", () => {
         new Response(JSON.stringify({ composio: { loggedIn: true } }), { status: 200 }),
       );
     });
-    const openMock = vi.spyOn(window, "open").mockReturnValue(null);
-    const onRefresh = vi.fn();
+    const openMock = rs.spyOn(window, "open").mockReturnValue(null);
+    const onRefresh = rs.fn();
     renderSection(status({ loggedIn: false }), {
       card: composioCard(status({ loggedIn: false })),
       onRefresh,

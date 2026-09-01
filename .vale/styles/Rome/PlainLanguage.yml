@@ -1,0 +1,267 @@
+# The plain-word lookup table: a fancy word on the left, the simpler word to
+# reach for on the right. This is the list to consult when picking a word, and
+# the reason it is checked in rather than kept as a habit.
+#
+# Source: the "Simple words and phrases" list published by plainlanguage.gov
+# (public domain), by way of the retext-simplify pattern table. Curated for this
+# repo, dropping three groups:
+#
+#   - terms that mean something else in software, where the plain swap is wrong
+#     ("interface" is not "meet", "parameters" are not "limits", "delete" is not
+#     "cut")
+#   - entries whose replacement is itself a contraction, which
+#     Rome.Contractions forbids
+#   - entries that only ever applied to government and military memos
+#
+# Pairs the repo has decided on live in Rome.WordChoice at error level. This
+# list is a suggestion: it advises, it does not gate. Adding a pair here is
+# cheap and does not break a build, so add one whenever a fancier word gets
+# past review.
+extends: substitution
+message: "Consider '%s' instead of '%s'."
+level: suggestion
+ignorecase: true
+swap:
+  a number of: many or some
+  abundance: enough or plenty
+  accede to: agree to or allow
+  accelerate: speed up
+  accentuate: stress
+  accompany: go with or with
+  accomplish: carry out or do
+  accorded: given
+  accordingly: so
+  accrue: add or gain
+  accurate: correct or exact or right
+  acquiesce: agree
+  additional: added or extra or more or other
+  adjacent to: next to
+  adjustment: change
+  admissible: accepted or allowed
+  advantageous: helpful
+  adversely impact: hurt
+  adversely impact on: hurt or set back
+  advise: recommend or tell
+  afford an opportunity: allow or let
+  all of: all
+  alleviate: ease or reduce
+  allocate: divide
+  along the lines of: as in or like
+  already existing: existing
+  alternatively: or
+  ameliorate: help or improve
+  "and/or": … or … or both
+  anticipate: expect
+  apparent: clear or plain
+  appreciable: many
+  appropriate: proper or right
+  approximate: about
+  as a means of: to
+  as of yet: yet
+  as prescribed by: in
+  as to: about or on
+  as yet: yet
+  ascertain: find out or learn
+  assist: aid or help
+  assistance: aid or help
+  at the present time: at present
+  at this time: now
+  attain: meet
+  attempt: try
+  attributable to: because
+  because of the fact that: because
+  belated: late
+  benefit: help
+  benefit from: enjoy
+  bestow: award or give
+  by means of: by or with
+  by virtue of: by or under
+  caveat: warning
+  cease: stop
+  close proximity: near
+  combined: joint
+  comply with: follow
+  comprise: form or include or make up
+  concerning: about or on
+  consequently: so
+  consolidate: combine or join or merge
+  constitutes: forms or is or makes up
+  contains: has
+  convene: meet
+  currently: now
+  deem: believe or consider or think
+  depart: go or leave
+  designate: appoint or choose or name
+  desire: want or wish
+  determine: decide or figure or find
+  disclose: show
+  discontinue: drop or stop
+  disseminate: give or issue or pass or send
+  due to the fact that: because or due to or since
+  during the period: during
+  "e\\.g\\.": for example or such as
+  each and every: each
+  economical: cheap
+  effect modifications: make changes
+  eliminate: cut or drop or end or stop
+  elucidate: explain
+  employ: use
+  endeavor: try
+  equitable: fair
+  equivalent: equal
+  establish: set up or prove or show
+  evidenced: showed
+  evident: clear
+  exclusively: only
+  exhibit: show
+  expedite: hasten or hurry or speed up
+  expeditious: fast or quick
+  expend: spend
+  expertise: ability
+  factual evidence: evidence or facts
+  feasible: can be done or workable
+  finalise: complete or finish
+  finalize: complete or finish
+  first and foremost: first
+  for a period of: for
+  for the purpose of: to
+  forfeit: give up or lose
+  formulate: plan
+  frequently: often
+  furnish: give or send
+  has a requirement for: needs
+  has no effect: does nothing or does not apply
+  herein: here
+  heretofore: until now
+  herewith: here or below
+  however: but or yet
+  "i\\.e\\.": as in
+  identical: same
+  if and when: if or when
+  impacted: affected or changed or harmed
+  in a timely manner: on time or promptly
+  in accordance with: by or under or following or per
+  in addition: also or besides or too
+  in all likelihood: probably
+  in an effort to: to
+  in between: between
+  in excess of: more than
+  in lieu of: instead
+  in light of the fact that: because
+  in many cases: often
+  in order for: for
+  in order that: for or so
+  in order to: to
+  in regard to: about or concerning or on
+  in relation to: about or with or to
+  in some instances: sometimes
+  in terms of: as or for or with
+  in the amount of: for
+  in the event of: if
+  in the near future: soon or shortly
+  in view of: since
+  in view of the above: so
+  inasmuch as: since
+  inception: start
+  incumbent upon: must
+  indicate: show or say or state or write down
+  indication: sign
+  is applicable to: applies to
+  is authorised to: may
+  is authorized to: may
+  is in consonance with: agrees with or follows
+  is responsible for: handles
+  it appears: seems
+  it is essential: must or need to
+  it is requested: please
+  liaison: discussion
+  magnitude: size
+  methodology: method
+  modify: change
+  multiple: many
+  necessitate: cause or need
+  nevertheless: besides or even so or still
+  not certain: uncertain
+  not later than: by or before
+  not many: few
+  not often: rarely
+  not unless: only if
+  not unlike: alike or similar
+  notify: let know or tell
+  notwithstanding: despite or in spite of or still
+  null and void: null or void
+  numerous: many
+  objective: aim or goal
+  obligate: bind or compel
+  on the contrary: but or so
+  on the other hand: but or so
+  one particular: one
+  optimum: best or greatest or most
+  owing to the fact that: because or since
+  participate: take part
+  particulars: details
+  perform: do
+  permit: let
+  pertaining to: about or of or on
+  point in time: moment or now or point or time
+  portion: part
+  possess: have or own
+  practicable: practical
+  preclude: prevent
+  previous: earlier
+  prioritise: focus on or rank
+  prioritize: focus on or rank
+  proceed: do or go ahead or try
+  procure: buy or get
+  proficiency: skill
+  promulgate: issue or publish
+  provide: give or offer or say
+  provided that: if
+  provides guidance for: guides
+  purchase: buy or sale
+  pursuant to: by or following or per or under
+  readily apparent: clear
+  refer back: refer
+  regarding: about or of or on
+  relative to: about or on
+  relocate: move
+  remain: stay
+  remainder: rest
+  represents: is
+  retain: keep
+  satisfy: meet or please
+  selection: choice
+  set forth in: in
+  shall: must or will
+  should you wish: if you want
+  similar to: like
+  solicit: ask for or request
+  span across: cross or span
+  "state-of-the-art": latest
+  strategise: plan
+  strategize: plan
+  subsequent: after or later or next or then
+  subsequently: after or later or then
+  substantial: large or much
+  successfully complete: complete or pass
+  sufficient: enough
+  terminate: end or stop
+  therefore: so or thus
+  therein: there
+  thereof: its or their
+  this day and age: today
+  time period: period or time
+  timely: prompt
+  transmit: send
+  transpire: happen
+  under the provisions of: under
+  until such time as: until
+  various different: different or various
+  viable: practical or workable
+  warrant: call for or permit
+  whereas: because or since
+  whether or not: whether
+  with reference to: about
+  with respect to: about or on
+  with the exception of: except for
+  witnessed: saw or seen

@@ -1,16 +1,16 @@
 ---
 name: loop-reconcile
-description: Autonomously compute the gap between an ideal-state doc and the codebase, then file the next work issues — or a loop-complete or loop-needs-discussion report.
+description: Autonomously compute the gap between an ideal-state doc and the codebase, then file the next work issues, a report on what needs discussion, or both.
 disable-model-invocation: true
 ---
 
 # Loop: reconcile
 
-Goal end-state: the next deliverable chunk of the gap between the doc and the codebase exists as issues, awaiting `ready-for-agent`, or one report explains why not.
+Goal end-state: every deliverable chunk the run can scope exists as issues, awaiting `ready-for-agent`, and one report explains whatever it could not scope.
 
-This is the autonomous half of the reconciliation loop. When launched from a session, run it in a background agent. It runs headless: never ask the user a question mid-run. Every ambiguity resolves to "stop and file a report", never "do something plausible". Every report reads standalone on GitHub and never depends on chat context.
+This is the autonomous half of the reconciliation loop. When launched from a session, run it in a background agent. It runs headless: never ask the user a question mid-run. Every ambiguity resolves to a report, never to something plausible. Every report reads standalone on GitHub and never depends on chat context.
 
-All work state lives in the GitHub repository itself: issues, labels, and milestones. No project board. Every issue this skill files carries two labels: `loop-reconcile`, the mark that the loop owns it, and a scope label `loop:<doc-stem>` naming its source doc — `loop:people` for `docs/northstars/people.md`. Reports also carry `loop-complete` or `loop-needs-discussion`. If a label is missing from the repository, create it.
+All work state lives in the GitHub repository itself: issues, labels, and milestones. No project board. Every issue this skill files carries two labels: `loop-reconcile`, the mark that the loop owns it, and a scope label `loop:<doc-stem>` naming its source doc — `loop:people` for `docs/northstars/people.md`. A report is an issue too, and it carries `loop-complete` or `loop-needs-discussion` on top of those two. If a label is missing from the repository, create it.
 
 Args: an ideal-state doc under `docs/northstars/`, and optionally a repository milestone.
 
@@ -42,11 +42,22 @@ Args: an ideal-state doc under `docs/northstars/`, and optionally a repository m
    - If one is labeled `ready-for-agent` or is in progress, file nothing. Print a pointer to it and stop.
    - If none carries `ready-for-agent`, re-check each against the gap computed below. If they hold, stop. If they are stale, revise or withdraw them, then continue.
 2. Compute the gap. Walk the Statements list one claim at a time against the code. Record each as holds, with evidence, or fails, with the shortest path to make it hold.
-3. Exit by what the walk found.
+3. Exit by what the walk found. A run files at most one report.
    - A statement cannot be checked, or two statements cannot both hold: the doc is broken. File a `loop-needs-discussion` report naming the statements, and file nothing else. The doc gets fixed in a `loop-northstar` session, never by this run.
    - Zero gap: file a `loop-complete` report walking each statement with its evidence and naming what it checked — the doc, or the milestone. Never advance to the next milestone.
-   - More than about four chunks, or crossing a contract boundary: file a `loop-needs-discussion` report calling for a milestone session and sketching a possible slicing. Never scope and plan in the same run.
-   - Otherwise: scope chunks by the rules below and file them as issues.
+   - Otherwise: scope chunks by the rules below and file them as issues, up to about four. Alongside them file a `loop-needs-discussion` report for every question the walk could not answer and every chunk the cap left out. Chunks and a report are one run's ordinary output, not alternatives.
+
+The size of a gap decides how much of it a run files. It never decides whether the run files anything.
+
+## Open questions
+
+A report names the statements it questions. Every other statement the walk covered is unquestioned, and a chunk serving only unquestioned statements is filable while that report is open.
+
+- The report enumerates the live resolutions of each question it raises. A chunk is filable when every one of those resolutions still needs it. A chunk that some resolutions need and others do not belongs to the report.
+- A filable chunk touches no file the contested fix would touch. This is the mechanical check when the resolutions are hard to enumerate.
+- A filable chunk names the report, states the open question in one line, and states which resolutions it survives. That claim is what a human checks before applying `ready-for-agent`.
+- Its Scope names the contested area as out of scope, so the boundary is written down rather than inferred.
+- A report questioning a statement carries the replacement text it proposes. A `loop-northstar` session then reviews a draft rather than redesigning from the problem.
 
 ## Scoping rules
 
@@ -57,7 +68,3 @@ Args: an ideal-state doc under `docs/northstars/`, and optionally a repository m
 - File several issues only when the chunks are parallel: disjoint files, no shared contract. Never file a dependency chain — a chained issue is a stored prediction that goes stale.
 - Issues follow [the issue format](../../../docs/authoring/github-issues.md), attach to the milestone when one is given, and stand alone without the doc.
 - Never apply `ready-for-agent`.
-
-## Exits
-
-Every run ends in exactly one: issues filed, a `loop-complete` report, or a `loop-needs-discussion` report. A report is an issue carrying its label.

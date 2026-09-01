@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
 import type { InstanceSessionCoordinator } from "./instance-session-coordinator.js";
 import type { CloudInstance, InstanceSession } from "./native-auth-types.js";
@@ -40,13 +40,13 @@ describe("RomeApiClient", () => {
   it("injects the selected origin session and retries one 401", async () => {
     const vault = new CredentialVault(memoryStore());
     await vault.setInstanceSession(session("old-token"));
-    const refresh = vi.fn(async () => {
+    const refresh = rs.fn(async () => {
       const next = session("new-token");
       await vault.setInstanceSession(next);
       return next;
     });
     const seen: string[] = [];
-    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const fetchImpl = rs.fn(async (url: string, init?: RequestInit) => {
       expect(new URL(url).origin).toBe(instance.origin);
       seen.push(new Headers(init?.headers).get("cookie") ?? "");
       return new Response(null, { status: seen.length === 1 ? 401 : 204 });
@@ -65,12 +65,12 @@ describe("RomeApiClient", () => {
   it("does not refresh a 403", async () => {
     const vault = new CredentialVault(memoryStore());
     await vault.setInstanceSession(session("token"));
-    const refresh = vi.fn();
+    const refresh = rs.fn();
     const client = new RomeApiClient(
       instance,
       vault,
       { refresh } as unknown as InstanceSessionCoordinator,
-      vi.fn(async () => new Response(null, { status: 403 })) as unknown as typeof fetch,
+      rs.fn(async () => new Response(null, { status: 403 })) as unknown as typeof fetch,
     );
     expect((await client.request("/api/private")).status).toBe(403);
     expect(refresh).not.toHaveBeenCalled();
@@ -82,8 +82,8 @@ describe("RomeApiClient", () => {
     const client = new RomeApiClient(
       instance,
       vault,
-      { refresh: vi.fn() } as unknown as InstanceSessionCoordinator,
-      vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch,
+      { refresh: rs.fn() } as unknown as InstanceSessionCoordinator,
+      rs.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch,
     );
     await expect(client.request("https://romeos.cc/api/account")).rejects.toThrow("relative /api");
     await expect(client.request("/settings")).rejects.toThrow("relative /api");

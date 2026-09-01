@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -16,12 +16,12 @@ beforeEach(() => {
   // Opening a row's detail dialog mounts ceremony cards that self-fetch their
   // transient status (verify-status, telegram user/status, ...). None of these
   // tests assert ceremony state, so a fresh minimal ok JSON keeps them quiet.
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
+  rs.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
 });
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function grantDisplay(overrides: Partial<GrantDisplay> = {}): GrantDisplay {

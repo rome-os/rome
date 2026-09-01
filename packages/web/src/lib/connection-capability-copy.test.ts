@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import enSettings from "@/i18n/locales/en/settings.json";
 import zhSettings from "@/i18n/locales/zh-CN/settings.json";
 import type { ConnectionSlot, SlotKey } from "@/lib/connection-cards";

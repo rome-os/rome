@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
-vi.mock("electron", () => ({
+rs.mock("electron", () => ({
   BrowserWindow: class {},
-  session: { defaultSession: { webRequest: { onHeadersReceived: vi.fn() } } },
-  shell: { openExternal: vi.fn() },
+  session: { defaultSession: { webRequest: { onHeadersReceived: rs.fn() } } },
+  shell: { openExternal: rs.fn() },
 }));
-vi.mock("./lifecycle", () => ({ isQuitting: () => false }));
+rs.mock("./lifecycle", () => ({ isQuitting: () => false }));
 
 import { contentSecurityPolicy, cspSourcesForRomeCloud, policyAppliesTo } from "./window";
 

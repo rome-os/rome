@@ -19,7 +19,7 @@ export type ReproMode = "shipped" | "fixed";
 export interface Evidence {
   /** Repo-relative path plus line or range — `packages/web/src/pages/Foo.tsx:286-300`. */
   where: string;
-  /** Smallest snippet that demonstrates the violation. */
+  /** Smallest snippet that shows the violation. */
   code: string;
 }
 

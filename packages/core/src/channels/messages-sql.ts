@@ -12,32 +12,56 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { TimelineEntry } from "@rome/api-types/people";
 import type { DrizzleDb } from "../db/index.js";
-import type { MessageAccount, MessageRead, Messages } from "./messages.js";
+import type {
+  ConversationRead,
+  MessageAccount,
+  MessageConversation,
+  MessageRead,
+  Messages,
+} from "./messages.js";
 
 /**
  * A store's rows as timeline entries: a SELECT producing exactly the columns
- * `source`, `address`, `at`, `outbound`, `ref`, `body`.
+ * `source`, `key`, `at`, `outbound`, `ref`, `body`.
  *
- * - `source` is the channel an entry arrived on, and `address` an address of
- *   the account it belongs to — one of the addresses the view was given.
+ * - `source` is the channel an entry arrived on, and `key` the scope entry the
+ *   row answers for — one of the strings the view was handed, which is an
+ *   address of the account a message belongs to when the scope asks by account,
+ *   and the id of the conversation it was said in when it asks by conversation.
  * - `at` is epoch seconds, `outbound` is 1 for something Rome said and 0 for
  *   something it was told, `body` is the line to render or NULL.
  * - `ref` must be unique across everything the store can put on one person's
  *   timeline. Ids unique only within a conversation (a WhatsApp message id, a
  *   LinkedIn message id) are qualified by the conversation.
  *
- * A row may repeat one message under several addresses — a LinkedIn thread
- * carrying two member ids of the same person answers under both. The reads
- * below fold those together, so a view is free to attribute rather than choose.
+ * A row may repeat one message under several keys — a LinkedIn thread carrying
+ * two member ids of the same person answers under both. The reads below fold
+ * those together, so a view is free to attribute rather than choose.
  */
 export type MessageViewSql = SQL;
 
-/** One address, on the channel that holds it. What a store is scoped by, since
- *  the pair is what names a conversation: two channels are free to spell an
- *  address the same way and mean two different people. */
-export interface MessageAddress {
+/** One string a store is scoped by, on the channel that holds it — an address,
+ *  or a conversation id. The pair rather than the string alone, since the pair
+ *  is what names the thing: two channels are free to spell one the same way and
+ *  mean two different people, or two different threads. */
+export interface MessageScopeKey {
   channel: string;
-  address: string;
+  key: string;
+}
+
+/**
+ * What a batch of calls asked a store for.
+ *
+ * `by` is the question, and it is the whole difference between the reads a
+ * store answers: the same rows, scoped by who a message passed between or by
+ * the thread it was said in. A batch asks one question — the queues below are
+ * per question — so a view reads `by` once and scopes its rows to match.
+ */
+export interface MessageScope {
+  by: "account" | "conversation";
+  /** Every key the batch named, each once. Never empty: a request that can hold
+   *  nothing is answered without reaching the view at all. */
+  keys: readonly MessageScopeKey[];
 }
 
 export interface SqlMessagesOptions {
@@ -48,19 +72,18 @@ export interface SqlMessagesOptions {
    *
    * Absent for a store that holds every channel's messages side by side and
    * keys them by the pair: Rome's own transcript, the sentinel's log. Such a
-   * store is scoped by `(channel, address)` throughout, and its view is handed
-   * the pairs rather than bare addresses so it can say the same.
+   * store is scoped by `(channel, key)` throughout, and its view is handed the
+   * pairs rather than bare strings so it can say the same.
    */
   channel?: string;
   db: DrizzleDb;
   /**
-   * The store's rows, scoped to every address of every account a batch of
-   * calls named, deduplicated.
+   * The store's rows, scoped to what a batch of calls named.
    *
    * Null when the request can hold nothing, and the store then answers empty
    * without a query.
    */
-  view(scope: readonly MessageAddress[]): MessageViewSql | null;
+  view(scope: MessageScope): MessageViewSql | null;
   /**
    * The view's `body` column mapped to the line to render, for a store whose
    * text is not stored as text — Rome's transcript keeps a JSON array of
@@ -73,9 +96,9 @@ export interface SqlMessagesOptions {
 /**
  * `Messages` over one SQL view.
  *
- * Every call — `read`, `count`, `latest` — is one job on one queue, and the
- * jobs raised in a tick are answered by a single statement. What differs
- * between them is only the shape of the job:
+ * Every call — `read`, `count`, `latest`, `readConversation` — is one job on a
+ * queue, and the jobs raised in a tick are answered by a single statement. What
+ * differs between them is only the shape of the job:
  *
  * - `read` asks for a page and takes the entries.
  * - `latest` asks for a page of one and takes its head.
@@ -85,12 +108,19 @@ export interface SqlMessagesOptions {
  * So the law messages.ts states holds by construction rather than by three
  * queries agreeing: the count is the length of the history the page walks,
  * because both are read off the same ranking of the same rows.
+ *
+ * A queue per question rather than one for all four, because a batch reaches
+ * the view as a single scope: account jobs and conversation jobs pooled
+ * together would ask one SELECT to answer two questions. The grouping that
+ * matters is untouched — a directory read raises account jobs only, and those
+ * still share one pass.
  */
 export function sqlMessages(options: SqlMessagesOptions): Messages {
-  const submit = batched<Job, JobResult>((jobs) => runBatch(options, jobs));
+  const byAccount = batched<Job, JobResult>((jobs) => runBatch(options, "account", jobs));
+  const byConversation = batched<Job, JobResult>((jobs) => runBatch(options, "conversation", jobs));
 
   const job = (accounts: readonly MessageAccount[], after: TimelineEntry | null, limit: number) =>
-    submit({ scope: scopeOf(accounts, options.channel), after, limit });
+    byAccount({ keys: accountKeys(accounts, options.channel), after, limit });
 
   return {
     async read(request: MessageRead) {
@@ -105,6 +135,16 @@ export function sqlMessages(options: SqlMessagesOptions): Messages {
     async latest(accounts) {
       return (await job(accounts, null, 1)).entries[0] ?? null;
     },
+
+    async readConversation(request: ConversationRead) {
+      const limit = Math.max(1, Math.floor(request.limit));
+      const answered = await byConversation({
+        keys: conversationKeys(request.conversation, options.channel),
+        after: request.after ?? null,
+        limit,
+      });
+      return answered.entries;
+    },
   };
 }
 
@@ -116,30 +156,42 @@ export function sqlMessages(options: SqlMessagesOptions): Messages {
  * one channel drops the accounts on every other here; a store that serves them
  * all keeps the channel beside each address and matches on both.
  */
-function scopeOf(
+function accountKeys(
   accounts: readonly MessageAccount[],
   channel: string | undefined,
-): MessageAddress[] {
-  const scope = new Map<string, MessageAddress>();
+): MessageScopeKey[] {
+  const scope = new Map<string, MessageScopeKey>();
   for (const account of accounts) {
     if (channel !== undefined && account.channel !== channel) continue;
     for (const address of account.addresses) {
-      scope.set(`${account.channel}\n${address}`, { channel: account.channel, address });
+      scope.set(`${account.channel}\n${address}`, { channel: account.channel, key: address });
     }
   }
   return [...scope.values()];
 }
 
-/** Every address in a scope, each once — what a view on a single channel needs,
- *  the channel being its own. */
-export function addressesIn(scope: readonly MessageAddress[]): string[] {
-  return [...new Set(scope.map((entry) => entry.address))];
+/** The conversation as the batch names it, and nothing at all when the store
+ *  serves another channel — the same subtraction {@link accountKeys} makes for
+ *  an account, a conversation id being no more portable across channels than an
+ *  address is. */
+function conversationKeys(
+  conversation: MessageConversation,
+  channel: string | undefined,
+): MessageScopeKey[] {
+  if (channel !== undefined && conversation.channel !== channel) return [];
+  return [{ channel: conversation.channel, key: conversation.id }];
+}
+
+/** Every key in a scope, each once — what a view on a single channel needs, the
+ *  channel being its own. */
+export function keysIn(scope: readonly MessageScopeKey[]): string[] {
+  return [...new Set(scope.map((entry) => entry.key))];
 }
 
 /** One call, as the batch sees it. `limit` of {@link COUNT_ONLY} is a job that
  *  wants the length of a history and none of it. */
 interface Job {
-  scope: readonly MessageAddress[];
+  keys: readonly MessageScopeKey[];
   after: TimelineEntry | null;
   limit: number;
 }
@@ -160,26 +212,28 @@ const nothing = (): JobResult => ({ entries: [], total: 0 });
 /**
  * One statement for a whole batch.
  *
- * The jobs enter the query as two tables of their own — which addresses each
- * asked about, and where each wants to resume and how much of the history it
- * wants — so the rows are scoped, ranked and cut per job inside a single pass
- * rather than once per job.
+ * The jobs enter the query as two tables of their own — which keys each asked
+ * about, and where each wants to resume and how much of the history it wants —
+ * so the rows are scoped, ranked and cut per job inside a single pass rather
+ * than once per job.
  */
-async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobResult[]> {
-  const asked = jobs.flatMap((job, index) => job.scope.map((entry) => ({ index, ...entry })));
+async function runBatch(
+  options: SqlMessagesOptions,
+  by: MessageScope["by"],
+  jobs: Job[],
+): Promise<JobResult[]> {
+  const asked = jobs.flatMap((job, index) => job.keys.map((entry) => ({ index, ...entry })));
   if (asked.length === 0) return jobs.map(nothing);
 
-  const wanted = new Map(asked.map((entry) => [`${entry.channel}\n${entry.address}`, entry]));
-  const rows = options.view(
-    [...wanted.values()].map(({ channel, address }) => ({
-      channel,
-      address,
-    })),
-  );
+  const wanted = new Map(asked.map((entry) => [`${entry.channel}\n${entry.key}`, entry]));
+  const rows = options.view({
+    by,
+    keys: [...wanted.values()].map(({ channel, key }) => ({ channel, key })),
+  });
   if (rows === null) return jobs.map(nothing);
 
   const scope = sql.join(
-    asked.map((entry) => sql`(${entry.index}, ${entry.channel}, ${entry.address})`),
+    asked.map((entry) => sql`(${entry.index}, ${entry.channel}, ${entry.key})`),
     sql`, `,
   );
   const ask = sql.join(
@@ -188,10 +242,10 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
   );
 
   const answered = (await options.db.all(sql`
-    WITH scope(rq, source, address) AS (VALUES ${scope}),
+    WITH scope(rq, source, held_key) AS (VALUES ${scope}),
     ask(rq, cap, has_cursor, c_at, c_outbound, c_source, c_ref) AS (VALUES ${ask}),
     -- One row per (job, message). DISTINCT because a view may attribute one
-    -- message to several of a job's addresses — a LinkedIn thread carrying two
+    -- message to several of a job's keys — a LinkedIn thread carrying two
     -- member ids of the same person — and a person's history shows a message
     -- once however many ways they are named on it.
     scoped AS (
@@ -203,10 +257,10 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
         held.ref AS ref,
         held.body AS body
       FROM (${rows}) held
-      -- The pair, never the address alone: a store holding several channels
-      -- side by side would otherwise hand one channel's message to a job that
-      -- asked about the same string on another.
-      JOIN scope ON scope.source = held.source AND scope.address = held.address
+      -- The pair, never the key alone: a store holding several channels side by
+      -- side would otherwise hand one channel's message to a job that asked
+      -- about the same string on another.
+      JOIN scope ON scope.source = held.source AND scope.held_key = held.key
     ),
     -- Each job's own history, ranked and measured in one pass. One named
     -- window rather than two inline ones: SQLite shares a partition pass only
@@ -341,27 +395,27 @@ function batched<J, R>(run: (jobs: J[]) => Promise<R[]>): (job: J) => Promise<R>
 }
 
 /**
- * A whole scope as a WHERE clause: `(channel = … AND address IN (…))` per
- * channel, or'd together, and null when the scope is empty.
+ * A whole scope as a WHERE clause: `(channel = … AND key IN (…))` per channel,
+ * or'd together, and null when the scope is empty.
  *
  * What a store holding several channels side by side scopes itself with. The
- * pair rather than the address alone, for the reason the batch's join gives:
- * two channels may spell an address the same way and mean two people.
+ * pair rather than the key alone, for the reason the batch's join gives: two
+ * channels may spell one the same way and mean two different things.
  */
 export function scopePairs(
-  scope: readonly MessageAddress[],
+  scope: readonly MessageScopeKey[],
   channelColumn: SQL,
-  addressColumn: SQL,
+  keyColumn: SQL,
 ): SQL | null {
   const byChannel = new Map<string, string[]>();
-  for (const { channel, address } of scope) {
-    const addresses = byChannel.get(channel);
-    if (addresses) addresses.push(address);
-    else byChannel.set(channel, [address]);
+  for (const { channel, key } of scope) {
+    const keys = byChannel.get(channel);
+    if (keys) keys.push(key);
+    else byChannel.set(channel, [key]);
   }
   const clauses = [...byChannel]
-    .map(([channel, addresses]) => {
-      const held = inList(addressColumn, addresses);
+    .map(([channel, keys]) => {
+      const held = inList(keyColumn, keys);
       return held === null ? null : sql`(${channelColumn} = ${channel} AND ${held})`;
     })
     .filter((clause): clause is SQL => clause !== null);

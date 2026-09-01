@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { runComposioLogin, runComposioLogout } from "@/lib/connection-connect";
 
 // Connect and reconnect run through the conferral setup (`useSetup`), while
@@ -6,14 +6,14 @@ import { runComposioLogin, runComposioLogout } from "@/lib/connection-connect";
 // ceremonies remain here.
 
 describe("runComposioLogin — endpoint contracts", () => {
-  const fetchMock = vi.fn();
+  const fetchMock = rs.fn();
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
   });
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
   });
 
   it("returns the loginUrl and resolves ok after the status poll confirms login", async () => {
@@ -98,14 +98,14 @@ describe("runComposioLogin — endpoint contracts", () => {
 });
 
 describe("runComposioLogout — endpoint contracts", () => {
-  const fetchMock = vi.fn();
+  const fetchMock = rs.fn();
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
   });
   afterEach(() => {
-    vi.unstubAllGlobals();
+    rs.unstubAllGlobals();
   });
 
   it("POSTs to the logout endpoint and returns ok on success", async () => {

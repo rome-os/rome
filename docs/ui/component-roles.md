@@ -1,6 +1,6 @@
 # Component Roles
 
-A component-role doc for the `@rome-os/ui` kit: which components must line up with each other, and what each guarantees so that lining up needs no per-pair coordination. [../authoring/ui-component-tokens.md](../authoring/ui-component-tokens.md) is the rulebook for the specs the roles govern; [../authoring/ui-tokens.md](../authoring/ui-tokens.md) defines the terms. A component holds exactly one role.
+A component-role doc for the `@rome-os/ui` kit: which components must line up with each other, and what each guarantees so that lining up needs no per-pair coordination. [../authoring/ui-component-tokens.md](../authoring/ui-component-tokens.md) is the rulebook for the specs the roles govern. [../authoring/ui-tokens.md](../authoring/ui-tokens.md) defines the terms. A component holds exactly one role.
 
 ## Why roles
 
@@ -11,7 +11,7 @@ An alignment claim is unfalsifiable until membership is written down. Absent the
 | Role | Owns | Members |
 |---|---|---|
 | [Control](#control) | Height, padding, radius, focus edge | Inline: `Button`, `IconButton`, `Input`, `CommandInput`, `SelectTrigger`, `SegmentedControl`, `Toggle`, `TabsTrigger`, Calendar `button_previous` and `button_next`, Calendar dropdown triggers, `CalendarDayButton`. Future: the Combobox, DatePicker and SearchField triggers. Block: `Textarea` |
-| [Selection control](#selection-control) | An intrinsic size off the control scale, and a hit area larger than its box | `Switch`; `Checkbox` and `Radio` when they land |
+| [Selection control](#selection-control) | An intrinsic size off the control scale, and a hit area larger than its box | `Switch`, plus `Checkbox` and `Radio` when they land |
 | [Surface](#surface) | Radius, elevation, padding, separation from the layer below | `Card`, `Tile`, `Alert`, `PopoverContent`, `DropdownMenuContent`, `ContextMenuContent`, `SelectContent`, `TooltipContent`, `Toaster`, `Dialog`, `Sheet` |
 | [Inline content](#inline-content) | A smaller scale of its own | `Badge`, `Avatar`, `Spinner`, Calendar `weekday`, `week_number_header`, and `week_number`. Future: `Kbd` and `Tag` |
 | [Layout](#layout) | All spacing between its children | `Field`, `FieldGroup`, `ButtonGroup`, Calendar `months`, `month`, `nav`, `table`, `weekdays`, and `week` |
@@ -19,7 +19,7 @@ An alignment claim is unfalsifiable until membership is written down. Absent the
 | [Table row](#table-row) | Row separation and interaction-state fill | `TableRow` |
 | [Table cell](#table-cell) | Cell inset, alignment, header typography | `TableHead`, `TableCell` |
 
-`Tile` still lives in `packages/web`; the kit stages it for a later move. It already holds a role here, so the move carries no reclassification.
+`Tile` still lives in `packages/web`. The kit stages it for a later move. It already holds a role here, so the move carries no reclassification.
 
 ## Control
 
@@ -34,12 +34,12 @@ A control takes pointer or keyboard input directly. A member is **inline** or **
 
   The start inset is shared because it is an alignment edge: it is where content starts reading, so every such member stacked in one column lines up on it. A centred label is not an edge — nothing lines up against it — so the centre group is free to sit tighter, and it is a group rather than each component's own step so that one size name still means one inset across the members that share it. The two agree at `md` and `lg` and diverge at `sm`.
 
-  Alignment is the axis, not component kind. A `Button` rendered start-aligned is on the shared start inset; a `SelectTrigger` would be on the centre group if it ever centred its value. The check is the component's own alignment, so it can be read straight off the source. `[mech]`
+  Alignment is the axis, not component kind. A `Button` rendered start-aligned is on the shared start inset. A `SelectTrigger` would be on the centre group if it ever centred its value. The check is the component's own alignment, so it can be read straight off the source. `[mech]`
 
   No member trims one side for a glyph sitting there. An optical correction is a decision for the whole role, not a per-component one, and until the role makes it the padding stays symmetric. `[mech]`
 - Radius is a `--control-r-*` step. `[mech]`
 - The focus edge is one geometry throughout: a 2px `outline` in `--ring` at `outline-offset: 0`, sitting outside the box. It stays outside because `ring` and the control fills sit a step apart on one ramp, so an inset edge does not separate from them. A translucent halo (`focus-visible:ring-*`) never appears. `[mech]`
-- A member carries no margin, and sets no fixed width. Spacing belongs to Layout; `w-full` reaches the outermost element. `[mech]`
+- A member carries no margin, and sets no fixed width. Spacing belongs to Layout. `w-full` reaches the outermost element. `[mech]`
 - Geometry is written in bracket form — `h-[var(--control-h-md)]`, never `h-(--control-h-md)` — so `tailwind-merge` classifies it and a caller's `className` wins. `[mech]`
 - Typography is a role utility (`text-ui`, `text-body`), never derived from the size step. `[mech]`
 
@@ -47,12 +47,12 @@ A control takes pointer or keyboard input directly. A member is **inline** or **
 
 The role exists for these: any two at the same size, dropped into one row, are the same height and centered against each other with no adjustment at the call site.
 
-- A size name is a composition contract before it is a lookup. The same name on any two members yields the same outer height. A member that omits a name cannot join a row at that size; it does not fall back to the nearest step. `[mech]`
+- A size name is a composition contract before it is a lookup. The same name on any two members yields the same outer height. A member that omits a name cannot join a row at that size. It does not fall back to the nearest step. `[mech]`
 - **The shared vocabulary is two steps: `sm` (28px) and `md` (36px).** Every member carries both, names them from that set and no other, and takes the matching `--control-h-*` and `--control-r-*` step. A member with a private spelling for a shared height is the divergence this clause prevents, whatever pixel it lands on. `[mech]`
 
   Two, because two is what mixed rows use. A census of every call site in `packages/web` and `rome_apps` puts 270 of 292 on `sm` or `md`, and those are the only steps more than one kind of member is ever asked for.
 
-- **`lg` (44px) and `xs` (24px) are the Button family's, and are not part of the shared vocabulary.** `Button` and its square twin `IconButton` carry them; a field, a select, or a switcher does not. `[mech]`
+- **`lg` (44px) and `xs` (24px) are the Button family's, and are not part of the shared vocabulary.** `Button` and its square twin `IconButton` carry them. A field, a select, or a switcher does not. `[mech]`
 
   They are not alignment steps, which is why the role does not bind them. `xs` is a chip beside body text, and a member sizing one sizes it square, off `--rome-size-24`. Neither shares a row with a field, so neither exercises the agreement the shared steps exist for.
 
@@ -83,7 +83,7 @@ A switch or checkbox reads as a glyph, not as a box. Sizing one to a control hei
 
 A surface frames content. It has no size of its own, and its radius and elevation state how far it floats above what it covers.
 
-- No intrinsic size. Content or the caller sizes a surface; a `w-*` a member sets is a default the caller overrides. `[mech]`
+- No intrinsic size. Content or the caller sizes a surface. A `w-*` a member sets is a default the caller overrides. `[mech]`
 - Elevation states depth, and only depth: none in flow, `shadow-4` floating, `shadow-10` floating above a floating layer, `shadow-25` modal. `[mech]`
 - Radius states box magnitude, not depth, and nests concentrically — see [border-radius-primitives.md](primitive-token/border-radius-primitives.md). A surface anchored to a viewport edge carries none on the anchored edge. `[mech]`
 
@@ -107,7 +107,7 @@ The two middle columns agree across most rows because a modal is a large box and
 
 Inline content sits inside a line of text or a table cell. It answers to the text around it, not to the buttons beside it.
 
-- The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`; `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
+- The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
 - Typography is `text-aux` or smaller, never `text-body`. `[mech]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
@@ -128,7 +128,7 @@ A layout component owns the space between its children and has no appearance of 
 > Prefer: `Field` supplying the gap between a label and its input.
 > Over: `FieldLabel` supplying `mb-1`, which every other consumer of that label then has to undo.
 
-The kit ships no general `Stack`, `Row`, or `Grid`; spacing between arbitrary siblings is a raw `flex` and `gap-*` at the call site until those land.
+The kit ships no general `Stack`, `Row`, or `Grid`. Spacing between arbitrary siblings is a raw `flex` and `gap-*` at the call site until those land.
 
 ## Table section
 
@@ -155,7 +155,7 @@ A table cell aligns content within a shared column.
 
 ## Composites
 
-A composite takes no role; each of its parts takes one. `Select` is a Control (`SelectTrigger`) and a Surface (`SelectContent`), exported separately for exactly this reason. `Command` follows the same composition: `CommandInput` is the Control, while its caller-owned `PopoverContent` or `Dialog` is the popup Surface. The `Command` root is not rostered as a role of its own. `Tabs`, `Calendar`, `Table`, and `DataTable` decompose the same way. `[mech]`
+A composite takes no role. Each of its parts takes one. `Select` is a Control (`SelectTrigger`) and a Surface (`SelectContent`), exported separately for exactly this reason. `Command` follows the same composition: `CommandInput` is the Control, while its caller-owned `PopoverContent` or `Dialog` is the popup Surface. The `Command` root is not rostered as a role of its own. `Tabs`, `Calendar`, `Table`, and `DataTable` decompose the same way. `[mech]`
 
 `Calendar` has this anatomy. The names match its `classNames` keys, except for the exported `CalendarDayButton`. State names such as selected, today, outside, and range start or end modify `day` or `CalendarDayButton`. They are not additional parts. The chevron is a Control adornment, and the inner week-number wrapper belongs to `week_number`. `[mech]`
 
@@ -179,7 +179,7 @@ Any component that holds a glyph, in any role.
 - The component sets the size, never the call site. A component that renders or receives an `<svg>` and leaves it unsized has no default — it has whatever each caller happened to write, which is how the same chip ended up at 12px and 14px in one tree. `[mech]`
 - A glyph tracks the box it sits in, not the label beside it. `Button` is the ladder: its text is `text-ui` at every size while its glyph runs 12 / 14 / 16 / 16 across the 24 / 28 / 36 / 44px boxes — a half-box at the two small steps, then held at 16px. Pick from that ladder, and where half a box is not a step, take the next one up: `Badge` is 22px and takes 12px. `[mech]`
 - A member with a size axis carries the glyph on that axis, so `sm` and `md` differ. `Button`, `IconButton`, `Input`, `SelectTrigger`, and `SegmentedControl` all give 14px at `sm` and 16px at `md`, which is what keeps a field and a button on one `sm` row from disagreeing about their glyphs. `SegmentedControl` reads the track, not the segment, for the same reason its height does: the track is the box that joins the row. `[mech]`
-- A component never writes a size on a glyph it hands to something else to hold, because that opts the glyph out of the holder's rule. `Calendar`'s one `Chevron` renderer feeds both a nav button and the dropdown caption; sizing it there would give the two rows one number and make each host's rule dead. `[mech]`
+- A component never writes a size on a glyph it hands to something else to hold, because that opts the glyph out of the holder's rule. `Calendar`'s one `Chevron` renderer feeds both a nav button and the dropdown caption. Sizing it there would give the two rows one number and make each host's rule dead. `[mech]`
 - A member with no size axis takes the glyph of the step it already pads on, rather than deriving a second answer from its own box. `TabsTrigger` is the case: its 32px list sits between the shared heights, it takes the `sm` centred inset, and so its glyph is `sm`'s 14px. Padding at one step and sizing the glyph at another is the drift this rule exists to stop. `[mech]`
 - The default stands aside for a caller's own `size-*`, and the opt-out lives in the selector: `[&_svg:not([class*='size-'])]:size-N`. It has to. The caller's class lands on the `<svg>` while the rule lives on the parent, and `tailwind-merge` reconciles one element at a time, so `cn` never sees the collision. Only that spelling opts out — `h-4 w-4` leaves the rule matching, and the rule wins on specificity, (0,2,1) against (0,1,0). `[mech]`
 - A component that reserves room for the glyph sizes that reserve from the glyph, not from a repeated literal. `Alert` holds its icon column at `auto` rather than `1rem`, and `Toaster`'s icon slot takes its width from its child, so a caller who opts out widens the reserve instead of overflowing it. `[mech]`
@@ -192,12 +192,12 @@ Naming the gap beats a wrong assignment.
 
 | Component | Why it holds no role yet |
 |---|---|
-| `Separator` | Draws a hairline, so it is not Layout; carries no scale, so it is not Inline content. |
+| `Separator` | Draws a hairline, so it is not Layout. Carries no scale, so it is not Inline content. |
 | `Skeleton` | Takes the shape of whatever it stands in for, so it inherits that component's role at the call site. |
 | `Markdown` | Renders author-controlled prose from its own stylesheet, sized and spaced by the document flow rather than by a role scale. |
 | Calendar `root`, `dropdowns`, `month_caption`, label-mode `caption_label`, `day` | Calendar parts that do not meet one existing role contract. See [Composites](#composites). |
-| `Command` | Composite root; deliberately takes no role of its own. |
-| `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandList`, `CommandSeparator` | Internal states, grouping, rows, scrolling, and separators of the `Command` composite; the caller-owned popup boundary is its Surface. |
+| `Command` | Composite root. Deliberately takes no role of its own. |
+| `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandList`, `CommandSeparator` | Internal states, grouping, rows, scrolling, and separators of the `Command` composite. The caller-owned popup boundary is its Surface. |
 | `EmptyState`, `Stepper` | Not yet surveyed against the contracts. |
 | `Breadcrumb` | Its default `text-ui` typography violates the Inline content contract. Its `BreadcrumbEllipsis` collapse marker is 20px tall and raises the row at the required `text-aux` line height. The marker only represents omitted crumbs, so its presentation-only semantics do not change the role decision. The 14px separator fits that role, but the composite cannot take a role until all parts fit. |
 
@@ -209,9 +209,9 @@ In-tree today. Each is a conflict the roster exposes, not a rule it grants.
 |---|---|
 | `CommandInput` exposes no size | Fixed at the `md` step, so a row containing it cannot be resized as a unit. `Textarea` has none either, but as a block member only its padding and typography are at stake. |
 | No adornment slot on `Input` | A leading icon is hand-positioned at five `packages/web` call sites (`absolute left-3 top-1/2 -translate-y-1/2`), each picking its own icon size and its own compensating left padding. |
-| Off-scale control steps | `Button size="xs"` and `IconButton size="xs"` are 24px, and `TabsList` is 32px. Neither is a `--control-h-*` step. The `xs` pair is deliberate and stated above; `TabsList` is not. |
+| Off-scale control steps | `Button size="xs"` and `IconButton size="xs"` are 24px, and `TabsList` is 32px. Neither is a `--control-h-*` step. The `xs` pair is deliberate and stated above. `TabsList` is not. |
 | Two members pad off the groups | Both follow from the row above. `Button size="xs"` pads from a spacing step, because neither padding group carries an `xs`. `TabsTrigger` takes the `sm` centred step: it has no size axis, and its 32px list sits between the shared heights, so the step is picked rather than looked up. |
-| Two spellings of the `md` step | `Button` and `Input` still accept `default`, and `Button` still accepts `icon`, as the pre-vocabulary names for `md` and `icon-md`. Both resolve to the same geometry and normalize to the canonical name in `data-size`; they are deprecated, not a second step. |
+| Two spellings of the `md` step | `Button` and `Input` still accept `default`, and `Button` still accepts `icon`, as the pre-vocabulary names for `md` and `icon-md`. Both resolve to the same geometry and normalize to the canonical name in `data-size`. They are deprecated, not a second step. |
 | `Input` offers an `lg` nothing uses | 44px is a square icon-control hit area, and no field has ever been asked for one. Deprecated rather than removed, since the kit is published. |
 | `Button` names seven sizes for four steps | The `icon-*` half exists so `Button` can do `IconButton`'s job, and 11 of its 14 call sites are `variant="ghost"` with no `ButtonGroup` — which `IconButton` already covers, with a required `label`. Consolidating needs a `variant` prop on `IconButton` first. |
 | Calendar controls use cell geometry | Navigation buttons, dropdown triggers, and day buttons read the 28px `--cell-size` rather than a `--control-h-*` step. Dropdown triggers also lack the shared focus edge. |
@@ -219,6 +219,6 @@ In-tree today. Each is a conflict the roster exposes, not a rule it grants.
 
 ## Examples
 
-- Positive: an email `Input` with a leading mail icon inside it, and an "Add" `Button`, in one row at the same size name. The row is a `flex` with `items-center` and nothing else; the icon rides the field's padding; changing the size name moves all three together.
+- Positive: an email `Input` with a leading mail icon inside it, and an "Add" `Button`, in one row at the same size name. The row is a `flex` with `items-center` and nothing else. The icon rides the field's padding. Changing the size name moves all three together.
 - Negative: a new member that names its 28px step `small`, or names a 32px step `sm`. One word then means two heights across the kit — `items-center` centers a ragged row instead of aligning it, and the fix that gets reached for is a hand-tuned height at the call site rather than the step the member should have taken.
 - Negative: `Badge` given `h-[var(--control-h-sm)]` so it matches a neighbouring button. It now sets the row height of every table it appears in, and no test fails.

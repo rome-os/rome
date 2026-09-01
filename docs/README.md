@@ -2,7 +2,7 @@
 
 Durable design documentation for Rome. For the rules used when writing docs, see [CLAUDE.md](CLAUDE.md).
 
-## What's where
+## What lives where
 
 - [`VISION.md`](../VISION.md) (repo root) — why Rome exists, posture constraints, scope.
 - [`concepts/`](concepts/index.md) — domain entity definitions. The single source of truth for what each term means.

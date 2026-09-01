@@ -1,6 +1,6 @@
 # Composition
 
-A composition doc for the `@rome-os/ui` kit: how a component and a text run agree on a size when they share a row. [component-roles.md](component-roles.md) fixes which components line up with each other and what each role's members guarantee. This doc covers the case that roster does not reach — a component standing next to text that belongs to no component. [semantic-token/typography.md](semantic-token/typography.md) owns which role a text run takes, and [CLAUDE.md](CLAUDE.md) defines the terms.
+A composition doc for the `@rome-os/ui` kit: how a component and a text run agree on a size when they share a row. [component-roles.md](component-roles.md) fixes which components line up with each other and what each role's members guarantee. This doc names the case that roster does not reach — a component standing next to text that belongs to no component. [semantic-token/typography.md](semantic-token/typography.md) owns which role a text run takes, and [CLAUDE.md](CLAUDE.md) defines the terms.
 
 ## Why size matching is a rule
 

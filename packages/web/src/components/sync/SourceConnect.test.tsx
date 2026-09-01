@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { RemoteTargetCandidate } from "@/lib/sync-api";
 import { SourceConnect } from "./SourceConnect";
 
@@ -22,11 +22,11 @@ const targets: RemoteTargetCandidate[] = [
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function mockSyncApi() {
-  return vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -59,9 +59,9 @@ function mockSyncApi() {
 describe("SourceConnect repository picker", () => {
   it("filters and selects an existing repository from the keyboard", async () => {
     mockSyncApi();
-    const onResolved = vi.fn();
+    const onResolved = rs.fn();
     const user = userEvent.setup();
-    render(<SourceConnect mode="select" open onClose={vi.fn()} onResolved={onResolved} />);
+    render(<SourceConnect mode="select" open onClose={rs.fn()} onResolved={onResolved} />);
 
     const input = await screen.findByRole("combobox", { name: "Repository" });
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
@@ -76,9 +76,9 @@ describe("SourceConnect repository picker", () => {
 
   it("creates a free-text repository from the keyboard", async () => {
     const fetchSpy = mockSyncApi();
-    const onResolved = vi.fn();
+    const onResolved = rs.fn();
     const user = userEvent.setup();
-    render(<SourceConnect mode="select" open onClose={vi.fn()} onResolved={onResolved} />);
+    render(<SourceConnect mode="select" open onClose={rs.fn()} onResolved={onResolved} />);
 
     const input = await screen.findByRole("combobox", { name: "Repository" });
     await user.type(input, "new-project");

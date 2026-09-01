@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { shouldShowAiToolUsage } from "@/components/ai-tools-panel";
 
 describe("AI tool usage visibility", () => {

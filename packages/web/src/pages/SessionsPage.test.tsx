@@ -1,7 +1,8 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import {
   getRomeSession,
   getSession,
@@ -15,17 +16,17 @@ import {
 import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
 import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
 
-vi.mock("@/components/agent-trace/TraceDrawer", () => ({
+rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
   traceDrawerContentInsetClass: () => "",
 }));
 
-vi.mock("@/components/chat/blocks", () => ({
+rs.mock("@/components/chat/blocks", () => ({
   renderFlatBlocks: () => null,
   renderSingleBlock: () => null,
 }));
 
-vi.mock("@/components/chat/ChatComposer", () => ({
+rs.mock("@/components/chat/ChatComposer", () => ({
   ChatComposer: ({ onSend, disabled }: { onSend: (s: unknown) => void; disabled?: boolean }) => (
     <button
       type="button"
@@ -45,7 +46,7 @@ vi.mock("@/components/chat/ChatComposer", () => ({
   ),
 }));
 
-vi.mock("@/components/chat/MessageList", () => ({
+rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
     <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
       {live.text}
@@ -53,18 +54,17 @@ vi.mock("@/components/chat/MessageList", () => ({
   ),
 }));
 
-vi.mock("@/lib/chat-api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/chat-api")>();
+rs.mock("@/lib/chat-api", () => {
   return {
-    ...actual,
-    getRomeSession: vi.fn(),
-    getSession: vi.fn(),
-    getSessionMetrics: vi.fn(),
-    listRomeSessionMessages: vi.fn(),
-    listRomeSessions: vi.fn(),
-    listSessionTurns: vi.fn(),
-    openTurnStream: vi.fn(),
-    postSessionTurn: vi.fn(),
+    ...chatApiModule,
+    getRomeSession: rs.fn(),
+    getSession: rs.fn(),
+    getSessionMetrics: rs.fn(),
+    listRomeSessionMessages: rs.fn(),
+    listRomeSessions: rs.fn(),
+    listSessionTurns: rs.fn(),
+    openTurnStream: rs.fn(),
+    postSessionTurn: rs.fn(),
   };
 });
 
@@ -146,8 +146,8 @@ function renderIndex(initialEntry = "/sessions") {
 
 beforeEach(() => {
   setRouterHistoryIndex(0);
-  vi.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
-  vi.mocked(listRomeSessions).mockResolvedValue({
+  rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
+  rs.mocked(listRomeSessions).mockResolvedValue({
     sessions: [],
     total: 0,
     offset: 0,
@@ -155,8 +155,8 @@ beforeEach(() => {
     nextOffset: null,
     facets: { types: [], sourceChannels: [] },
   });
-  vi.mocked(listRomeSessionMessages).mockResolvedValue([]);
-  vi.mocked(listSessionTurns).mockResolvedValue([
+  rs.mocked(listRomeSessionMessages).mockResolvedValue([]);
+  rs.mocked(listSessionTurns).mockResolvedValue([
     {
       turnId: "feedback-fork-turn",
       streamId: "feedback-fork-turn",
@@ -164,8 +164,8 @@ beforeEach(() => {
       status: "running",
     },
   ]);
-  vi.mocked(getSession).mockResolvedValue(null);
-  vi.mocked(postSessionTurn).mockResolvedValue({
+  rs.mocked(getSession).mockResolvedValue(null);
+  rs.mocked(postSessionTurn).mockResolvedValue({
     ok: true,
     data: { turnId: "follow-up-turn", sessionId: "feedback-fork-session", startedAt: "" },
   });
@@ -173,7 +173,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 describe("sessionsViewportClass", () => {
@@ -190,7 +190,7 @@ describe("sessionsViewportClass", () => {
 
 describe("SessionsPage live fork details", () => {
   it("returns through router history when available", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     setRouterHistoryIndex(1);
 
     render(
@@ -212,7 +212,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("falls back to the sessions page when router history is empty", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     render(
       <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
@@ -229,7 +229,7 @@ describe("SessionsPage live fork details", () => {
 
   it("attaches to and renders an active fork turn", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    vi.mocked(openTurnStream).mockImplementation(async () => {
+    rs.mocked(openTurnStream).mockImplementation(async () => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           streamController = controller;
@@ -264,7 +264,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
@@ -273,7 +273,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("keeps raw identifiers in a collapsed Technical details section", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
@@ -293,7 +293,7 @@ describe("SessionsPage live fork details", () => {
   // *finish* has to hand it a real stream.
   function mockFinishableTurnStream() {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-    vi.mocked(openTurnStream).mockImplementation(async () => {
+    rs.mocked(openTurnStream).mockImplementation(async () => {
       const body = new ReadableStream<Uint8Array>({
         start(c) {
           controller = c;
@@ -309,7 +309,7 @@ describe("SessionsPage live fork details", () => {
   }
 
   it("shows no composer on a fork the backend will not continue", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
@@ -320,7 +320,7 @@ describe("SessionsPage live fork details", () => {
   it("re-probes continuability once the first branch answer lands", async () => {
     // The view opens while the fork is still running, so the first probe
     // legitimately 404s. The composer must appear when the turn ends.
-    vi.mocked(getSession)
+    rs.mocked(getSession)
       .mockResolvedValueOnce(null)
       .mockResolvedValue({ id: "feedback-fork-session" } as never);
     const finish = mockFinishableTurnStream();
@@ -336,14 +336,14 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {
-    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
     const composer = await screen.findByTestId("side-chat-composer");
-    const reloads = vi.mocked(listRomeSessionMessages).mock.calls.length;
-    const turnLookups = vi.mocked(listSessionTurns).mock.calls.length;
+    const reloads = rs.mocked(listRomeSessionMessages).mock.calls.length;
+    const turnLookups = rs.mocked(listSessionTurns).mock.calls.length;
     await act(async () => {
       fireEvent.click(composer);
     });
@@ -351,14 +351,14 @@ describe("SessionsPage live fork details", () => {
     await waitFor(() => {
       expect(postSessionTurn).toHaveBeenCalledWith("feedback-fork-session", expect.any(FormData));
     });
-    const form = vi.mocked(postSessionTurn).mock.calls[0][1];
+    const form = rs.mocked(postSessionTurn).mock.calls[0][1];
     expect(form.get("text")).toBe("And the failure case?");
     // The guardian's own message shows before the reply does.
     await waitFor(() => {
-      expect(vi.mocked(listRomeSessionMessages).mock.calls.length).toBeGreaterThan(reloads);
+      expect(rs.mocked(listRomeSessionMessages).mock.calls.length).toBeGreaterThan(reloads);
     });
     await waitFor(() => {
-      expect(vi.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(turnLookups);
+      expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(turnLookups);
     });
   });
 
@@ -366,8 +366,8 @@ describe("SessionsPage live fork details", () => {
     // The turns endpoint reports a turn as `queued` until it becomes the
     // session's current turn. Skipping those loses the reply: the turn runs
     // server-side and nothing ever opens its stream.
-    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    vi.mocked(listSessionTurns).mockResolvedValue([
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    rs.mocked(listSessionTurns).mockResolvedValue([
       {
         turnId: "queued-follow-up",
         streamId: "queued-follow-up",
@@ -388,8 +388,8 @@ describe("SessionsPage live fork details", () => {
     // `getSession` returns null only on 404. Anything else — a 500, a network
     // blip — throws, and treating that as "not continuable" would drop the
     // composer off a live branch until the next probe.
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
-    vi.mocked(getSession)
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(getSession)
       .mockResolvedValueOnce({ id: "feedback-fork-session" } as never)
       .mockRejectedValue(new Error("boom"));
 
@@ -406,10 +406,10 @@ describe("SessionsPage live fork details", () => {
   it("refuses a second send while the first is still in flight", async () => {
     // This view follows only the first running turn, so a queued second turn
     // would run server-side and never render.
-    vi.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     let release: (() => void) | undefined;
-    vi.mocked(postSessionTurn).mockImplementation(
+    rs.mocked(postSessionTurn).mockImplementation(
       () =>
         new Promise((resolve) => {
           release = () =>
@@ -437,7 +437,7 @@ describe("SessionsPage live fork details", () => {
 describe("SessionsPage explorer", () => {
   it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
     expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    vi.mocked(getSessionMetrics).mockResolvedValue({
+    rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: {
         from: "2026-07-08T00:00:00.000Z",
         to: "2026-07-15T00:00:00.000Z",
@@ -471,7 +471,7 @@ describe("SessionsPage explorer", () => {
   });
 
   it("shows usage overview and switches to the human-readable inventory", async () => {
-    vi.mocked(getSessionMetrics).mockResolvedValue({
+    rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
       totals: {
         sessionCount: 1,
@@ -562,7 +562,7 @@ describe("SessionsPage explorer", () => {
         },
       ],
     });
-    vi.mocked(listRomeSessions).mockResolvedValue({
+    rs.mocked(listRomeSessions).mockResolvedValue({
       sessions: [
         {
           ...FORK_SESSION,
@@ -610,7 +610,7 @@ describe("SessionsPage explorer", () => {
         expect.objectContaining({ limit: 50, query: "pull request" }),
       ),
     );
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     setRouterHistoryIndex(1);
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
@@ -628,7 +628,7 @@ describe("SessionsPage explorer", () => {
       expect.objectContaining({ limit: 50, range: "7d", model: undefined }),
     );
 
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     expect(await screen.findByRole("button", { name: "Back to sessions" })).toBeTruthy();
   });

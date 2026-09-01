@@ -239,7 +239,7 @@ describe("AgentLoader", () => {
       await loader.loadAll(FIXTURES_DIR);
       const all = loader.getAll();
       expect(all.size).toBe(7);
-      // Ensure it's a copy (different Map reference)
+      // Make sure it's a copy (different Map reference)
       expect(all).not.toBe(loader.getAll());
     });
   });

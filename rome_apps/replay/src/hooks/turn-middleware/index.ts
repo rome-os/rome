@@ -173,8 +173,8 @@ class ReplayTurnMiddleware implements TurnMiddlewareHook {
     await sessionsRepo.advanceCursor(webId);
   }
 
-  /** Inverse-map and re-emit every block in order, ensuring exactly one
-   *  terminal block finalizes the turn. */
+  /** Inverse-map and re-emit every block in order. Exactly one terminal
+   *  block finalizes the turn. */
   private async emitTrace(
     ctx: TurnMiddlewareContext,
     blocks: TraceBlock[],

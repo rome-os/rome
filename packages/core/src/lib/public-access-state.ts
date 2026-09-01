@@ -4,6 +4,7 @@ import type { DrizzleDb } from "../db/index.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
   normalizePublicAccessConfig,
+  type PublicAccessConfig,
 } from "./public-access-config.js";
 
 /**
@@ -54,12 +55,14 @@ export class PublicAccessState {
     this.setCloudEmailAccess(config.cloudEmailAccess);
   }
 
-  async load(db: DrizzleDb): Promise<void> {
+  /** Loads and normalizes the stored policy, updates this snapshot, and returns that config. */
+  async load(db: DrizzleDb): Promise<PublicAccessConfig> {
     const rows = await db.select().from(settings).where(eq(settings.key, "publicAccess"));
     const config =
       rows.length > 0 && rows[0].value
         ? normalizePublicAccessConfig(rows[0].value)
         : DEFAULT_PUBLIC_ACCESS_CONFIG;
     this.setConfig(config);
+    return config;
   }
 }

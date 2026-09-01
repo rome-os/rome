@@ -113,7 +113,7 @@ function Td(props: ComponentPropsWithoutRef<"td">) {
 
 /**
  * A rendered specimen: the live component, with the design claim it is there
- * to demonstrate underneath it. Available to every doc without an import.
+ * to show underneath it. Available to every doc without an import.
  */
 export function Specimen({ title, children }: { title?: string; children: ReactNode }) {
   return (

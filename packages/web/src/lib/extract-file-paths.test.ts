@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { extractFilePathsFromText, isProjectPath } from "./extract-file-paths";
 
 describe("extractFilePathsFromText", () => {

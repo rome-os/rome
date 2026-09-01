@@ -18,7 +18,7 @@ export const ROME_USER_ID = "rome-guardian";
  * the server-side twin of the web catalog's `romeManaged` flag, so the gate
  * holds at the agent entry point too, not just the UI. Rome-managed toolkits are
  * acted on via `connector_proxy` (direct REST/GraphQL with Rome's OAuth token),
- * never `connector_tool_execute` (Composio-only). GitHub additionally exposes
+ * never `connector_tool_execute` (Composio-only). GitHub also exposes
  * `gh`/`git` in the shell, and its events arrive via Rome's own GitHub webhook,
  * never a Composio trigger.
  */

@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -23,11 +23,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function mockCeremonyFetch(routes: Record<string, unknown> = {}) {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     for (const [needle, payload] of Object.entries(routes)) {
       if (url.includes(needle)) {

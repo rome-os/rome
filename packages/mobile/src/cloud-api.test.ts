@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { CloudApi } from "./cloud-api.js";
 
 const credential = { accessToken: "cloud-token", deviceSessionId: "device-1" };
 
 describe("CloudApi", () => {
   it("takes selectable origins only from a valid Cloud response", async () => {
-    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchImpl = rs.fn(async (_url: string, init?: RequestInit) => {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer cloud-token");
       return Response.json({
         items: [
@@ -37,7 +37,7 @@ describe("CloudApi", () => {
       "https://romeos.cc",
       "https://a.romeos.cc/path",
     ]) {
-      const fetchImpl = vi.fn(async () =>
+      const fetchImpl = rs.fn(async () =>
         Response.json({
           items: [{ id: "1", name: "Rome", slug: "rome", origin, status: "running" }],
         }),
@@ -50,7 +50,7 @@ describe("CloudApi", () => {
   it("surfaces a revoked Cloud device credential without returning secrets", async () => {
     const api = new CloudApi(
       "https://romeos.cc",
-      vi.fn(async () =>
+      rs.fn(async () =>
         Response.json({ error: "unauthorized" }, { status: 401 }),
       ) as unknown as typeof fetch,
     );
@@ -63,7 +63,7 @@ describe("CloudApi", () => {
   it("reports authorization drift so the Launcher can reload its service list", async () => {
     const api = new CloudApi(
       "https://romeos.cc",
-      vi.fn(async () =>
+      rs.fn(async () =>
         Response.json({ error: "access_denied" }, { status: 403 }),
       ) as unknown as typeof fetch,
     );

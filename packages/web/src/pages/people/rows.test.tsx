@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "@/i18n";
@@ -17,7 +17,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function row(over: Partial<PeopleRow> = {}): PeopleRow {
@@ -53,7 +53,7 @@ describe("DirectoryRow", () => {
     // the bulk bar. `aria-pressed` is how that reaches assistive tech; a tint
     // alone would say it only to the sighted.
     const user = userEvent.setup();
-    const onToggleSelect = vi.fn();
+    const onToggleSelect = rs.fn();
     render(<DirectoryRow row={row()} selected={false} onToggleSelect={onToggleSelect} />);
 
     const select = screen.getByRole("button", { name: "Select Wei Chen" });

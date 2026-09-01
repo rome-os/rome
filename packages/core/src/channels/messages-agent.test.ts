@@ -9,6 +9,7 @@ import {
   type MessagesContractSubject,
 } from "./messages-contract.js";
 import { agentMessages } from "./messages-agent.js";
+import type { MessageConversation } from "./messages.js";
 
 // `rome_agent_messages` read as a `Messages` store, holding exactly what
 // `agentMessagesSource` holds today: the roles that carry conversation, on
@@ -23,6 +24,8 @@ const OTHER_CHANNEL = "discord";
 
 const account = { channel: CHANNEL, addresses: [DIRECT, DIRECT_ALT] };
 const silent = [{ channel: CHANNEL, addresses: ["tg-nobody"] }];
+const groupThread: MessageConversation = { channel: CHANNEL, id: GROUP };
+const emptyThread: MessageConversation = { channel: CHANNEL, id: "tg-no-session" };
 
 const text = (line: string) => JSON.stringify([{ type: "text", content: line }]);
 
@@ -83,15 +86,22 @@ async function seed(db: DrizzleDb) {
   // The account's other address: one history, not two halves of one.
   await message(db, "m-alt", { sessionId: "s-direct-alt", role: "user", at: 250 });
 
-  // Out of scope, each for its own reason.
+  // Out of every account's scope, each for its own reason.
   await message(db, "m-trace", { sessionId: "s-direct", role: "trace", at: 400 });
-  // Sent by the account, but into a thread the group addresses.
+  // The group's own session, which only a conversation read reaches. Enough of
+  // it to page, and a second in it said twice so the ordering has a tie.
+  //
+  // The first was sent by the account, and is still the group's: a line the
+  // account wrote into a group belongs to the group's thread.
   await message(db, "m-group", {
     sessionId: "s-group",
     role: "user",
     at: 500,
     senderId: DIRECT,
   });
+  await message(db, "m-group-reply", { sessionId: "s-group", role: "assistant", at: 500 });
+  await message(db, "m-group-note", { sessionId: "s-group", role: "notification", at: 520 });
+  await message(db, "m-group-later", { sessionId: "s-group", role: "user", at: 540 });
   await message(db, "m-webchat", { sessionId: "s-webchat", role: "user", at: 600 });
   await message(db, "m-elsewhere", { sessionId: "s-elsewhere", role: "user", at: 550 });
 }
@@ -136,6 +146,44 @@ describe("agentMessages", () => {
       limit: WHOLE_HISTORY,
     });
     expect(asGroup).toEqual([]);
+  });
+
+  // The session's thread is the conversation, and a group's session is the one
+  // no account addresses.
+  it("answers a group's session asked for as a conversation", async () => {
+    const page = await agentMessages(db).readConversation({
+      conversation: groupThread,
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((entry) => entry.ref)).toEqual([
+      "agent:m-group-later",
+      "agent:m-group-note",
+      "agent:m-group-reply",
+      "agent:m-group",
+    ]);
+  });
+
+  it("keeps a conversation on its own channel", async () => {
+    // `s-elsewhere` spells this account's thread id on another channel, so the
+    // pair is all that keeps the two conversations apart.
+    const here = await agentMessages(db).readConversation({
+      conversation: { channel: CHANNEL, id: DIRECT },
+      limit: WHOLE_HISTORY,
+    });
+    expect(here.map((entry) => entry.ref)).not.toContain("agent:m-elsewhere");
+    const there = await agentMessages(db).readConversation({
+      conversation: { channel: OTHER_CHANNEL, id: DIRECT },
+      limit: WHOLE_HISTORY,
+    });
+    expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
+  });
+
+  it("leaves a trace row out of a conversation too", async () => {
+    const page = await agentMessages(db).readConversation({
+      conversation: { channel: CHANNEL, id: DIRECT },
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((entry) => entry.ref)).not.toContain("agent:m-trace");
   });
 
   it("leaves out a session that is not a channel's", async () => {
@@ -300,7 +348,13 @@ testMessagesContract("agentMessages", () => {
   enrolled ??= (async () => {
     const { db } = createTestDb();
     await seed(db);
-    return { messages: agentMessages(db), accounts: [account], silent };
+    return {
+      messages: agentMessages(db),
+      accounts: [account],
+      silent,
+      conversation: groupThread,
+      silentConversation: emptyThread,
+    };
   })();
   return enrolled;
 });

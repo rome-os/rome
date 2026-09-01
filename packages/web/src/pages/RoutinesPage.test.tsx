@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
@@ -25,9 +25,9 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.useRealTimers();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
 });
 
 function scheduleRoutine(overrides: Partial<Routine> & Pick<Routine, "id" | "name">): Routine {
@@ -83,7 +83,7 @@ function mockBackend(initial: {
   const unreachable = initial.unreachable ?? {};
   const calls: FetchCall[] = [];
 
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -550,8 +550,8 @@ describe("RoutinesPage", () => {
   });
 
   it("defaults a new one-off to today and three minutes from now", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(2026, 6, 29, 10, 14));
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date(2026, 6, 29, 10, 14));
     mockBackend({ routines: [] });
     const user = userEvent.setup();
     renderPage();
@@ -565,8 +565,8 @@ describe("RoutinesPage", () => {
   });
 
   it("caps a near-midnight one-off at 11:59 PM today", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(2026, 6, 29, 23, 58));
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date(2026, 6, 29, 23, 58));
     mockBackend({ routines: [] });
     const user = userEvent.setup();
     renderPage();
@@ -580,7 +580,7 @@ describe("RoutinesPage", () => {
   });
 
   it("allows wheel scrolling in the action picker inside the create dialog", async () => {
-    vi.stubGlobal(
+    rs.stubGlobal(
       "ResizeObserver",
       class {
         observe() {}

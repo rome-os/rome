@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { registerDevice } from "./device-registration.js";
 
 const P = "https://romeos.cc";
 
 describe("registerDevice", () => {
   it("POSTs an APNs token + environment to Rome Cloud with the CSRF header", async () => {
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 201 }));
+    const fetchImpl = rs.fn(async () => new Response("{}", { status: 201 }));
     const result = await registerDevice(fetchImpl as unknown as typeof fetch, {
       provider: "apns",
       platform: "ios",
@@ -27,7 +27,7 @@ describe("registerDevice", () => {
   });
 
   it("POSTs an FCM token with no apns_environment (Android)", async () => {
-    const fetchImpl = vi.fn(async () => new Response("{}", { status: 201 }));
+    const fetchImpl = rs.fn(async () => new Response("{}", { status: 201 }));
     const result = await registerDevice(fetchImpl as unknown as typeof fetch, {
       provider: "fcm",
       platform: "android",
@@ -44,7 +44,7 @@ describe("registerDevice", () => {
   });
 
   it("reports status without throwing on HTTP failure", async () => {
-    const fetchImpl = vi.fn(async () => new Response("no", { status: 401 }));
+    const fetchImpl = rs.fn(async () => new Response("no", { status: 401 }));
     await expect(
       registerDevice(fetchImpl as unknown as typeof fetch, {
         provider: "apns",
@@ -57,7 +57,7 @@ describe("registerDevice", () => {
   });
 
   it("reports status 0 without throwing on network error", async () => {
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = rs.fn(async () => {
       throw new Error("offline");
     });
     await expect(

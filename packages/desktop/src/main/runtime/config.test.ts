@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   generateRuntimeEnv,
   parseSimpleEnvFile,
@@ -102,25 +102,25 @@ describe("resolveProxyPort", () => {
   // assertion throws — mutating process.env directly leaks a bad value into
   // every later test in the file the first time one of these fails.
   afterEach(() => {
-    vi.unstubAllEnvs();
+    rs.unstubAllEnvs();
   });
 
   it("defaults to the fixed port so the origin is stable across launches", () => {
-    vi.stubEnv("ROME_DESKTOP_PROXY_PORT", "");
+    rs.stubEnv("ROME_DESKTOP_PROXY_PORT", "");
     expect(resolveProxyPort()).toBe(47823);
   });
 
   it("honors an override so a squatted port is recoverable", () => {
     // The port binds with no fallback, so if something the user cannot quit
     // holds it, this is the lever support can pull.
-    vi.stubEnv("ROME_DESKTOP_PROXY_PORT", "47900");
+    rs.stubEnv("ROME_DESKTOP_PROXY_PORT", "47900");
     expect(resolveProxyPort()).toBe(47900);
   });
 
   it.each(["4782x", "47823.5", "80", "70000"])("rejects %s rather than falling back", (value) => {
     // Falling back on a typo would reproduce the exact "port in use" error the
     // override was set to escape, with no hint that it was ignored.
-    vi.stubEnv("ROME_DESKTOP_PROXY_PORT", value);
+    rs.stubEnv("ROME_DESKTOP_PROXY_PORT", value);
     expect(() => resolveProxyPort()).toThrow(/ROME_DESKTOP_PROXY_PORT/);
   });
 });

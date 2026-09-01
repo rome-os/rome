@@ -1,22 +1,22 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { SyncStatus } from "@/lib/sync-api";
 import { SyncStatusPanel } from "./SyncStatusPanel";
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function mockStatus(status: SyncStatus) {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(status));
+  return rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(status));
 }
 
 describe("SyncStatusPanel", () => {
   it("links the remote label to the repository when a URL is available", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       if (String(input).startsWith("/api/sync/status")) {
         return Response.json({
           state: "linked",
@@ -70,7 +70,7 @@ describe("SyncStatusPanel branch reset", () => {
   });
 
   it("switches to main and hides reset after reset", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -102,7 +102,7 @@ describe("SyncStatusPanel branch reset", () => {
 
   it("refreshes status after a blocked reset so new local changes are shown", async () => {
     let statusReads = 0;
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {

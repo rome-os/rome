@@ -1,31 +1,26 @@
 # GitHub Issues
 
-A **GitHub issue** is one tracked unit of work on the repo's issue tracker. This file defines the format of an issue. Prose rules come from [WRITING.md](WRITING.md).
+A **GitHub issue** is one tracked unit of work on the repo's issue tracker. This file holds the rules every issue shares. Each issue type has its own rulebook, and this file wins where a rule there conflicts with it. Prose rules come from [WRITING.md](WRITING.md).
+
+A report an automation files on the tracker, such as a reconciliation loop report, is not a unit of work. It follows its skill's rules and carries its skill's labels, and no rule below applies to it.
 
 ## Issue types
 
-Every issue is one of two types.
+Every issue is one of three types. The type names the next action the issue asks for, not the kind of change.
 
-- **bug report** — a defect in behavior the system already ships. An incident write-up files as a bug report.
-- **task spec** — a scoped change for a person or agent to implement: a feature, a migration step, or a follow-up spun out of a PR, incident, or audit.
+- **[bug report](github-issues-bug-report.md)** — a defect in behavior the system already ships. The next action is an investigation. An incident write-up files as a bug report.
+- **[feature request](github-issues-feature-request.md)** — a pain, gap, or missing capability where the change is undecided. The next action is a design conversation.
+- **[task spec](github-issues-task-spec.md)** — a scoped change for a person or agent to implement. The next action is implementation.
 
-## Format
+Two questions decide the type. Does the system break its own intended behavior? File a bug report. Is the change already decided and scoped? File a task spec. Otherwise file a feature request — a feature idea and a pain point file the same way.
 
-### Title
+## Title
 
 A title reads `<area>: <statement>`. The area is a lower-case component or surface name, such as `relay`, `connector`, `docs`, `web`. An issue in a planned set reads the same way — a step code such as `[D1]` never leads a title, because the ordering lives in the blocked-by edges.
 
-A bug title states the symptom in present tense, not the fix.
+Each type's rulebook fixes the mood of the statement.
 
-> Prefer: "relay: drainer reconnects every ~50s instead of persisting".
-> Over: "relay: fix the drainer reconnect storm".
-
-A task title states the action in imperative mood.
-
-> Prefer: "docs: write the ADR family authoring guideline".
-> Over: "docs: ADR authoring guideline missing".
-
-### Situation
+## Situation
 
 Every issue body opens with a **Situation** section: what is going on, in plain words, before any section that names code.
 
@@ -41,57 +36,6 @@ Situation names no file, symbol, or line number.
 > Prefer: "the message history page gathers a person's addresses on its own, and gathers them less thoroughly than the contacts list does."
 > Over: "`timeline-sources.ts:88-140` duplicates `foldAccounts` and drops the `book.resolve` branch."
 
-### Bug report body
+## Labels
 
-Required sections, in order: Situation, Symptom, How to reproduce, Initial triage, Suspected root cause, Possible fixes. An Environment section may follow.
-
-- **Symptom** — the exact error or behavior, the trigger, and the involved surface. Situation frames the problem in plain words. Symptom carries the exact string.
-- **How to reproduce** — numbered steps from a clean state, with the exact commands and environment preconditions.
-- **Initial triage** — what the investigation ruled in and ruled out, with evidence.
-- **Suspected root cause** — one paragraph on the mechanism, tied to the evidence above.
-- **Possible fixes** — a list of options.
-
-Possible fixes enumerates the design space and picks nothing. The author of the fix decides.
-
-> Prefer: "1. Align `resolveWebhookUrl` with the GitHub path. 2. Fail closed at boot when the relay URL is missing."
-> Over: "Fix: align `resolveWebhookUrl` with the GitHub path."
-
-Suspected root cause states its confidence. A guess labeled as confirmed poisons the next investigation.
-
-> Prefer: "Suspected: the backoff resets on WS open — unverified beyond the log pattern."
-> Over: the same hypothesis presented as a confirmed root cause.
-
-### Task spec body
-
-Required sections: Situation, Scope, Acceptance. When the task depends on other issues, a **Blocked by** line names them by number.
-
-- **Scope** — the change, and what stays out.
-- **Acceptance** — a checklist of observable outcomes, each naming what proves it: a committed test, or a run against the finished branch.
-
-Acceptance items are observable from outside the implementation.
-
-> Prefer: "- [ ] the test fails when an ad-hoc size enters a migrated file".
-> Over: "- [ ] typography is cleaned up".
-
-Every item names what proves it. A committed test lands in the tree and runs in CI on every later change. A check runs once against the finished branch, and the PR test plan carries its evidence. An implementer builds an item that names neither as a committed test.
-
-An item earns a committed test when what it names can break later and nothing else catches the break. An item runs once against the finished branch when the type checker, a deleted route, or an existing test already decides it.
-
-> Prefer: "- [ ] run once: a grep for `/api/persons` returns nothing outside git history."
-> Over: "- [ ] committed test: the source contains no reference to `/api/persons`."
-
-Unless the item states how the deleted thing comes back silently, an absence item runs once. A re-imported export fails the type check and a re-registered route fails the route test, so neither earns a committed test of its own.
-
-Scope names what stays out. A task without a boundary grows during implementation.
-
-> Prefer: "Scope it to the files migrated in C1–C6."
-> Over: a scope section that only lists inclusions.
-
-### Labels
-
-A bug report carries the `bug` label and exactly one of `P0`, `P1`, `P2`, `P3`. The label descriptions in the repo define the priorities. This file does not restate them.
-
-A task spec ready for pickup carries `ready-for-agent`. The label enters when an agent can implement from the body alone, without the conversation that produced the spec.
-
-> Prefer: a body carrying Scope, Acceptance, and its Blocked by line.
-> Over: a body that says "as discussed" or links a chat transcript as the spec.
+Every issue carries the label of its type: `bug`, `feature-request`, or `task`. The other labels an issue carries are fixed by its type's rulebook.

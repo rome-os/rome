@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { CloudApi } from "./cloud-api.js";
 import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
 import { InstanceSessionCoordinator } from "./instance-session-coordinator.js";
@@ -31,7 +31,7 @@ function memoryStore(): SecureKeyValueStore {
 describe("InstanceSessionCoordinator", () => {
   it("shares one in-flight exchange and installs the host-bound session", async () => {
     const calls: string[] = [];
-    const fetchImpl = vi.fn(async (raw: string, init?: RequestInit) => {
+    const fetchImpl = rs.fn(async (raw: string, init?: RequestInit) => {
       const url = new URL(raw);
       calls.push(url.pathname);
       if (url.pathname.endsWith("/native/start")) {
@@ -71,7 +71,7 @@ describe("InstanceSessionCoordinator", () => {
     });
     const vault = new CredentialVault(memoryStore());
     await vault.setCloudCredential({ accessToken: "cloud-token", deviceSessionId: "device-1" });
-    const cookieStore: WebViewCookieStore = { install: vi.fn(), clear: vi.fn() };
+    const cookieStore: WebViewCookieStore = { install: rs.fn(), clear: rs.fn() };
     const cloudApi = new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch);
     const coordinator = new InstanceSessionCoordinator(
       cloudApi,
@@ -96,7 +96,7 @@ describe("InstanceSessionCoordinator", () => {
   });
 
   it("rejects a Core response bound to another origin", async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = rs.fn(async () =>
       Response.json({
         authorization_request: {
           response_type: "code",
@@ -117,20 +117,20 @@ describe("InstanceSessionCoordinator", () => {
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: vi.fn(), clear: vi.fn() },
+      { install: rs.fn(), clear: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
     await expect(coordinator.refresh(instance)).rejects.toThrow("invalid session request");
   });
 
   it("reports when the selected Rome does not have the Native session routes", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ error: "not_found" }, { status: 404 }));
+    const fetchImpl = rs.fn(async () => Response.json({ error: "not_found" }, { status: 404 }));
     const vault = new CredentialVault(memoryStore());
     await vault.setCloudCredential({ accessToken: "cloud-token", deviceSessionId: "device-1" });
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: vi.fn(), clear: vi.fn() },
+      { install: rs.fn(), clear: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
 
@@ -142,7 +142,7 @@ describe("InstanceSessionCoordinator", () => {
   it("restarts the complete exchange once when pending state has drifted", async () => {
     let exchange = 0;
     const calls: string[] = [];
-    const fetchImpl = vi.fn(async (raw: string) => {
+    const fetchImpl = rs.fn(async (raw: string) => {
       const path = new URL(raw).pathname;
       calls.push(path);
       if (path.endsWith("/native/start")) {
@@ -183,7 +183,7 @@ describe("InstanceSessionCoordinator", () => {
     const coordinator = new InstanceSessionCoordinator(
       new CloudApi("https://romeos.cc", fetchImpl as unknown as typeof fetch),
       vault,
-      { install: vi.fn(), clear: vi.fn() },
+      { install: rs.fn(), clear: rs.fn() },
       fetchImpl as unknown as typeof fetch,
     );
     await expect(coordinator.refresh(instance)).resolves.toMatchObject({ token: "instance-token" });

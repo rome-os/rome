@@ -21,6 +21,7 @@ Admission rules for every statement:
 - Declarative present tense. No "currently", no "we will", no "migrate from", no milestone names.
 - Checkable: an agent can verify compliance by reading the code.
 - Open: more than one implementation can satisfy it. The test: the statement stands without naming a file, function, or type. A statement only one implementation satisfies is code transcribed into prose.
+- A statement asserting that something is answered one way, or once, names the question it answers. Compliance turns on which reads count as the same question, so a uniqueness claim without its question cannot be checked.
 
 Content that never enters the doc:
 
@@ -42,8 +43,9 @@ A milestone is an intermediate ideal state. Its description is a Statements list
 
 1. Orient. Read the existing doc if there is one, the repository's open milestones and `loop-reconcile` issues, and the code the doc covers.
 2. Discuss to consensus. Draft in chat and iterate with the user. Push back on any statement that fails an admission rule.
-3. Check consistency. Walk the full Statements list — new and existing statements together — and surface any two that cannot both hold. A revision session checks against the whole doc, not only the edited part.
-4. Land the artifacts, only after the user's go-ahead in chat:
+3. Name each statement's decider. For every statement the session lands, new and existing, name the code a reader opens to decide compliance. A statement whose decider you cannot name is not checkable, and it does not land. This is the step that catches a statement describing a question the code does not ask.
+4. Check consistency. Walk the full Statements list — new and existing statements together — and surface any two that cannot both hold. A revision session checks against the whole doc, not only the edited part.
+5. Land the artifacts, only after the user's go-ahead in chat:
    1. The doc: open a branch and a PR. The user merges.
    2. The milestones: create each on GitHub with `gh api repos/{owner}/{repo}/milestones -f title=... -f description=...` — the title names the slice, the description holds its Statements list. Create layers in build order.
 

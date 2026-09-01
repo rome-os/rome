@@ -87,7 +87,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
       log.info("dream started", { windowHours });
 
-      // Ensure daily schedule is registered on first run
+      // Make sure daily schedule is registered on first run
       try {
         await ensureDailySchedule(
           appContext.runAction.bind(appContext),

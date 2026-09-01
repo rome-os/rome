@@ -276,6 +276,9 @@ WORKDIR /opt/rome
 COPY --chown=rome:rome --from=builder /build/ ./
 
 ENV ROME_DOCKER_APP_CODE_MODE=${ROME_DOCKER_APP_CODE_MODE}
+# Explicitly declare ownership of the production proxy config so daemon
+# startup reconciliation is enabled without inferring ownership from a path.
+ENV CADDY_CONFIG_PATH=/etc/caddy/Caddyfile
 
 RUN case "$ROME_DOCKER_APP_CODE_MODE" in \
       source) ;; \

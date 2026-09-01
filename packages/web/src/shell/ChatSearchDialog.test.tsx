@@ -1,9 +1,9 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { fireEvent, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { useLocation, MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import type { ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -21,7 +21,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function chatSession(
@@ -47,7 +47,7 @@ function chatSession(
 }
 
 function mockSessionSearch(sessions: ChatSession[], contentMatches: ChatSearchMessageMatch[] = []) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === "/api/chat/sessions?status=all") {
       return Response.json(sessions);
@@ -143,7 +143,7 @@ describe("matchRanges", () => {
 
 describe("ChatSearchDialog", () => {
   it("names the loading status while chats are fetched", () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+    rs.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
 
     renderSearch("/chat", true);
 
@@ -152,7 +152,7 @@ describe("ChatSearchDialog", () => {
 
   it("exposes one live status while message results are loading", async () => {
     const titled = chatSession("titled", "Roadmap review", "work/rome");
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/chat/sessions?status=all") return Response.json([titled]);
       if (url.startsWith("/api/chat/sessions/search?q=")) return new Promise(() => {});
@@ -351,7 +351,7 @@ describe("ChatSearchDialog", () => {
 
   it("retries a failed request without clearing the query", async () => {
     let sessionListCalls = 0;
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
     ) => {
       const url = String(input);
@@ -385,7 +385,7 @@ describe("ChatSearchDialog", () => {
     // native action to drive list selection. Enter must still reach the
     // button rather than being swallowed by the command root.
     let sessionListCalls = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/chat/sessions?status=all") {
         sessionListCalls += 1;

@@ -4,7 +4,7 @@ import type { ActionResult } from "./types.js";
 
 /**
  * Call another action through ActionEngine from within an action's execute().
- * Ensures the call is journaled for replay and goes through the approval gate.
+ * Makes sure the call is journaled for replay and goes through the approval gate.
  */
 export async function callAction(
   actionName: string,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { shouldReturnToDashboard } from "./startup-surface";
 
 const DASHBOARD = "http://127.0.0.1:47823";

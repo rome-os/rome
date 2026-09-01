@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -10,17 +10,17 @@ import { AppGrid, STORAGE_KEY } from "./AppGrid";
 // otherwise need its own fetch fixture. Every value is built once in the factory
 // rather than per call: the installed-apps effect keys on the array identity, so
 // a fresh literal per render re-runs it forever.
-vi.mock("@/hooks/use-apps", () => {
+rs.mock("@/hooks/use-apps", () => {
   const apps: never[] = [];
   const invalidators = { list: async () => {}, updates: async () => {} };
   return { useApps: () => ({ apps }), useInvalidateApps: () => invalidators };
 });
-vi.mock("@/hooks/use-settings", () => {
+rs.mock("@/hooks/use-settings", () => {
   const settings = { data: undefined };
   const invalidate = async () => {};
   return { useSettings: () => settings, useInvalidateSettings: () => invalidate };
 });
-vi.mock("@/hooks/use-new-apps", () => {
+rs.mock("@/hooks/use-new-apps", () => {
   const newApps = { newAppIds: new Set<string>(), markAppsSeen: () => {} };
   return { useNewApps: () => newApps };
 });

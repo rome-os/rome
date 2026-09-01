@@ -1,17 +1,17 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppStoreSheet } from "./AppStoreSheet";
 
-vi.mock("@/lib/app-store-url", () => ({ APP_STORE_BROWSE_URL: "https://store.example/store" }));
+rs.mock("@/lib/app-store-url", () => ({ APP_STORE_BROWSE_URL: "https://store.example/store" }));
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function Location() {
@@ -19,8 +19,8 @@ function Location() {
   return <output data-testid="location">{JSON.stringify(location)}</output>;
 }
 function setup(open = true) {
-  const onClose = vi.fn();
-  const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+  const onClose = rs.fn();
+  const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(
       JSON.stringify({
         available: true,
@@ -33,7 +33,7 @@ function setup(open = true) {
   );
   render(
     <MemoryRouter>
-      <AppStoreSheet open={open} onClose={onClose} onInstalled={vi.fn()} />
+      <AppStoreSheet open={open} onClose={onClose} onInstalled={rs.fn()} />
       <Location />
     </MemoryRouter>,
   );

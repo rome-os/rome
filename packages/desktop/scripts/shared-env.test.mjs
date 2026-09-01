@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 import { getDesktopBuildDefine } from "./shared-env.mjs";
 
@@ -8,25 +8,25 @@ describe("getDesktopBuildDefine", () => {
   // ROME_RUNTIME_IMAGE exported — which is exactly what someone wiring the
   // release build does.
   afterEach(() => {
-    vi.unstubAllEnvs();
+    rs.unstubAllEnvs();
   });
 
   it("bakes null when the build is not cut from a release tag", () => {
     // The resolver falls through to the moving tag on null, which is what keeps
     // a local build following whatever was published last.
-    vi.stubEnv("ROME_RUNTIME_IMAGE", "");
+    rs.stubEnv("ROME_RUNTIME_IMAGE", "");
     expect(getDesktopBuildDefine().__ROME_RUNTIME_IMAGE__).toBe("null");
   });
 
   it("bakes the image a tagged build was given", () => {
-    vi.stubEnv("ROME_RUNTIME_IMAGE", "yunfanye/rome:1.2.3");
+    rs.stubEnv("ROME_RUNTIME_IMAGE", "yunfanye/rome:1.2.3");
     expect(getDesktopBuildDefine().__ROME_RUNTIME_IMAGE__).toBe('"yunfanye/rome:1.2.3"');
   });
 
   it("treats a blank value as absent rather than pinning to an empty tag", () => {
     // A workflow that computes the reference and comes up empty would otherwise
     // bake "", and every install would fail to pull.
-    vi.stubEnv("ROME_RUNTIME_IMAGE", "   ");
+    rs.stubEnv("ROME_RUNTIME_IMAGE", "   ");
     expect(getDesktopBuildDefine().__ROME_RUNTIME_IMAGE__).toBe("null");
   });
 });

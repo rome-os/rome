@@ -1,17 +1,17 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChangedFile } from "@/lib/sync-api";
 import { ChangedFilesDialog } from "./ChangedFilesDialog";
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function mockChanges(files: ChangedFile[]) {
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith("/api/sync/changes")) return Response.json({ files });
     return Response.json({}, { status: 404 });
@@ -66,7 +66,7 @@ describe("ChangedFilesDialog", () => {
   });
 
   it("opens the actual unified diff when a file is clicked", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
     ) => {
       const url = String(input);
@@ -107,7 +107,7 @@ describe("ChangedFilesDialog", () => {
   });
 
   it("shows a focused error when the selected diff cannot load", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith("/api/sync/changes/diff")) {
         return Response.json({ error: "Diff is no longer available" }, { status: 409 });
@@ -123,7 +123,7 @@ describe("ChangedFilesDialog", () => {
 
   it("undoes a changed file from its row", async () => {
     const files: ChangedFile[] = [{ path: "src/modified.ts", change: "modified" }];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -138,7 +138,7 @@ describe("ChangedFilesDialog", () => {
       if (url.startsWith("/api/sync/changes")) return Response.json({ files });
       return Response.json({}, { status: 404 });
     }) as typeof fetch);
-    const onChangesRestored = vi.fn();
+    const onChangesRestored = rs.fn();
 
     render(
       <ChangedFilesDialog
@@ -157,7 +157,7 @@ describe("ChangedFilesDialog", () => {
   });
 
   it("keeps the file visible and shows an error when undo fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -182,7 +182,7 @@ describe("ChangedFilesDialog", () => {
       { path: "src/one.ts", change: "modified" },
       { path: "src/two.ts", change: "added" },
     ];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -194,7 +194,7 @@ describe("ChangedFilesDialog", () => {
       if (url.startsWith("/api/sync/changes")) return Response.json({ files });
       return Response.json({}, { status: 404 });
     }) as typeof fetch);
-    const onChangesRestored = vi.fn();
+    const onChangesRestored = rs.fn();
 
     render(
       <ChangedFilesDialog
@@ -215,7 +215,7 @@ describe("ChangedFilesDialog", () => {
   it("clears the previous file list when loading a different project", async () => {
     let secondFetchStarted = false;
     let resolveSecondFetch: ((response: Response) => void) | undefined;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("projectPath=apps")) {
         return Response.json({ files: [{ path: "old-project.ts", change: "modified" }] });
@@ -244,7 +244,7 @@ describe("ChangedFilesDialog", () => {
   });
 
   it("does not fetch while closed", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
     render(<ChangedFilesDialog path="apps" open={false} onClose={() => {}} />);
     expect(fetchSpy).not.toHaveBeenCalled();
   });

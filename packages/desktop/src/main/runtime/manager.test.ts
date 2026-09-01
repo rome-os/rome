@@ -1,17 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 
-vi.mock("electron", () => ({
+rs.mock("electron", () => ({
   app: undefined,
   shell: {
-    openExternal: vi.fn(),
-    openPath: vi.fn(),
+    openExternal: rs.fn(),
+    openPath: rs.fn(),
   },
 }));
 
-vi.mock("../logger", () => ({
+rs.mock("../logger", () => ({
   createLogger: () => ({
-    error: vi.fn(),
-    info: vi.fn(),
+    error: rs.fn(),
+    info: rs.fn(),
   }),
 }));
 
