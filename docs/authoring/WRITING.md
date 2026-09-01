@@ -26,7 +26,7 @@ A project-specific term earns admission only with a one-line separation from its
   > Prefer: "install" always means the daemon operation, "set up" covers the dev environment.
   > Over: "install" means the daemon operation in one section and the dev-environment steps in another.
 
-- Name the mechanism, not a picture of it. A description states what is true, not what it is like.
+- Name the thing, not a picture of it. A description states what is true, not what it is like.
 
   > Prefer: "a group has several people on it, and every line any of them sent reads the same way."
   > Over: "a group conversation has more than two ends, and three people talking are one undifferentiated voice."
