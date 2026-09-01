@@ -19,6 +19,7 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from "discord.js";
+import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
 import type { APIRequest, RateLimitData, RequestMethod, ResponseLike } from "discord.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import {
@@ -33,6 +34,8 @@ import type {
   ConversationId,
   ConversationSettingsControl,
   ConversationSettingsSnapshot,
+  ChatStopHandler,
+  MessageAddressing,
 } from "@rome-os/app-runtime";
 import type {
   NormalizedMessage,
@@ -167,7 +170,11 @@ function isThreadType(type: ChannelType): boolean {
   );
 }
 
-function buildSlashCommands() {
+export function buildDiscordSlashCommands() {
+  const stop = new SlashCommandBuilder()
+    .setName("stop")
+    .setDescription("Stop the active Rome response in this conversation");
+
   const channel = new SlashCommandBuilder()
     .setName("channel")
     .setDescription("Configure Rome Bot behavior for this channel")
@@ -277,7 +284,12 @@ function buildSlashCommands() {
     .setName("help")
     .setDescription("Show available Rome Bot commands");
 
-  return [channel.toJSON(), bot.toJSON(), help.toJSON()];
+  return [stop.toJSON(), channel.toJSON(), bot.toJSON(), help.toJSON()];
+}
+
+export function normalizeDiscordMessageText(content: string, botId?: string): string {
+  if (!botId) return content.trim();
+  return content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
 }
 
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
@@ -321,6 +333,7 @@ export class DiscordAdapter implements ProviderAdapter {
    */
   private listAgents?: () => string[];
   private isGuardian?: (channelUserId: string) => Promise<boolean>;
+  private chatStop?: ChatStopHandler;
 
   /**
    * Reports terminal gateway faults so the grant-epoch lifecycle can react:
@@ -345,6 +358,7 @@ export class DiscordAdapter implements ProviderAdapter {
     maxMessagesPerChannel?: number;
     listAgents?: () => string[];
     isGuardian?: (channelUserId: string) => Promise<boolean>;
+    chatStop?: ChatStopHandler;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   }) {
     this.connectionId = config.connectionId;
@@ -352,6 +366,7 @@ export class DiscordAdapter implements ProviderAdapter {
     this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
     this.listAgents = config.listAgents;
     this.isGuardian = config.isGuardian;
+    this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
     this.client = new Client({
       intents: [
@@ -647,7 +662,7 @@ export class DiscordAdapter implements ProviderAdapter {
       if (!this.slashCommandsRegistered) {
         this.slashCommandsRegistered = true;
         try {
-          const commands = buildSlashCommands();
+          const commands = buildDiscordSlashCommands();
           await this.rest.put(Routes.applicationCommands(client.user.id), { body: commands });
           log.info("slash commands registered", { count: commands.length });
         } catch (err) {
@@ -683,6 +698,13 @@ export class DiscordAdapter implements ProviderAdapter {
       const isThread = isThreadType(message.channel.type);
 
       const cfg = this.legacyConfig(await this.settingsForMessage(message));
+      const botId = this.client.user?.id;
+      const botMentioned = botId ? message.mentions.users.has(botId) : false;
+      const isOwnThread =
+        isThread &&
+        !!botId &&
+        "ownerId" in message.channel &&
+        (message.channel as ThreadChannel).ownerId === botId;
 
       // ── Layer 2: Bot filter ───────────────────────────────────────────────
       if (message.author.bot) {
@@ -718,12 +740,32 @@ export class DiscordAdapter implements ProviderAdapter {
 
       // ── DM shortcut: always respond ───────────────────────────────────────
       if (isDm) {
-        await this.dispatchMessage(message, isDm, isThread);
+        await this.dispatchMessage(message, isDm, isThread, "direct");
         return;
       }
 
+      let replyToBot = false;
+      if (!botMentioned && botId && message.reference?.messageId) {
+        try {
+          const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+          replyToBot = refMsg.author.id === botId;
+        } catch {
+          // A missing reference cannot prove that this message addresses Rome.
+        }
+      }
+      const addressing: MessageAddressing = botMentioned
+        ? "mention"
+        : replyToBot
+          ? "reply"
+          : isOwnThread
+            ? "bot_thread"
+            : "ambient";
+      const directedStop =
+        addressing !== "ambient" &&
+        isStopCommand(normalizeDiscordMessageText(message.content, botId));
+
       // ── Layer 4: Channel permission ───────────────────────────────────────
-      if (cfg?.mode === "ignore") {
+      if (cfg?.mode === "ignore" && !directedStop) {
         log.debug("ignoring message in channel with mode=ignore", {
           channelId: message.channelId,
         });
@@ -734,53 +776,33 @@ export class DiscordAdapter implements ProviderAdapter {
       // Threads the bot itself started (e.g. auto-thread replies) are treated
       // as ongoing conversations and skip the mention requirement. Threads
       // created by other users still need an @mention or a reply-to-bot.
-      const botId = this.client.user?.id;
-      const isOwnThread =
-        isThread &&
-        !!botId &&
-        "ownerId" in message.channel &&
-        (message.channel as ThreadChannel).ownerId === botId;
-
       const requireMention = cfg?.requireMention ?? true;
-      if (requireMention && !isOwnThread) {
-        const botMentioned = botId ? message.mentions.users.has(botId) : false;
-
-        let replyToBot = false;
-        if (!botMentioned && message.reference?.messageId) {
-          try {
-            const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-            replyToBot = refMsg.author.id === botId;
-          } catch {
-            // can't fetch reference — skip
-          }
-        }
-
-        if (!botMentioned && !replyToBot) {
-          log.debug("ignoring guild message not directed at bot", {
-            from: message.author.id,
-            channelId: message.channelId,
-            isThread,
-          });
-          return;
-        }
+      if (requireMention && addressing === "ambient") {
+        log.debug("ignoring guild message not directed at bot", {
+          from: message.author.id,
+          channelId: message.channelId,
+          isThread,
+        });
+        return;
       }
 
-      await this.dispatchMessage(message, isDm, isThread);
+      await this.dispatchMessage(message, isDm, isThread, addressing);
     });
 
     await this.client.login(this._botToken);
     log.info("bot logged in", { username: this.client.user?.tag });
   }
 
-  private async dispatchMessage(message: Message, isDm: boolean, isThread: boolean): Promise<void> {
+  private async dispatchMessage(
+    message: Message,
+    isDm: boolean,
+    isThread: boolean,
+    addressing: MessageAddressing,
+  ): Promise<void> {
     if (!this.handler) return;
 
     // Strip the bot @mention from message text so the agent sees clean input
-    let text = message.content;
-    if (this.client.user) {
-      const botId = this.client.user.id;
-      text = text.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
-    }
+    const text = normalizeDiscordMessageText(message.content, this.client.user?.id);
 
     let threadName: string | undefined;
     if (!isDm && "name" in message.channel) {
@@ -805,6 +827,7 @@ export class DiscordAdapter implements ProviderAdapter {
       text,
       attachments: this.extractAttachments(message),
       replyTo: replyToMessageId ? { messageId: replyToMessageId } : undefined,
+      addressing,
       rawEvent: message,
     };
 
@@ -830,13 +853,30 @@ export class DiscordAdapter implements ProviderAdapter {
     await interaction.deferReply({ ephemeral: true });
 
     try {
+      const cmd = interaction.commandName;
+      if (cmd === "stop") {
+        if (!this.chatStop || !this.connectionId) {
+          await interaction.editReply({ content: "Stop is unavailable for this connection." });
+          return;
+        }
+        const result = await this.chatStop({
+          ref: {
+            connectionId: this.connectionId,
+            conversationId: interaction.channelId as ConversationId,
+          },
+          service: "discord",
+          senderId: interaction.user.id,
+        });
+        await interaction.editReply({ content: chatStopReceipt(result.status) });
+        return;
+      }
+
       if (this.isGuardian && !(await this.isGuardian(interaction.user.id))) {
         await interaction.editReply({
           content: "Only the linked guardian can configure this Discord conversation.",
         });
         return;
       }
-      const cmd = interaction.commandName;
       const subGroup = interaction.options.getSubcommandGroup(false);
       const sub = interaction.options.getSubcommand(false);
 
@@ -859,6 +899,7 @@ export class DiscordAdapter implements ProviderAdapter {
             "",
             "Global overview:",
             "  `/bot status` — list all channel overrides",
+            "  `/stop` — stop the active Rome response in this conversation",
             "",
             "Tip: you can also tell the bot what you want in plain language",
           ].join("\n"),

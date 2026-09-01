@@ -17,6 +17,7 @@ import {
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "./feishu.js";
@@ -47,6 +48,7 @@ export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-prov
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   conversationSettings: ConversationSettingsService;
+  chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
@@ -85,6 +87,7 @@ export function registerBuiltinConnections(
   registry.register(
     makeDiscordDescriptor({
       conversationSettings: deps.conversationSettings,
+      chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
     }),

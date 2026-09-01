@@ -951,6 +951,9 @@ export function normalizeWechatMessage(msg: WechatMessage): NormalizedMessage | 
     text: extracted.text,
     attachments: extracted.attachments.filter((att) => att.url || att.fileName || att.mimeType),
     ...(extracted.replyTo ? { replyTo: extracted.replyTo } : {}),
+    // WeChat group traffic is partitioned by senderId, so a command can only
+    // address that sender's Rome conversation, never another group member's.
+    addressing: "direct",
     rawEvent: msg,
   };
 }

@@ -6,6 +6,7 @@
 import type { ChildProcess } from "node:child_process";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import type {
+  ConversationId,
   CurrentActionContext,
   MessageReplyReference,
   RomeSessionRef,
@@ -34,6 +35,7 @@ import {
 } from "../actions/action-subprocess.js";
 import { actionExecutionContext } from "../actions/context.js";
 import { replayContext } from "../actions/replay.js";
+import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -75,6 +77,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private manager: AgentSessionManager,
     private webchatRepo?: WebChatRepository,
     private actionWorkerCoordinator?: ActionWorkerCoordinator,
+    private turnStreams?: AgentTurnStreamRegistry,
   ) {}
 
   attach(child: ChildProcess): IpcRpc {
@@ -194,8 +197,35 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const stream = ctx.openStream<StreamAgentMessage>(`agent.turn:${handle.turnId}`);
         // Drain the per-turn events into the IPC stream.
         void (async () => {
+          let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
           try {
             for await (const msg of handle.events) {
+              if (!liveStream && msg.type === "turn_start" && this.turnStreams) {
+                const thread = req.init?.threadContext;
+                try {
+                  liveStream = this.turnStreams.register({
+                    sessionId: msg.sessionId,
+                    turnId: msg.turnId,
+                    agentName: session.key.agentName,
+                    ...(thread?.connectionId
+                      ? {
+                          conversation: {
+                            connectionId: thread.connectionId,
+                            conversationId: thread.threadId as ConversationId,
+                          },
+                        }
+                      : {}),
+                    ...(thread?.channelUserId ? { initiatorId: thread.channelUserId } : {}),
+                    interrupt: handle.interrupt,
+                  });
+                } catch (err) {
+                  log.warn("failed to register agent turn stream", {
+                    turnId: handle.turnId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                }
+              }
+              liveStream?.publish(msg);
               if (recorder) {
                 await recordAgentTraceBestEffort(recorder, msg, log, {
                   turnId: handle.turnId,
@@ -211,6 +241,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
               error: err instanceof Error ? err.message : String(err),
             });
             stream.close({ error: err instanceof Error ? err : new Error(String(err)) });
+          } finally {
+            liveStream?.finish();
           }
         })();
 

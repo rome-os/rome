@@ -1,6 +1,7 @@
-import { createAppLogger } from "@rome-os/app-runtime";
+import { chatStopReceipt, createAppLogger, isStopCommand } from "@rome-os/app-runtime";
 import type {
   ActionEngineLike,
+  ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
   ConversationSettingsControl,
   InboundMessage,
@@ -16,6 +17,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     private readonly actionEngine: ActionEngineLike,
     private readonly talkRouter: TalkRouter,
     private readonly conversationSettings: ConversationSettingsControl,
+    private readonly chatStop: ChatStopHandler,
   ) {}
 
   async register(): Promise<void> {
@@ -50,6 +52,38 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     const ref = { connectionId, conversationId: message.conversationId };
+    if (isStopCommand(message.text)) {
+      const addressing =
+        message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
+      if (addressing === "ambient") {
+        log.debug("ignoring group stop command not directed at the bot", {
+          service,
+          messageId: message.messageId,
+        });
+        return;
+      }
+      try {
+        const result = await this.chatStop({
+          ref,
+          service,
+          senderId: message.senderId,
+        });
+        await this.talkRouter.send(connectionId, message.conversationId, {
+          text: chatStopReceipt(result.status),
+        });
+      } catch (err) {
+        log.error("stop command failed", {
+          service,
+          messageId: message.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await this.talkRouter.send(connectionId, message.conversationId, {
+          text: "Stop could not be requested. Please try again.",
+        });
+      }
+      return;
+    }
+
     let enabled = true;
     let routedAgentName: string | undefined;
     const snapshot = await this.conversationSettings.get(ref);
@@ -151,6 +185,12 @@ export function createHook(deps: {
   actionEngine: ActionEngineLike;
   talkRouter: TalkRouter;
   conversationSettings: ConversationSettingsControl;
+  chatStop: ChatStopHandler;
 }): ChannelMessageHookInterface {
-  return new ChannelMessageHook(deps.actionEngine, deps.talkRouter, deps.conversationSettings);
+  return new ChannelMessageHook(
+    deps.actionEngine,
+    deps.talkRouter,
+    deps.conversationSettings,
+    deps.chatStop,
+  );
 }

@@ -7,6 +7,7 @@ import {
   LoggerLevel,
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
+import { isStopCommand } from "@rome-os/app-runtime";
 import type { ProviderAdapter } from "./adapter.js";
 import type { NormalizedMessage, OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
@@ -15,6 +16,7 @@ import type {
   ConversationDescriptor,
   ConversationId,
   ConversationSettingsControl,
+  MessageAddressing,
 } from "@rome-os/app-runtime";
 
 const log = createLogger("feishu");
@@ -225,10 +227,17 @@ export class FeishuAdapter implements ProviderAdapter {
 
     // MVP: text-bearing messages only. Media-only messages arrive with empty
     // content and are dropped until attachment support lands.
+    const commandText = stripMentionPlaceholders(m.content ?? "", m.mentions);
     const resolvedText = resolveMentions(m.content ?? "", m.mentions);
-    const text = resolvedText || (m.rawContentType === "text" && m.mentionedBot ? "hello" : "");
+    const text =
+      m.mentionedBot && isStopCommand(commandText)
+        ? "/stop"
+        : resolvedText || (m.rawContentType === "text" && m.mentionedBot ? "hello" : "");
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
+    const addressing: MessageAddressing =
+      threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
+    const directedStop = addressing !== "ambient" && isStopCommand(text);
     if (threadType === "group") {
       this.observedConversations.set(m.chatId, {
         id: m.chatId,
@@ -245,7 +254,7 @@ export class FeishuAdapter implements ProviderAdapter {
       }
 
       const cfg = await this.getChannelConfig(m.chatId);
-      if (cfg.mode === "ignore") {
+      if (cfg.mode === "ignore" && !directedStop) {
         log.debug("ignoring Feishu group message because group policy is disabled", {
           from: m.senderId,
           threadId: m.chatId,
@@ -275,6 +284,7 @@ export class FeishuAdapter implements ProviderAdapter {
       attachments: [],
       replyTo: m.replyToMessageId ? { messageId: m.replyToMessageId } : undefined,
       routing: cfg.agentName ? { agentName: cfg.agentName } : undefined,
+      addressing,
       rawEvent: m.raw ?? m,
     };
 
@@ -537,6 +547,17 @@ export function resolveMentions(
   let text = content;
   for (const mention of mentions ?? []) {
     if (mention.key && mention.name) text = text.split(mention.key).join(mention.name);
+  }
+  return text.trim();
+}
+
+function stripMentionPlaceholders(
+  content: string,
+  mentions: Array<{ key?: string; name?: string }>,
+): string {
+  let text = content;
+  for (const mention of mentions ?? []) {
+    if (mention.key) text = text.split(mention.key).join("");
   }
   return text.trim();
 }

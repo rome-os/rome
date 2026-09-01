@@ -25,6 +25,7 @@ export function toInboundMessage(message: NormalizedMessage): InboundMessage {
     attachments: message.attachments,
     timestamp: message.timestamp,
     replyTo: message.replyTo,
+    ...(message.addressing ? { addressing: message.addressing } : {}),
     thread: {
       kind: message.threadType === "private" ? "dm" : message.parentThreadId ? "topic" : "group",
       ...(message.threadName ? { name: message.threadName } : {}),

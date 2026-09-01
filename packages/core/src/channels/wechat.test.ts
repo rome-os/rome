@@ -55,6 +55,7 @@ describe("normalizeWechatMessage", () => {
       timestamp: new Date(1700000000000),
       text: "hello from wechat",
       attachments: [],
+      addressing: "direct",
       rawEvent: expect.any(Object),
     });
   });
@@ -238,6 +239,7 @@ describe("normalizeWechatMessage", () => {
     expect(msg?.threadId).toBe("bob@im.wechat");
     expect(msg?.threadType).toBe("group");
     expect(msg?.threadName).toBe("room-1@chatroom");
+    expect(msg?.addressing).toBe("direct");
   });
 
   it("treats empty group id as private metadata", () => {

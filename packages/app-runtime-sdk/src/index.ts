@@ -1316,6 +1316,10 @@ export interface MessageRouting {
   agentName?: string;
 }
 
+/** How an inbound message was directed at the bot. Channel control messages
+ * use this provider-normalized signal instead of parsing provider payloads. */
+export type MessageAddressing = "direct" | "mention" | "reply" | "bot_thread" | "ambient";
+
 /** Provider-normalized reference attached to an ordinary inbound reply. */
 export interface MessageReplyReference {
   /** Provider/server id of the referenced message. */
@@ -1350,6 +1354,7 @@ export interface NormalizedMessage {
   attachments: Attachment[];
   replyTo?: MessageReplyReference;
   routing?: MessageRouting;
+  addressing?: MessageAddressing;
   rawEvent: unknown;
 }
 
@@ -1385,8 +1390,41 @@ export interface InboundMessage {
   timestamp: Date;
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  addressing?: MessageAddressing;
   raw?: unknown;
 }
+
+/** Exact provider-neutral chat command recognized before an agent turn. */
+export function isStopCommand(text: string): boolean {
+  return text.trim().toLowerCase() === "/stop";
+}
+
+export type ChatStopStatus = "stop_requested" | "idle" | "forbidden";
+
+export interface ChatStopResult {
+  status: ChatStopStatus;
+  turnId?: string;
+}
+
+export function chatStopReceipt(status: ChatStopStatus): string {
+  switch (status) {
+    case "stop_requested":
+      return "Stop requested.";
+    case "forbidden":
+      return "You can only stop a response that you started.";
+    case "idle":
+      return "There is no active response to stop.";
+  }
+}
+
+export interface ChatStopInput {
+  ref: ConversationRef;
+  service: string;
+  senderId: string;
+}
+
+/** Stops the active agent turn for a provider conversation. */
+export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;

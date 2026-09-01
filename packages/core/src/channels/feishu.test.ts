@@ -253,6 +253,7 @@ describe("FeishuAdapter", () => {
     expect(msg.displayName).toBe("Alice");
     expect(msg.threadId).toBe("oc_chat");
     expect(msg.threadType).toBe("private");
+    expect(msg.addressing).toBe("direct");
     expect(msg.text).toBe("hi there");
     expect(msg.id).toBe("om_123");
   });
@@ -260,6 +261,19 @@ describe("FeishuAdapter", () => {
   it("maps group chat type to a group thread", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
     expect(captured[0].threadType).toBe("group");
+    expect(captured[0].addressing).toBe("mention");
+  });
+
+  it("normalizes an addressed group /stop without leaving the bot mention in the command", async () => {
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 /stop",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ text: "/stop", addressing: "mention" });
   });
 
   it("delivers an @-only group message as a greeting", async () => {
@@ -391,6 +405,38 @@ describe("FeishuAdapter", () => {
     await channel.emit({ chatType: "group", mentionedBot: true, content: "@_user_1 hello" });
 
     expect(captured).toHaveLength(0);
+  });
+
+  it("delivers an addressed /stop when group policy is disabled", async () => {
+    const conversationSettings = makeConversationSettings({
+      enabled: false,
+      activation: { mode: "all" },
+    });
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      {
+        appId: "cli_test",
+        appSecret: "secret",
+        connectionId: FEISHU_CONNECTION_ID,
+        conversationSettings: conversationSettings.control,
+      },
+      () => channel as unknown as LarkChannel,
+    );
+    captured = [];
+    adapter.onMessage(async (msg) => {
+      captured.push(msg);
+    });
+    await adapter.start();
+
+    await channel.emit({
+      chatType: "group",
+      mentionedBot: true,
+      content: "@_user_1 /stop",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ text: "/stop", addressing: "mention" });
   });
 
   it("renders current group settings as select field defaults", async () => {

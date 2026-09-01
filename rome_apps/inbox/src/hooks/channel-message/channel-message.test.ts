@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ActionEngineLike,
+  ChatStopHandler,
   ConversationId,
   ConversationSettingsControl,
   InboundMessage,
@@ -64,6 +65,11 @@ function createHarness() {
     snapshot(connectionId, conversationId),
   );
   const conversationSettings = { get } as unknown as ConversationSettingsControl;
+  const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
+  const chatStop: ChatStopHandler = stop;
+  const send = rs.fn(async (_connectionId: string, conversationId: ConversationId) => ({
+    conversationId,
+  }));
   const talkRouter: TalkRouter = {
     list: async () => [
       { connectionId: TELEGRAM_ID, service: "telegram" },
@@ -73,21 +79,19 @@ function createHarness() {
       handlers.set(connectionId, handler);
       return () => handlers.delete(connectionId);
     },
-    async send(_connectionId, conversationId) {
-      return { conversationId };
-    },
+    send,
     feature<K extends TalkFeatureName>(connectionId: string, name: K) {
       return (features.get(connectionId)?.[name] ?? null) as TalkFeatureMap[K] | null;
     },
   };
-  const hook = new ChannelMessageHook(actionEngine, talkRouter, conversationSettings);
+  const hook = new ChannelMessageHook(actionEngine, talkRouter, conversationSettings, chatStop);
   const emit = async (connectionId: string, incoming: InboundMessage) => {
     const handler = handlers.get(connectionId);
     if (!handler) throw new Error(`no subscription for ${connectionId}`);
     await handler(incoming);
   };
 
-  return { hook, run, get, features, emit };
+  return { hook, run, get, features, emit, stop, send };
 }
 
 describe("ChannelMessageHook", () => {
@@ -135,6 +139,50 @@ describe("ChannelMessageHook", () => {
         }),
       }),
     );
+  });
+
+  it("handles a direct /stop before settings or message_handler", async () => {
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ text: "/STOP", thread: { kind: "dm", name: "Alice" } }),
+    );
+
+    expect(harness.stop).toHaveBeenCalledWith({
+      ref: { connectionId: TELEGRAM_ID, conversationId: "chat-1" },
+      service: "telegram",
+      senderId: "user-1",
+    });
+    expect(harness.send).toHaveBeenCalledWith(TELEGRAM_ID, "chat-1", {
+      text: "Stop requested.",
+    });
+    expect(harness.get).not.toHaveBeenCalled();
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it("accepts an addressed group /stop even when the conversation is disabled", async () => {
+    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
+      snapshot(connectionId, conversationId, { enabled: false }),
+    );
+
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ text: "/stop", addressing: "mention", thread: { kind: "group" } }),
+    );
+
+    expect(harness.stop).toHaveBeenCalledTimes(1);
+    expect(harness.get).not.toHaveBeenCalled();
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it("swallows an ambient group /stop instead of sending it to the model", async () => {
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ text: "/stop", addressing: "ambient", thread: { kind: "group" } }),
+    );
+
+    expect(harness.stop).not.toHaveBeenCalled();
+    expect(harness.send).not.toHaveBeenCalled();
+    expect(harness.run).not.toHaveBeenCalled();
   });
 
   it("honors disabled conversations and routed agents from shared settings", async () => {

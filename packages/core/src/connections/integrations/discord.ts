@@ -16,6 +16,7 @@
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type {
+  ChatStopHandler,
   TalkActivity,
   TalkDirectory,
   TalkFeatureMap,
@@ -117,6 +118,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  */
 export interface DiscordDeps {
   conversationSettings: ConversationSettingsService;
+  chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
   /** Injectable token validator so the connect route / tests can drive the
@@ -381,6 +383,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             botToken: token.token,
             connectionId: kit.connectionId,
             conversationSettings: deps.conversationSettings,
+            chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             isGuardian: async (channelUserId) =>
               (await deps.personMappingRepo.findByChannelUser("discord", channelUserId))
