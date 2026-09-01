@@ -2975,14 +2975,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
-    const modelSelection = await resolveSessionModelSelectionForTurn(
-      {
-        id: sessionId,
-        largeModelSelection: session.largeModelSelection,
-      },
-      messageCount,
-      body.largeModelSelection,
-    );
+    // A branch resumes by recomputing its channel-thread key, and
+    // `persistForkThread` stored that key without a model-selection suffix. Pin
+    // the selection to null so the two derivations cannot drift: a suffix here
+    // would open a fresh provider thread and silently lose the branch history.
+    const modelSelection =
+      session.type === "fork"
+        ? null
+        : await resolveSessionModelSelectionForTurn(
+            {
+              id: sessionId,
+              largeModelSelection: session.largeModelSelection,
+            },
+            messageCount,
+            body.largeModelSelection,
+          );
     const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
     const channelThreadKey = buildWebchatChannelThreadKey(sessionId, modelSelection);
 
@@ -3620,10 +3627,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // addressable via /turns/:turnId/stream like a user-initiated turn.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
-    // A side chat reaches this host too: it can hold an approved action or a
-    // `defer` wake-up, and both resume through here. Rejecting it would claim
-    // the approval without executing it and drop the wake-up, both silently.
-    if (!session || !(isStoredWebchatSession(session) || (await isContinuableFork(session)))) {
+    // Deliberately top-level only. A side chat has no scheduled wake-ups (see
+    // `deferEnabled`) and does not host approval continuations: resuming one
+    // here would reopen its session without the detached surface, and a
+    // continuation raised on the branch's first turn still carries the parent's
+    // delivery address. Refusing keeps both failures loud instead of silently
+    // answering into the wrong transcript.
+    if (!session || !isStoredWebchatSession(session)) {
       throw new Error(`Webchat session "${sessionId}" not found`);
     }
     const stream = await createStream(

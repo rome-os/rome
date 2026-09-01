@@ -3630,6 +3630,48 @@ describe("Webchat API", () => {
       expect(acquiredInit?.interactiveSurfaceDetached).toBe(true);
     });
 
+    it("resumes a branch under its persisted key even when a selection is sent", async () => {
+      // `persistForkThread` stored the row without a model-selection suffix. If
+      // a follow-up ever recomputed a suffixed key, `acquire` would open a
+      // fresh provider thread and lose the branch history with no error.
+      rs.spyOn(deps.sessionManager, "findReusableSession").mockResolvedValue(withThread(FORK_ID));
+      let acquiredKey: unknown;
+      deps.agentSessionManager = {
+        acquire: rs.fn(async (key) => {
+          acquiredKey = key;
+          return {
+            key: { agentName: "main", channelThreadKey: `webchat:${FORK_ID}` },
+            sessionId: "fork-agent-session",
+            status: "idle",
+            sendTurn() {
+              return {
+                turnId: "follow-up-turn",
+                events: (async function* () {
+                  yield { type: "result", content: "ok" };
+                })(),
+                turnContext: otelContext.active(),
+              };
+            },
+            subscribe: () => () => undefined,
+            onStatusChange: () => () => undefined,
+            interrupt: async () => undefined,
+            close: async () => undefined,
+          } satisfies AgentSession;
+        }),
+        peek: () => undefined,
+        shutdown: async () => undefined,
+      };
+      const app = createWebchatRuntime(deps).routes;
+
+      await app.request(`/chat/sessions/${FORK_ID}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
+      });
+
+      expect(acquiredKey).toEqual({ agentName: "main", channelThreadKey: `webchat:${FORK_ID}` });
+    });
+
     it("leaves an ordinary chat's interactive surface attached", async () => {
       let acquiredInit: AgentSessionInit | undefined;
       deps.agentSessionManager = {
@@ -3794,11 +3836,11 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
-    it("runs a backend continuation on a continuable side chat", async () => {
-      // An approved action and a `defer` wake-up both resume through
-      // `enqueueSessionTask`. A side chat can reach either, so rejecting its
-      // session type here would claim the approval and never execute it, and
-      // lose the wake-up — both silently.
+    it("refuses a backend continuation on a side chat", async () => {
+      // Side chats hold no scheduled wake-ups (they get no defer tool) and do
+      // not host approval continuations. Resuming one here would reopen its
+      // session without the detached surface, so the refusal is deliberate and
+      // keeps the failure loud.
       const forkId = "sess-fork-backend-continuation";
       await deps.webchatRepo.ensureRomeSession({
         id: forkId,
@@ -3819,15 +3861,13 @@ describe("Webchat API", () => {
       });
       const { runtime } = createWebchatRuntime(deps);
 
-      await runtime.enqueueSessionTask(forkId, async ({ emit }) => {
-        emit({ type: "result", content: "Sent the message you approved." });
-      });
+      await expect(
+        runtime.enqueueSessionTask(forkId, async ({ emit }) => {
+          emit({ type: "result", content: "Should never run." });
+        }),
+      ).rejects.toThrow(/not found/);
 
-      const assistantReplies = (await deps.webchatRepo.getMessages(forkId)).filter(
-        (m) => m.role === "assistant",
-      );
-      expect(assistantReplies).toHaveLength(1);
-      expect(assistantReplies[0]!.content).toContain("Sent the message you approved.");
+      expect(await deps.webchatRepo.getMessages(forkId)).toHaveLength(0);
     });
 
     it("persists an ask_question card emitted by a deferred backend continuation", async () => {

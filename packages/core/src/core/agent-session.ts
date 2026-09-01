@@ -1105,7 +1105,13 @@ async function openSession(
   // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
-  const deferEnabled = isGuardianFacingChannel(key.channelThreadKey) && !opts.isSubagent;
+  // A detached session (a side chat) gets no defer tool either: its wake-up
+  // would resume through a path that cannot honor the detached surface, and
+  // the first branch turn still carries its parent's delivery address.
+  const deferEnabled =
+    isGuardianFacingChannel(key.channelThreadKey) &&
+    !opts.isSubagent &&
+    !init.interactiveSurfaceDetached;
   const makeExecuteDefer =
     (refs: TurnExecRefs) =>
     async (input: DeferInput): Promise<unknown> =>

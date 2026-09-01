@@ -103,6 +103,7 @@ The caller also chooses how long the fork's provider branch lives:
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
 - A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
+- A fork holds no scheduled wake-ups and hosts no approval continuation, continuable or not. Both resume through the top-level session host, which answers into the conversation that scheduled them.
 
 **Not to be confused with:**
 
