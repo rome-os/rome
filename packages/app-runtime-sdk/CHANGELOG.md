@@ -1,5 +1,13 @@
 # @rome-os/app-runtime
 
+## [0.6.3](https://github.com/rome-os/rome/compare/app-runtime-v0.6.2...app-runtime-v0.6.3) (2026-09-01)
+
+
+### Features
+
+* add streaming input to WebChat ([#121](https://github.com/rome-os/rome/issues/121)) ([f99eb96](https://github.com/rome-os/rome/commit/f99eb96cf28d1e6ba82be0c8b959f4947dd63ffb))
+* **core:** use provider-native output schemas ([#164](https://github.com/rome-os/rome/issues/164)) ([9da1e18](https://github.com/rome-os/rome/commit/9da1e1840fcee42b95fa9e5cd439731b51f11c60))
+
 ## [0.6.2](https://github.com/rome-os/rome/compare/app-runtime-v0.6.1...app-runtime-v0.6.2) (2026-08-29)
 
 
