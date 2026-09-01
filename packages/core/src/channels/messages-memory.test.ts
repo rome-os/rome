@@ -9,11 +9,19 @@ import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 const PHONE = "1555@s.whatsapp.net";
 const LID = "77@lid";
 const MEMBER = "ACoAA1";
-// A group: addressed by neither of the two who speak in it, so its messages
-// name the conversation themselves.
+// A group: addressed by the group and by nobody on it, so its messages are
+// held at the group rather than at whoever spoke — which is how a mirror keys
+// one, a WhatsApp group message hanging off the group's chat.
 const GROUP = "wa-group";
+// Two people on that group. No message of it names either, which is what makes
+// a group unreachable from an account read rather than merely filtered out of
+// one.
 const IN_GROUP_ONE = "9998@s.whatsapp.net";
 const IN_GROUP_TWO = "9997@s.whatsapp.net";
+// The thread the LinkedIn messages below were said in: a conversation named by
+// something other than the address they arrived at, the way a LinkedIn message
+// hangs off a thread rather than off a member.
+const LI_THREAD = "li-thread-1";
 
 const entry = (
   source: string,
@@ -29,28 +37,27 @@ const held: HeldMessage[] = [
   // settles the tie, and both have to survive a page boundary.
   { channel: "whatsapp", address: LID, entry: entry("whatsapp", 300, "wa:d") },
   { channel: "whatsapp", address: PHONE, entry: entry("whatsapp", 500, "wa:e") },
-  { channel: "linkedin", address: MEMBER, entry: entry("linkedin", 200, "li:b") },
-  { channel: "linkedin", address: MEMBER, entry: entry("linkedin", 400, "li:f", "outbound") },
+  {
+    channel: "linkedin",
+    address: MEMBER,
+    conversation: LI_THREAD,
+    entry: entry("linkedin", 200, "li:b"),
+  },
+  {
+    channel: "linkedin",
+    address: MEMBER,
+    conversation: LI_THREAD,
+    entry: entry("linkedin", 400, "li:f", "outbound"),
+  },
   // Out of every scope below: another account on the same channel, and the
   // same string as a WhatsApp address on a channel that is not WhatsApp.
   { channel: "whatsapp", address: "9999@s.whatsapp.net", entry: entry("whatsapp", 600, "wa:x") },
   { channel: "linkedin", address: PHONE, entry: entry("linkedin", 700, "li:x") },
-  // The group, reachable only by naming it. Two of its lines arrived at the
-  // address that said them and name the conversation, and two name it by
-  // arriving at the group itself — which is what a message with no conversation
-  // of its own says.
-  {
-    channel: "whatsapp",
-    address: IN_GROUP_ONE,
-    conversation: GROUP,
-    entry: entry("whatsapp", 800, "wa:g1"),
-  },
-  {
-    channel: "whatsapp",
-    address: IN_GROUP_TWO,
-    conversation: GROUP,
-    entry: entry("whatsapp", 900, "wa:g2"),
-  },
+  // The group, reachable only by naming it. Every line of it is held at the
+  // group, so it names the conversation by arriving there — which is what a
+  // message with no conversation of its own says.
+  { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 800, "wa:g1") },
+  { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 900, "wa:g2") },
   // The same second as wa:g2; the direction settles the tie.
   { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 900, "wa:g3", "outbound") },
   { channel: "whatsapp", address: GROUP, entry: entry("whatsapp", 1000, "wa:g4") },
@@ -101,17 +108,31 @@ describe("memoryMessages", () => {
     expect(page.map((e) => e.ref)).toEqual(["wa:g4", "wa:g3", "wa:g2", "wa:g1"]);
   });
 
-  it("answers a conversation to no account that names one of its speakers", async () => {
-    const speakers = [
-      { channel: "whatsapp", addresses: [IN_GROUP_ONE, IN_GROUP_TWO] },
+  it("answers a group's messages to no account read", async () => {
+    // Every account the fixture holds one for, and two people on the group
+    // besides. A group message is held at the group, so no address names one —
+    // which is the reason the account reads answer direct threads only.
+    const everyone = [
       ...accounts,
+      { channel: "whatsapp", addresses: [IN_GROUP_ONE, IN_GROUP_TWO] },
     ];
-    const page = await messages.read({ accounts: speakers, limit: WHOLE_HISTORY });
-    // Each speaker's own line reaches the address it arrived at — a memory
-    // store subtracts nothing — and the two the group itself holds reach
-    // nobody, which is what an address that names no account means.
-    expect(page.map((e) => e.ref)).not.toContain("wa:g3");
-    expect(page.map((e) => e.ref)).not.toContain("wa:g4");
+    const held = (await messages.read({ accounts: everyone, limit: WHOLE_HISTORY })).map(
+      (e) => e.ref,
+    );
+    for (const ref of ["wa:g1", "wa:g2", "wa:g3", "wa:g4"]) expect(held).not.toContain(ref);
+  });
+
+  it("reads a conversation named by something other than the address", async () => {
+    const page = await messages.readConversation({
+      conversation: { channel: "linkedin", id: LI_THREAD },
+      limit: WHOLE_HISTORY,
+    });
+    expect(page.map((e) => e.ref)).toEqual(["li:f", "li:b"]);
+    // And the same messages still reach the member's own account read: a
+    // direct thread is one history named two ways, not two histories.
+    const member = [{ channel: "linkedin", addresses: [MEMBER] }];
+    expect((await messages.read({ accounts: member, limit: WHOLE_HISTORY })).map((e) => e.ref)) //
+      .toEqual(["li:f", "li:b"]);
   });
 
   it("reads a direct conversation under the address that names it", async () => {

@@ -18,9 +18,14 @@ export interface HeldMessage {
    * The conversation, when it is not the address.
    *
    * A direct conversation is addressed by the person on it, so a store that
-   * keys a thread by who is on it names both with one string — which is what a
-   * message with no conversation of its own says. A group is addressed by
-   * neither, so its messages name it here.
+   * keys a message by who it passed between names both with one string — which
+   * is what a message with no conversation of its own says. A store that keys a
+   * message by its thread instead names the thread here, the way a LinkedIn
+   * message hangs off a thread rather than off a member.
+   *
+   * A group's messages are held at the group, since that is what addresses one.
+   * So no account names them, and the account reads answer none of them without
+   * subtracting anything — which is the guarantee messages.ts states.
    */
   conversation?: string;
   entry: TimelineEntry;
