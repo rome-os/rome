@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import { checkGate, setFeatureGates } from "./index.js";
 import { parseGateOverrides, installEnvGateOverrides } from "./env-overrides.js";
 import { resetFeatureGates } from "./testing.js";

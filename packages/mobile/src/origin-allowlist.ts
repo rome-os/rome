@@ -71,7 +71,7 @@ export interface OriginPolicy {
  * incomplete polyfill (notably `.origin`), so any entry point importing this
  * module MUST first import `react-native-url-polyfill/auto` (see `App.tsx`);
  * otherwise origins are parsed incorrectly and the policy can be bypassed.
- * Under Node/vitest the platform `URL` is already compliant.
+ * Under Node-based test runners the platform `URL` is already compliant.
  */
 function normalizeHttpsOrigin(value: string): string | null {
   let url: URL;

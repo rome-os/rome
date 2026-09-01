@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter rome-desktop-base-web build && node scripts/dev.mjs",
     "build": "pnpm --filter rome-desktop-base-web build && node scripts/build.mjs",
-    "test": "../../scripts/test-env.sh vitest run --environment node",
+    "test": "../../scripts/test-env.sh rstest",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "image:local": "bash scripts/build-local-image.sh",
     "smoke:guest-image": "node scripts/smoke-guest-image.mjs",
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
+    "@rstest/core": "^0.11.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.2.3",
     "electron": "^36.0.0",

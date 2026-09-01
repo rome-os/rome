@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { registerDevice } from "./device-registration.js";
 import { NOTIFICATION_CHANNEL_ID, runPushRegistration } from "./push-registration.js";
 
@@ -11,15 +11,15 @@ function makeNotifications(
   over: Partial<Record<"granted" | "token", unknown>> = {},
 ) {
   return {
-    setNotificationChannelAsync: vi.fn(async () => {
+    setNotificationChannelAsync: rs.fn(async () => {
       calls.push("channel");
       return {};
     }),
-    requestPermissionsAsync: vi.fn(async () => {
+    requestPermissionsAsync: rs.fn(async () => {
       calls.push("permission");
       return { granted: (over.granted ?? true) as boolean };
     }),
-    getDevicePushTokenAsync: vi.fn(async () => {
+    getDevicePushTokenAsync: rs.fn(async () => {
       calls.push("token");
       return { data: (over.token ?? "tok") as string };
     }),
@@ -27,20 +27,20 @@ function makeNotifications(
   };
 }
 
-const okRegister = () => vi.fn(async () => ({ ok: true, status: 201 }));
+const okRegister = () => rs.fn(async () => ({ ok: true, status: 201 }));
 const asRegister = (m: unknown) => m as unknown as typeof registerDevice;
 const base = {
   fetchImpl: fetch,
   romeCloudOrigin: P,
-  getApnsEnvironment: vi.fn(() => "sandbox" as const),
-  delay: vi.fn(async () => {}),
+  getApnsEnvironment: rs.fn(() => "sandbox" as const),
+  delay: rs.fn(async () => {}),
 };
 
 describe("runPushRegistration — iOS", () => {
   it("skips the channel, registers APNs with the environment, returns true", async () => {
     const notifications = makeNotifications();
     const register = okRegister();
-    const getApnsEnvironment = vi.fn(() => "sandbox" as const);
+    const getApnsEnvironment = rs.fn(() => "sandbox" as const);
 
     const ok = await runPushRegistration({
       ...base,
@@ -67,11 +67,11 @@ describe("runPushRegistration — Android", () => {
   it("creates the HIGH channel BEFORE permission, registers FCM, never reads the APNs env", async () => {
     const calls: string[] = [];
     const notifications = makeNotifications(calls);
-    const register = vi.fn(async () => {
+    const register = rs.fn(async () => {
       calls.push("register");
       return { ok: true, status: 201 };
     });
-    const getApnsEnvironment = vi.fn(() => "sandbox" as const);
+    const getApnsEnvironment = rs.fn(() => "sandbox" as const);
 
     const ok = await runPushRegistration({
       ...base,
@@ -137,7 +137,7 @@ describe("runPushRegistration — short-circuits", () => {
     // degrades it to "push registration skipped". It must not register.
     const notifications = {
       ...makeNotifications(),
-      getDevicePushTokenAsync: vi.fn(async (): Promise<{ data: string }> => {
+      getDevicePushTokenAsync: rs.fn(async (): Promise<{ data: string }> => {
         throw new Error("getDevicePushTokenAsync is not available in Expo Go");
       }),
     };
@@ -160,11 +160,11 @@ describe("runPushRegistration — short-circuits", () => {
 describe("runPushRegistration — 401 retry", () => {
   it("retries once after a delay on 401 and succeeds", async () => {
     const notifications = makeNotifications();
-    const register = vi
+    const register = rs
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 401 })
       .mockResolvedValueOnce({ ok: true, status: 201 });
-    const delay = vi.fn(async () => {});
+    const delay = rs.fn(async () => {});
     const ok = await runPushRegistration({
       ...base,
       platform: "ios",
@@ -179,8 +179,8 @@ describe("runPushRegistration — 401 retry", () => {
 
   it("returns not-registered if the single retry also fails", async () => {
     const notifications = makeNotifications();
-    const register = vi.fn(async () => ({ ok: false, status: 401 }));
-    const delay = vi.fn(async () => {});
+    const register = rs.fn(async () => ({ ok: false, status: 401 }));
+    const delay = rs.fn(async () => {});
     const ok = await runPushRegistration({
       ...base,
       platform: "ios",
@@ -194,8 +194,8 @@ describe("runPushRegistration — 401 retry", () => {
 
   it("does not retry on a non-401 failure", async () => {
     const notifications = makeNotifications();
-    const register = vi.fn(async () => ({ ok: false, status: 400 }));
-    const delay = vi.fn(async () => {});
+    const register = rs.fn(async () => ({ ok: false, status: 400 }));
+    const delay = rs.fn(async () => {});
     const ok = await runPushRegistration({
       ...base,
       platform: "ios",

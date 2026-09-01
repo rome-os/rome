@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { RESTART_BUTTON, updateDialogFor } from "./update-dialog";
 import type { UpdateState, UpdateStatus } from "./updater";
 

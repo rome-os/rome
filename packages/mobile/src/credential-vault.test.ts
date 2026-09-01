@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { CredentialVault, type SecureKeyValueStore } from "./credential-vault.js";
 
 function memoryStore(): SecureKeyValueStore & { values: Map<string, string> } {

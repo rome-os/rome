@@ -54,15 +54,15 @@
     "build": "tsc",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "../../scripts/test-env.sh vitest run"
+    "test": "../../scripts/test-env.sh rstest"
   },
   "dependencies": {
     "@statsig/statsig-node-core": "^0.19.6",
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
+    "@rstest/core": "^0.11.11",
     "@types/jsonwebtoken": "^9.0.10",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.1"
+    "typescript": "^5.9.3"
   }
 }

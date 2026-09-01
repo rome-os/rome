@@ -10,8 +10,8 @@
     "android": "expo run:android",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
-    "test": "../../scripts/test-env.sh vitest run",
-    "test:watch": "../../scripts/test-env.sh vitest"
+    "test": "../../scripts/test-env.sh rstest",
+    "test:watch": "../../scripts/test-env.sh rstest --watch"
   },
   "dependencies": {
     "@expo/ui": "~57.0.13",
@@ -32,8 +32,8 @@
     "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@rstest/core": "^0.11.11",
     "@types/react": "~19.2.14",
-    "typescript": "~6.0.3",
-    "vitest": "^3.2.1"
+    "typescript": "~6.0.3"
   }
 }
