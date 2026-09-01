@@ -262,7 +262,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0].threadType).toBe("group");
   });
 
-  it("delivers an @-only group message as a greeting", async () => {
+  it("preserves an @-only group message as the visible bot mention", async () => {
     await channel.emit({
       chatType: "group",
       content: "",
@@ -272,7 +272,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0].text).toBe("hello");
+    expect(captured[0].text).toBe("@Rome");
   });
 
   it("ignores group messages that do not mention the bot by default", async () => {

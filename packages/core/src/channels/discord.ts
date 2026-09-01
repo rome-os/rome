@@ -49,6 +49,7 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
+import { preserveMentionOnlyText } from "./mention-only.js";
 
 interface DiscordRestMessage {
   id: string;
@@ -88,6 +89,16 @@ const HISTORY_CHANNEL_TYPES = new Set([0, 5, 11, 12]);
 function timestampToSnowflake(timestampMs: number): string {
   const discordEpoch = 1420070400000n;
   return ((BigInt(Math.floor(timestampMs)) - discordEpoch) << 22n).toString();
+}
+
+/** Strips the bot mention from prose while preserving a mention-only message. */
+export function normalizeDiscordMessageText(
+  content: string,
+  bot: { id: string; displayName: string } | null,
+  mentionedBot: boolean,
+): string {
+  const text = bot ? content.replace(new RegExp(`<@!?${bot.id}>`, "g"), "").trim() : content;
+  return preserveMentionOnlyText(text, bot !== null && mentionedBot, bot?.displayName);
 }
 
 function restMessageToNormalized(
@@ -775,12 +786,12 @@ export class DiscordAdapter implements ProviderAdapter {
   private async dispatchMessage(message: Message, isDm: boolean, isThread: boolean): Promise<void> {
     if (!this.handler) return;
 
-    // Strip the bot @mention from message text so the agent sees clean input
-    let text = message.content;
-    if (this.client.user) {
-      const botId = this.client.user.id;
-      text = text.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
-    }
+    const bot = this.client.user;
+    const text = normalizeDiscordMessageText(
+      message.content,
+      bot,
+      bot ? message.mentions.users.has(bot.id) : false,
+    );
 
     let threadName: string | undefined;
     if (!isDm && "name" in message.channel) {

@@ -16,6 +16,7 @@ import type {
   ConversationId,
   ConversationSettingsControl,
 } from "@rome-os/app-runtime";
+import { preserveMentionOnlyText } from "./mention-only.js";
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
@@ -226,7 +227,11 @@ export class FeishuAdapter implements ProviderAdapter {
     // MVP: text-bearing messages only. Media-only messages arrive with empty
     // content and are dropped until attachment support lands.
     const resolvedText = resolveMentions(m.content ?? "", m.mentions);
-    const text = resolvedText || (m.rawContentType === "text" && m.mentionedBot ? "hello" : "");
+    const text = preserveMentionOnlyText(
+      resolvedText,
+      m.rawContentType === "text" && m.mentionedBot,
+      this.channel.botIdentity?.name,
+    );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
     if (threadType === "group") {
