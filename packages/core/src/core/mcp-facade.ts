@@ -25,10 +25,10 @@ import type {
   ModelToolCallContext,
   ModelToolDefinition,
   SkillMcpDefinition,
-  SubmitOutputSpec,
+  HandbackSpec,
 } from "./agent-runner.js";
 
-export type { SubmitOutputSpec };
+export type { HandbackSpec };
 
 const log = createLogger("mcp-facade");
 
@@ -68,7 +68,7 @@ export interface FacadeBundle {
   subagents: FacadeToolDef[];
   /** Three tools when `skillCatalog` is non-empty, otherwise empty. */
   skills: FacadeToolDef[];
-  /** One `submit_output` tool when the agent declares an `outputSchema`, otherwise empty. */
+  /** One `submit_output` tool for conversational handback sessions. */
   submitOutput: FacadeToolDef[];
   /**
    * Built-in tools the model uses to ask the human something: `ask_question`
@@ -95,7 +95,7 @@ export interface FacadeParams {
    */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  submitOutput?: SubmitOutputSpec;
+  handback?: HandbackSpec;
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
     name: string,
@@ -121,13 +121,6 @@ export interface FacadeParams {
    * an error instead of claiming a card was delivered / a handback shipped.
    */
   interactiveSurfaceDetached?: boolean;
-  /**
-   * True for a conversational handback session: gates the `confirm_output`
-   * interactive tool, which the agent calls to ship the standing submission on
-   * the guardian's verbal approval (the surface picks the tool_use up off the
-   * stream and resolves the handback, same as the Approve control).
-   */
-  conversationalHandback?: boolean;
   /**
    * Schedule a deferred self-wakeup (`defer`). When supplied, the
    * `defer` built-in registers on every surface; the implementation (captured
@@ -694,11 +687,11 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
     actions: buildActionFacadeTools(params.getActionCatalog, params.executeAction),
     subagents: buildSubagentFacadeTools(params.subagentTools, params.executeSubagent),
     skills: buildSkillFacadeTools(params.getSkillCatalog),
-    submitOutput: buildSubmitOutputFacadeTool(params.submitOutput, params.executeSubmitOutput),
+    submitOutput: buildSubmitOutputFacadeTool(params.handback, params.executeSubmitOutput),
     interactiveTools: buildInteractiveTools(
       params.supportsInteractiveSurface ?? false,
       params.interactiveSurfaceDetached ?? false,
-      params.conversationalHandback ?? false,
+      !!params.handback,
       params.executeDefer,
     ),
   };
@@ -1066,7 +1059,7 @@ function buildDeferFacadeTool(
 function buildInteractiveTools(
   supportsInteractiveSurface: boolean,
   interactiveSurfaceDetached: boolean,
-  conversationalHandback: boolean,
+  hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
@@ -1181,8 +1174,7 @@ function buildInteractiveTools(
   // confirm_output additionally belongs only to a conversational handback (the
   // surface that resolves it is the handoff approval gate); a plain chat never
   // has it.
-  if (conversationalHandback)
-    tools.push(...buildConfirmOutputFacadeTool(interactiveSurfaceDetached));
+  if (hasHandback) tools.push(...buildConfirmOutputFacadeTool(interactiveSurfaceDetached));
   tools.push({
     name: "propose_routine",
     description:
@@ -1303,7 +1295,7 @@ function buildInteractiveTools(
 }
 
 function buildSubmitOutputFacadeTool(
-  spec: SubmitOutputSpec | undefined,
+  spec: HandbackSpec | undefined,
   executeSubmitOutput: ((input: unknown) => Promise<unknown>) | undefined,
 ): FacadeToolDef[] {
   if (!spec || !executeSubmitOutput) return [];
@@ -1311,7 +1303,7 @@ function buildSubmitOutputFacadeTool(
     {
       name: "submit_output",
       description:
-        "Submit the structured result for this turn. The input must match this agent's declared output schema. Call this exactly once when you have your final answer; do not include any other prose after calling it.",
+        "Present a schema-valid candidate to the guardian for approval. A later candidate may supersede it after the guardian requests changes.",
       inputSchema: spec.schema,
       handler: (input) =>
         runFacadeTool("submit_output", input, (parsed) => executeSubmitOutput(parsed)),

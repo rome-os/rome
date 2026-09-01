@@ -52,13 +52,12 @@ export function createRomeMcpServerForSession(params: ModelSessionForkOpenParams
     getActionCatalog: params.getActionCatalog,
     getSkillCatalog: params.getSkillCatalog,
     subagentTools: params.subagentTools,
-    submitOutput: params.submitOutput,
+    handback: params.handback,
     executeAction: params.executeAction,
     executeSubagent: params.executeSubagent,
     executeSubmitOutput: params.executeSubmitOutput,
     supportsInteractiveSurface: params.supportsInteractiveSurface,
     interactiveSurfaceDetached: params.interactiveSurfaceDetached,
-    conversationalHandback: params.conversationalHandback,
     executeDefer: params.executeDefer,
   });
 }

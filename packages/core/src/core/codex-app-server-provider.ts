@@ -77,6 +77,10 @@ import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
 import type { CodexTurnRuntime } from "./codex/turn-runtime.js";
 import { createRomeDynamicTools, type RomeDynamicTools } from "./codex/rome-dynamic-tools.js";
+import {
+  compileOutputSchema,
+  formatOutputSchemaErrors,
+} from "../apps/packaging/output-schema-validator.js";
 
 const log = createLogger("codex-app-server-provider");
 
@@ -372,11 +376,14 @@ export class CodexAppServerProvider implements ModelProvider {
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
     const modelName = stripLegacyReasoningSuffix(params.model);
+    const outputValidator = params.outputSchema
+      ? compileOutputSchema(params.outputSchema)
+      : undefined;
 
-    // Rome-owned actions, skills, subagents, interactive tools, and structured
-    // output all use app-server dynamic tools. The provider-visible catalog is
-    // thread-scoped; execution is selected from the active turn runtime so a
-    // borrowed exact fork can reuse the source thread with fork callbacks.
+    // Rome-owned actions, skills, subagents, and interactive tools use
+    // app-server dynamic tools. The provider-visible catalog is thread-scoped;
+    // execution is selected from the active turn runtime so a borrowed exact
+    // fork can reuse the source thread with fork callbacks.
     const romeTools = createRomeDynamicTools(params);
 
     const sink = new AgentMessageSink();
@@ -450,6 +457,7 @@ export class CodexAppServerProvider implements ModelProvider {
         if (turnPhase === "final" || item.phase == null) {
           if (activeTurn) activeTurn.finalText = item.text;
         }
+        if (params.outputSchema) return;
         const msg: AgentMessage = turnPhase
           ? { type: "text", content: item.text, turnPhase }
           : { type: "text", content: item.text };
@@ -564,7 +572,8 @@ export class CodexAppServerProvider implements ModelProvider {
         case Notify.agentMessageDelta: {
           const p = params2 as AgentMessageDeltaNotification;
           if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
-          if (p.delta) (activeTurn?.sink ?? sink).push({ type: "text_delta", content: p.delta });
+          if (p.delta && !params.outputSchema)
+            (activeTurn?.sink ?? sink).push({ type: "text_delta", content: p.delta });
           return;
         }
         case Notify.itemStarted: {
@@ -621,6 +630,9 @@ export class CodexAppServerProvider implements ModelProvider {
               const classification = classifyCodexFailure(p.turn?.error, this.options);
               activeTurn.errorCode = classification.code;
               if (classification.pending) activeTurn.pending.push(classification.pending);
+            } else if (params.outputSchema && p.turn?.status !== "completed") {
+              activeTurn.failed = true;
+              activeTurn.errorMessage = `Codex app-server structured turn ended with status ${p.turn?.status ?? "unknown"}`;
             }
             activeTurn.resolveDone();
           }
@@ -788,6 +800,7 @@ export class CodexAppServerProvider implements ModelProvider {
           threadId: tid,
           input: turnInput,
           effort,
+          ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
           ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
         })) as { turn?: { id?: string } } | undefined;
         turn.turnId ??= started?.turn?.id ?? null;
@@ -823,19 +836,44 @@ export class CodexAppServerProvider implements ModelProvider {
             if (runtime === sourceRuntime && turn.turnId) {
               lastCompletedTurnCheckpoint = turn.turnId;
             }
-            runtime.sink.push({
-              type: "result",
-              content: turn.finalText,
-              accounting: buildOpenAiAccounting({
-                usage: toSdkUsage(turn.usage),
-                model: modelName,
-                agentName: params.agentName,
-                appStoreListingId: params.appStoreListingId,
-                reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
-                stopReason: turn.failed ? "error" : "end_turn",
-                durationMs: Date.now() - turn.startedAt,
-              }),
+            const accounting = buildOpenAiAccounting({
+              usage: toSdkUsage(turn.usage),
+              model: modelName,
+              agentName: params.agentName,
+              appStoreListingId: params.appStoreListingId,
+              reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
+              stopReason: turn.failed ? "error" : "end_turn",
+              durationMs: Date.now() - turn.startedAt,
             });
+            if (params.outputSchema) {
+              try {
+                const structuredOutput: unknown = JSON.parse(turn.finalText);
+                if (outputValidator && !outputValidator.validate(structuredOutput)) {
+                  runtime.sink.push({
+                    type: "error",
+                    error: `Codex app-server returned structured output that failed validation: ${formatOutputSchemaErrors(outputValidator.validate.errors).join("; ")}`,
+                    accounting,
+                  });
+                } else {
+                  runtime.sink.push({
+                    type: "result",
+                    content: JSON.stringify(structuredOutput),
+                    structuredOutput,
+                    accounting,
+                  });
+                }
+              } catch (err) {
+                runtime.sink.push({
+                  type: "error",
+                  error: `Codex app-server returned invalid structured output: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                  accounting,
+                });
+              }
+            } else {
+              runtime.sink.push({ type: "result", content: turn.finalText, accounting });
+            }
           }
         }
       } catch (err) {

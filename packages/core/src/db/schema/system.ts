@@ -459,7 +459,7 @@ export const romeSessions = sqliteTable(
     parentTurnId: text("parent_turn_id"),
     // JSON handback contract for a 'handoff' session, set at mint time
     // (e.g. `{"schema": {...}, "validate": "workflow_validate"}`). Drives the
-    // session's conversational `submit_output` tool; NULL for plain chats and
+    // session's conversational handback tools; NULL for plain chats and
     // contract-less handoffs.
     handoffSpec: text("handoff_spec"),
     // Reversible soft-hide for top-level webchat sessions. NULL = not archived

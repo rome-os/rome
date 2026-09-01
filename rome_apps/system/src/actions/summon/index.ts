@@ -188,12 +188,9 @@ export async function executeSummon(
 
       if (msg.type === "result") {
         result = msg.content;
-      }
-      // Validated payload from the agent's `submit_output` (declared
-      // outputSchema). Returned alongside the prose `result` so callers can
-      // act on structured data instead of parsing free text.
-      if (msg.type === "structured_output") {
-        output = msg.payload;
+        if (Object.prototype.hasOwnProperty.call(msg, "structuredOutput")) {
+          output = msg.structuredOutput;
+        }
       }
     }
 

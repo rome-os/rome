@@ -84,6 +84,7 @@ export interface TraceAccounting {
 export interface ResultBlock extends TraceBlockBase {
   type: "result";
   content: string;
+  structuredOutput?: unknown;
   accounting?: TraceAccounting;
 }
 

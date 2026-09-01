@@ -64,7 +64,6 @@ describe("Webchat API", () => {
       (): AgentTurnHandle => ({
         turnId: "input-turn",
         turnContext: otelContext.active(),
-        getSubmittedOutput: () => undefined,
         events: (async function* () {
           await terminal;
           yield { type: "result" as const, content: "" };
@@ -89,7 +88,6 @@ describe("Webchat API", () => {
       onStatusChange: () => () => {},
       interrupt: async () => {},
       close: async () => {},
-      getSubmittedOutput: () => undefined,
     };
     deps.agentSessionManager = {
       acquire: rs.fn(async () => agent),
@@ -157,7 +155,6 @@ describe("Webchat API", () => {
         return {
           turnId,
           turnContext: otelContext.active(),
-          getSubmittedOutput: () => undefined,
           events: (async function* () {
             await terminal;
             yield { type: "result" as const, content: "" };
@@ -168,7 +165,6 @@ describe("Webchat API", () => {
       onStatusChange: () => () => {},
       interrupt,
       close: async () => {},
-      getSubmittedOutput: () => undefined,
     };
     deps.agentSessionManager = {
       acquire: rs.fn(async () => agent),
@@ -1139,14 +1135,12 @@ describe("Webchat API", () => {
                     yield { type: "result", content: "" };
                   })(),
                   turnContext: otelContext.active(),
-                  getSubmittedOutput: () => undefined,
                 };
               },
               subscribe: () => () => undefined,
               onStatusChange: () => () => undefined,
               interrupt: async () => undefined,
               close: async () => undefined,
-              getSubmittedOutput: () => undefined,
             }) satisfies AgentSession,
         ),
         peek: () => undefined,
@@ -1534,14 +1528,12 @@ describe("Webchat API", () => {
                 yield { type: "result", content: "" };
               })(),
               turnContext: otelContext.active(),
-              getSubmittedOutput: () => undefined,
             };
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
           interrupt: async () => undefined,
           close: async () => undefined,
-          getSubmittedOutput: () => undefined,
         } satisfies AgentSession;
       }),
       peek: () => undefined,
@@ -1771,14 +1763,12 @@ describe("Webchat API", () => {
               turnId: "turn-stream-1",
               events: script(),
               turnContext: otelContext.active(),
-              getSubmittedOutput: () => undefined,
             };
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
           interrupt: async () => undefined,
           close: async () => undefined,
-          getSubmittedOutput: () => undefined,
         })),
         peek: () => undefined,
         shutdown: async () => undefined,
@@ -2196,7 +2186,6 @@ describe("Webchat API", () => {
             turnId: "cancel-turn",
             interrupt,
             turnContext: otelContext.active(),
-            getSubmittedOutput: () => undefined,
             events: (async function* () {
               yield {
                 type: "turn_start",
@@ -2319,14 +2308,12 @@ describe("Webchat API", () => {
                 yield { type: "result", content: "" };
               })(),
               turnContext: otelContext.active(),
-              getSubmittedOutput: () => undefined,
             };
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
           interrupt: async () => undefined,
           close: async () => undefined,
-          getSubmittedOutput: () => undefined,
         } satisfies AgentSession;
       }),
       peek: () => undefined,
@@ -2408,14 +2395,12 @@ describe("Webchat API", () => {
                 yield { type: "result", content: "" };
               })(),
               turnContext: otelContext.active(),
-              getSubmittedOutput: () => undefined,
             };
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
           interrupt: async () => undefined,
           close: async () => undefined,
-          getSubmittedOutput: () => undefined,
         } satisfies AgentSession;
       }),
       peek: () => undefined,
@@ -2513,14 +2498,12 @@ describe("Webchat API", () => {
                 turnId: `turn-${sentTurns.length}`,
                 events: scripted() as AsyncGenerator<never>,
                 turnContext: otelContext.active(),
-                getSubmittedOutput: () => undefined,
               };
             },
             subscribe: () => () => undefined,
             onStatusChange: () => () => undefined,
             interrupt: async () => undefined,
             close: async () => undefined,
-            getSubmittedOutput: () => undefined,
           } satisfies AgentSession;
           return Promise.resolve(session);
         }),

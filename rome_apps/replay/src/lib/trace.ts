@@ -274,6 +274,9 @@ export function blockToAgentMessage(block: TraceBlock, index: number): AgentMess
       return {
         type: "result",
         content: typeof block.content === "string" ? block.content : "",
+        ...(Object.prototype.hasOwnProperty.call(block, "structuredOutput")
+          ? { structuredOutput: block.structuredOutput }
+          : {}),
         ...(block.accounting ? { accounting: block.accounting as never } : {}),
       };
     case "error":

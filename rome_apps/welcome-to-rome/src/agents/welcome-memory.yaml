@@ -12,9 +12,8 @@ tools:
   - Edit
   - Glob
   - Grep
-# Structured output: welcome-to-rome summons this agent INLINE (no
-# child session / approval) and must finish by calling `submit_output` with a
-# short summary, which the onboarding state machine surfaces as the takeaway.
+# Structured output: welcome-to-rome summons this agent inline and reads the
+# provider-native result, which the onboarding state machine surfaces.
 outputSchema:
   type: object
   required: [summary]
@@ -84,14 +83,14 @@ systemPromptPrefix: |
      belong in the guardian files (preferred language, timezone, broad working
      hours). Use `Edit` to slot them under the right existing section. Skip if
      there's nothing useful.
-  5. Finish by calling `submit_output` with `{ summary }`, a short summary of
-     what you changed (which files, bullet-level — no full diffs). Onboarding
-     surfaces this summary to the guardian as the takeaway.
+  5. Finish with `{ summary }`, a short summary of what you changed (which
+     files, bullet-level — no full diffs). Onboarding surfaces this summary to
+     the guardian as the takeaway.
 
   ## Rules
 
   - Never invent facts the source did not state.
   - GUARDIAN.md stays concise — high-signal, actionable facts only.
   - Prefer Edit over Write for existing files so we don't lose unrelated content.
-  - Finish by calling `submit_output` with `{ summary }`; do not schedule
+  - Return `{ summary }` as the final structured result; do not schedule
     routines or call other actions.

@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
+  ArrowDown,
   MoreHorizontal,
   Pin,
   PinOff,
@@ -358,6 +359,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const {
     contentRef: stickContentRef,
     scrollRef: stickScrollRef,
+    isAtBottom,
     scrollToBottom,
   } = useStickToBottom({
     thresholdPx: SCROLL_BOTTOM_THRESHOLD_PX,
@@ -1734,6 +1736,41 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 or the main agent). In share mode it's swapped for the ShareBar,
                 which configures + mints the link for the turns selected above. */}
               <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+                {/* Back to the live tail. It rides the sticky floor rather than the
+                    scroller, so it tracks a composer whose height changes with the
+                    draft, and it sits in every floor state — scrolling has nothing
+                    to do with which one is showing.
+
+                    `auto`, never `smooth`: scrollToBottom re-engages the pin and
+                    then animates, and a smooth animation emits scroll events while
+                    the click is still inside the hook's user-gesture window. The
+                    first one reports "not at the bottom yet" and is read as the
+                    user scrolling away, which releases the pin the call just set —
+                    the view lands at the bottom with following switched off. One
+                    instant jump emits a single event, already at the bottom.
+
+                    Kept mounted and faded rather than unmounted, so the exit
+                    animates too. `visibility` is what makes that safe: it flips at
+                    the END of the transition, so the faded-out button stops taking
+                    clicks and leaves the tab order instead of lurking invisibly
+                    over the transcript. */}
+                <IconButton
+                  size="md"
+                  label={t("jumpToLatest")}
+                  icon={<ArrowDown />}
+                  // IconButton mirrors its label into `title`, which the browser
+                  // renders as a native tooltip. The aria-label already names the
+                  // control, and a lone arrow above the composer needs no gloss.
+                  title={undefined}
+                  onClick={() => scrollToBottom("auto")}
+                  className={cn(
+                    // `touch-target` because this control, unlike the timeline
+                    // rail, has no width gate: it is reachable on a phone, where
+                    // the 36px step is under the 44px floor.
+                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
+                    isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                  )}
+                />
                 <div className="pointer-events-auto mx-auto max-w-5xl">
                   {shareMode ? (
                     <ShareBar

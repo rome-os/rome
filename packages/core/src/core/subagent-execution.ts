@@ -238,6 +238,8 @@ export function createSubagentExecutionService(deps: {
 
       void (async () => {
         let resultText = "";
+        let structuredOutput: unknown;
+        let hasStructuredOutput = false;
         let terminalError: Extract<StreamAgentMessage, { type: "error" }> | undefined;
         let cancelled = false;
         try {
@@ -247,11 +249,16 @@ export function createSubagentExecutionService(deps: {
               turnId: handle.turnId,
               source: "subagent-execution",
             });
-            if (message.type === "result") resultText = message.content;
+            if (message.type === "result") {
+              resultText = message.content;
+              if (Object.prototype.hasOwnProperty.call(message, "structuredOutput")) {
+                structuredOutput = message.structuredOutput;
+                hasStructuredOutput = true;
+              }
+            }
             if (message.type === "error") terminalError = message;
             if (message.type === "turn_end" && message.status === "interrupted") cancelled = true;
           }
-          const submitted = handle.getSubmittedOutput();
           if (cancelled) {
             resolveCompletion({
               status: "cancelled",
@@ -274,7 +281,7 @@ export function createSubagentExecutionService(deps: {
               status: "completed",
               sessionId: child.sessionId,
               turnId: handle.turnId,
-              output: submitted !== undefined ? submitted : resultText,
+              output: hasStructuredOutput ? structuredOutput : resultText,
             });
           }
         } catch (err) {

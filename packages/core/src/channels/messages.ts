@@ -15,9 +15,14 @@ import type { TimelineEntry } from "@rome/api-types/people";
  * `Account.addresses` on the channel's own address book.
  *
  * The addresses rather than the id, because a store keys its rows by whichever
- * address a message arrived on. A read that named only the address a person
- * mapping happens to carry would answer an empty history for a conversation
- * that plainly exists.
+ * address a message arrived on: a WhatsApp contact is reachable under both a
+ * phone JID and a `@lid` JID, and history hangs off either. A read that named
+ * only the address a person mapping happens to carry would answer an empty
+ * history for a conversation that plainly exists.
+ *
+ * What `timelineAccounts` (../people/timeline-sources.ts) folds a person's
+ * links into, and what every store a person's history is read from is then
+ * scoped by.
  */
 export interface MessageAccount {
   channel: string;

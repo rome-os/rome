@@ -19,7 +19,6 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
         turnId: `turn-${started.length}`,
         events: { async *[Symbol.asyncIterator]() {} },
         turnContext: context.active(),
-        getSubmittedOutput: () => undefined,
       };
     },
     () => ({ steerUserInput: steer }),

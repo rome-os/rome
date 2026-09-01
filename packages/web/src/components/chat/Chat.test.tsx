@@ -39,6 +39,9 @@ rs.mock("@/pages/free/use-free-cells", () => ({
   useFreeCells: () => ({ addWidget: rs.fn(), placements: [] }),
 }));
 
+// Mutable so a test can put the viewport away from the tail; reset in beforeEach.
+const stickToBottom = rs.hoisted(() => ({ isAtBottom: true, scrollToBottom: rs.fn() }));
+
 rs.mock("@/hooks/use-stick-to-bottom", () => ({
   // Callback refs, matching the real hook. Chat composes these with its own
   // refs and CALLS them, so a ref object here would throw on mount — and a
@@ -47,7 +50,8 @@ rs.mock("@/hooks/use-stick-to-bottom", () => ({
   useStickToBottom: () => ({
     contentRef: rs.fn(),
     scrollRef: rs.fn(),
-    scrollToBottom: rs.fn(),
+    isAtBottom: stickToBottom.isAtBottom,
+    scrollToBottom: stickToBottom.scrollToBottom,
   }),
 }));
 
@@ -170,6 +174,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  stickToBottom.isAtBottom = true;
   mockUseSessionIdentity.mockReturnValue({
     sessionName: null,
     pinnedAgentMention: null,
@@ -412,5 +417,30 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+});
+
+describe("Chat jump to latest", () => {
+  it("hides the control while the viewport is already at the tail", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByLabelText("jumpToLatest").className).toContain("invisible");
+  });
+
+  it("jumps instantly once the viewport has left the tail", async () => {
+    stickToBottom.isAtBottom = false;
+    renderChat(<Chat sessionId="session-1" />);
+    // Chat's session-switch effect has already logged its own scrollToBottom
+    // ("auto") by now, which would satisfy the assertion below on its own —
+    // leaving the click free to pass anything. Only the click's call may count.
+    stickToBottom.scrollToBottom.mockClear();
+
+    const control = screen.getByLabelText("jumpToLatest");
+    expect(control.className).not.toContain("invisible");
+    await userEvent.click(control);
+
+    // "auto", not "smooth": a smooth animation's first scroll event lands inside
+    // the hook's user-gesture window while still short of the bottom, and is read
+    // as the user scrolling away — releasing the pin this click just re-engaged.
+    expect(stickToBottom.scrollToBottom).toHaveBeenCalledWith("auto");
   });
 });

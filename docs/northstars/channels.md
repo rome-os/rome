@@ -12,5 +12,6 @@ Every channel answers the same three things. It carries messages, it says who it
 - A caller reads every channel through one interface and names no channel. Adding a channel changes no code above it.
 - A channel says who it can reach, as far as its platform offers a directory.
 - A channel says what was said on it, as far back as its platform lets Rome read.
+- A channel answers for what was said to a person and for what a conversation holds.
 - A channel says who it reaches and what was said on it without its message transport.
 - A person reachable several ways on one channel is one account with one history.

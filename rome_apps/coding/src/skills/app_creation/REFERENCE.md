@@ -230,9 +230,9 @@ selected model should use. It accepts `low`, `high`, or `xhigh` and defaults to
 #### Structured output: `outputSchema`
 
 When you want the agent to return **structured JSON** rather than free-form
-text, declare an `outputSchema`. The agent must call the built-in
-`submit_output` tool with a payload matching the JSON Schema; the daemon
-asks the agent to retry on invalid submissions.
+text, declare an `outputSchema`. Rome passes the schema to the selected
+provider's native structured-output API. The provider returns one schema-valid
+terminal value or fails the turn.
 
 ```yaml
 name: sentinel
@@ -253,16 +253,19 @@ outputSchema:
       type: string
 systemPromptPrefix: |
   You are a triage agent. For each message decide REPLY / ESCALATE / IGNORE.
-  Once decided, call submit_output with your decision and reasoning.
+  Return your decision and reasoning as the final structured result.
 ```
 
 While iterating `agentRunner.run()`, callers read the validated payload from
-the `structured_output` stream event:
+the terminal `result`:
 
 ```ts
 for await (const msg of agentRunner.run({ agentName: "research-app:sentinel", prompt })) {
-  if (msg.type === "structured_output") {
-    const { decision, reason } = msg.payload as { decision: string; reason: string };
+  if (msg.type === "result" && msg.structuredOutput) {
+    const { decision, reason } = msg.structuredOutput as {
+      decision: string;
+      reason: string;
+    };
     // `decision` is guaranteed to be one of REPLY | ESCALATE | IGNORE
   }
 }
@@ -408,7 +411,7 @@ export function createAction(
   | Category | Types | Semantics |
   | --- | --- | --- |
   | Lifecycle | `turn_start`, `turn_end`, `session_init` | Bracketing: `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `session_init` describes the session. |
-  | Content | `thinking`, `text`, `tool_use`, `tool_result`, `structured_output`, `result`, `error` | Durable blocks. `result`/`error` is the agent's terminal block (at most one per agent per turn); `accounting` on it carries provider usage. |
+  | Content | `thinking`, `text`, `tool_use`, `tool_result`, `structured_output`, `result`, `error` | Durable blocks. `structured_output` is reserved for interactive handback submissions. `result`/`error` is the agent's terminal block (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. |
   | Transient | `text_delta` | Streaming preview of an in-flight `text` block; never persisted — ignore unless you render live text. |
 
   Typical consumption: read `sessionId` from `turn_start` (to resume the
@@ -746,7 +749,7 @@ export function createAction(
           `Recent context (last ${windowHours}h):`,
           JSON.stringify(history.data, null, 2),
           "",
-          "Research the topic, then call submit_output with { summary, tags }.",
+          "Research the topic, then return { summary, tags } as structured output.",
         ].join("\n"),
         sharedContext: { topic },        // extra context surfaced to the agent
       })) {
@@ -754,12 +757,11 @@ export function createAction(
           case "text":
             // Streaming text — forward to the frontend for a streaming UI.
             break;
-          case "structured_output":
-            // The agent submitted a payload matching the outputSchema.
-            structured = msg.payload as { summary: string; tags: string[] };
-            break;
           case "result":
             finalText = msg.content as string;
+            structured = msg.structuredOutput as
+              | { summary: string; tags: string[] }
+              | undefined;
             break;
           case "error":
             log.error("researcher failed", { error: msg.error });
@@ -808,8 +810,8 @@ outputSchema:
     tags: { type: array, items: { type: string } }
 systemPromptPrefix: |
   You are the researcher agent. Read the input topic and context, run
-  the WebSearch tool when needed, and finish by calling submit_output with
-  { summary, tags }.
+  the WebSearch tool when needed, and return { summary, tags } as the final
+  structured result.
 ```
 
 Takeaways:

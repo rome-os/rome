@@ -528,6 +528,7 @@ export interface AgentTurnMetrics {
 
 export interface AgentTurnOutput {
   text: string;
+  structuredOutput?: unknown;
   state: "final" | "partial" | "none";
   terminalKind?: "result" | "error";
   stopReason?: string;
@@ -736,6 +737,9 @@ export type SubagentResultMessage =
 export interface ResultMessage {
   type: "result";
   content: string;
+  /** Provider-native structured result when the agent declares outputSchema.
+   * `content` is the canonical JSON serialization of this value. */
+  structuredOutput?: unknown;
   /** Provider-reported usage for the agent that produced this block.
    *  Sub-agent terminals carry their own accounting. */
   accounting?: AgentAccounting;

@@ -51,6 +51,10 @@ import {
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
+import {
+  compileOutputSchema,
+  formatOutputSchemaErrors,
+} from "../apps/packaging/output-schema-validator.js";
 
 // Beta content block types are not re-exported from the agent SDK and
 // `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes
@@ -434,13 +438,16 @@ export class AnthropicProvider implements ModelProvider {
       model,
       systemPrompt,
       subagentTools,
-      submitOutput,
+      handback,
       maxTurns = 500,
       executeAction,
       executeSubagent,
       executeSubmitOutput,
       executeDefer,
     } = params;
+    const outputValidator = params.outputSchema
+      ? compileOutputSchema(params.outputSchema)
+      : undefined;
 
     const toolUseNames = new Map<string, string>();
 
@@ -448,14 +455,13 @@ export class AnthropicProvider implements ModelProvider {
       getActionCatalog: params.getActionCatalog,
       getSkillCatalog: params.getSkillCatalog,
       subagentTools,
-      submitOutput,
+      handback,
       externalMcpServers: params.externalMcpServers,
       executeAction,
       executeSubagent,
       executeSubmitOutput,
       supportsInteractiveSurface: params.supportsInteractiveSurface,
       interactiveSurfaceDetached: params.interactiveSurfaceDetached,
-      conversationalHandback: params.conversationalHandback,
       executeDefer,
     });
 
@@ -501,6 +507,9 @@ export class AnthropicProvider implements ModelProvider {
         model: effectiveModel,
         effort,
         systemPrompt,
+        ...(params.outputSchema
+          ? { outputFormat: { type: "json_schema" as const, schema: params.outputSchema } }
+          : {}),
         env: queryEnv,
         maxTurns,
         tools: params.builtinTools ?? [],
@@ -609,6 +618,7 @@ export class AnthropicProvider implements ModelProvider {
             if (message.parent_tool_use_id === null) {
               const evt = message.event;
               if (evt.type === "content_block_delta" && evt.delta.type === "text_delta") {
+                if (params.outputSchema) continue;
                 if (partialText === "" && pendingText !== null) {
                   yield { type: "text", content: pendingText, turnPhase: "commentary" };
                   pendingText = null;
@@ -631,6 +641,7 @@ export class AnthropicProvider implements ModelProvider {
             }
             for (const block of message.message.content) {
               if (isTextBlock(block) && block.text) {
+                if (params.outputSchema) continue;
                 partialText = "";
                 // A new text block: the previously held one is now confirmed
                 // mid-turn narration. Hold this one until something follows it.
@@ -691,7 +702,7 @@ export class AnthropicProvider implements ModelProvider {
             }
             pendingSteers.clear();
             // The turn is ending: any text still held was the closing answer.
-            if (pendingText !== null) {
+            if (!params.outputSchema && pendingText !== null) {
               yield { type: "text", content: pendingText, turnPhase: "final" };
               pendingText = null;
             }
@@ -725,11 +736,37 @@ export class AnthropicProvider implements ModelProvider {
               // fingerprint we can't diff).
               void clearAnthropicAuthRevoked(authRevokedSource).catch(() => {});
               lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
-              yield {
-                type: "result",
-                content: message.result || "",
-                accounting,
-              };
+              if (params.outputSchema) {
+                if (!("structured_output" in message) || message.structured_output === undefined) {
+                  yield {
+                    type: "error",
+                    error: "Claude Agent SDK completed without structured output",
+                    accounting,
+                  };
+                } else {
+                  const structuredOutput = message.structured_output;
+                  if (outputValidator && !outputValidator.validate(structuredOutput)) {
+                    yield {
+                      type: "error",
+                      error: `Claude Agent SDK returned structured output that failed validation: ${formatOutputSchemaErrors(outputValidator.validate.errors).join("; ")}`,
+                      accounting,
+                    };
+                  } else {
+                    yield {
+                      type: "result",
+                      content: JSON.stringify(structuredOutput),
+                      structuredOutput,
+                      accounting,
+                    };
+                  }
+                }
+              } else {
+                yield {
+                  type: "result",
+                  content: message.result || "",
+                  accounting,
+                };
+              }
             } else {
               const errors = message.errors ?? [];
               log.error("agent SDK result", { ...resultData, errors });
@@ -760,16 +797,19 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (abortController.signal.aborted && running) {
           await queryProcess.abort();
-          if (pendingText !== null) {
+          if (!params.outputSchema && pendingText !== null) {
             yield {
               type: "text",
               content: pendingText,
               turnPhase: partialText ? "commentary" : "final",
             };
           }
-          if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
+          if (!params.outputSchema && partialText)
+            yield { type: "text", content: partialText, turnPhase: "final" };
           running = false;
-          yield { type: "result", content: partialText || pendingText || "" };
+          yield params.outputSchema
+            ? { type: "error", error: "Claude structured-output turn was interrupted" }
+            : { type: "result", content: partialText || pendingText || "" };
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -778,19 +818,22 @@ export class AnthropicProvider implements ModelProvider {
         // isn't silently dropped. Done in `catch` rather than `finally` on
         // purpose: a `yield` in `finally` re-suspends the generator when the
         // consumer abandons iteration via `.return()`, swallowing the close.
-        if (pendingText !== null) {
+        if (!params.outputSchema && pendingText !== null) {
           yield {
             type: "text",
             content: pendingText,
             turnPhase: partialText ? "commentary" : "final",
           };
         }
-        if (partialText) yield { type: "text", content: partialText, turnPhase: "final" };
+        if (!params.outputSchema && partialText)
+          yield { type: "text", content: partialText, turnPhase: "final" };
         if (abortController.signal.aborted && err instanceof AbortError) {
           await queryProcess.abort();
           if (running) {
             running = false;
-            yield { type: "result", content: partialText || pendingText || "" };
+            yield params.outputSchema
+              ? { type: "error", error: "Claude structured-output turn was interrupted" }
+              : { type: "result", content: partialText || pendingText || "" };
           }
           return;
         }

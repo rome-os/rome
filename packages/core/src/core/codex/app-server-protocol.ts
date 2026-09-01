@@ -230,6 +230,7 @@ export interface TurnStartParams {
   model?: string | null;
   effort?: ReasoningEffort | null;
   approvalPolicy?: AskForApproval | null;
+  outputSchema?: unknown | null;
 }
 
 export interface TurnSteerParams {

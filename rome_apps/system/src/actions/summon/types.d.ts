@@ -36,7 +36,7 @@ export interface SummonOutput {
   /** Opaque durable Rome trace for this summon invocation. Pass the complete
    * object to Rome APIs; do not inspect or reconstruct its fields. */
   romeSession: RomeSessionRef;
-  /** Validated payload the agent submitted via `submit_output`, when its
-   * config declares an `outputSchema`. Absent otherwise. */
+  /** Provider-native structured payload when the agent config declares an
+   * `outputSchema`. Absent otherwise. */
   output?: unknown;
 }

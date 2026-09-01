@@ -285,7 +285,6 @@ describe("AgentRunner", () => {
       onStatusChange: rs.fn(() => () => undefined),
       interrupt: rs.fn(async () => undefined),
       close: rs.fn(async () => undefined),
-      getSubmittedOutput: rs.fn(() => undefined),
     };
     const manager = {
       acquire: rs.fn(),
@@ -341,7 +340,6 @@ describe("AgentRunner", () => {
         onStatusChange: rs.fn(() => () => undefined),
         interrupt: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
-        getSubmittedOutput: rs.fn(() => undefined),
       };
       const manager = {
         acquire: rs.fn(),
@@ -423,7 +421,6 @@ describe("AgentRunner", () => {
       onStatusChange: rs.fn(() => () => undefined),
       interrupt: rs.fn(async () => undefined),
       close: rs.fn(async () => undefined),
-      getSubmittedOutput: rs.fn(() => undefined),
     };
     const manager = {
       acquire: rs.fn(),
@@ -869,7 +866,7 @@ describe("AgentRunner", () => {
       expect(forkOpen!.builtinTools).toEqual([]);
       expect(forkOpen!.reasoningEffort).toBe("high");
       expect(forkOpen!.supportsInteractiveSurface).toBe(false);
-      expect(forkOpen!.submitOutput).toBeUndefined();
+      expect(forkOpen!.handback).toBeUndefined();
       await expect(forkOpen!.executeAction("demo_action", {})).rejects.toThrow(
         "Actions are disabled in forked turns",
       );
@@ -1075,9 +1072,8 @@ describe("AgentRunner", () => {
       expect(messages.indexOf(start!)).toBeLessThan(messages.indexOf(terminal!));
     });
 
-    it("exact forks surface submit_output as structured_output on the fork stream, exactly once", async () => {
+    it("exact forks preserve provider-native structured results without a side-channel event", async () => {
       const payload = { decision: "REPLY", reason: "all good" };
-      const submitResponses: unknown[] = [];
       let forkOpen: ModelSessionForkOpenParams | undefined;
 
       const messages = await runForkAgainstLiveSession(
@@ -1085,30 +1081,28 @@ describe("AgentRunner", () => {
           forkOpen = openParams;
           return forkSessionStub({
             events: (async function* (): AsyncIterable<AgentMessage> {
-              submitResponses.push(await openParams.executeSubmitOutput!(payload));
-              submitResponses.push(await openParams.executeSubmitOutput!(payload));
-              yield { type: "result", content: "submitted" };
+              yield {
+                type: "result",
+                content: JSON.stringify(payload),
+                structuredOutput: payload,
+              };
             })(),
           });
         },
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      expect(forkOpen!.submitOutput).toBeDefined();
-      expect(submitResponses[0]).toMatchObject({ ok: true });
-      expect(submitResponses[1]).toMatchObject({
-        ok: false,
-        error: "submit_output was already called this turn",
+      expect(forkOpen!.outputSchema).toEqual(
+        expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
+      );
+      expect(forkOpen!.handback).toBeUndefined();
+      expect(messages.some((message) => message.type === "structured_output")).toBe(false);
+      expect(messages.find((message) => message.type === "result")).toMatchObject({
+        content: JSON.stringify(payload),
+        structuredOutput: payload,
       });
-      const structured = messages.filter((m) => m.type === "structured_output");
-      expect(structured).toEqual([
-        { type: "structured_output", payload, agent: "test-structured" },
-      ]);
-      const terminal = messages.find((m) => m.type === "result");
-      expect(messages.indexOf(structured[0])).toBeLessThan(messages.indexOf(terminal!));
     });
-
-    it("exact forks fail closed when an outputSchema agent ends without submit_output", async () => {
+    it("exact forks fail closed when a provider omits structured output", async () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
@@ -1119,18 +1113,16 @@ describe("AgentRunner", () => {
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      // Same fail-closed contract as the live events loop: the fork advertised
-      // the source's submit_output tool, so a bare `result` is "agent forgot",
-      // not a real result.
+      // The same terminal assertion applies to live and forked turns.
       expect(messages.map((m) => m.type)).toEqual(["turn_start", "error", "turn_end"]);
       expect(messages[1]).toMatchObject({
         type: "error",
-        error: expect.stringContaining("without calling submit_output"),
+        error: expect.stringContaining("without structured output"),
       });
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
     });
 
-    it("exact forks keep the result when the turn parked on a suspension without submitting", async () => {
+    it("does not exempt a suspended outputSchema turn from the native result contract", async () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
@@ -1141,21 +1133,29 @@ describe("AgentRunner", () => {
                 tool: "demo_action",
                 output: { pendingApproval: true },
               };
-              yield { type: "result", content: "parked for approval" };
+              yield {
+                type: "result",
+                content: JSON.stringify({ decision: "REPLY", reason: "after approval" }),
+                structuredOutput: { decision: "REPLY", reason: "after approval" },
+              };
             })(),
           }),
         { agentName: "test-structured", fork: { mode: "exact" } },
       );
 
-      // Suspension exemption mirrors the live path: a parked turn legitimately
-      // ends without submitting — it is waiting, not done.
+      // outputSchema is per provider turn. A suspension makes the contract
+      // invalid even if the provider subsequently emits a schema-valid value.
       expect(messages.map((m) => m.type)).toEqual([
         "turn_start",
         "tool_result",
-        "result",
+        "error",
         "turn_end",
       ]);
-      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(messages[2]).toMatchObject({
+        type: "error",
+        error: expect.stringContaining("cannot suspend"),
+      });
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
     });
 
     it("exact fork actions take the non-interactive fallback for interactive results", async () => {
@@ -1211,7 +1211,7 @@ describe("AgentRunner", () => {
       });
       const runner = new AgentRunner(manager);
       // A conversational-handback source (interactive-summon child session):
-      // no config outputSchema; the session-scoped contract wires submit_output.
+      // No config outputSchema; the session-scoped contract wires handback tools.
       const source = await manager.acquire(
         { agentName: "test-main", channelThreadKey: "webchat:handback-fork" },
         {
@@ -1235,9 +1235,11 @@ describe("AgentRunner", () => {
         }),
       );
 
-      // The fork still advertises the source's submit_output contract
+      // The fork still advertises the source's handback contract
       // (catalog identity with the source)...
-      expect(forkOpen!.submitOutput).toBeDefined();
+      expect(forkOpen!.handback).toBeDefined();
+      expect(forkOpen!.outputSchema).toBeUndefined();
+      expect(forkOpen!.executeSubmitOutput).toBeDefined();
       // ...but a handback submission is a UI act: no webchat drain persists a
       // submission_card off a fork stream, so accepting it would claim a
       // guardian review that can never happen.
@@ -1734,7 +1736,6 @@ describe("AgentRunner", () => {
           yield { type: "result", content: "resumed", agent: "test-main" } as const;
         })(),
         turnContext: context.active(),
-        getSubmittedOutput: () => undefined,
       }));
       const session: AgentSession = {
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
@@ -1745,7 +1746,6 @@ describe("AgentRunner", () => {
         onStatusChange: rs.fn(() => () => undefined),
         interrupt: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
-        getSubmittedOutput: rs.fn(() => undefined),
       };
       const manager: AgentSessionManager = {
         acquire: rs.fn(async () => {
@@ -4766,35 +4766,9 @@ describe("AgentRunner", () => {
   });
 
   describe("outputSchema", () => {
-    it("exposes submit_output spec + executor and captures the structured payload", async () => {
-      // Build a provider whose run() validates that submitOutput is wired,
-      // calls executeSubmitOutput with a schema-matching payload, then ends
-      // the turn. The AgentSession should expose the captured payload via
-      // handle.getSubmittedOutput().
-      const calls: import("./agent-runner.js").ModelRunParams[] = [];
-      let executorResponse: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
-        calls.push(params);
-        yield {
-          type: "tool_use",
-          id: "tu-submit-1",
-          tool: "submit_output",
-          input: { decision: "REPLY", reason: "trivial" },
-        };
-        executorResponse = await params.executeSubmitOutput!({
-          decision: "REPLY",
-          reason: "trivial",
-        });
-        yield {
-          type: "tool_result",
-          toolUseId: "tu-submit-1",
-          tool: "submit_output",
-          output: executorResponse,
-        };
-        yield { type: "result", content: "" };
-      };
+    function structuredProvider(
+      runImpl: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentMessage>,
+    ): ModelProvider & { sessions: import("./agent-runner.js").ModelSessionParams[] } {
       const provider: ModelProvider & {
         sessions: import("./agent-runner.js").ModelSessionParams[];
       } = {
@@ -4807,319 +4781,128 @@ describe("AgentRunner", () => {
           return createSessionFromRun("mock", runImpl, params);
         },
       };
+      return provider;
+    }
 
-      const modelResolver = createTestModelResolver({
-        providers: [provider],
+    it("forwards outputSchema to the provider and returns its native structured result atomically", async () => {
+      const payload = { decision: "REPLY", reason: "trivial" };
+      const calls: import("./agent-runner.js").ModelRunParams[] = [];
+      const provider = structuredProvider(async function* (params) {
+        calls.push(params);
+        yield { type: "result", content: "provider text is normalized", structuredOutput: payload };
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
-
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
       const session = await manager.acquire({
         agentName: "test-structured",
-        channelThreadKey: "test:structured-1",
+        channelThreadKey: "test:structured-native",
       });
-      const handle = session.sendTurn({ prompt: "Triage." });
+
       const events: AgentMessage[] = [];
-      for await (const msg of handle.events) events.push(msg);
+      for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
-      // Spec is forwarded to the provider with the yaml's JSON Schema verbatim.
-      expect(provider.sessions).toHaveLength(1);
-      expect(provider.sessions[0].submitOutput).toEqual({
-        schema: expect.objectContaining({
-          type: "object",
-          required: ["decision", "reason"],
+      expect(provider.sessions[0].outputSchema).toEqual(
+        expect.objectContaining({ type: "object", required: ["decision", "reason"] }),
+      );
+      expect(calls[0].outputSchema).toEqual(provider.sessions[0].outputSchema);
+      expect(provider.sessions[0].handback).toBeUndefined();
+      expect(provider.sessions[0].executeSubmitOutput).toBeUndefined();
+      expect(provider.sessions[0].systemPrompt).not.toContain("submit_output");
+      expect(events.filter((event) => event.type === "result")).toEqual([
+        expect.objectContaining({
+          type: "result",
+          content: JSON.stringify(payload),
+          structuredOutput: payload,
         }),
-      });
-
-      // System prompt advertises the structured-output contract.
-      expect(provider.sessions[0].systemPrompt).toContain("Structured output contract");
-      expect(provider.sessions[0].systemPrompt).toContain("submit_output");
-
-      // Executor returned an acceptance hint that the agent can stop on.
-      expect(executorResponse).toMatchObject({ ok: true });
-
-      // Payload is retrievable from the handle after the turn ends.
-      expect(handle.getSubmittedOutput()).toEqual({
-        decision: "REPLY",
-        reason: "trivial",
-      });
-
-      // A first-class structured_output AgentMessage is emitted on the stream
-      // post-validation so SDK consumers can read the accepted payload
-      // without reaching into the tool_use convention.
-      const structured = events.find((m) => m.type === "structured_output");
-      expect(structured).toEqual({
-        type: "structured_output",
-        payload: { decision: "REPLY", reason: "trivial" },
-        agent: "test-structured",
-      });
-
-      // Turn still terminated cleanly via the result block.
-      const terminal = events.find((m) => m.type === "result");
-      expect(terminal).toBeDefined();
+      ]);
+      expect(events.some((event) => event.type === "structured_output")).toBe(false);
     });
 
-    it("rejects payloads that don't match the outputSchema and keeps the turn open for retry", async () => {
-      let firstResponse: unknown;
-      let secondResponse: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
-        // Bad payload — wrong enum value.
+    it("fails the turn when provider-native output does not match the declared schema", async () => {
+      const provider = structuredProvider(async function* () {
         yield {
-          type: "tool_use",
-          id: "tu-1",
-          tool: "submit_output",
-          input: { decision: "NOPE", reason: "n/a" },
+          type: "result",
+          content: "{}",
+          structuredOutput: { decision: "NOPE", reason: "invalid enum" },
         };
-        firstResponse = await params.executeSubmitOutput!({
-          decision: "NOPE",
-          reason: "n/a",
-        });
-        yield {
-          type: "tool_result",
-          toolUseId: "tu-1",
-          tool: "submit_output",
-          output: firstResponse,
-        };
-        // Retry with a valid payload — must succeed.
-        yield {
-          type: "tool_use",
-          id: "tu-2",
-          tool: "submit_output",
-          input: { decision: "REPLY", reason: "ok" },
-        };
-        secondResponse = await params.executeSubmitOutput!({
-          decision: "REPLY",
-          reason: "ok",
-        });
-        yield {
-          type: "tool_result",
-          toolUseId: "tu-2",
-          tool: "submit_output",
-          output: secondResponse,
-        };
-        yield { type: "result", content: "" };
-      };
-      const provider: ModelProvider & {
-        sessions: import("./agent-runner.js").ModelSessionParams[];
-      } = {
-        id: "mock",
-        displayName: "mock-structured",
-        builtinTools: new Set<string>(),
-        sessions: [],
-        openSession: async (params) => {
-          provider.sessions.push(params);
-          return createSessionFromRun("mock", runImpl, params);
-        },
-      };
-
-      const modelResolver = createTestModelResolver({
-        providers: [provider],
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
-
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
       const session = await manager.acquire({
         agentName: "test-structured",
         channelThreadKey: "test:structured-invalid",
       });
-      const handle = session.sendTurn({ prompt: "Triage." });
+
       const events: AgentMessage[] = [];
-      for await (const msg of handle.events) events.push(msg);
+      for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
-      // Bad payload was rejected with a structured tool error and the schema
-      // issues are echoed back so the model can self-correct.
-      expect(firstResponse).toMatchObject({ ok: false });
-      expect((firstResponse as { issues: string[] }).issues.length).toBeGreaterThan(0);
-
-      // The retry was accepted.
-      expect(secondResponse).toMatchObject({ ok: true });
-      expect(handle.getSubmittedOutput()).toEqual({ decision: "REPLY", reason: "ok" });
-      expect(events.find((m) => m.type === "result")).toBeDefined();
+      expect(events.find((event) => event.type === "result")).toBeUndefined();
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        error: expect.stringContaining("failed Rome validation"),
+      });
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
     });
 
-    it("rejects a second submit_output call in the same turn", async () => {
-      let firstResponse: unknown;
-      let secondResponse: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
-        yield {
-          type: "tool_use",
-          id: "tu-1",
-          tool: "submit_output",
-          input: { decision: "REPLY", reason: "first" },
-        };
-        firstResponse = await params.executeSubmitOutput!({
-          decision: "REPLY",
-          reason: "first",
-        });
-        yield {
-          type: "tool_result",
-          toolUseId: "tu-1",
-          tool: "submit_output",
-          output: firstResponse,
-        };
-        yield {
-          type: "tool_use",
-          id: "tu-2",
-          tool: "submit_output",
-          input: { decision: "IGNORE", reason: "second" },
-        };
-        secondResponse = await params.executeSubmitOutput!({
-          decision: "IGNORE",
-          reason: "second",
-        });
-        yield {
-          type: "tool_result",
-          toolUseId: "tu-2",
-          tool: "submit_output",
-          output: secondResponse,
-        };
-        yield { type: "result", content: "" };
-      };
-      const provider: ModelProvider & {
-        sessions: import("./agent-runner.js").ModelSessionParams[];
-      } = {
-        id: "mock",
-        displayName: "mock-structured",
-        builtinTools: new Set<string>(),
-        sessions: [],
-        openSession: async (params) => {
-          provider.sessions.push(params);
-          return createSessionFromRun("mock", runImpl, params);
-        },
-      };
-
-      const modelResolver = createTestModelResolver({
-        providers: [provider],
+    it("fails the turn when a provider completes without structured output", async () => {
+      const provider = structuredProvider(async function* () {
+        yield { type: "result", content: "plain text" };
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
-
-      const session = await manager.acquire({
-        agentName: "test-structured",
-        channelThreadKey: "test:structured-double",
-      });
-      const handle = session.sendTurn({ prompt: "Triage." });
-      const events: AgentMessage[] = [];
-      for await (const msg of handle.events) events.push(msg);
-
-      // First call accepted, second rejected — the first payload remains the
-      // authoritative submitted output so callers don't see a silent overwrite.
-      expect(firstResponse).toMatchObject({ ok: true });
-      expect(secondResponse).toMatchObject({ ok: false });
-      expect(handle.getSubmittedOutput()).toEqual({ decision: "REPLY", reason: "first" });
-      // Only one structured_output message is emitted (the accepted one).
-      const structureds = events.filter((m) => m.type === "structured_output");
-      expect(structureds).toHaveLength(1);
-    });
-
-    it("converts a result terminal to an error when the agent never called submit_output", async () => {
-      const runImpl = async function* (): AsyncIterable<AgentMessage> {
-        // Agent emits a result without ever calling submit_output — violates
-        // the contract advertised by `outputSchema`.
-        yield { type: "result", content: "done without submitting" };
-      };
-      const provider: ModelProvider & {
-        sessions: import("./agent-runner.js").ModelSessionParams[];
-      } = {
-        id: "mock",
-        displayName: "mock-structured",
-        builtinTools: new Set<string>(),
-        sessions: [],
-        openSession: async (params) => {
-          provider.sessions.push(params);
-          return createSessionFromRun("mock", runImpl, params);
-        },
-      };
-
-      const modelResolver = createTestModelResolver({
-        providers: [provider],
-      });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
-
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
       const session = await manager.acquire({
         agentName: "test-structured",
         channelThreadKey: "test:structured-missing",
       });
-      const handle = session.sendTurn({ prompt: "Triage." });
-      const events: AgentMessage[] = [];
-      for await (const msg of handle.events) events.push(msg);
 
-      // The result terminal was replaced with an error so callers can
-      // distinguish "agent skipped submit_output" from "agent submitted
-      // nothing meaningful." Nothing is exposed via getSubmittedOutput().
-      const terminal = events.find((m) => m.type === "error");
-      expect(terminal).toBeDefined();
-      expect((terminal as { error: string }).error).toMatch(/submit_output/);
-      expect(events.find((m) => m.type === "result")).toBeUndefined();
-      expect(handle.getSubmittedOutput()).toBeUndefined();
+      const events: AgentMessage[] = [];
+      for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
+
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        error: expect.stringContaining("without structured output"),
+      });
+      expect(events.find((event) => event.type === "result")).toBeUndefined();
     });
 
-    it("does NOT error when the turn parked on a pending interaction (ask_question)", async () => {
-      // An interactive agent with an outputSchema (e.g. an interview) parks the
-      // turn on ask_question to wait for the guardian's answer. That turn ends
-      // with a `result` but legitimately hasn't submitted yet — it must NOT be
-      // converted to the "must call submit_output" error.
-      const runImpl = async function* (): AsyncIterable<AgentMessage> {
-        yield {
-          type: "tool_use",
-          id: "tu-ask-1",
-          tool: "ask_question",
-          input: { question: "What do you do?" },
-        };
+    it("fails a suspended turn even if the provider later returns valid structured output", async () => {
+      const payload = { decision: "REPLY", reason: "after approval" };
+      const provider = structuredProvider(async function* () {
         yield {
           type: "tool_result",
-          toolUseId: "tu-ask-1",
-          tool: "ask_question",
-          // The suspension descriptor the action shim returns when it parks.
-          output: {
-            pendingInteraction: true,
-            appId: "some-app",
-            render: { kind: "inline", componentId: "question-card" },
-          },
+          toolUseId: "tu-park",
+          tool: "demo_action",
+          output: { pendingApproval: true },
         };
-        yield { type: "result", content: "Asked the guardian; awaiting their reply." };
-      };
-      const provider: ModelProvider & {
-        sessions: import("./agent-runner.js").ModelSessionParams[];
-      } = {
-        id: "mock",
-        displayName: "mock-structured",
-        builtinTools: new Set<string>(),
-        sessions: [],
-        openSession: async (params) => {
-          provider.sessions.push(params);
-          return createSessionFromRun("mock", runImpl, params);
-        },
-      };
-
-      const modelResolver = createTestModelResolver({
-        providers: [provider],
+        yield { type: "result", content: JSON.stringify(payload), structuredOutput: payload };
       });
-      const manager = createAgentSessionManager(managerDeps(modelResolver));
-
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
       const session = await manager.acquire({
         agentName: "test-structured",
-        channelThreadKey: "test:structured-parked",
+        channelThreadKey: "test:structured-suspended",
       });
-      const handle = session.sendTurn({ prompt: "Interview me." });
-      const events: AgentMessage[] = [];
-      for await (const msg of handle.events) events.push(msg);
 
-      // The parked turn keeps its `result` terminal — no synthetic error.
-      expect(events.find((m) => m.type === "error")).toBeUndefined();
-      expect(events.find((m) => m.type === "result")).toBeDefined();
+      const events: AgentMessage[] = [];
+      for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
+
+      expect(events.find((event) => event.type === "result")).toBeUndefined();
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        error: expect.stringContaining("cannot suspend"),
+      });
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
     });
 
-    it("does not expose submit_output when the agent has no outputSchema", async () => {
+    it("does not configure provider-native output for an agent without outputSchema", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "ok" }]]);
       const runner = createRunner(provider);
       await collectMessages(runner.run({ agentName: "test-main", prompt: "hi" }));
 
       expect(provider.sessions).toHaveLength(1);
-      expect(provider.sessions[0].submitOutput).toBeUndefined();
-      expect(provider.sessions[0].executeSubmitOutput).toBeUndefined();
-      expect(provider.sessions[0].systemPrompt).not.toContain("Structured output contract");
+      expect(provider.sessions[0].outputSchema).toBeUndefined();
+      expect(provider.sessions[0].handback).toBeUndefined();
     });
   });
 });

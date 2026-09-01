@@ -107,7 +107,7 @@ function ideasFromSummon(output: unknown): AppIdea[] {
 function memoryPrompt(source: string, locale: WelcomeLocale): string {
   return [
     "Here is what we just learned about the guardian. Fold the useful facts into",
-    "their memory per your instructions, then call submit_output with { summary }.",
+    "their memory per your instructions, then return { summary } as the final structured result.",
     guardianLanguageInstruction(locale),
     "",
     source,
@@ -131,7 +131,7 @@ function ideasBrief(basis: string, locale: WelcomeLocale): string {
   return [
     "Brainstorming your first apps to build.",
     "",
-    "From what Rome learned about the guardian below, brainstorm a few concrete, personalized first apps, then hand back the idea tuples via submit_output.",
+    "From what Rome learned about the guardian below, brainstorm a few concrete, personalized first apps, then return the idea tuples as the final structured result.",
     guardianLanguageInstruction(locale),
     "",
     basis,

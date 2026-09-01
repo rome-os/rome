@@ -197,7 +197,7 @@ describe("normalizeRoutineDraftForCard", () => {
   // confirm_output is the verbal-approval lever for a handback; it must appear
   // only in a conversational handback on an interactive surface, never in a
   // plain chat (which has no Approve gate to resolve).
-  it("registers confirm_output only for a conversational handback on an interactive surface", () => {
+  it("registers confirm_output only for a handback on an interactive surface", () => {
     const params = {
       getActionCatalog: () => [],
       getSkillCatalog: () => [],
@@ -206,12 +206,13 @@ describe("normalizeRoutineDraftForCard", () => {
       executeSubagent: async () => ({}),
       supportsInteractiveSurface: true,
     };
-    const handback = buildFacadeBundle({ ...params, conversationalHandback: true });
-    const plainChat = buildFacadeBundle({ ...params, conversationalHandback: false });
+    const handbackSpec = { schema: { type: "object", properties: {} } };
+    const handback = buildFacadeBundle({ ...params, handback: handbackSpec });
+    const plainChat = buildFacadeBundle(params);
     const noSurface = buildFacadeBundle({
       ...params,
       supportsInteractiveSurface: false,
-      conversationalHandback: true,
+      handback: handbackSpec,
     });
     expect(handback.interactiveTools.map((t) => t.name)).toContain("confirm_output");
     expect(plainChat.interactiveTools.map((t) => t.name)).not.toContain("confirm_output");
@@ -233,7 +234,7 @@ describe("normalizeRoutineDraftForCard", () => {
       executeAction: async () => ({}),
       executeSubagent: async () => ({}),
       supportsInteractiveSurface: true,
-      conversationalHandback: true,
+      handback: { schema: { type: "object", properties: {} } },
       interactiveSurfaceDetached: true,
     };
 

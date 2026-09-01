@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from "@rome-os/app-runtime";
 import { ArtifactLocalNameSchema } from "./artifact-name.js";
+import { compileOutputSchema, validatePortableOutputSchema } from "./output-schema-validator.js";
 
 const FavorRequirementSchema = z
   .object({
@@ -110,6 +111,23 @@ export const AgentConfigSchema = z
     codeBacked: z.boolean().optional(),
   })
   .strict()
+  .superRefine((raw, ctx) => {
+    if (!raw.outputSchema) return;
+    const portabilityIssues = validatePortableOutputSchema(raw.outputSchema);
+    for (const issue of portabilityIssues) {
+      ctx.addIssue({ code: "custom", path: ["outputSchema"], message: issue });
+    }
+    if (portabilityIssues.length > 0) return;
+    try {
+      compileOutputSchema(raw.outputSchema);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["outputSchema"],
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })
   .transform((raw, ctx) => {
     const tier = raw.tier ?? (raw.model ? LEGACY_MODEL_TO_TIER[raw.model] : undefined);
     if (!tier) {

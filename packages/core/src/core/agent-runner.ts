@@ -63,8 +63,8 @@ export interface SkillMcpDefinition {
   ownerId: string;
 }
 
-export interface SubmitOutputSpec {
-  /** JSON Schema describing the structured payload the agent must submit. */
+export interface HandbackSpec {
+  /** JSON Schema describing a candidate shown for guardian approval. */
   schema: Record<string, unknown>;
 }
 
@@ -83,7 +83,8 @@ export interface ModelRunParams {
   actionCatalog: ActionMcpDefinition[];
   skillCatalog: SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  submitOutput?: SubmitOutputSpec;
+  outputSchema?: Record<string, unknown>;
+  handback?: HandbackSpec;
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
@@ -139,7 +140,10 @@ export interface ModelSessionParams {
    */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  submitOutput?: SubmitOutputSpec;
+  /** Provider-native final-response JSON Schema for every model turn. */
+  outputSchema?: Record<string, unknown>;
+  /** Conversational candidate/approval flow; separate from final output. */
+  handback?: HandbackSpec;
   builtinTools?: string[];
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
@@ -192,14 +196,6 @@ export interface ModelSessionParams {
    * delivered. See FacadeParams.interactiveSurfaceDetached.
    */
   interactiveSurfaceDetached?: boolean;
-  /**
-   * True for a conversational handback session (interactive summon): the agent
-   * presents a candidate via `submit_output` and the guardian approves it. When
-   * set (and the surface is interactive), the agent also gets a `confirm_output`
-   * tool to ship the standing submission on the guardian's verbal approval —
-   * the same outcome as the guardian clicking Approve.
-   */
-  conversationalHandback?: boolean;
 }
 
 export interface ModelUserInput {
@@ -349,7 +345,8 @@ export function createSessionFromRun(
         actionCatalog: params.getActionCatalog(),
         skillCatalog: params.getSkillCatalog(),
         subagentTools: params.subagentTools,
-        submitOutput: params.submitOutput,
+        outputSchema: params.outputSchema,
+        handback: params.handback,
         builtinTools: params.builtinTools,
         maxTurns: params.maxTurns,
         reasoningEffort: input.reasoningEffort ?? params.reasoningEffort,

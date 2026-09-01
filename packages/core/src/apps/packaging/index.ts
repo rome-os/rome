@@ -49,6 +49,15 @@ export {
 } from "./manifest.js";
 export { ActionConfigSchema, AgentConfigSchema } from "./artifact-config.js";
 export {
+  PortableOutputSchemaError,
+  assertPortableOutputSchema,
+  compileJsonSchema,
+  compileOutputSchema,
+  formatOutputSchemaErrors,
+  validatePortableOutputSchema,
+  type CompiledOutputSchema,
+} from "./output-schema-validator.js";
+export {
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,
   type SkillFrontmatter,

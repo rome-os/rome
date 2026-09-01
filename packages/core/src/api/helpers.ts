@@ -250,6 +250,7 @@ export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): T
       return {
         type: "result",
         content: msg.content,
+        structuredOutput: msg.structuredOutput,
         accounting: msg.accounting,
         agent: msg.agent,
       };

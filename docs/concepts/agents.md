@@ -10,6 +10,26 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 - Every agent conversation happens within a [session](sessions.md). There is no session-less agent turn.
 - Each subagent has a restricted capability set appropriate to its role. Delegation never widens capabilities.
 
+## Structured output
+
+An agent may declare `outputSchema` when every model turn must end with data
+rather than free-form prose. Rome admits only the portable JSON Schema subset
+that both supported providers accept unchanged, then passes the schema to the
+provider's native structured-output API.
+
+**Contracts:**
+
+- `outputSchema` applies to each provider turn, including forked turns. It is
+  not a signal that a multi-turn conversation will eventually produce data.
+- The provider owns constrained generation, validation feedback, and its
+  internal retry policy. Rome does not add a second model retry loop.
+- A successful terminal `result` carries the validated value in
+  `structuredOutput`; `content` is that value's JSON serialization. Missing,
+  invalid, or retry-exhausted provider output fails the turn.
+- Structured output is separate from a handoff's guardian-approved handback.
+  A handback may span several ordinary conversational turns; an
+  `outputSchema` turn may not park on that interaction.
+
 **Not to be confused with:**
 
 - **[Action](actions.md)** — an action is code that runs. An agent is the LLM-backed entity that decides to run it.

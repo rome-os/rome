@@ -1207,7 +1207,6 @@ async function main() {
       actionLoader,
       personMappingRepo,
       whatsAppStoreRepo,
-      whatsAppAccounts,
       channels,
       accountNames,
       webchatRepo,

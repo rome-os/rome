@@ -25,11 +25,27 @@ A task title states the action in imperative mood.
 > Prefer: "docs: write the ADR family authoring guideline".
 > Over: "docs: ADR authoring guideline missing".
 
+### Situation
+
+Every issue body opens with a **Situation** section: what is going on, in plain words, before any section that names code.
+
+Situation uses the nouns and verbs the project already agreed on. Those live in [`concepts/`](../concepts/index.md), and a term links to its entry on first use.
+
+> Prefer: "Rome answers one question in two places: which addresses belong to the same person?"
+> Over: "The people directory and the timeline each run their own account fold."
+
+When the situation needs a term concepts does not carry, pick one and define it in a **Terminology** section directly after Situation. One line per term, and that term everywhere below. A term used on more than one surface and carrying a contract [earns a concepts entry](concepts.md#admission) instead.
+
+Situation names no file, symbol, or line number.
+
+> Prefer: "the message history page gathers a person's addresses on its own, and gathers them less thoroughly than the contacts list does."
+> Over: "`timeline-sources.ts:88-140` duplicates `foldAccounts` and drops the `book.resolve` branch."
+
 ### Bug report body
 
-Required sections, in order: Symptom, How to reproduce, Initial triage, Suspected root cause, Possible fixes. An Environment section may follow.
+Required sections, in order: Situation, Symptom, How to reproduce, Initial triage, Suspected root cause, Possible fixes. An Environment section may follow.
 
-- **Symptom** — the exact error or behavior, the trigger, and the involved surface.
+- **Symptom** — the exact error or behavior, the trigger, and the involved surface. Situation frames the problem in plain words. Symptom carries the exact string.
 - **How to reproduce** — numbered steps from a clean state, with the exact commands and environment preconditions.
 - **Initial triage** — what the investigation ruled in and ruled out, with evidence.
 - **Suspected root cause** — one paragraph on the mechanism, tied to the evidence above.
@@ -47,7 +63,7 @@ Suspected root cause states its confidence. A guess labeled as confirmed poisons
 
 ### Task spec body
 
-Required sections: Scope, Acceptance. When the task depends on other issues, a **Blocked by** line names them by number.
+Required sections: Situation, Scope, Acceptance. When the task depends on other issues, a **Blocked by** line names them by number.
 
 - **Scope** — the change, and what stays out.
 - **Acceptance** — a checklist of observable outcomes, each naming what proves it: a committed test, or a run against the finished branch.

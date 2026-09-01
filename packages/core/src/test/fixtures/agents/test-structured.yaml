@@ -1,11 +1,11 @@
 name: test-structured
-description: Test agent that returns a structured JSON payload via submit_output.
+description: Test agent that returns a provider-native structured JSON payload.
 model: haiku
 permissionMode: bypassPermissions
 tools:
   - Read
 systemPromptPrefix: |
-  You are a test agent. Decide an action and submit the structured result.
+  You are a test agent. Decide an action and return the structured result.
 outputSchema:
   type: object
   required:

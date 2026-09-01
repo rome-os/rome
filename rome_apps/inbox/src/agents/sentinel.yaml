@@ -17,7 +17,7 @@ actions:
 #       decision: { type: string, enum: [REPLY, ESCALATE, IGNORE] }
 #       reason:   { type: string }
 # and update rome_apps/inbox/src/actions/message-handler/index.ts to read the
-# decision from `handle.getSubmittedOutput()` instead of parseSentinelDecision().
+# decision from `result.structuredOutput` instead of parseSentinelDecision().
 systemPromptPrefix: |
   You are a sentinel agent. You triage incoming messages from untrusted senders.
 

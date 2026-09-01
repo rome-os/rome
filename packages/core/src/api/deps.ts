@@ -4,7 +4,6 @@ import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import type { Channels } from "../channels/channel.js";
-import type { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
@@ -75,9 +74,6 @@ export interface ApiDeps {
   personMappingRepo: PersonMappingRepository;
   /** Durable mirror of the WhatsApp address book + message history (People tab). */
   whatsAppStoreRepo: WhatsAppStoreRepository;
-  /** WhatsApp's address book over that mirror — who it can reach, folded onto
-   *  one account per person, and what was last said to each. */
-  whatsAppAccounts: WhatsAppAccounts;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. LinkedIn reaches the API only through here — no route reads its
    *  store directly. */

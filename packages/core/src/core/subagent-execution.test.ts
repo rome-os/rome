@@ -61,14 +61,12 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
         turnId,
         events,
         turnContext: ROOT_CONTEXT,
-        getSubmittedOutput: () => undefined,
       };
     },
     subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,
     interrupt,
     close: rs.fn(async () => undefined),
-    getSubmittedOutput: () => undefined,
   };
   return { session, releases, calls, interrupt };
 }

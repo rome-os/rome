@@ -92,10 +92,11 @@ import type {
   SubagentExecutionService,
 } from "./subagent-execution.js";
 import {
+  compileJsonSchema,
   compileOutputSchema,
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
-} from "./output-schema-validator.js";
+} from "../apps/packaging/output-schema-validator.js";
 import { translateTurnSpans, type CapturedBlock } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,
@@ -219,7 +220,7 @@ export interface AgentSessionInit {
    * is the conversation's candidate handback, not the turn's required
    * terminal. `validate` optionally names an action the host runs on each
    * schema-valid submission for app-specific semantic checks (fail-closed).
-   * Ignored when the agent config itself declares an `outputSchema`.
+   * It cannot be combined with an agent-declared `outputSchema`.
    */
   handback?: { schema: Record<string, unknown>; validate?: string };
   /** Runtime-internal id for a generation already created transactionally. */
@@ -265,14 +266,6 @@ export interface AgentTurnHandle {
    * same trace as the agent run.
    */
   turnContext: Context;
-  /**
-   * Read the structured payload submitted via `submit_output` on this turn.
-   * Returns undefined if the agent has no outputSchema or the agent never
-   * called `submit_output`. Defined only after the turn's terminal block has
-   * been consumed; callers should read it after the `for await (... of
-   * events)` loop ends.
-   */
-  getSubmittedOutput: () => unknown | undefined;
 }
 
 export interface SendTurnOptions {
@@ -328,13 +321,6 @@ export interface AgentSession {
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
-  /**
-   * Read the structured payload that the agent submitted via `submit_output`
-   * for the given turn. Returns undefined if the agent has no outputSchema, if
-   * the turn never submitted, or if the turn is unknown. Available once the
-   * turn's terminal `result`/`error` has been observed.
-   */
-  getSubmittedOutput(turnId: string): unknown | undefined;
 }
 
 export interface AgentSessionManager {
@@ -711,22 +697,16 @@ interface ForkTurnContext {
   /** Thread metadata for the fork's action executions (see ForkedAgentTurnInput). */
   threadContext?: ThreadContext;
   /**
-   * Interleave an out-of-band message (exact-mode subagent relay,
-   * structured_output) into the forked turn's stream.
+   * Interleave an out-of-band message into the forked turn's stream.
    */
   emit: (msg: StreamAgentMessage) => void;
 }
 
 /**
- * What the open-params factory hands back to `runForkedTurn`: the provider
- * open params plus a probe for the fork's own exactly-once submit_output
- * capture. The pump needs the probe — not the stream — to enforce the
- * structured-output contract on the terminal, because relayed subagent
- * `structured_output` blocks make the stream itself an ambiguous signal.
+ * What the open-params factory hands back to `runForkedTurn`.
  */
 interface ForkOpen {
   params: ModelSessionForkOpenParams;
-  hasSubmittedOutput: () => boolean;
   /** Replace provider-generic subagent tool events with semantic ones. */
   projectProviderMessage: (msg: StreamAgentMessage) => Promise<StreamAgentMessage[]>;
   /**
@@ -839,25 +819,33 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   }
 
-  // Config-declared outputSchema wins; a session-scoped handback contract
-  // (handoff child sessions) otherwise supplies the same `submit_output`
-  // machinery without the per-turn fail-closed terminal, plus an optional
-  // app-specific validator action the host runs on each submission.
-  const conversationalHandback = !config.outputSchema ? init.handback : undefined;
-  const submitOutputSpec = config.outputSchema
-    ? { schema: config.outputSchema, validate: undefined as string | undefined }
-    : conversationalHandback
-      ? { schema: conversationalHandback.schema, validate: conversationalHandback.validate }
-      : undefined;
-  // Compile the JSON Schema once per session. A broken schema fails the
-  // session open here rather than silently dropping the contract at first turn.
-  let submitOutputValidator: CompiledOutputSchema | undefined;
-  if (submitOutputSpec) {
+  if (config.outputSchema && init.handback) {
+    throw new Error(
+      `Agent ${key.agentName} cannot combine provider outputSchema with a conversational handback`,
+    );
+  }
+  const conversationalHandback = init.handback;
+  // Compile both boundaries once. Provider output uses portable-v1; handback
+  // remains an internal UI contract and may use general JSON Schema.
+  let structuredOutputValidator: CompiledOutputSchema | undefined;
+  if (config.outputSchema) {
     try {
-      submitOutputValidator = compileOutputSchema(submitOutputSpec.schema);
+      structuredOutputValidator = compileOutputSchema(config.outputSchema);
     } catch (err) {
       throw new Error(
         `Agent ${key.agentName} declares an invalid outputSchema: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+  let handbackValidator: CompiledOutputSchema | undefined;
+  if (conversationalHandback) {
+    try {
+      handbackValidator = compileJsonSchema(conversationalHandback.schema);
+    } catch (err) {
+      throw new Error(
+        `Agent ${key.agentName} declares an invalid handback schema: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -890,11 +878,7 @@ async function openSession(
     ? baseSystemPrompt +
       "\n\n--- Result contract ---\n" +
       "A `submit_output` tool is available. Calling it is how you present a finished result for the guardian's approval — it surfaces an Approve control to them. So the moment you have a result you'd show them for sign-off, call `submit_output` once with it (matching the declared schema) AS you tell them it's ready and ask if they'd like any changes. Do NOT wait for the guardian to say 'yes' or 'it's done' first — submitting is what asks. Until you have something worth reviewing, converse normally; turns may end without calling it. The guardian then either clicks Approve, or approves in words. If they reply with changes, keep refining and call `submit_output` again when the updated result is ready. If they reply with an UNAMBIGUOUS approval of what you submitted (e.g. \"yes\", \"ship it\", \"looks good\", \"go ahead\"), call the `confirm_output` tool — that ships the result you last submitted, exactly as if they had clicked Approve. Only call `confirm_output` after a submit_output and only on a clear approval; for a question or any requested change, do not call it."
-    : submitOutputSpec
-      ? baseSystemPrompt +
-        "\n\n--- Structured output contract ---\n" +
-        "When you have produced your final answer for this turn, call the `submit_output` tool exactly once with arguments that match its declared input schema. Do not emit any further prose after calling it; the tool call IS the turn result."
-      : baseSystemPrompt;
+    : baseSystemPrompt;
 
   // The registry's `getForAgent` is the single resolution point for what this
   // agent may call — its allow-list plus the globally-granted actions, or
@@ -1141,20 +1125,15 @@ async function openSession(
     (refs: TurnExecRefs) =>
     async (input: unknown): Promise<unknown> =>
       refs.bindTurnCtx(async () => {
-        // Only wired when the session declares an output contract; the guard
-        // also narrows submitOutputSpec for the validate call below.
-        if (!submitOutputSpec) {
+        if (!conversationalHandback) {
           throw new Error("submit_output is not configured for this session");
         }
         // A handback submission is a UI act: the webchat drain persists a
         // submission_card off the live session's stream and the guardian
         // approves it there. Nothing drains a forked turn's stream, so
         // accepting here would tell the model a review is pending that can
-        // never happen. Reject before validation and the exactly-once capture;
-        // the fork ends with its result as prose instead. (outputSchema
-        // submissions stay accepted on forks — there the capture IS the
-        // turn's data contract, enforced fail-closed by the fork pump.)
-        if (conversationalHandback && !refs.supportsInteractiveSurface) {
+        // never happen. Reject before validation and capture.
+        if (!refs.supportsInteractiveSurface) {
           return {
             ok: false,
             error:
@@ -1164,24 +1143,24 @@ async function openSession(
         }
         // Schema validation first — failure is a tool error the agent must
         // fix and retry. Do not capture or emit anything; the turn stays open.
-        if (submitOutputValidator && !submitOutputValidator.validate(input)) {
-          const issues = formatOutputSchemaErrors(submitOutputValidator.validate.errors);
+        if (handbackValidator && !handbackValidator.validate(input)) {
+          const issues = formatOutputSchemaErrors(handbackValidator.validate.errors);
           return {
             ok: false,
-            error: "Payload does not match this agent's outputSchema",
+            error: "Payload does not match this conversation's handback schema",
             issues,
-            hint: "Fix the listed issues and call submit_output again. The turn does not end until validation succeeds.",
+            hint: "Fix the listed issues and call submit_output again.",
           };
         }
         // App-specific semantic gate, after the schema and before the
         // exactly-once capture (a bounced submission must not consume the
         // once). Fail closed: a validator that errors, throws, or returns a
         // malformed verdict rejects the submission — never waves it through.
-        if (submitOutputSpec.validate) {
+        if (conversationalHandback.validate) {
           let verdict: { valid: boolean; errors?: string[] };
           try {
             const res = await deps.actionEngine.run(
-              submitOutputSpec.validate,
+              conversationalHandback.validate,
               input as Record<string, unknown>,
               {
                 initiator: "system:handback-validate",
@@ -1231,12 +1210,11 @@ async function openSession(
         }
         return {
           ok: true,
-          message: conversationalHandback
-            ? "Submission accepted and shown to the guardian for approval. End your turn with a one-line note that the result is awaiting their review; if they want changes, their feedback arrives as the next turn."
-            : "Output accepted. End this turn now — do not emit any further messages.",
+          message:
+            "Submission accepted and shown to the guardian for approval. End your turn with a one-line note that the result is awaiting their review; if they want changes, their feedback arrives as the next turn.",
         };
       });
-  const executeSubmitOutput = submitOutputSpec
+  const executeSubmitOutput = conversationalHandback
     ? makeExecuteSubmitOutput(sessionExecRefs)
     : undefined;
 
@@ -1298,7 +1276,8 @@ async function openSession(
     getActionCatalog,
     getSkillCatalog,
     subagentTools,
-    submitOutput: submitOutputSpec,
+    outputSchema: config.outputSchema,
+    handback: conversationalHandback,
     builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
     maxTurns: config.maxTurns,
     reasoningEffort,
@@ -1312,7 +1291,6 @@ async function openSession(
     executeSubmitOutput,
     executeDefer,
     supportsInteractiveSurface,
-    conversationalHandback: !!conversationalHandback,
   });
 
   // Captured on every successful open (including reopens) so exact-mode forks
@@ -1374,6 +1352,7 @@ async function openSession(
           getActionCatalog: () => [],
           getSkillCatalog: () => [],
           subagentTools: [],
+          outputSchema: config.outputSchema,
           builtinTools: [],
           reasoningEffort,
           executeAction: async () => {
@@ -1384,10 +1363,6 @@ async function openSession(
           },
           supportsInteractiveSurface: false,
         },
-        // Isolated forks expose no submit_output tool, so the structured-output
-        // contract can't apply to them by construction — and no subagents, so
-        // there is nothing to dispose.
-        hasSubmittedOutput: () => false,
         projectProviderMessage: async (msg) => [msg],
         dispose: async () => {},
       };
@@ -1397,12 +1372,9 @@ async function openSession(
       // (code-backed) — and those refuse fork() before this factory runs.
       throw new Error("Exact fork requires a live provider session");
     }
-    // Exactly-once submit_output per forked turn, surfaced on the fork's own
-    // stream (a fork has no turn sink for impl.captureSubmittedOutput to
-    // publish into). The thread/shared context fall back to the session's
+    // The thread/shared context fall back to the session's
     // open-time values — NOT the impl's current-turn refs, which could belong
     // to an unrelated source turn running concurrently with the fork.
-    let forkSubmitted = false;
     // Fork-owned children: a fork's subagent must never append to (or create)
     // the child session the source's turns reuse — the child transcript is
     // state the source observably depends on, so sharing it breaks the "fork
@@ -1457,12 +1429,7 @@ async function openSession(
         return forkChildManager;
       },
       childChannelThreadKey: `${key.channelThreadKey}#fork:${fork.forkSessionId}`,
-      captureSubmittedOutput: (payload) => {
-        if (forkSubmitted) return false;
-        forkSubmitted = true;
-        fork.emit({ type: "structured_output", payload });
-        return true;
-      },
+      captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
           parent: {
@@ -1491,7 +1458,7 @@ async function openSession(
         model: fork.model,
         executeAction: makeExecuteAction(refs),
         executeSubagent: makeExecuteSubagent(refs),
-        executeSubmitOutput: submitOutputSpec ? makeExecuteSubmitOutput(refs) : undefined,
+        executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled ? makeExecuteDefer(refs) : undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
@@ -1500,7 +1467,6 @@ async function openSession(
         // FacadeParams.interactiveSurfaceDetached.
         interactiveSurfaceDetached: true,
       },
-      hasSubmittedOutput: () => forkSubmitted,
       projectProviderMessage: async (msg) => {
         if (msg.type === "tool_use" && subagentToolNames.has(msg.tool)) {
           forkPendingSubagentUses.set(msg.id, msg);
@@ -1588,6 +1554,7 @@ async function openSession(
     modelSession,
     deps,
     config,
+    structuredOutputValidator,
     systemPrompt,
     workingDir,
     buildForkOpenParams,
@@ -1627,6 +1594,7 @@ interface ImplArgs {
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
+  structuredOutputValidator?: CompiledOutputSchema;
   systemPrompt: string;
   workingDir: string;
   /** Builds the open params for a forked turn's session (mode-aware). */
@@ -1701,30 +1669,26 @@ interface TurnSink {
   pendingSubagentToolUses: Map<string, Extract<AgentMessage, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
   subagentLinksCleared: boolean;
+  /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
+  outputSchemaSuspended: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
- * True if a tool_result output is a suspension directive — the action parked
- * the turn on a pending interaction / approval / handoff rather than returning
- * data. The shim returns these as `{ pendingInteraction|pendingApproval|handoff:
- * true, ... }`, which reach us either structured or JSON-serialized through the
- * MCP facade (`[{ type:"text", text:"<json>" }]` / `{ content:[...] }`) — unwrap
- * both. Mirrors `readSuspensionFromOutput` in the webchat drain loop.
+ * True when a tool result parked the turn on a pending interaction, approval,
+ * or handoff. Facade results may reach us directly, JSON-encoded, or wrapped
+ * in an MCP text-content array, so normalize all three shapes.
  */
-// Scan the tool result so facade tools that bypass `executeAction` are covered.
 function toolResultSuspendsTurn(output: unknown): boolean {
   let value: unknown = output;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const content = (value as { content?: unknown }).content;
-    if (Array.isArray(content)) value = content;
-  }
+  if (isRecord(value) && Array.isArray(value.content)) value = value.content;
   if (Array.isArray(value)) {
     const textBlock = value.find(
-      (b): b is { type: "text"; text: string } =>
-        !!b &&
-        typeof b === "object" &&
-        (b as { type?: unknown }).type === "text" &&
-        typeof (b as { text?: unknown }).text === "string",
+      (block): block is { type: "text"; text: string } =>
+        isRecord(block) && block.type === "text" && typeof block.text === "string",
     );
     value = textBlock?.text;
   }
@@ -1735,29 +1699,57 @@ function toolResultSuspendsTurn(output: unknown): boolean {
       return false;
     }
   }
-  if (!value || typeof value !== "object") return false;
-  const o = value as Record<string, unknown>;
-  return o.pendingInteraction === true || o.pendingApproval === true || o.handoff === true;
+  return (
+    isRecord(value) &&
+    (value.pendingInteraction === true || value.pendingApproval === true || value.handoff === true)
+  );
 }
 
-/** Fail-closed terminal for an outputSchema agent that ended a turn with a
- *  `result` and never called submit_output. Shared by the live events loop and
- *  exact-mode forked turns so the two paths can't drift. */
-const MISSING_STRUCTURED_OUTPUT_ERROR =
-  "Agent ended the turn without calling submit_output, but outputSchema is declared. Structured output is required for this agent.";
-
-/** Did this turn park on a suspension (ask_question, approval, handoff)? Such a
- *  turn ends with a `result` but is not "done" — the agent resumes next turn —
- *  so it must be exempt from the outputSchema "must submit_output" check. */
-function turnParkedOnSuspension(blocks: CapturedBlock[]): boolean {
-  return blocks.some(({ block }) => {
-    return block.type === "tool_result" && toolResultSuspendsTurn(block.output);
-  });
+function validateProviderStructuredResult(
+  message: AgentMessage,
+  compiled: CompiledOutputSchema | undefined,
+  suspended = false,
+): AgentMessage {
+  if (!compiled || message.type !== "result") return message;
+  if (suspended) {
+    return {
+      type: "error",
+      error: "Agent cannot suspend a turn while outputSchema is configured",
+      accounting: message.accounting,
+    };
+  }
+  if (!Object.prototype.hasOwnProperty.call(message, "structuredOutput")) {
+    return {
+      type: "error",
+      error: "Provider completed without structured output for the declared outputSchema",
+      accounting: message.accounting,
+    };
+  }
+  if (!compiled.validate(message.structuredOutput)) {
+    return {
+      type: "error",
+      error: `Provider returned structured output that failed Rome validation: ${formatOutputSchemaErrors(
+        compiled.validate.errors,
+      ).join("; ")}`,
+      accounting: message.accounting,
+    };
+  }
+  try {
+    return { ...message, content: JSON.stringify(message.structuredOutput) };
+  } catch (err) {
+    return {
+      type: "error",
+      error: `Provider returned non-serializable structured output: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      accounting: message.accounting,
+    };
+  }
 }
 
 /**
  * Serialized outbound stream for one forked turn. The provider-event pump and
- * out-of-band emitters (exact-mode subagent relays, structured_output) push
+ * out-of-band emitters (for example exact-mode subagent relays) push
  * concurrently; `runForkedTurn` drains in arrival order. Pushes after `end()`
  * are dropped; anything pushed after the drain loop stops at the terminal
  * block is buffered but never read.
@@ -1813,6 +1805,7 @@ class AgentSessionImpl implements AgentSession {
   private modelSession: ModelSession;
   private deps: ManagerDeps;
   private config: ReturnType<AgentLoader["get"]>;
+  private structuredOutputValidator?: CompiledOutputSchema;
   private systemPrompt: string;
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
@@ -1821,17 +1814,8 @@ class AgentSessionImpl implements AgentSession {
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
-  /**
-   * Per-turn cache of payloads submitted via the `submit_output` tool. Only
-   * populated when the agent has an `outputSchema`. Keyed by turnId so that
-   * (a) the AgentSession can stay alive across multiple turns and still
-   * surface each turn's submitted payload, and (b) executeSubagent can map
-   * the value back to the child turn it just consumed.
-   */
-  private submittedOutputs = new Map<string, unknown>();
-  /** Bounded ring of recent turns to keep `submittedOutputs` from growing. */
-  private submittedOutputsOrder: string[] = [];
-  private static readonly SUBMITTED_OUTPUTS_CAP = 32;
+  /** Exactly-once submission for the current conversational handback turn. */
+  private submittedOutputTurnId?: string;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
   // runEventsLoop when the terminal `result`/`error` message lands, so the
   // trace contract is complete by the time the sink closes (i.e. before
@@ -1891,6 +1875,7 @@ class AgentSessionImpl implements AgentSession {
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
+    this.structuredOutputValidator = args.structuredOutputValidator;
     this.systemPrompt = args.systemPrompt;
     this.workingDir = args.workingDir;
     this.buildForkOpenParams = args.buildForkOpenParams;
@@ -2076,20 +2061,16 @@ class AgentSessionImpl implements AgentSession {
         // translator runs on terminal and needs the full block stream to
         // reconstruct rounds and tool pairs.
         sink.blocks.push({ block: msg, tsMs: Date.now() });
+        if (
+          this.structuredOutputValidator &&
+          msg.type === "tool_result" &&
+          toolResultSuspendsTurn(msg.output)
+        ) {
+          sink.outputSchemaSuspended = true;
+        }
         this.trackTurnMetrics(msg);
         await this.deps.sessionManager.touchSession(this.sessionId);
 
-        // If the agent declared an outputSchema but the turn is ending with a
-        // `result` and never submitted, replace the terminal with an error so
-        // downstream callers can distinguish "agent forgot" from "agent
-        // intentionally produced nothing." accounting is preserved so the
-        // model-call span and observability still see the cost of the turn.
-        //
-        // Exception: a turn that parked on a suspension (ask_question / approval
-        // / handoff) legitimately ends without submit_output — the agent is
-        // waiting, not done, and will submit on a later turn once it has what it
-        // needs. Interactive agents with an outputSchema (e.g. an interview that
-        // asks questions, then hands back a summary) depend on this.
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
           sink.pendingSubagentToolUses.set(msg.id, msg);
           this.maybePublishSubagentStart(sink, msg.id);
@@ -2121,21 +2102,11 @@ class AgentSessionImpl implements AgentSession {
             this.publishOutbound(sink, pendingUse);
           }
         }
-        let outbound: AgentMessage = msg;
-        if (
-          isTerminalBlock(msg) &&
-          msg.type === "result" &&
-          this.config.outputSchema &&
-          this.currentTurnId &&
-          !this.submittedOutputs.has(this.currentTurnId) &&
-          !turnParkedOnSuspension(sink.blocks)
-        ) {
-          outbound = {
-            type: "error",
-            error: MISSING_STRUCTURED_OUTPUT_ERROR,
-            accounting: msg.accounting,
-          };
-        }
+        let outbound: AgentMessage = validateProviderStructuredResult(
+          msg,
+          this.structuredOutputValidator,
+          sink.outputSchemaSuspended,
+        );
 
         if (outbound.type === "error" && outbound.code === "auth_revoked") {
           // The provider process/session may have cached the rejected
@@ -2159,8 +2130,7 @@ class AgentSessionImpl implements AgentSession {
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
           }
-          // Use `outbound` (not `msg`) so error-replacement (when an
-          // outputSchema-required turn ends without submit_output) is
+          // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
           // bracket ships after the spans close, so the trace contract is
           // complete by the time consumers observe the end of the turn.
@@ -2578,18 +2548,7 @@ class AgentSessionImpl implements AgentSession {
     };
   }
 
-  /**
-   * Capture the payload submitted by the `submit_output` tool on the current
-   * turn. Returns `true` if the payload was accepted, `false` on a second
-   * submission within the same turn (caller surfaces a tool error).
-   *
-   * On acceptance, emits a first-class `structured_output` AgentMessage into
-   * the active turn sink so consumers can read the *validated* payload from
-   * the stream — distinct from the raw `tool_use` event for `submit_output`,
-   * which is the model's pre-validation proposal.
-   *
-   * Pruned to SUBMITTED_OUTPUTS_CAP entries.
-   */
+  /** Capture and publish one schema-valid handback submission per turn. */
   captureSubmittedOutput(payload: unknown): boolean {
     const turnId = this.currentTurnId;
     if (!turnId) {
@@ -2598,26 +2557,13 @@ class AgentSessionImpl implements AgentSession {
       });
       return false;
     }
-    if (this.submittedOutputs.has(turnId)) {
-      // Already accepted a payload this turn; refuse silently here and let
-      // the caller (executeSubmitOutput) return the tool error.
-      return false;
-    }
-    this.submittedOutputsOrder.push(turnId);
-    while (this.submittedOutputsOrder.length > AgentSessionImpl.SUBMITTED_OUTPUTS_CAP) {
-      const stale = this.submittedOutputsOrder.shift();
-      if (stale) this.submittedOutputs.delete(stale);
-    }
-    this.submittedOutputs.set(turnId, payload);
+    if (this.submittedOutputTurnId === turnId) return false;
+    this.submittedOutputTurnId = turnId;
     const sink = this.currentSink;
     if (sink) {
       this.publishOutbound(sink, { type: "structured_output", payload });
     }
     return true;
-  }
-
-  getSubmittedOutput(turnId: string): unknown | undefined {
-    return this.submittedOutputs.get(turnId);
   }
 
   async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage> {
@@ -2645,6 +2591,7 @@ class AgentSessionImpl implements AgentSession {
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
+    let outputSchemaSuspended = false;
     try {
       // Enter the cleanup scope before publishing turn_start. If a caller
       // detaches immediately after that first event, iterator.return() must
@@ -2696,7 +2643,7 @@ class AgentSessionImpl implements AgentSession {
           });
           // One serialized outbound stream for the whole forked turn: the
           // provider-event pump below and out-of-band emitters (exact-mode
-          // subagent relays, structured_output) push concurrently; the drain
+          // subagent relays and handback candidates) push concurrently; the drain
           // loop yields in arrival order. A provider stream failure becomes the
           // turn's terminal error block, preserving the bracketing invariant.
           const outbound = new ForkStreamQueue();
@@ -2732,36 +2679,23 @@ class AgentSessionImpl implements AgentSession {
           }
           outbound.end();
         })();
-        // Mirror runEventsLoop's fail-closed structured-output contract: an
-        // exact fork advertises the source's submit_output tool, so a `result`
-        // terminal without the fork's own submission is "agent forgot", not a
-        // real result. Same suspension exemption as the live path (a parked
-        // turn legitimately ends without submitting). Isolated forks expose no
-        // submit_output tool, so the contract can't apply there.
-        const requireStructuredOutput = mode === "exact" && !!this.config.outputSchema;
-        let parkedOnSuspension = false;
         for await (const msg of outbound) {
-          let out = msg;
-          if (requireStructuredOutput) {
-            if (msg.type === "tool_result" && toolResultSuspendsTurn(msg.output)) {
-              parkedOnSuspension = true;
-            }
-            if (
-              isTerminalBlock(msg) &&
-              msg.type === "result" &&
-              !forkOpen.hasSubmittedOutput() &&
-              !parkedOnSuspension
-            ) {
-              out = {
-                type: "error",
-                error: MISSING_STRUCTURED_OUTPUT_ERROR,
-                accounting: msg.accounting,
-              };
-            }
+          if (
+            this.structuredOutputValidator &&
+            msg.type === "tool_result" &&
+            toolResultSuspendsTurn(msg.output)
+          ) {
+            outputSchemaSuspended = true;
           }
+          const out = validateProviderStructuredResult(
+            msg,
+            this.structuredOutputValidator,
+            outputSchemaSuspended,
+          );
+          const projectedOut = out as StreamAgentMessage;
           // Relayed subagent blocks carry the child's agent tag; everything
           // else is this agent's own output.
-          yield { ...out, agent: out.agent ?? this.key.agentName };
+          yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
           if (isTerminalBlock(out)) {
             status =
               out.accounting?.stopReason === "interrupted"
@@ -2917,6 +2851,7 @@ class AgentSessionImpl implements AgentSession {
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
+      outputSchemaSuspended: false,
     };
     const events = this.buildTurnEvents(sink);
 
@@ -2998,7 +2933,6 @@ class AgentSessionImpl implements AgentSession {
         if (this.currentSink === sink) await this.interrupt(reason);
       },
       turnContext: turnCtx,
-      getSubmittedOutput: () => this.submittedOutputs.get(turnId),
     };
   }
 
@@ -3144,10 +3078,22 @@ class AgentSessionImpl implements AgentSession {
         },
         emit: (event) => {
           if (sink.done) return;
-          if (event.type === "result" || event.type === "error") {
-            emittedTerminal = event;
+          if (
+            this.structuredOutputValidator &&
+            event.type === "tool_result" &&
+            toolResultSuspendsTurn(event.output)
+          ) {
+            sink.outputSchemaSuspended = true;
           }
-          this.publishOutbound(sink, event);
+          const outbound = validateProviderStructuredResult(
+            event,
+            this.structuredOutputValidator,
+            sink.outputSchemaSuspended,
+          );
+          if (outbound.type === "result" || outbound.type === "error") {
+            emittedTerminal = outbound;
+          }
+          this.publishOutbound(sink, outbound);
         },
         meta: {},
       };
@@ -3224,7 +3170,19 @@ class AgentSessionImpl implements AgentSession {
             turnId,
           );
         }
-        this.finalizeTurn(sink, emittedTerminal ?? { type: "result", content: "" });
+        let terminal: ResultMessage | ErrorMessage = emittedTerminal ?? {
+          type: "result",
+          content: "",
+        };
+        if (!emittedTerminal && this.structuredOutputValidator) {
+          terminal = validateProviderStructuredResult(
+            terminal,
+            this.structuredOutputValidator,
+            sink.outputSchemaSuspended,
+          ) as ResultMessage | ErrorMessage;
+          this.publishOutbound(sink, terminal);
+        }
+        this.finalizeTurn(sink, terminal);
       }
 
       // The agent + model spans are normally ended by runEventsLoop on the
@@ -3422,6 +3380,7 @@ function buildLifecycleOutput(
   if (terminal?.type === "result") {
     return {
       text: terminal.content,
+      structuredOutput: terminal.structuredOutput,
       state: status === "interrupted" ? "partial" : "final",
       terminalKind: "result",
       stopReason,

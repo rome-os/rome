@@ -13,25 +13,6 @@ import {
 import type { MessageAccount, Messages } from "../channels/messages.js";
 
 /**
- * One account a person is reachable at, as a timeline read addresses it.
- *
- * `addresses` is every identifier the channel folds onto that account — a
- * WhatsApp contact is reachable under both a phone JID and a `@lid` JID, and
- * history hangs off either. A store that reads only the identifier the person
- * mapping happens to name would answer an empty timeline for a conversation
- * that plainly exists.
- *
- * A {@link MessageAccount} by shape, and read as one: this is what
- * `timelineAccounts` folds a person's mappings into, and what the stores below
- * are then scoped by.
- */
-export interface TimelineAccount {
-  channel: string;
-  /** Non-empty. Order carries no meaning. */
-  addresses: string[];
-}
-
-/**
  * One page of `accounts`' merged history, newest first, resuming after
  * `cursor`.
  *

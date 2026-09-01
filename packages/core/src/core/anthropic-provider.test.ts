@@ -216,6 +216,123 @@ describe("AnthropicProvider", () => {
     expect(provider.builtinTools.has("TodoWrite")).toBe(true);
   });
 
+  it("uses SDK outputFormat and publishes only the native structured terminal", async () => {
+    const schema = {
+      type: "object",
+      properties: { value: { type: "integer" } },
+      required: ["value"],
+      additionalProperties: false,
+    };
+    const structuredOutput = { value: 7 };
+    mockQuery([
+      {
+        type: "assistant",
+        uuid: "assistant-structured",
+        session_id: "claude-structured",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: JSON.stringify(structuredOutput) }] },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        result: JSON.stringify(structuredOutput),
+        structured_output: structuredOutput,
+        num_turns: 1,
+        stop_reason: "end_turn",
+        total_cost_usd: 0,
+        duration_ms: 1,
+      },
+    ]);
+
+    const session = await new AnthropicProvider().openSession(
+      buildParams({ outputSchema: schema }),
+    );
+    await session.sendUserInput({ text: "return seven" });
+    const events = await collectEvents(session);
+
+    expect(queryMock.mock.calls[0]![0].options.outputFormat).toEqual({
+      type: "json_schema",
+      schema,
+    });
+    expect(events.some((event) => event.type === "text" || event.type === "text_delta")).toBe(
+      false,
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "result",
+        content: JSON.stringify(structuredOutput),
+        structuredOutput,
+      }),
+    );
+    await session.close();
+  });
+
+  it("rejects native structured output that does not match outputSchema", async () => {
+    mockQuery([
+      {
+        type: "result",
+        subtype: "success",
+        result: '{"value":"seven"}',
+        structured_output: { value: "seven" },
+        num_turns: 1,
+        stop_reason: "end_turn",
+        total_cost_usd: 0,
+        duration_ms: 1,
+      },
+    ]);
+    const session = await new AnthropicProvider().openSession(
+      buildParams({
+        outputSchema: {
+          type: "object",
+          properties: { value: { type: "integer" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    await session.sendUserInput({ text: "return seven" });
+
+    expect(await collectEvents(session)).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringContaining("failed validation"),
+      }),
+    );
+    await session.close();
+  });
+
+  it("surfaces SDK structured-output retry exhaustion as a failed turn", async () => {
+    mockQuery([
+      {
+        type: "result",
+        subtype: "error_max_structured_output_retries",
+        errors: [],
+        num_turns: 1,
+        stop_reason: null,
+        total_cost_usd: 0,
+        duration_ms: 1,
+      },
+    ]);
+    const session = await new AnthropicProvider().openSession(
+      buildParams({
+        outputSchema: {
+          type: "object",
+          properties: { value: { type: "integer" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    await session.sendUserInput({ text: "return a value" });
+    expect(await collectEvents(session)).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringContaining("error_max_structured_output_retries"),
+      }),
+    );
+    await session.close();
+  });
+
   it.each([
     "startup",
     "partial",

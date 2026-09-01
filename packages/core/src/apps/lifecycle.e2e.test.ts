@@ -436,7 +436,7 @@ class McpSessionModelProvider extends MockModelProvider {
       getActionCatalog: params.getActionCatalog,
       getSkillCatalog: params.getSkillCatalog,
       subagentTools: params.subagentTools,
-      submitOutput: params.submitOutput,
+      handback: params.handback,
       executeAction: params.executeAction,
       executeSubagent: params.executeSubagent,
       executeSubmitOutput: params.executeSubmitOutput,

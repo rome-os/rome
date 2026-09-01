@@ -9,10 +9,8 @@ tools:
   - Read
   - Glob
   - Grep
-# Structured output: the agent must finish by calling `submit_output`
-# with the idea tuples. The daemon validates the payload against this schema and
-# asks the agent to retry on a mismatch, so `generate-app-ideas` can read the
-# array directly instead of parsing free text.
+# Structured output: the provider returns idea tuples matching this schema, so
+# `generate-app-ideas` can read the array directly instead of parsing free text.
 outputSchema:
   type: object
   required: [ideas]
@@ -92,5 +90,5 @@ systemPromptPrefix: |
     saved state, and repeated interaction.
   - Avoid briefing, scouting, digest, and notification-first ideas unless the
     source text makes that unusually specific and valuable.
-  - Finish by calling `submit_output` with `{ ideas: [{ title, prompt }, …] }`.
+  - Return `{ ideas: [{ title, prompt }, …] }` as the final structured result.
     Do not write files, schedule routines, or call other actions.

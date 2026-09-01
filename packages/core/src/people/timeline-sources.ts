@@ -12,13 +12,17 @@
 // so a group conversation — addressed by the group rather than by the person —
 // never reaches a person's timeline.
 
-import type { Accounts } from "../channels/accounts.js";
-import { messageStores, type Channels } from "../channels/channel.js";
-import type { Messages } from "../channels/messages.js";
+import {
+  foldAccounts,
+  type AccountFold,
+  type AddressBooks,
+  type StoredAddress,
+} from "../channels/account-fold.js";
+import { addressBooks, messageStores, type Channels } from "../channels/channel.js";
+import type { MessageAccount, Messages } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { TimelineAccount } from "./timeline.js";
 
 /**
  * The stores a person's history is read from, in the order they claim an
@@ -59,86 +63,44 @@ export function personMessageStores(deps: { db: DrizzleDb; channels: Channels })
  * asking about a directory of people must not pay for one read per row.
  */
 export async function timelineAccounts(
-  deps: { whatsAppAccounts: AddressBook },
-  groups: readonly (readonly LinkedAddress[])[],
-): Promise<TimelineAccount[][]> {
-  const channels = new Set(groups.flatMap((group) => group.map((link) => link.channel)));
-  const books = await readAddressBooks(deps, channels);
-  return groups.map((group) => foldAccounts(books, group));
+  deps: { channels: Channels },
+  groups: readonly (readonly StoredAddress[])[],
+): Promise<MessageAccount[][]> {
+  const links = groups.flat();
+  const fold = await foldAccounts(booksNamed(deps.channels, links), { stored: links });
+  return groups.map((group) => accountsOf(fold, group));
 }
 
-/** One address a link names. `channelUserId` is the account's own address —
- *  the wire field's name, kept because the column and the contract carry it. */
-interface LinkedAddress {
-  channel: string;
-  channelUserId: string;
+/** The address books of the channels the links name, and nothing else. An
+ *  address book costs a full read, and a channel no link names folds nothing,
+ *  so a person on one channel pays for one book rather than for the list. */
+function booksNamed(channels: Channels, links: readonly StoredAddress[]): AddressBooks {
+  const named = new Set(links.map((link) => link.channel));
+  return Object.fromEntries(
+    Object.entries(addressBooks(channels)).filter(([channel]) => named.has(channel)),
+  );
 }
 
-/** The listing half of a channel's address book: the accounts, each carrying
- *  every address it answers to. There is no separate address map to ask for —
- *  the listing already says which addresses are one account. */
-type AddressBook = Accounts;
-
-/** Each channel's accounts, indexed the two ways the fold reads them: which
- *  account an address belongs to, and every address of that account.
- *
- *  Named here rather than read off the channel list, and only for the channels
- *  the links name, since an address book costs a full read. LinkedIn has one
- *  too but is deliberately absent: it stores a member under its member id and
- *  nothing else, so folding it would buy a whole read and change no answer. It
- *  joins here when it starts storing a second address. */
-async function readAddressBooks(
-  deps: { whatsAppAccounts: AddressBook },
-  channels: ReadonlySet<string>,
-): Promise<Map<string, FoldedBook>> {
-  const known = new Map<string, AddressBook>([["whatsapp", deps.whatsAppAccounts]]);
-  const books = new Map<string, FoldedBook>();
-  for (const [channel, accounts] of known) {
-    if (!channels.has(channel)) continue;
-    // One page big enough to hold the listing: its order is stable but the
-    // listing under it is not, so walking cursors across a live address book
-    // would skip or repeat an account as an inbound message reordered it.
-    const { accounts: listing } = await accounts.listAccounts({ limit: WHOLE_LISTING });
-    const of = new Map<string, string>();
-    const folded = new Map<string, string[]>();
-    for (const account of listing) {
-      // The id among them, whether or not the channel spelled it out as an
-      // address: it is a form the account answers to.
-      const addresses = [...new Set([account.id as string, ...account.addresses])];
-      folded.set(account.id, addresses);
-      for (const address of addresses) of.set(address, account.id);
-    }
-    books.set(channel, { of, folded });
-  }
-  return books;
-}
-
-/** One channel's listing, indexed by address and by account. */
-interface FoldedBook {
-  /** Which account each address belongs to. */
-  of: Map<string, string>;
-  /** Every address of each account. */
-  folded: Map<string, string[]>;
-}
-
-function foldAccounts(
-  books: Map<string, FoldedBook>,
-  links: readonly LinkedAddress[],
-): TimelineAccount[] {
-  const byAccount = new Map<string, TimelineAccount>();
+/** One group's links as the accounts they reach, keyed by the account rather
+ *  than by the address a link happened to name, so two links onto one account
+ *  are one entry. */
+function accountsOf(fold: AccountFold, links: readonly StoredAddress[]): MessageAccount[] {
+  const byAccount = new Map<string, MessageAccount>();
   for (const link of links) {
-    const book = books.get(link.channel);
-    const accountId = book?.of.get(link.channelUserId) ?? link.channelUserId;
-    const key = `${link.channel}\n${accountId}`;
+    const key = fold.key(link.channel, link.channelUserId);
     if (byAccount.has(key)) continue;
     byAccount.set(key, {
       channel: link.channel,
-      addresses: [...new Set([link.channelUserId, ...(book?.folded.get(accountId) ?? [])])],
+      // The link's own address among them, whatever the book says: a channel
+      // that folds nothing onto it is still read at the address the guardian
+      // stored.
+      addresses: [
+        ...new Set([
+          link.channelUserId,
+          ...(fold.accountFor(link.channel, link.channelUserId)?.aliases ?? []),
+        ]),
+      ],
     });
   }
   return [...byAccount.values()];
 }
-
-/** One page big enough to hold any listing — what `Accounts.listAccounts`
- *  says to ask for when a caller needs every account exactly once. */
-const WHOLE_LISTING = Number.MAX_SAFE_INTEGER;

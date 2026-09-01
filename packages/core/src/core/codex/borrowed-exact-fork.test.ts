@@ -118,7 +118,7 @@ describe("createBorrowedExactForkSession", () => {
       openParams: openParams({
         supportsInteractiveSurface: true,
         interactiveSurfaceDetached: true,
-        conversationalHandback: true,
+        handback: { schema: { type: "object", properties: {} } },
       }),
       runExclusive: async (work) => await work(),
       runTurn: async (_input, runtime) => {

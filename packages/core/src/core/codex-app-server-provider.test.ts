@@ -1156,6 +1156,208 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("passes outputSchema on turn/start and publishes one parsed structured terminal", async () => {
+    const provider = new CodexAppServerProvider();
+    const schema = {
+      type: "object",
+      properties: { value: { type: "integer" } },
+      required: ["value"],
+      additionalProperties: false,
+    };
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-structured" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: "thr-structured",
+          turn: { id: "turn-structured" },
+        });
+        n("item/agentMessage/delta", {
+          threadId: "thr-structured",
+          turnId: "turn-structured",
+          itemId: "m1",
+          delta: '{"value":',
+        });
+        n("item/completed", {
+          item: {
+            type: "agentMessage",
+            id: "m1",
+            text: '{"value":7}',
+            phase: "final_answer",
+          },
+          threadId: "thr-structured",
+          turnId: "turn-structured",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "thr-structured",
+          turn: { id: "turn-structured", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams({ outputSchema: schema }));
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "return seven" });
+    const messages = await collected;
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "turn/start",
+      expect.objectContaining({ threadId: "thr-structured", outputSchema: schema }),
+    );
+    expect(
+      messages.some((message) => message.type === "text" || message.type === "text_delta"),
+    ).toBe(false);
+    expect(messages.at(-1)).toMatchObject({
+      type: "result",
+      content: '{"value":7}',
+      structuredOutput: { value: 7 },
+    });
+    await session.close();
+  });
+
+  it("fails a structured turn when app-server completes with non-JSON final text", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-invalid-json" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: "thr-invalid-json",
+          turn: { id: "turn-invalid-json" },
+        });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "not json", phase: "final_answer" },
+          threadId: "thr-invalid-json",
+          turnId: "turn-invalid-json",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "thr-invalid-json",
+          turn: { id: "turn-invalid-json", status: "completed" },
+        });
+      }
+      return {};
+    });
+    const session = await provider.openSession(
+      buildParams({
+        outputSchema: {
+          type: "object",
+          properties: { value: { type: "integer" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "return seven" });
+    expect(await collected).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringContaining("invalid structured output"),
+      }),
+    );
+    await session.close();
+  });
+
+  it("rejects parsed structured output that does not match outputSchema", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-invalid-value" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: "thr-invalid-value",
+          turn: { id: "turn-invalid-value" },
+        });
+        n("item/completed", {
+          item: {
+            type: "agentMessage",
+            id: "m1",
+            text: '{"value":"seven"}',
+            phase: "final_answer",
+          },
+          threadId: "thr-invalid-value",
+          turnId: "turn-invalid-value",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "thr-invalid-value",
+          turn: { id: "turn-invalid-value", status: "completed" },
+        });
+      }
+      return {};
+    });
+    const session = await provider.openSession(
+      buildParams({
+        outputSchema: {
+          type: "object",
+          properties: { value: { type: "integer" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "return seven" });
+
+    expect(await collected).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringContaining("failed validation"),
+      }),
+    );
+    await session.close();
+  });
+
+  it("fails a structured turn when app-server reports interruption", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-interrupted" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: "thr-interrupted",
+          turn: { id: "turn-interrupted" },
+        });
+        n("turn/completed", {
+          threadId: "thr-interrupted",
+          turn: { id: "turn-interrupted", status: "interrupted" },
+        });
+      }
+      return {};
+    });
+    const session = await provider.openSession(
+      buildParams({
+        outputSchema: {
+          type: "object",
+          properties: { value: { type: "integer" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      }),
+    );
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "return seven" });
+
+    expect(await collected).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: expect.stringContaining("status interrupted"),
+      }),
+    );
+    await session.close();
+  });
+
   it("aggregates every model request in a turn without double-counting prior turns", async () => {
     const provider = new CodexAppServerProvider();
     let turnNumber = 0;

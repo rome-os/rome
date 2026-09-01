@@ -24,7 +24,7 @@ import type {
   ModelToolDefinition,
   SkillMcpDefinition,
 } from "./agent-runner.js";
-import type { SubmitOutputSpec } from "./mcp-facade.js";
+import type { HandbackSpec } from "./mcp-facade.js";
 import {
   createRomeMcpServer,
   type RomeMcpGroup,
@@ -38,7 +38,7 @@ interface BuildAnthropicMcpServersParams {
   /** See FacadeParams.getSkillCatalog. */
   getSkillCatalog: () => SkillMcpDefinition[];
   subagentTools: ModelToolDefinition[];
-  submitOutput?: SubmitOutputSpec;
+  handback?: HandbackSpec;
   externalMcpServers?: Record<string, McpServerConfig>;
   executeAction: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent: (
@@ -51,8 +51,6 @@ interface BuildAnthropicMcpServersParams {
   supportsInteractiveSurface?: boolean;
   /** See FacadeParams.interactiveSurfaceDetached. */
   interactiveSurfaceDetached?: boolean;
-  /** See FacadeParams.conversationalHandback. */
-  conversationalHandback?: boolean;
   /** See FacadeParams.executeDefer. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
 }
@@ -104,27 +102,25 @@ export function buildAnthropicMcpServers({
   getActionCatalog,
   getSkillCatalog,
   subagentTools,
-  submitOutput,
+  handback,
   externalMcpServers,
   executeAction,
   executeSubagent,
   executeSubmitOutput,
   supportsInteractiveSurface,
   interactiveSurfaceDetached,
-  conversationalHandback,
   executeDefer,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
   const server = createRomeMcpServer({
     getActionCatalog,
     getSkillCatalog,
     subagentTools,
-    submitOutput,
+    handback,
     executeAction,
     executeSubagent,
     executeSubmitOutput,
     supportsInteractiveSurface,
     interactiveSurfaceDetached,
-    conversationalHandback,
     executeDefer,
   });
 
