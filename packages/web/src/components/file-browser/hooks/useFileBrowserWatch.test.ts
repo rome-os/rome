@@ -1,31 +1,31 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { useFileBrowserWatch } from "./useFileBrowserWatch";
 
-const testState = vi.hoisted(() => ({
+const testState = rs.hoisted(() => ({
   config: { apiBasePath: "/api/projects", logicalRootPath: "projects" },
-  tree: { loadRoot: vi.fn().mockResolvedValue([]) },
+  tree: { loadRoot: rs.fn().mockResolvedValue([]) },
   selection: {
     selectedPath: null as string | null,
     selectedFolderPath: "projects" as string | null,
   },
   file: {
-    hasUnsavedEdits: vi.fn().mockReturnValue(false),
-    loadFile: vi.fn().mockResolvedValue("loaded"),
-    isSelfOriginatedWatchEvent: vi.fn().mockReturnValue(false),
+    hasUnsavedEdits: rs.fn().mockReturnValue(false),
+    loadFile: rs.fn().mockResolvedValue("loaded"),
+    isSelfOriginatedWatchEvent: rs.fn().mockReturnValue(false),
   },
-  watch: { clearDeletedSelection: vi.fn() },
+  watch: { clearDeletedSelection: rs.fn() },
 }));
 
-vi.mock("../store/context", () => ({
+rs.mock("../store/context", () => ({
   useFileBrowserStoreApi: () => ({ getState: () => testState }),
 }));
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
   readonly withCredentials: boolean;
-  readonly close = vi.fn();
+  readonly close = rs.fn();
   private readonly listeners = new Map<string, Set<EventListener>>();
 
   constructor(
@@ -54,18 +54,18 @@ class MockEventSource {
 
 describe("useFileBrowserWatch", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    rs.useFakeTimers();
     MockEventSource.instances = [];
     testState.selection.selectedPath = null;
     testState.selection.selectedFolderPath = "projects";
-    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
   });
 
   afterEach(() => {
     cleanup();
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-    vi.clearAllMocks();
+    rs.useRealTimers();
+    rs.unstubAllGlobals();
+    rs.clearAllMocks();
   });
 
   it("rebaselines the file tree when the watcher reports ready", async () => {
@@ -104,7 +104,7 @@ describe("useFileBrowserWatch", () => {
     expect(testState.tree.loadRoot).not.toHaveBeenCalled();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(150);
+      await rs.advanceTimersByTimeAsync(150);
     });
 
     expect(testState.tree.loadRoot).toHaveBeenCalledWith({ preserveExpandedChildren: true });

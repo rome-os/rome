@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -11,14 +11,14 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 // Mount-time probes the page issues; each returns an empty-but-valid payload so
 // the page reaches its loaded state and renders every section. `connections`
 // overrides the /api/connections body for the source-overview assertions.
 function mockBackend(connections: unknown[] = []) {
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     const ok = (json: unknown) => ({ ok: true, status: 200, json: async () => json }) as Response;
     if (url.includes("/api/sentinel-log")) return ok([]);
@@ -104,7 +104,7 @@ describe("InboxPage triage policy", () => {
   });
 
   it("rolls a trust toggle back when the save fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -134,7 +134,7 @@ describe("InboxPage triage policy", () => {
 
   it("resyncs the trust toggles when a refresh returns newer settings", async () => {
     let settingsFetches = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {

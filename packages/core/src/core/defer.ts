@@ -54,7 +54,7 @@ type ParsedDefer = { ok: true; name: string; fireAtMs: number } | { ok: false; e
 /** The `defer` tool input. The MCP boundary already validates the model's call
  * against the advertised JSON schema (see `mcp-facade.ts` → `toMcpToolShape`),
  * so field types are guaranteed by the time we get here; this schema is the
- * runtime source of truth that additionally encodes the one constraint a JSON
+ * runtime source of truth that also encodes the one constraint a JSON
  * schema can't express — `afterMinutes` and `at` are mutually exclusive and one
  * is required. The future-time check stays in code (a schema can't see "now").
  * `name` is trimmed-then-required so a whitespace-only name can't slip through. */

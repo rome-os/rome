@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 // Real bundles, so the hide control's accessible name is the shipped
 // string rather than its key — the same thing a screen reader would read.
@@ -8,9 +8,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatTimelineRail } from "./ChatTimelineRail";
 import type { TimelineQuestion } from "./chat-timeline";
 
-beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+beforeEach(() => {
+  rs.useFakeTimers({ shouldAdvanceTime: true });
+});
 afterEach(() => {
-  vi.useRealTimers();
+  rs.useRealTimers();
   cleanup();
   localStorage.clear();
 });
@@ -120,7 +122,7 @@ describe("ChatTimelineRail", () => {
   });
 
   it("jumps to the question a dot points at", () => {
-    const onJump = vi.fn();
+    const onJump = rs.fn();
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS, onJump);
     fireEvent.click(screen.getByRole("button", { name: "what broke the build?" }));
     expect(onJump).toHaveBeenCalledWith("q2");
@@ -129,7 +131,7 @@ describe("ChatTimelineRail", () => {
   it("keeps every question clickable when they crowd together", () => {
     // All four within 12px of content. They spread down the track instead of
     // merging, so none becomes unreachable — the whole point of spreading.
-    const onJump = vi.fn();
+    const onJump = rs.fn();
     renderRail(
       stubScroller([
         { id: "q1", top: 0 },
@@ -271,7 +273,7 @@ describe("ChatTimelineRail", () => {
       Object.defineProperty(scroller, "scrollHeight", { value: 3000, configurable: true });
       act(() => {
         fire?.();
-        vi.advanceTimersByTime(200);
+        rs.advanceTimersByTime(200);
       });
       expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
     } finally {

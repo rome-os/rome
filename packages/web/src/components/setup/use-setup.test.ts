@@ -1,19 +1,19 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 //
 // The useSetup polling runner drops local state on reset so the card can offer
 // a fresh Connect, and a
 // polled setup that has vanished (404) clears itself rather than sticking on a
 // stale terminal view.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useSetup } from "@/components/setup/use-setup";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => rs.restoreAllMocks());
 
 describe("useSetup stale-state handling", () => {
   it("reset() drops cid and state so a fresh Connect is possible", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ state: { status: "presenting", view: { title: "x" } } }), {
         status: 200,
       }),
@@ -31,7 +31,7 @@ describe("useSetup stale-state handling", () => {
   });
 
   it("clears itself when the polled setup has vanished (404)", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 404 }));
     const { result } = renderHook(() =>
       useSetup({ idOrService: "discord", grant: "bot", activeCid: "gone" }),
     );
@@ -47,7 +47,7 @@ describe("useSetup stale-state handling", () => {
     // — without it the guardian stares at an unchanged card until the
     // connections page's own refresh interval comes round.
     let polls = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async () => {
       polls += 1;
       const state =
         polls > 1
@@ -55,7 +55,7 @@ describe("useSetup stale-state handling", () => {
           : { status: "awaiting-redirect", url: "https://broker/authorize?state=xyz" };
       return new Response(JSON.stringify({ state }), { status: 200 });
     });
-    const onDone = vi.fn();
+    const onDone = rs.fn();
     const { result } = renderHook(() =>
       useSetup({
         idOrService: "github",

@@ -88,8 +88,8 @@ export interface CreateAppDomainOptions {
 }
 
 /**
- * Wire the three apps-domain classes together. Caller is responsible for
- * registering subscribers via `catalog.subscribe(...)` before invoking
+ * Wire the three apps-domain classes together. The caller registers
+ * subscribers via `catalog.subscribe(...)` before invoking
  * `manager.boot()`, so boot-time replay fires through them.
  */
 export function createAppDomain(opts: CreateAppDomainOptions): AppDomain {

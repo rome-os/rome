@@ -48,12 +48,14 @@ export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
 /**
  * Rome's own transcript of a channel conversation.
  *
- * Reached through the session's channel address: a channel session is keyed by
- * the thread it belongs to, so a session addressed by the account is that
- * account's direct conversation, and a group's session — addressed by the
- * group rather than by anyone on it — is named by no account and never
- * matches. Which sender a message carries makes no difference: a line the
- * account wrote into a group belongs to the group's thread.
+ * Reached through the session's thread either way it is asked. A channel
+ * session is keyed by the thread it belongs to, so a session addressed by the
+ * account is that account's direct conversation, and a conversation names the
+ * same column by its own id — the two scopes select the same way and differ
+ * only in what they subtract. A group's session is addressed by the group
+ * rather than by anyone on it, so it is named by no account and reached only by
+ * naming the group. Which sender a message carries makes no difference: a line
+ * the account wrote into a group belongs to the group's thread.
  */
 export function agentMessages(db: DrizzleDb): Messages {
   // No `channel`: the transcript holds every channel that has no mirror of its
@@ -61,12 +63,20 @@ export function agentMessages(db: DrizzleDb): Messages {
   return sqlMessages({
     db,
     view(scope) {
-      const addressed = scopePairs(scope, sql`s.source_channel`, sql`s.source_thread_id`);
+      const addressed = scopePairs(scope.keys, sql`s.source_channel`, sql`s.source_thread_id`);
       if (addressed === null) return null;
+      const held =
+        scope.by === "account"
+          ? // Addressing already leaves a group out, since a group's session is
+            // keyed by the group and no account answers to that. Said again on
+            // the store's own terms so the guarantee survives a caller that
+            // hands over a group id as if it were an account's address.
+            sql`${addressed} AND coalesce(s.source_thread_type, '') <> 'group'`
+          : addressed;
       return sql`
         SELECT
           s.source_channel AS source,
-          s.source_thread_id AS address,
+          s.source_thread_id AS key,
           m.created_at AS at,
           ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
@@ -74,12 +84,7 @@ export function agentMessages(db: DrizzleDb): Messages {
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
-          AND ${addressed}
-          -- Addressing already leaves a group out, since a group's session is
-          -- keyed by the group and no account answers to that. Said again on
-          -- the store's own terms so the guarantee survives a caller that
-          -- hands over a group id as if it were an account's address.
-          AND coalesce(s.source_thread_type, '') <> 'group'
+          AND ${held}
           -- 'notification' is a line that passed outside a turn — something
           -- the person said without waking the agent, or something Rome sent
           -- untied to one. Either way it is conversation, and the direction

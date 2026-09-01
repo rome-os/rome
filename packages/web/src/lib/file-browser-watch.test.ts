@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import {
   createFileBrowserEventsUrl,
   findFileBrowserTreeNode,
@@ -51,7 +51,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("does not clear a deleted path that is replaced in the same batch", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -76,7 +76,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("checks same-path file to directory replacements before recovering", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -109,7 +109,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("checks same-path directory to file replacements before recovering", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -142,7 +142,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("returns deleted paths that are absent after an explicit existence check", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -167,7 +167,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("checks existence when an add is followed by a delete in the same batch", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -208,7 +208,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("does not probe a deleted path that is present in the refreshed tree", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -228,7 +228,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("collapses deleted descendants under a deleted directory before probing", async () => {
-    const pathExists = vi.fn(async () => false);
+    const pathExists = rs.fn(async () => false);
 
     await expect(
       getAbsentDeletedWatchPaths(
@@ -290,7 +290,7 @@ describe("file browser watch reconciliation", () => {
   });
 
   it("does not reload the selected file for a self-originated save event", () => {
-    const isSelfOriginated = vi.fn(
+    const isSelfOriginated = rs.fn(
       (event: { path: string }) => event.path === "projects/app/src/index.ts",
     );
 

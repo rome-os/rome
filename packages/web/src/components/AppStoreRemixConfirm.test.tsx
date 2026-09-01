@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 const intent = { listingId: "@alice/calendar", version: "1.2.3" };
@@ -33,7 +33,7 @@ function payload() {
   };
 }
 function mockFetch(data: unknown = payload()) {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(data)));
+  return rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(data)));
 }
 
 function Location() {
@@ -48,8 +48,8 @@ function Location() {
 describe("Store Remix confirmation", () => {
   it("pins the exact requested version and only confirms once without installing", async () => {
     const fetch = mockFetch();
-    const confirm = vi.fn();
-    render(<AppStoreRemixConfirm intent={intent} onConfirm={confirm} onCancel={vi.fn()} />);
+    const confirm = rs.fn();
+    render(<AppStoreRemixConfirm intent={intent} onConfirm={confirm} onCancel={rs.fn()} />);
     const button = screen.getByRole("button", { name: "Yes, continue in chat" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     await screen.findByText("Calendar");
@@ -80,21 +80,21 @@ describe("Store Remix confirmation", () => {
     if (reason === "taken-down") data.listing.state = "taken_down";
     if (reason === "unavailable") data.available = false;
     mockFetch(data);
-    render(<AppStoreRemixConfirm intent={intent} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    render(<AppStoreRemixConfirm intent={intent} onConfirm={rs.fn()} onCancel={rs.fn()} />);
     await screen.findByRole("alert");
     expect(screen.queryByRole("button", { name: "Yes, continue in chat" })).toBeNull();
   });
 
   it("can cancel during loading and ignores a late response", async () => {
     let resolve!: (response: Response) => void;
-    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(
+    const fetch = rs.spyOn(globalThis, "fetch").mockImplementation(
       () =>
         new Promise((r) => {
           resolve = r;
         }),
     );
-    const cancel = vi.fn();
-    const confirm = vi.fn();
+    const cancel = rs.fn();
+    const confirm = rs.fn();
     const view = render(
       <AppStoreRemixConfirm intent={intent} onConfirm={confirm} onCancel={cancel} />,
     );
@@ -108,9 +108,9 @@ describe("Store Remix confirmation", () => {
 
   it("does not confirm stale metadata while a new intent loads", async () => {
     const fetch = mockFetch();
-    const confirm = vi.fn();
+    const confirm = rs.fn();
     const view = render(
-      <AppStoreRemixConfirm intent={intent} onConfirm={confirm} onCancel={vi.fn()} />,
+      <AppStoreRemixConfirm intent={intent} onConfirm={confirm} onCancel={rs.fn()} />,
     );
     await screen.findByText("Calendar");
     fetch.mockImplementation(() => new Promise(() => {}));
@@ -118,7 +118,7 @@ describe("Store Remix confirmation", () => {
       <AppStoreRemixConfirm
         intent={{ ...intent, version: "2.0.0" }}
         onConfirm={confirm}
-        onCancel={vi.fn()}
+        onCancel={rs.fn()}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Yes, continue in chat" }));
@@ -129,7 +129,7 @@ describe("Store Remix confirmation", () => {
   it("retries a failed metadata request", async () => {
     const fetch = mockFetch();
     fetch.mockRejectedValueOnce(new Error("Offline"));
-    render(<AppStoreRemixConfirm intent={intent} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    render(<AppStoreRemixConfirm intent={intent} onConfirm={rs.fn()} onCancel={rs.fn()} />);
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByText("Calendar");

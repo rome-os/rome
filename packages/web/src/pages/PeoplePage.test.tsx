@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -46,7 +46,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 /** Every field any of the contract's write bodies carries, so one shape reads
@@ -352,7 +352,7 @@ function mockApi(
     accountsFail: options.accountsFail ?? false,
   };
   const calls: FetchCall[] = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {

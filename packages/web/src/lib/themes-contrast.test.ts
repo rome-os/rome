@@ -17,7 +17,7 @@
  * Palette-audit methodology: the `ux/color-audit` skill.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { getThemeDefinitions } from "./theme";
 import type { ThemeDefinition } from "./themes";
 

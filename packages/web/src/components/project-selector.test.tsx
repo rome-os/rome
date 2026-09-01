@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n from "@/i18n";
@@ -27,17 +27,17 @@ function renderCreateForm() {
       defaultProjectName="general"
       menuOpen
       searchQuery=""
-      setSearchQuery={vi.fn()}
+      setSearchQuery={rs.fn()}
       createFormOpen
-      setCreateFormOpen={vi.fn()}
+      setCreateFormOpen={rs.fn()}
       newProjectName=""
-      setNewProjectName={vi.fn()}
+      setNewProjectName={rs.fn()}
       creatingProject={false}
       connectOnCreate={false}
-      setConnectOnCreate={vi.fn()}
-      onToggleMenu={vi.fn()}
-      onPickProject={vi.fn()}
-      onCreateProject={vi.fn()}
+      setConnectOnCreate={rs.fn()}
+      onToggleMenu={rs.fn()}
+      onPickProject={rs.fn()}
+      onCreateProject={rs.fn()}
     />,
   );
 
@@ -64,17 +64,17 @@ function baseProps() {
     defaultProjectName: "general",
     menuOpen: true as const,
     searchQuery: "",
-    setSearchQuery: vi.fn(),
+    setSearchQuery: rs.fn(),
     createFormOpen: false,
-    setCreateFormOpen: vi.fn(),
+    setCreateFormOpen: rs.fn(),
     newProjectName: "",
-    setNewProjectName: vi.fn(),
+    setNewProjectName: rs.fn(),
     creatingProject: false,
     connectOnCreate: false,
-    setConnectOnCreate: vi.fn(),
-    onToggleMenu: vi.fn(),
-    onPickProject: vi.fn(),
-    onCreateProject: vi.fn(),
+    setConnectOnCreate: rs.fn(),
+    onToggleMenu: rs.fn(),
+    onPickProject: rs.fn(),
+    onCreateProject: rs.fn(),
   };
 }
 

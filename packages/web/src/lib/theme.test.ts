@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { INHERITED_TOKENS } from "../../../ui/src/token-contract";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import {
   buildThemeCss,
   DEFAULT_THEME_NAME,

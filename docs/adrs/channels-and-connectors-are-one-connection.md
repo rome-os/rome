@@ -20,7 +20,7 @@ The industry default keeps the two stacks apart and authorizes each on its own, 
 
 Every external service Rome wires to is reached through one kind of thing, a Connection: a set of named grants, where one grant is one conferral, plus up to three capabilities — Talk, Act, and Watch — each declaring which grants it needs. A capability handle is non-null exactly when the integration implements that capability and every grant it needs is live. A Watch the service feeds only under a resource subscription also needs one active subscription.
 
-A service carries at most one Connection. The original design chose the opposite — connections minted per connect, so two Slack workspaces would be two Connections — and that half was not carried into the implementation. The shipped registry refuses a second connect for a service it already holds, and a unique index on the service column enforces it in the database. This record covers the unification of channels and connectors, which shipped; the per-connect cardinality is a design that did not.
+A service carries at most one Connection. The original design chose the opposite — connections minted per connect, so two Slack workspaces would be two Connections — and that half was not carried into the implementation. The shipped registry refuses a second connect for a service it already holds, and a unique index on the service column enforces it in the database. This record covers the unification of channels and connectors, which shipped. The per-connect cardinality is a design that did not.
 
 ## Alternatives
 

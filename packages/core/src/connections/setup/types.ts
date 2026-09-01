@@ -48,7 +48,7 @@ export interface SetupViewStep {
 
 /** A prompt's form — the instructional preamble plus the fields to collect. The
  *  preamble mirrors {@link SetupView}'s narrative slots (`steps`, `links`) so a
- *  token-paste prompt can carry a full "how to obtain this credential" guide
+ *  token-paste prompt can carry a full "how to get this credential" guide
  *  (create the bot, copy the token) next to the field — the standard renderer
  *  shows the numbered steps and links above the inputs. */
 export interface SetupForm {

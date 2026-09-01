@@ -1,11 +1,11 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { openTurnStream } from "@/lib/chat-api";
 import { DelegatedSubagentGroup, type DelegatedSubagentNode } from "./DelegatedSubagentGroup";
 
-vi.mock("react-i18next", () => ({
+rs.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, params?: { agent?: string; count?: number }) => {
       const labels: Record<string, string> = {
@@ -25,11 +25,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("@/lib/chat-api", () => ({
-  openTurnStream: vi.fn(),
+rs.mock("@/lib/chat-api", () => ({
+  openTurnStream: rs.fn(),
 }));
 
-vi.mock("@/components/chat/AgentAvatar", () => ({
+rs.mock("@/components/chat/AgentAvatar", () => ({
   AgentAvatar: ({
     iconUrl,
     label,
@@ -51,11 +51,11 @@ vi.mock("@/components/chat/AgentAvatar", () => ({
   ),
 }));
 
-const openTurnStreamMock = vi.mocked(openTurnStream);
+const openTurnStreamMock = rs.mocked(openTurnStream);
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 function completedSubagent(overrides: Partial<TraceSubagentSummary> = {}): TraceSubagentSummary {
@@ -128,7 +128,7 @@ describe("DelegatedSubagentGroup", () => {
 
   it("opens the selected child trace", async () => {
     const child = completedSubagent();
-    const onOpen = vi.fn((_node: DelegatedSubagentNode) => {});
+    const onOpen = rs.fn((_node: DelegatedSubagentNode) => {});
     render(
       <DelegatedSubagentGroup
         subagents={[child]}

@@ -1,10 +1,10 @@
-// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 // initAnalytics keeps module-level state (started flag, idle timestamp), so
 // every test gets a fresh module instance.
 async function loadAnalytics() {
-  vi.resetModules();
+  rs.resetModules();
   return await import("@/lib/analytics");
 }
 
@@ -25,7 +25,7 @@ function setVisibility(state: DocumentVisibilityState): void {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  rs.useFakeTimers();
   window.dataLayer = undefined;
   window.gtag = undefined;
   window.__ROME_RUNTIME_CONFIG__ = undefined;
@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
+  rs.useRealTimers();
 });
 
 describe("shouldLoadAnalytics", () => {
@@ -129,7 +129,7 @@ describe("idle re-engagement", () => {
     initAnalytics();
 
     setVisibility("hidden");
-    vi.advanceTimersByTime(31 * 60 * 1000);
+    rs.advanceTimersByTime(31 * 60 * 1000);
     setVisibility("visible");
     expect(eventsNamed("page_view")).toHaveLength(1);
     // Bare event: gtag reads the live document — no path params to sanitize.
@@ -142,7 +142,7 @@ describe("idle re-engagement", () => {
     initAnalytics();
 
     setVisibility("hidden");
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    rs.advanceTimersByTime(5 * 60 * 1000);
     setVisibility("visible");
     expect(eventsNamed("page_view")).toHaveLength(0);
   });

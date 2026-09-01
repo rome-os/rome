@@ -1,11 +1,11 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAppRemixResume } from "./use-app-remix-resume";
 
-const auth = vi.hoisted(() => ({ bootstrap: { phase: "needs-signin" } }));
-vi.mock("@/lib/auth-state", () => ({ useAuthStateSnapshot: () => auth }));
+const auth = rs.hoisted(() => ({ bootstrap: { phase: "needs-signin" } }));
+rs.mock("@/lib/auth-state", () => ({ useAuthStateSnapshot: () => auth }));
 afterEach(() => {
   cleanup();
   sessionStorage.clear();

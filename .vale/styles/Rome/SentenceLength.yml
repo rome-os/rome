@@ -1,0 +1,12 @@
+# "Flag any descriptive sentence over 25 words for splitting." —
+# docs/authoring/WRITING.md, "Sentences".
+#
+# A suggestion, because the rule it comes from says flag, not forbid. It stays
+# below `MinAlertLevel` in .vale.ini, so it reports only under
+# `vale --minAlertLevel suggestion`.
+extends: occurrence
+message: "Sentence runs over 25 words — consider splitting it."
+scope: sentence
+level: suggestion
+max: 25
+token: '\b\w+\b'

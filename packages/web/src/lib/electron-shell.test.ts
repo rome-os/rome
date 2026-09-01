@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it } from "@rstest/core";
 
 import { isElectronShell } from "./electron-shell";
 
@@ -28,7 +28,7 @@ describe("isElectronShell", () => {
   });
 
   it("is false where there is no window at all", () => {
-    // vitest.config.mts defaults this package to the node environment, so the
+    // rstest.config.mts defaults this package to the node environment, so the
     // guard is what keeps a server-side caller from throwing.
     const win = globalThis.window;
     Reflect.deleteProperty(globalThis, "window");

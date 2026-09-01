@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -13,7 +13,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function buildDashboard(): ProjectDashboardResponse {
@@ -48,7 +48,7 @@ function buildDashboard(): ProjectDashboardResponse {
 }
 
 function mockDashboardFetch(response: ProjectDashboardResponse) {
-  vi.spyOn(globalThis, "fetch").mockImplementation(((input: RequestInfo | URL) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.startsWith("/api/projects/dashboard")) {
       return Promise.resolve(
@@ -69,7 +69,7 @@ function renderDashboard(initialEntry: string) {
     disconnect(): void {}
   }
   globalThis.ResizeObserver = TestResizeObserver;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+  rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
     const measuringText = this.id === "recharts_measurement_span";
     const width = measuringText ? 40 : 560;
     const height = measuringText ? 14 : 150;

@@ -1,0 +1,20 @@
+# "Cut marketing adjectives entirely" — docs/authoring/WRITING.md, "Word choice".
+#
+# "Robust" is on the WRITING.md list and absent here, because next to code it is
+# usually a claim rather than a boast: "robust to an unparseable value" names a
+# tolerance the reader can check. Cutting it stays a judgement for review.
+extends: existence
+message: "Cut the marketing adjective '%s'."
+level: error
+ignorecase: true
+tokens:
+  - 'seamless(?:ly)?'
+  - 'powerful(?:ly)?'
+  - 'cutting[- ]edge'
+  - 'effortless(?:ly)?'
+  - 'world[- ]class'
+  - 'next[- ]gen(?:eration)?'
+  - 'revolutionary'
+  - 'state[- ]of[- ]the[- ]art'
+  - 'blazing(?:ly)? fast'
+  - 'best[- ]in[- ]class'

@@ -1,6 +1,6 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import DesktopPage, { applyDesktopSafeAreaBottom } from "./DesktopPage";
 
@@ -21,7 +21,7 @@ describe("DesktopPage", () => {
       "/desktop-vnc.html?resize=scale&path=desktop-proxy/websockify",
     );
 
-    const setProperty = vi.fn();
+    const setProperty = rs.fn();
     applyDesktopSafeAreaBottom(
       {
         contentDocument: { documentElement: { style: { setProperty } } },

@@ -1,14 +1,14 @@
-// @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 beforeEach(() => {
-  vi.resetModules();
+  rs.resetModules();
   localStorage.clear();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+  rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 200 })));
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  rs.unstubAllGlobals();
   localStorage.clear();
 });
 

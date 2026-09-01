@@ -1,7 +1,8 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import {
   getRomeSession,
   getSessionMetrics,
@@ -13,17 +14,17 @@ import {
 import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
 import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
 
-vi.mock("@/components/agent-trace/TraceDrawer", () => ({
+rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
   traceDrawerContentInsetClass: () => "",
 }));
 
-vi.mock("@/components/chat/blocks", () => ({
+rs.mock("@/components/chat/blocks", () => ({
   renderFlatBlocks: () => null,
   renderSingleBlock: () => null,
 }));
 
-vi.mock("@/components/chat/MessageList", () => ({
+rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
     <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
       {live.text}
@@ -31,16 +32,15 @@ vi.mock("@/components/chat/MessageList", () => ({
   ),
 }));
 
-vi.mock("@/lib/chat-api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/chat-api")>();
+rs.mock("@/lib/chat-api", () => {
   return {
-    ...actual,
-    getRomeSession: vi.fn(),
-    getSessionMetrics: vi.fn(),
-    listRomeSessionMessages: vi.fn(),
-    listRomeSessions: vi.fn(),
-    listSessionTurns: vi.fn(),
-    openTurnStream: vi.fn(),
+    ...chatApiModule,
+    getRomeSession: rs.fn(),
+    getSessionMetrics: rs.fn(),
+    listRomeSessionMessages: rs.fn(),
+    listRomeSessions: rs.fn(),
+    listSessionTurns: rs.fn(),
+    openTurnStream: rs.fn(),
   };
 });
 
@@ -122,8 +122,8 @@ function renderIndex(initialEntry = "/sessions") {
 
 beforeEach(() => {
   setRouterHistoryIndex(0);
-  vi.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
-  vi.mocked(listRomeSessions).mockResolvedValue({
+  rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
+  rs.mocked(listRomeSessions).mockResolvedValue({
     sessions: [],
     total: 0,
     offset: 0,
@@ -131,8 +131,8 @@ beforeEach(() => {
     nextOffset: null,
     facets: { types: [], sourceChannels: [] },
   });
-  vi.mocked(listRomeSessionMessages).mockResolvedValue([]);
-  vi.mocked(listSessionTurns).mockResolvedValue([
+  rs.mocked(listRomeSessionMessages).mockResolvedValue([]);
+  rs.mocked(listSessionTurns).mockResolvedValue([
     {
       turnId: "feedback-fork-turn",
       streamId: "feedback-fork-turn",
@@ -144,7 +144,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  rs.clearAllMocks();
 });
 
 describe("sessionsViewportClass", () => {
@@ -161,7 +161,7 @@ describe("sessionsViewportClass", () => {
 
 describe("SessionsPage live fork details", () => {
   it("returns through router history when available", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     setRouterHistoryIndex(1);
 
     render(
@@ -183,7 +183,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("falls back to the sessions page when router history is empty", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     render(
       <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
@@ -200,7 +200,7 @@ describe("SessionsPage live fork details", () => {
 
   it("attaches to and renders an active fork turn", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    vi.mocked(openTurnStream).mockImplementation(async () => {
+    rs.mocked(openTurnStream).mockImplementation(async () => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           streamController = controller;
@@ -235,7 +235,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
@@ -244,7 +244,7 @@ describe("SessionsPage live fork details", () => {
   });
 
   it("keeps raw identifiers in a collapsed Technical details section", async () => {
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
@@ -263,7 +263,7 @@ describe("SessionsPage live fork details", () => {
 describe("SessionsPage explorer", () => {
   it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
     expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    vi.mocked(getSessionMetrics).mockResolvedValue({
+    rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: {
         from: "2026-07-08T00:00:00.000Z",
         to: "2026-07-15T00:00:00.000Z",
@@ -297,7 +297,7 @@ describe("SessionsPage explorer", () => {
   });
 
   it("shows usage overview and switches to the human-readable inventory", async () => {
-    vi.mocked(getSessionMetrics).mockResolvedValue({
+    rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
       totals: {
         sessionCount: 1,
@@ -388,7 +388,7 @@ describe("SessionsPage explorer", () => {
         },
       ],
     });
-    vi.mocked(listRomeSessions).mockResolvedValue({
+    rs.mocked(listRomeSessions).mockResolvedValue({
       sessions: [
         {
           ...FORK_SESSION,
@@ -436,7 +436,7 @@ describe("SessionsPage explorer", () => {
         expect.objectContaining({ limit: 50, query: "pull request" }),
       ),
     );
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     setRouterHistoryIndex(1);
     fireEvent.click(await screen.findByRole("button", { name: "Back to sessions" }));
@@ -454,7 +454,7 @@ describe("SessionsPage explorer", () => {
       expect.objectContaining({ limit: 50, range: "7d", model: undefined }),
     );
 
-    vi.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     expect(await screen.findByRole("button", { name: "Back to sessions" })).toBeTruthy();
   });

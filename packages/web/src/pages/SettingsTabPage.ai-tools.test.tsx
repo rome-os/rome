@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
 
@@ -15,7 +15,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function ok(json: unknown): Response {
@@ -28,7 +28,7 @@ describe("AI Tools refresh", () => {
     const refreshResponse = new Promise<Response>((resolve) => {
       resolveRefresh = resolve;
     });
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
@@ -76,7 +76,7 @@ describe("AI Tools refresh", () => {
   });
 
   it("keeps a refresh failure visible", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
@@ -108,7 +108,7 @@ describe("AI Tools refresh", () => {
 describe("AI Tools destructive actions", () => {
   it("confirms Claude logout and keeps an endpoint failure visible", async () => {
     let logoutCalls = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: true }, codex: { loggedIn: false } });
@@ -152,7 +152,7 @@ describe("AI Tools destructive actions", () => {
       hasApiKey: true,
       updatedAt: "2026-07-12T00:00:00.000Z",
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({
@@ -206,7 +206,7 @@ describe("AI Tools destructive actions", () => {
 
 describe("AI Tools provider presentation", () => {
   it("supports the onboarding visibility and connection-state contract", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: false }, codex: { loggedIn: true } });
@@ -216,7 +216,7 @@ describe("AI Tools provider presentation", () => {
       }
       return ok({});
     }) as typeof fetch);
-    const onConnectedChange = vi.fn();
+    const onConnectedChange = rs.fn();
 
     render(
       <AiToolsPanel
@@ -250,7 +250,7 @@ describe("AI Tools provider presentation", () => {
   });
 
   it("shows ChatGPT before Claude", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
@@ -278,7 +278,7 @@ describe("AI Tools provider presentation", () => {
   });
 
   it("shows the API provider logo and source instead of Claude login controls", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({
@@ -348,7 +348,7 @@ describe("AI Tools provider presentation", () => {
 
   it("edits one custom environment through JSON and key-value views", async () => {
     let savedBody: Record<string, unknown> | null = null;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
@@ -436,7 +436,7 @@ describe("AI Tools provider presentation", () => {
 
   it("edits a stored custom API token as a literal value", async () => {
     let savedBody: Record<string, unknown> | null = null;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({
@@ -495,7 +495,7 @@ describe("AI Tools provider presentation", () => {
   });
 
   it("explains that an environment API key must be removed from runtime configuration", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
         return ok({

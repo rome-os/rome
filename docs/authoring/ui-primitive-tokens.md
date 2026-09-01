@@ -35,7 +35,7 @@ Letter spacing and font weight hold their values inside the [typography roles](.
 
 One doc per dimension. Required sections: Tokens, How the scale is built, Forbidden usage. `[mech]`
 
-A primitive doc states what a token is — its name, its value, and the rationale for that value — never what it serves. Purpose belongs to the semantic tokens that alias it, and lives in their docs. A sentence whose subject is a token and whose predicate is a consumer or a role is a usage statement; a value's rationale may still cite the demand that fixed it. `[llm]`
+A primitive doc states what a token is — its name, its value, and the rationale for that value — never what it serves. Purpose belongs to the semantic tokens that alias it, and lives in their docs. A sentence whose subject is a token and whose predicate is a consumer or a role is a usage statement. A value's rationale may still cite the demand that fixed it. `[llm]`
 
 > Prefer: "`--neutral-550` sits at 5.2:1 on `--neutral-25`, the depth where a muted-text token clears AA."
 > Over: "`--neutral-550` serves muted text in Ash."

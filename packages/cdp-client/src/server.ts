@@ -346,7 +346,7 @@ wss.on("connection", (ws) => {
             const conn = await getOrCreateTabConnection(currentTabId);
             if (conn) {
               conn.viewers.add(ws);
-              // Re-trigger screencast to ensure this viewer gets a frame
+              // Re-trigger screencast to make sure this viewer gets a frame
               // (first frame may have fired before viewer was added)
               await conn.cdp.Page.startScreencast({
                 format: "jpeg",

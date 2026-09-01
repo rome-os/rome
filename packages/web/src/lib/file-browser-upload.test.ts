@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { getUploadEntriesFromFileList } from "./file-browser-upload";
 
 function fileWithRelativePath(name: string, relativePath: string): File {

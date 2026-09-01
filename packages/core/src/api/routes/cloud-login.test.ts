@@ -1,7 +1,7 @@
 /**
  * `/api/auth/cloud/*` — the cloud guardian sign-in, driving the
  * standard OAuth surface. Driven end-to-end over HTTP: POST start to
- * obtain the Rome Cloud `/oauth2/authorize` URL (and the CSRF state + nonce), then
+ * get the Rome Cloud `/oauth2/authorize` URL (and the CSRF state + nonce), then
  * GET the callback with that state. The Rome Cloud legs — the `/oauth2/token`
  * exchange and the `/oauth2/jwks` fetch inside `verifyIdToken` — are served by a
  * fake Rome Cloud that signs real ES256 id_tokens, so the flow (including signature

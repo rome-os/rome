@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Ensure every CLAUDE.md has an AGENTS.md symlink beside it.
+ * Make sure every CLAUDE.md has an AGENTS.md symlink beside it.
  *
  * Claude Code reads CLAUDE.md, other coding agents read AGENTS.md, and only a
  * symlink makes the two unable to drift — so a copy is a finding, not a pass.

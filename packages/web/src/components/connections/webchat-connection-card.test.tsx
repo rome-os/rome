@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import i18n from "@/i18n";
 import { WebchatConnectionCard } from "@/components/connections/webchat-connection-card";

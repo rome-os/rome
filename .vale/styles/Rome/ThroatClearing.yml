@@ -1,0 +1,17 @@
+# "No stacked auxiliaries or throat-clearing." — docs/authoring/WRITING.md,
+# "Verbs". "No preamble, no summary" — the same file, "Structure".
+extends: existence
+message: "Cut the throat-clearing '%s' and state the point."
+level: error
+ignorecase: true
+tokens:
+  - 'it (?:is|should be) important to note that'
+  - 'it should be noted that'
+  - 'it is worth noting that'
+  - 'please note that'
+  - 'needless to say'
+  - 'as a matter of fact'
+  - 'it is interesting to note that'
+  - 'as (?:previously |already )?mentioned'
+  - 'this (?:document|doc|section|guide) (?:describes|explains|covers|outlines)'
+  - 'in this (?:document|doc|section|guide), we'

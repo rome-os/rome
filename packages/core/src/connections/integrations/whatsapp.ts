@@ -1,7 +1,7 @@
 // WhatsApp connection integration. Channel contract: docs/architecture/channels.md.
 //
 // WhatsApp is a Talker with a single `session` grant: a linked-device session
-// (Baileys auth state) obtained by entering a pairing code on the phone. The
+// (Baileys auth state) that comes from entering a pairing code on the phone. The
 // transport core — normalization, address-book sync, media download, the
 // generation-gated reconnect loop — is the existing `WhatsAppAdapter`
 // (packages/core/src/channels/whatsapp.ts), wrapped here.

@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import i18n from "@/i18n";
 import { AppInstallConfirm } from "./AppInstallConfirm";
@@ -11,7 +11,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function listingPayload(overrides?: {
@@ -48,7 +48,7 @@ function listingPayload(overrides?: {
 }
 
 function mockListingFetch(payload: ListingDetailPayload) {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue({
+  rs.spyOn(globalThis, "fetch").mockResolvedValue({
     ok: true,
     status: 200,
     json: async () => structuredClone(payload),
@@ -97,7 +97,7 @@ describe("AppInstallConfirm", () => {
   });
 
   it("keeps one accessible button name while installation is pending", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       if (String(input) === "/api/apps") return new Promise(() => {});
       return Response.json(listingPayload());
     }) as typeof fetch);

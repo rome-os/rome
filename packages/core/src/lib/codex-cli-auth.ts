@@ -151,7 +151,7 @@ export async function markCodexAuthRevoked(): Promise<void> {
 
 /**
  * Whether `refreshToken` matches a recorded revocation marker. A mismatch (or no
- * marker) means the token is current/unrevoked; a mismatch additionally clears
+ * marker) means the token is current/unrevoked; a mismatch also clears
  * the now-stale marker so a re-logged-in account reads as healthy.
  */
 async function isRefreshTokenRevoked(refreshToken: string | undefined): Promise<boolean> {

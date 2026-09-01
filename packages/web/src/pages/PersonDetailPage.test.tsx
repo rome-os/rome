@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -31,7 +31,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 // Anchored at noon today rather than at "now": the timeline groups by calendar
@@ -138,7 +138,7 @@ function mockApi(
 ) {
   const calls: FetchCall[] = [];
   const person = typeof options.person === "object" ? { ...options.person } : { ...PERSON };
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -381,7 +381,7 @@ describe("PersonDetailPage", () => {
     };
     let headEntries = ENTRIES;
     const user = userEvent.setup();
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       const json = (body: unknown) =>
         ({ ok: true, status: 200, json: async () => body }) as Response;

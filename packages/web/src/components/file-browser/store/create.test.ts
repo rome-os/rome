@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { TFunction } from "i18next";
 import { createFileBrowserStore } from "./create";
 
@@ -9,7 +10,7 @@ function createTestStore() {
     rootLabel: "projects",
     initialSelectedFolderPath: "/projects/current",
     queryClient: new QueryClient(),
-    navigate: vi.fn(),
+    navigate: rs.fn(),
     getRouteSnapshot: () => ({ pathname: "/projects/current", search: "", hash: "" }),
     t: ((key: string) => key) as TFunction,
     embedded: false,

@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 interface BuildInfoFixture {
@@ -66,7 +66,7 @@ function mockBackend(opts: {
   const upgradeResponses = [...(opts.upgrade ?? [])];
   const upgradeRequests: unknown[] = [];
 
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -245,9 +245,9 @@ describe("SystemUpgradeSection", () => {
   });
 
   it("reloads only once the backend reports the target version", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const reload = vi.fn();
-    vi.stubGlobal("location", { ...window.location, reload });
+    rs.useFakeTimers({ shouldAdvanceTime: true });
+    const reload = rs.fn();
+    rs.stubGlobal("location", { ...window.location, reload });
     // The fixture is read at response time, so flipping `version` below
     // simulates the new container coming up.
     const build = buildInfo();
@@ -257,7 +257,7 @@ describe("SystemUpgradeSection", () => {
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
     renderSection();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
 
     try {
       await user.click(await findEnabledButton("Check for updates"));
@@ -267,23 +267,23 @@ describe("SystemUpgradeSection", () => {
 
       // The old backend is still serving its version — a reachable backend
       // alone must not trigger the reload.
-      await vi.advanceTimersByTimeAsync(3_500);
+      await rs.advanceTimersByTimeAsync(3_500);
       expect(reload).not.toHaveBeenCalled();
 
       build.version = "1.2.0";
-      await vi.advanceTimersByTimeAsync(3_500);
+      await rs.advanceTimersByTimeAsync(3_500);
       await waitFor(() => expect(reload).toHaveBeenCalled());
     } finally {
-      vi.unstubAllGlobals();
-      vi.useRealTimers();
+      rs.unstubAllGlobals();
+      rs.useRealTimers();
     }
   });
 
   it("gives up after the restart timeout and points the guardian at Rome Cloud", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.stubEnv("ROME_CLOUD_ORIGIN", "https://rome-cloud.test");
-    const reload = vi.fn();
-    vi.stubGlobal("location", { ...window.location, reload });
+    rs.useFakeTimers({ shouldAdvanceTime: true });
+    rs.stubEnv("ROME_CLOUD_ORIGIN", "https://rome-cloud.test");
+    const reload = rs.fn();
+    rs.stubGlobal("location", { ...window.location, reload });
     const build = buildInfo();
     mockBackend({
       build,
@@ -291,7 +291,7 @@ describe("SystemUpgradeSection", () => {
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
     renderSection();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
 
     try {
       await user.click(await findEnabledButton("Check for updates"));
@@ -300,7 +300,7 @@ describe("SystemUpgradeSection", () => {
       expect(await screen.findByText("Rome is restarting")).toBeTruthy();
 
       // The backend never comes back on the target version.
-      await vi.advanceTimersByTimeAsync(10 * 60_000 + 3_000);
+      await rs.advanceTimersByTimeAsync(10 * 60_000 + 3_000);
 
       await waitFor(() =>
         expect(screen.getByText("The upgrade is taking longer than expected")).toBeTruthy(),
@@ -310,12 +310,12 @@ describe("SystemUpgradeSection", () => {
 
       // Polling has stopped: even the target version appearing no longer reloads.
       build.version = "1.2.0";
-      await vi.advanceTimersByTimeAsync(10_000);
+      await rs.advanceTimersByTimeAsync(10_000);
       expect(reload).not.toHaveBeenCalled();
     } finally {
-      vi.unstubAllGlobals();
-      vi.unstubAllEnvs();
-      vi.useRealTimers();
+      rs.unstubAllGlobals();
+      rs.unstubAllEnvs();
+      rs.useRealTimers();
     }
   });
 

@@ -1,14 +1,14 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { PeopleList } from "@rome/api-types/people";
 import { usePeople } from "./use-people";
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function wrapper() {
@@ -44,7 +44,7 @@ function peopleList(): PeopleList {
 
 describe("usePeople", () => {
   it("reads the curated people from GET /api/people", async () => {
-    const fetchSpy = vi
+    const fetchSpy = rs
       .spyOn(globalThis, "fetch")
       .mockImplementation((async () => Response.json(peopleList())) as typeof fetch);
 
@@ -55,7 +55,7 @@ describe("usePeople", () => {
   });
 
   it("unwraps the listing envelope into its rows, whole", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async () =>
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
       Response.json(peopleList())) as typeof fetch);
 
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
@@ -65,7 +65,7 @@ describe("usePeople", () => {
   });
 
   it("answers an empty listing when the read fails, so the composer still mounts", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation((async () =>
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
       Response.json({ error: "nope" }, { status: 500 })) as typeof fetch);
 
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });

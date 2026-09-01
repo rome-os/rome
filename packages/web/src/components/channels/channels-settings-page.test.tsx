@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, screen, render, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { ChannelsSettingsPage } from "./channels-settings-page";
@@ -28,7 +28,7 @@ async function choose(user: UserEvent, trigger: HTMLElement, optionName: string 
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 function ok(json: unknown): Response {
@@ -92,7 +92,7 @@ function mockApi(options: { failPatch?: boolean; deferFirstPatch?: boolean } = {
   // Lets a test hold the first PATCH open, edit another field while it is in
   // flight, and only then decide the outcome — the race is scripted, not timed.
   let settleFirst: ((outcome: { fail: boolean }) => void) | null = null;
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -152,7 +152,7 @@ describe("ChannelsSettingsPage", () => {
       overrides: { activation: { mode: "mention" } },
     });
     const patchBodies: unknown[] = [];
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation((async (
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => {
@@ -348,7 +348,7 @@ describe("ChannelsSettingsPage", () => {
 
   it("shows a retryable error without the empty-state onboarding copy", async () => {
     let settingsLoads = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/connections") return ok({ connections: [] });
       if (url === "/api/agents") return ok({ agents: [] });

@@ -23,12 +23,12 @@ The steps for cutting a release — preflight, version choice, the confirmed pus
 The invariants behind that table, each enforced by the workflow rather than by convention:
 
 - **Semver docker tags are immutable.** The build job refuses to publish a version whose docker tag already exists in the registry, so a rerun after a successful publish (or a force-moved git tag) fails instead of silently re-pointing the tag. No mutable `{major}` / `{major}.{minor}` aliases are published — Rome Cloud resolves available versions by listing the exact semver tags, so aliases would only add dangling pointers.
-- **`latest` always points at the highest published stable release.** The publish job compares the release against every stable semver tag already in the registry and only moves `latest` when the new version is the highest; prereleases never move it. The metadata action's own `latest` behavior is disabled (`flavor: latest=false`) so this check is the single authority.
-- **A `v*` tag must be strict semver** (`vMAJOR.MINOR.PATCH` with optional `-prerelease`; `+buildmeta` is rejected because docker tags can't contain `+`). The gate lives in the workflow's build-metadata step and is the single producer-side validation for the version that gets baked into the image.
+- **`latest` always points at the highest published stable release.** The publish job compares the release against every stable semver tag already in the registry and only moves `latest` when the new version is the highest. Prereleases never move it. The metadata action's own `latest` behavior is disabled (`flavor: latest=false`) so this check is the single authority.
+- **A `v*` tag must be strict semver** (`vMAJOR.MINOR.PATCH` with optional `-prerelease`, and `+buildmeta` is rejected because docker tags cannot contain `+`). The gate lives in the workflow's build-metadata step and is the single producer-side validation for the version that gets baked into the image.
 
 ### Baked build identity
 
-The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to the image's docker tag), `ROME_BUILD_SHA`, and `ROME_BUILD_TIME` into the image as env vars. The runtime reports them via `getBuildInfo()` → `/api/build-info`; `version` is `null` on non-release builds (local/source runs), and consumers degrade gracefully on null rather than guessing.
+The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to the image's docker tag), `ROME_BUILD_SHA`, and `ROME_BUILD_TIME` into the image as env vars. The runtime reports them via `getBuildInfo()` → `/api/build-info`. `version` is `null` on non-release builds (local/source runs), and consumers degrade gracefully on null rather than guessing.
 
 ### Rehearsing the pipeline
 
@@ -46,7 +46,7 @@ Five workspace packages are managed for npm publication via [release-please](htt
 
 The SDKs and `@rome-os/ui` are supported public packages. `@rome-os/libs` and
 `@rome-os/rome-web-components` will be published so Rome and Rome Cloud can
-share versioned implementations across repositories; they are not supported
+share versioned implementations across repositories. They are not supported
 app-author APIs.
 
 Releases are driven by **Conventional Commits**, not by hand-authored changeset files. Every commit landing on `main` either contributes to the next release (if its type/path are in scope) or is invisible to the release flow.
@@ -88,15 +88,15 @@ All five packages are still under `0.x.y` today, so the practical rules are:
 - Removed export, changed signature, behavior change consumers must adapt to → `feat!:` or include `BREAKING CHANGE:` in the body → minor bump.
 - New API or backwards-compatible additive change → `feat:` → patch bump.
 - Bugfix or internal change with observable impact → `fix:` → patch bump.
-- Internal-only change consumers don't see → `chore:` / `refactor:` → no bump, no changelog line.
+- Internal-only change consumers do not see → `chore:` / `refactor:` → no bump, no changelog line.
 
 ## Authoring a PR
 
 1. Make your change. PR title must be a Conventional Commit (e.g. `feat(app-runtime): add IpcRpcTimeoutError`). Squash-and-merge uses this as the merge commit.
-2. If the change touches any path configured in `release-please-config.json`, pick the right type so the version bump reflects observable impact. Use `feat!:` (or `BREAKING CHANGE:` in the body) for breakage even pre-1.0 — it's still the loudest signal in the changelog.
+2. If the change touches any path configured in `release-please-config.json`, pick the right type so the version bump reflects observable impact. Use `feat!:` (or `BREAKING CHANGE:` in the body) for breakage even pre-1.0 — it is still the loudest signal in the changelog.
 3. If the change does not touch a releasable package's path, no special handling needed — release-please ignores it.
 
-The title format is enforced: CI's `lint` job runs `scripts/check-pr-title.sh` on every PR open/edit, so a non-conventional title fails a check instead of landing on `main` as a commit release-please can't read. It validates the shape (`<type>[(<scope>)][!]: <subject>`, lower-case type and scope) against the standard type set — it does not judge whether you picked the *right* type for the change, or whether the subject reads well.
+The title format is enforced: CI's `lint` job runs `scripts/check-pr-title.sh` on every PR open/edit, so a non-conventional title fails a check instead of landing on `main` as a commit release-please cannot read. It validates the shape (`<type>[(<scope>)][!]: <subject>`, lower-case type and scope) against the standard type set — it does not judge whether you picked the *right* type for the change, or whether the subject reads well.
 
 The subject is optional on a normal title (`chore:` passes), but **required whenever `!` is present**. release-please's parser reports a bare `feat!:` as non-breaking while reporting `feat!: subject` as breaking, so a subject-less breaking title would quietly downgrade a minor bump to a patch. Run it locally before pushing:
 
@@ -112,7 +112,7 @@ There is no PR-time "did you add a changeset?" check. The merge commit is the so
 2. The `Release` workflow runs release-please. If there are any unreleased Conventional commits attributed to a releasable package, it opens (or updates) a single release PR titled `chore: release …` that bumps `version` in each affected `package.json` and appends to that package's `CHANGELOG.md`. Multiple commits accumulate into the same PR until it merges.
 3. Merging the release PR triggers the workflow again. release-please now creates a GitHub release + git tag for each package whose version moved and emits `paths_released`. The follow-up `publish` job matrixes over those paths, runs `pnpm build` in each, and pushes the tarball to npm.
 
-The publish step is the merge of the release PR, not your original PR — so contributors don't have to worry about "every small fix becomes its own release". Multiple commits ship together.
+The publish step is the merge of the release PR, not your original PR — so contributors do not have to worry about "every small fix becomes its own release". Multiple commits ship together.
 
 ### Every published package declares `repository`
 
@@ -140,14 +140,14 @@ expensive place to find out.
 Use `.github/workflows/release.yml` as the single npm publish entrypoint, even
 for manual retries or hotfix publishes. In Actions, run `Release` manually and
 choose `all` or one package path. `all` expands to every package in
-`release-please-config.json`; each one also stays individually selectable, for a
+`release-please-config.json`. Each one also stays individually selectable, for a
 dry run or a single-package retry. The manual path calls the same reusable
 `sdk-publish.yml` implementation as automatic release publishes, but keeps the
 OIDC caller identity anchored on `release.yml`.
 
 The `all` list in `sdk-publish.yml` is maintained by hand, so it and
 `release-please-config.json` have to stay in step. A package in `all` without a
-Trusted Publisher fails every `all` dispatch, not just its own; a package left
+Trusted Publisher fails every `all` dispatch, not just its own. A package left
 out of `all` is reachable only by selecting it by name.
 
 The npm Trusted Publisher for every published package must be configured to this
@@ -160,9 +160,9 @@ reusable workflow calls are authorized against the caller workflow, so
 ## Where to look
 
 - `release-please-config.json` — Per-package release config (release-type, bump rules, plugins).
-- `.release-please-manifest.json` — Current version per package path. release-please updates this in the release PR; never edit by hand.
-- `.github/workflows/release.yml` — Single publish entrypoint: push events run `release-please` and automatic npm publish; manual dispatches retry/publish selected packages under the same npm Trusted Publisher identity.
-- `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`; do not run it directly.
+- `.release-please-manifest.json` — Current version per package path. release-please updates this in the release PR. Never edit by hand.
+- `.github/workflows/release.yml` — Single publish entrypoint: push events run `release-please` and automatic npm publish. Manual dispatches retry/publish selected packages under the same npm Trusted Publisher identity.
+- `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`. Do not run it directly.
 - `scripts/check-publish-targets.test.mjs` (`pnpm test:release:targets`, part of `test:unit:rest`) — Holds the three package lists together: the `all` dispatch target, the dispatch menu, and `release-please-config.json`. It also asserts every released package declares `repository`.
 - The `lint` job in `.github/workflows/ci.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is the job's first step, ahead of the toolchain install, so a bad title reports in seconds. Read the note below before making it a required check.
 
@@ -170,5 +170,5 @@ reusable workflow calls are authorized against the caller workflow, so
 
 Workflows do not start automatically for pull requests opened by the built-in `GITHUB_TOKEN`. Runs on release-please's own PR are created in the `action_required` state and wait for a maintainer to approve them — visible on the release branch today, where `CI` runs alternate between `action_required` and `success` depending on whether someone clicked through. Nothing is permanently unsatisfiable, but every required context becomes a manual approval step on every release PR, and `main` sets `enforce_admins: true`, so there is no admin bypass when someone forgets.
 
-To restore automatic runs, pass a GitHub App installation token (or a PAT) as `token:` to `googleapis/release-please-action` in `release.yml` — PRs it opens then trigger workflows like any other. Do that first if you don't want the approval step, then add `lint` — and whatever else should gate merges — to the required status checks.
-- `packages/<pkg>/CHANGELOG.md` — Generated and appended-to by release-please. Don't edit by hand; release-please reconciles entries from commits.
+To restore automatic runs, pass a GitHub App installation token (or a PAT) as `token:` to `googleapis/release-please-action` in `release.yml` — PRs it opens then trigger workflows like any other. Do that first if you do not want the approval step, then add `lint` — and whatever else should gate merges — to the required status checks.
+- `packages/<pkg>/CHANGELOG.md` — Generated and appended-to by release-please. Do not edit by hand. Release-please reconciles entries from commits.

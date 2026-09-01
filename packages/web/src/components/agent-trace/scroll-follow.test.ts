@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { isTraceScrollNearBottom, TRACE_SCROLL_BOTTOM_THRESHOLD_PX } from "./scroll-follow";
 
 describe("isTraceScrollNearBottom", () => {

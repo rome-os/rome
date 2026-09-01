@@ -2,7 +2,7 @@
 // stubbed; we pin the request shapes (routes, method, body) and the non-throwing
 // result mapping (start error, 404 poll, 409 late input).
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   cancelSetup,
   getSetupState,
@@ -12,10 +12,10 @@ import {
   type SetupState,
 } from "@/lib/setup-api";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => rs.restoreAllMocks());
 
 function stubFetch(handler: (url: string, init?: RequestInit) => Response) {
-  return vi
+  return rs
     .spyOn(globalThis, "fetch")
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) =>
       Promise.resolve(handler(typeof input === "string" ? input : input.toString(), init)),

@@ -1,4 +1,4 @@
-# Messaging: Messages, Channels, Policies, Sentinel, Approvals
+# Messaging: Messages, Conversations, Channels, Policies, Sentinel, Approvals
 
 ## Message
 
@@ -13,8 +13,24 @@ A message is one thing somebody said — a line a person sent to Rome, or one Ro
 **Not to be confused with:**
 
 - **[Channel](#channels)** — the channel is what carried a message. The message is what was said on it.
+- **[Conversation](#conversation)** — the conversation is the thread a message was said in. The message is the one line.
 - **[Account](people.md#account)** — the account is who said it. The message is what they said.
 - **Notification** — a notification is an out-of-band delivery to the guardian. It lands in the same transcript, but nobody sent it on a channel.
+
+## Conversation
+
+A conversation is the thread a [message](#message) was said in, named by the platform's own id for it. Every message belongs to exactly one.
+
+**Contracts:**
+
+- A direct conversation is addressed by the person on it. A group conversation is addressed by the group and by nobody on it, so no account names one and no read scoped by an account reaches one.
+- A conversation belongs to the [channel](#channels) that holds it. Two channels are free to spell an id the same way and mean two different threads.
+- What a conversation holds and what passed between Rome and a person are two questions to one store, not two histories: a channel answers both from the record it already keeps.
+
+**Not to be confused with:**
+
+- **[Account](people.md#account)** — the account is who Rome is talking to. The conversation is where they said it. On a direct thread the two are named by one string; on a group they are not.
+- **Session** — a session is Rome's own working context for a thread. The conversation is the thread itself, which exists whether or not Rome ever opened a session on it.
 
 ## Channels
 

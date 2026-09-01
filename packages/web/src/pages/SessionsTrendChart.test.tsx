@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+// @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { SessionMetricGroup, SessionMetricsBucket } from "@rome/api-types/sessions";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { SessionsTrendChart } from "./SessionsTrendChart";
 
 const usage = (totalTokens: number) => ({
@@ -103,7 +103,7 @@ beforeAll(() => {
     disconnect(): void {}
   }
   globalThis.ResizeObserver = TestResizeObserver;
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+  rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
     const measuringText = this.id === "recharts_measurement_span";
     const width = measuringText ? 40 : 1_000;
     const height = measuringText ? 14 : 220;
@@ -122,11 +122,11 @@ beforeAll(() => {
 });
 
 afterEach(() => cleanup());
-afterAll(() => vi.restoreAllMocks());
+afterAll(() => rs.restoreAllMocks());
 
 describe("SessionsTrendChart", () => {
   it("renders a Recharts stack and keeps legend drill-down behavior", () => {
-    const onSeriesSelect = vi.fn();
+    const onSeriesSelect = rs.fn();
     const { container } = render(
       <SessionsTrendChart
         buckets={buckets}
@@ -147,7 +147,7 @@ describe("SessionsTrendChart", () => {
   });
 
   it("keeps an explicit empty state", () => {
-    render(<SessionsTrendChart buckets={[]} series={[]} metric="runs" onSeriesSelect={vi.fn()} />);
+    render(<SessionsTrendChart buckets={[]} series={[]} metric="runs" onSeriesSelect={rs.fn()} />);
 
     expect(screen.getByText("No runs in this period")).toBeTruthy();
   });
@@ -158,7 +158,7 @@ describe("SessionsTrendChart", () => {
         buckets={buckets}
         series={series}
         metric="errors"
-        onSeriesSelect={vi.fn()}
+        onSeriesSelect={rs.fn()}
       />,
     );
 
@@ -171,7 +171,7 @@ describe("SessionsTrendChart", () => {
         buckets={[]}
         series={[appSeries]}
         metric="runs"
-        onSeriesSelect={vi.fn()}
+        onSeriesSelect={rs.fn()}
       />,
     );
 

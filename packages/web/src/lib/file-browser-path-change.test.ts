@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { getFileBrowserPathChangeUpdate } from "./file-browser-path-change";
 
 describe("file browser path change helpers", () => {

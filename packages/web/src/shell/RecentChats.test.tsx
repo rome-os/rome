@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -16,9 +16,9 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  rs.useRealTimers();
   localStorage.clear();
-  vi.restoreAllMocks();
+  rs.restoreAllMocks();
 });
 
 interface MockSession {
@@ -35,7 +35,7 @@ interface MockSession {
 }
 
 function mockSessions(sessions: MockSession[]) {
-  const spy = vi.spyOn(globalThis, "fetch").mockImplementation((async (
+  const spy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
@@ -111,7 +111,7 @@ function textIndex(container: HTMLElement, text: string): number {
 describe("RecentChats", () => {
   it("keeps search and list settings visible together", async () => {
     mockSessions([]);
-    const onSearch = vi.fn();
+    const onSearch = rs.fn();
     const user = userEvent.setup();
 
     renderRecentChats("/chat", onSearch);
@@ -128,7 +128,7 @@ describe("RecentChats", () => {
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
       attempts += 1;
       if (attempts === 1) return new Response("boom", { status: 500 });
       return new Response(
@@ -253,8 +253,8 @@ describe("RecentChats", () => {
 
   it("groups by date using activity time instead of created time", async () => {
     localStorage.setItem("rome-recent-chats-group-mode", "date");
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
+    rs.useFakeTimers();
+    rs.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
     mockSessions([
       {
         id: "today-activity",
@@ -271,7 +271,7 @@ describe("RecentChats", () => {
     renderRecentChats();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
+      await rs.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByText("Today")).toBeTruthy();
     expect(screen.getByText("Today activity")).toBeTruthy();

@@ -94,7 +94,7 @@ An entry enters a nested file when it holds in that directory and no file above 
 
 ## Eviction
 
-An entry whose named failure can no longer happen leaves. `[human]`
+An entry whose named failure cannot happen leaves. `[human]`
 
 When a directory's behavior changes, re-run the admission bar on that directory's file. An entry that now fails leaves. `[human]`
 

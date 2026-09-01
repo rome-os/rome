@@ -318,7 +318,7 @@ export default function ConnectionGalleryPrototypePage() {
 function GallerySection({ scenario }: { scenario: GalleryScenario }) {
   // Telegram renders here too (bot + personal-account slots in one dialog) so
   // the list-derived states show alongside every other service; the pure-view
-  // section above additionally covers the bot ceremony's interaction states no
+  // section above also covers the bot ceremony's interaction states no
   // list snapshot can express.
   const cards = buildConnectionCards(scenario.connections, scenario.composio).filter(
     (card) => !scenario.only || scenario.only.includes(card.service),

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, rs } from "@rstest/core";
 import { fetchAuthState, hasSession } from "@/lib/auth-state";
 
 type Fetcher = typeof fetch;
@@ -17,12 +17,12 @@ function notOkResponse(status = 502): Response {
 }
 
 function makeFetcher(handler: (path: string) => Response | Promise<Response>): Fetcher {
-  return vi.fn(async (input: RequestInfo | URL) => handler(String(input))) as unknown as Fetcher;
+  return rs.fn(async (input: RequestInfo | URL) => handler(String(input))) as unknown as Fetcher;
 }
 
 describe("fetchAuthState", () => {
   it("flags backendReachable=false when /api/health throws (e.g. ECONNREFUSED)", async () => {
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const fetcher = rs.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/health") throw new TypeError("Failed to fetch");
       return jsonResponse({});
     }) as unknown as Fetcher;
@@ -82,7 +82,7 @@ describe("fetchAuthState", () => {
   });
 
   it("flags backendReachable=false when /api/bootstrap throws after a healthy probe", async () => {
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const fetcher = rs.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === "/api/health") return jsonResponse({ status: "ok" });
       throw new TypeError("Failed to fetch");
@@ -122,7 +122,7 @@ describe("fetchAuthState", () => {
   });
 
   it("does not send credentials with the health probe", async () => {
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetcher = rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/health") {
         expect(init?.credentials).toBeUndefined();
         return jsonResponse({ status: "ok" });
@@ -138,7 +138,7 @@ describe("fetchAuthState", () => {
   it("threads the AbortSignal through both fetch calls (health + bootstrap only)", async () => {
     const controller = new AbortController();
     const seen: (AbortSignal | undefined)[] = [];
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetcher = rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       seen.push(init?.signal ?? undefined);
       if (String(input) === "/api/health") return jsonResponse({ status: "ok" });
       return jsonResponse({ phase: "ready" });

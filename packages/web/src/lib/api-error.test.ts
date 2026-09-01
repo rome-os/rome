@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { getApiErrorMessage } from "./api-error";
 
 function response(body: string, contentType = "application/json"): Response {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import type { ApprovalRecord } from "@/lib/chat-types";
 import { deriveCardStatus, isTerminalCardStatus } from "./derive-card-status";
 

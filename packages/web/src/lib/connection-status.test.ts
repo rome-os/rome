@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import { connectionStatus } from "@/lib/connection-status";

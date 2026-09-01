@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import { detectAppInstalls, resolveAppToOpen } from "./chat-helpers";
 import type { TraceBlockDto } from "@rome/api-types/trace-segments";
 

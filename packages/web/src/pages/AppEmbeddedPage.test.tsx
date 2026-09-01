@@ -1,8 +1,9 @@
-// @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import * as React from "react";
 import i18n from "@/i18n";
 import AppEmbeddedPage from "./AppEmbeddedPage";
 
@@ -17,10 +18,9 @@ import AppEmbeddedPage from "./AppEmbeddedPage";
 // component that mirrors the one behavior under test: it keys a mount counter on
 // `entryUrl`, exactly as the real host keys its mount lifecycle on the entry URL.
 // So `hostMounts.count` incrementing is a faithful proxy for "the host remounted".
-const hostMounts = vi.hoisted(() => ({ count: 0, lastEntryUrl: "" }));
+const hostMounts = rs.hoisted(() => ({ count: 0, lastEntryUrl: "" }));
 
-vi.mock("@/components/rome-app-host", async () => {
-  const React = await import("react");
+rs.mock("@/components/rome-app-host", () => {
   return {
     RomeAppHost: ({ entryUrl }: { entryUrl: string }) => {
       React.useEffect(() => {
@@ -35,7 +35,7 @@ vi.mock("@/components/rome-app-host", async () => {
   };
 });
 
-vi.mock("@/hooks/use-theme", () => ({
+rs.mock("@/hooks/use-theme", () => ({
   useTheme: () => ({ resolved: "light", theme: "ember" }),
 }));
 
@@ -131,8 +131,8 @@ beforeEach(() => {
   hostMounts.lastEntryUrl = "";
   manifestFetches = 0;
   respond = () => manifestResponse("/assets/demo.v1.js");
-  vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-  vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+  rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith("/api/apps/demo/manifest")) {
       manifestFetches += 1;
@@ -144,8 +144,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
 });
 
 function renderPage() {
@@ -293,7 +293,7 @@ describe("AppEmbeddedPage catalog-change refresh", () => {
     // must not clobber the fresher state. Drive manifest fetches through manual
     // deferrals so we control arrival order.
     const deferrals: Array<(r: Response) => void> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith("/api/apps/demo/manifest")) {
         manifestFetches += 1;

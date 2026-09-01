@@ -148,7 +148,7 @@ describe("SessionsRepository", () => {
     });
 
     const before = await repo.findById(id);
-    // Small delay to ensure timestamp changes
+    // Small delay to make sure timestamp changes
     await new Promise((r) => setTimeout(r, 10));
     await repo.touch(id);
 

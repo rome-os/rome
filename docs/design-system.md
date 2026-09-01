@@ -111,7 +111,7 @@ The tokens are the whole scale. Which members *offer* a step is a separate quest
 
 `--control-px-center-*` is for **centred** content, which is not an edge because nothing lines up against it: a default `Button`, a `SegmentedControl` segment, a `TabsTrigger`. It is a token rather than each component's own step so that one size name still means one inset across the members that share it — a `Button` and a segment at `md` pad the same.
 
-The groups agree at `md` and `lg` and diverge at `sm`, where a start edge takes 10px to keep a field's text off its border and centred content takes 8px. Both set symmetric padding; neither word names a side.
+The groups agree at `md` and `lg` and diverge at `sm`, where a start edge takes 10px to keep a field's text off its border and centred content takes 8px. Both set symmetric padding. Neither word names a side.
 
 Two members sit outside the groups. `Button size="xs"` is 24px, below the scale, and neither group carries an `xs` step, so it pads from a spacing step. `TabsTrigger` has no size axis and its list is 32px, between the shared heights — it takes the `sm` centred step, recorded as a divergence in [`ui/component-roles.md`](ui/component-roles.md#known-divergences) rather than pretending to fit. The vertical inset on Textarea, the one control that pads vertically at all, is a spacing step too, with nothing to agree with.
 
