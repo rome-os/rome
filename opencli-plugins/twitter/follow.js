@@ -1,10 +1,10 @@
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+import { CommandExecutionError, TimeoutError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // Overrides the built-in twitter/follow: plugins are discovered last at opencli
 // startup, so this cli() call wins the "twitter/follow" registry key while every
 // other twitter command stays built-in. Diff base: clis/twitter/follow.js in
-// @yunfanye/opencli@1.8.6 - the only addition is the --only-follow-back gate.
+// @yunfanye/opencli@1.8.8 - the only addition is the --only-follow-back gate.
 cli({
   site: "twitter",
   name: "follow",
@@ -36,6 +36,7 @@ cli({
     await page.goto(`https://x.com/${username}`);
     await page.wait({ selector: '[data-testid="primaryColumn"]' });
     const result = await page.evaluate(`(async () => {
+        let writeStarted = false;
         try {
             let attempts = 0;
             let followBtn = null;
@@ -67,6 +68,7 @@ cli({
                 }
             }
 
+            writeStarted = true;
             followBtn.click();
             await new Promise(r => setTimeout(r, 1500));
 
@@ -75,17 +77,30 @@ cli({
             if (verify) {
                 return { ok: true, message: 'Successfully followed @${username}.' };
             } else {
-                return { ok: false, message: 'Follow action initiated but UI did not update.' };
+                return { ok: false, unconfirmed: true, message: 'Follow action initiated but UI did not update.' };
             }
         } catch (e) {
-            return { ok: false, message: e.toString() };
+            return { ok: false, unconfirmed: writeStarted, message: e.toString() };
         }
     })()`);
     if (result.refused) throw new CommandExecutionError(result.message);
-    if (result.ok) await page.wait(2);
+    if (result.unconfirmed) {
+      throw new TimeoutError(
+        "twitter follow confirmation",
+        1.5,
+        `${result.message} Check the profile before retrying; the follow may already have succeeded.`,
+      );
+    }
+    if (!result.ok) {
+      throw new CommandExecutionError(
+        result.message,
+        "Nothing changed. Open the profile in the browser and retry.",
+      );
+    }
+    await page.wait(2);
     return [
       {
-        status: result.ok ? "success" : "failed",
+        status: "success",
         message: result.message,
       },
     ];
