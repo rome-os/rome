@@ -24,10 +24,10 @@ provider's native structured-output API.
 - The provider owns constrained generation, validation feedback, and its
   internal retry policy. Rome does not add a second model retry loop.
 - A successful terminal `result` carries the validated value in
-  `structuredOutput`; `content` is that value's JSON serialization. Missing,
+  `structuredOutput`. `content` is that value's JSON serialization. Missing,
   invalid, or retry-exhausted provider output fails the turn.
 - Structured output is separate from a handoff's guardian-approved handback.
-  A handback may span several ordinary conversational turns; an
+  A handback may span several ordinary conversational turns. An
   `outputSchema` turn may not park on that interaction.
 
 **Not to be confused with:**

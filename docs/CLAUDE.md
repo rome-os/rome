@@ -5,6 +5,7 @@ Durable design documentation for Rome. [README.md](README.md) maps what lives wh
 ## Playbook
 
 - Before writing any prose in `docs/`, read [authoring/WRITING.md](authoring/WRITING.md) — terminology, word choice, verbs, sentences, structure.
+- After changing prose in `docs/`, run `pnpm lint:prose`. Vale checks the rules from WRITING.md that a machine can decide, against the baseline in `scripts/prose-baseline.mjs`. The same check covers comments in `.ts` and `.tsx` sources.
 - Before writing a rulebook for a content type, read [authoring/authoring.md](authoring/authoring.md) — the format, admission, eviction, and intake it must carry.
 - When writing an entry in `concepts/`, `principles/`, or `architecture/`, read that family's rulebook: [authoring/concepts.md](authoring/concepts.md), [authoring/principles.md](authoring/principles.md), [authoring/architecture.md](authoring/architecture.md).
 - When recording a standing decision — the choice, the rejected alternatives, and the forces between them — write an ADR in [`adrs/`](authoring/adrs.md), one file per decision keyed by filename.

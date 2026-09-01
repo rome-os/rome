@@ -35,7 +35,7 @@ export interface ScaffoldDevAppOptions {
  * Scaffold a new dev app from the bundled template into the caller-supplied
  * `rootPath`. Filesystem-only — does NOT touch the lockfile, registry, or
  * DB. The caller (typically the agent action `app_management { op: "create" }`)
- * is responsible for choosing `rootPath` and for following up with
+ * chooses `rootPath` and follows up with
  * `op: "install"` to install via `AppManager.install`.
  *
  * `rootPath` must be absolute. Refuses to overwrite an existing non-empty

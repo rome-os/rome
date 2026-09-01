@@ -1,0 +1,32 @@
+# The house word list, from the "Word choice" section of
+# docs/authoring/WRITING.md. Every pair here is a choice this repo has made, so
+# this rule is an error. Rome.PlainLanguage holds the wider advisory list.
+#
+# Each key also matches the inflections a doc actually uses ("commences",
+# "obtained"). The replacement stays in base form — the message names the word
+# to reach for, not the exact string to paste.
+#
+# WRITING.md also prefers "start" over "begin" and "initiate", and "get" over
+# "acquire". Those three are absent here on purpose: each has a technical sense
+# this rule cannot tell apart from the prose one. "Begins" is a plural noun in
+# "ends FIFO with unmatched begins", "acquire" is a noun in "on every acquire",
+# and "initiated" is half of a compound adjective in "backend-initiated". A
+# reader still applies the WRITING.md preference. The gate does not, because it
+# would be wrong more often than right.
+extends: substitution
+message: "Use '%s', not '%s'."
+level: error
+ignorecase: true
+swap:
+  'commence(?:s|d)?': start
+  'utili[sz]e(?:s|d)?': use
+  'utili[sz]ation': use
+  'leverage(?:s|d)?': use
+  'facilitate(?:s|d)?': help
+  'ensure(?:s|d)?': make sure
+  'prior to': before
+  'obtain(?:s|ed)?': get
+  'demonstrate(?:s|d)?': show
+  'additionally': also
+  'furthermore': also
+  'moreover': also

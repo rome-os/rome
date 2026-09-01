@@ -51,6 +51,20 @@
             # its own pinned binaries — see .github/workflows/ci.yml.
             pkgs.shellcheck
             pkgs.shfmt
+            # Prose linting for docs/ and for comments in .ts/.tsx sources
+            # (`pnpm lint:prose`). Vale reads the vendored style in
+            # .vale/styles/Rome, which encodes the machine-checkable rules from
+            # docs/authoring/WRITING.md.
+            #
+            # This lags CI on purpose, and it is the one tool here that does.
+            # CI pins 3.19.0 for a line-mapping fix that matters for comments
+            # inside long block comments; nixpkgs carries 3.14.1, which reports
+            # a drifted line for a few of them. The verdict is identical either
+            # way — the baseline counts alerts per file and per rule, not per
+            # line — so a host run still says pass or fail correctly, and only
+            # the line a reader jumps to can be off. Drop this note when
+            # nixpkgs reaches 3.19.0.
+            pkgs.vale
             # Vultr's API CLI, for ad-hoc host-side infrastructure work. It
             # reads VULTR_API_KEY from the environment — keep the key out of
             # the repo and out of the shell definition.

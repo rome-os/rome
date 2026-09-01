@@ -170,7 +170,7 @@ export function grantProfileFromBundle(
 }
 
 /**
- * Ensure a provider's connection exists and import the bundle into its grant.
+ * Make sure a provider's connection exists and import the bundle into its grant.
  * Mints the connection on first import (fresh install / first redeem after
  * upgrade); subsequent imports reuse the existing connection —
  * `importCredential`'s material comparison makes an unchanged re-import a no-op.
@@ -261,7 +261,7 @@ export async function reconcileProviderAccounts(
     const existing = connections.find((c) => c.service === provider);
 
     // Fresh instance: a legacy row but no ledger connection yet. Mint the
-    // connection row directly, then ensure + authorize its single grant. Each
+    // connection row directly, then `ensureGrant` + authorize its single grant. Each
     // OAuth provider descriptor declares exactly one grant (OAUTH_PROVIDER_GRANTS),
     // so ensuring that one is the whole grant set — `load()` then rehydrates a
     // complete connection with no separate import step.

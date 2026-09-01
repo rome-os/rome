@@ -1,0 +1,20 @@
+# "No history words. Docs state what is true now." — docs/authoring/WRITING.md,
+# "Word choice".
+#
+# "used to" carries two senses, and only the history one is banned: "it used to
+# read the cache" versus "the flag is used to pick the cache". Vale's regex
+# engine is RE2, which has no lookbehind, so the passive sense cannot be
+# excluded by asserting what precedes the phrase. The token instead matches only
+# the history sense head-on, by requiring a subject in front of it. A history
+# "used to" with a noun subject ("the daemon used to retry") slips through, and
+# stays a job for the reader.
+extends: existence
+message: "Remove the history word '%s' — docs state what is true now."
+level: error
+ignorecase: true
+tokens:
+  - 'previously'
+  - 'formerly'
+  - 'no longer'
+  - 'renamed from'
+  - '(?:it|this|that|these|those|they|we|you|which) used to'

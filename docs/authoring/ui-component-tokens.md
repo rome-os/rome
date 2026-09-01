@@ -8,7 +8,7 @@ No component spec exists yet. Every rule below predates the first spec, which me
 
 One doc per component. Required sections: When to use, Anatomy, Token table, Interaction states, Component tokens, Examples. `[mech]`
 
-The first line names the component's role and links to [../ui/component-roles.md](../ui/component-roles.md). A spec states what is true of the one component; a clause that holds for every member of the role lives in the roles doc, never in both. `[mech]`
+The first line names the component's role and links to [../ui/component-roles.md](../ui/component-roles.md). A spec states what is true of the one component. A clause that holds for every member of the role lives in the roles doc, never in both. `[mech]`
 
 ### When to use
 

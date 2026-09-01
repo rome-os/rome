@@ -27,7 +27,7 @@ Both branches call `create` with a new app id and scoped name:
   and failure.
 
 Creation writes only the new authoring directory, never source installation state or user data.
-Local copies exclude dependencies, caches, and secret files; unsupported links are rejected.
+Local copies exclude dependencies, caches, and secret files. Unsupported links are rejected.
 Both paths validate `includeSource`, preserve Remix provenance, and isolate declared identities.
 The skill finishes identity and data isolation before building and installing the derived app.
 

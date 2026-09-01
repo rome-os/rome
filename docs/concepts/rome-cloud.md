@@ -22,11 +22,11 @@ It plays four roles:
 
 ## Instance sign-in
 
-An instance authenticates its guardian to Rome Cloud over a standard OAuth 2.0 / OIDC surface: one front-channel `/oauth2/authorize` and one back-channel `/oauth2/token`. Sign-in yields a signed identity assertion, and an enrolling instance additionally receives its durable instance credential.
+An instance authenticates its guardian to Rome Cloud over a standard OAuth 2.0 / OIDC surface: one front-channel `/oauth2/authorize` and one back-channel `/oauth2/token`. Sign-in yields a signed identity assertion, and an enrolling instance also receives its durable instance credential.
 
 **Contracts:**
 
-- Two endpoints, with the grant selected by scope — never one endpoint per flow variant. Scope `openid` returns the login assertion. Scope `openid instance:enroll` additionally mints the durable instance credential.
+- Two endpoints, with the grant selected by scope — never one endpoint per flow variant. Scope `openid` returns the login assertion. Scope `openid instance:enroll` also mints the durable instance credential.
 - A code minted for one scope can never be redeemed for another.
 - Identity is a verifiable token. The assertion is asymmetrically signed, and the instance verifies it against the published JWKS, selecting the key by `kid` — so key rotation is additive, with no client change. The issuer is validated ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) mix-up protection), and the subject is the authenticated account. No separate unsigned identity body exists to reconcile against a second lookup.
 - Ownership is enforced at authorization. Rome Cloud issues a code only to the account that owns the instance, so a verified assertion names the confirmed owner and the instance performs no cross-account reconciliation.

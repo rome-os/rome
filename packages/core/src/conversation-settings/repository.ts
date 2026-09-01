@@ -65,7 +65,7 @@ export class ConversationSettingsRepository {
     );
   }
 
-  /** Ensure and mutate one aggregate in one SQLite transaction. Callers
+  /** Create if missing, then mutate one aggregate in one SQLite transaction. Callers
    * serialize by address before entering this method. */
   mutate(
     descriptor: ConversationDescriptor,

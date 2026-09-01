@@ -26,9 +26,20 @@ A project-specific term earns admission only with a one-line separation from its
   > Prefer: "install" always means the daemon operation, "set up" covers the dev environment.
   > Over: "install" means the daemon operation in one section and the dev-environment steps in another.
 
+<!-- vale Rome.WordChoice = NO -->
+<!-- vale Rome.Marketing = NO -->
+<!-- vale Rome.History = NO -->
+
 - Use the plain, common word over the fancy synonym: *start* not *begin/commence/initiate*, *use* not *utilize/leverage*, *help* not *facilitate*, *make sure* not *ensure*, *before* not *prior to*, *get* not *obtain/acquire*, *show* not *demonstrate*, *also* not *additionally/furthermore/moreover*.
+
+  For a word that is not on that list, look it up in [`PlainLanguage.yml`](../../.vale/styles/Rome/PlainLanguage.yml) — a fancy word on the left, the plainer word to reach for on the right. Add a pair whenever a fancier word gets past review.
+
 - Cut marketing adjectives entirely: *seamless*, *robust*, *powerful*, *cutting-edge*, *effortless*, *world-class*, *next-generation*, *revolutionary*.
 - No history words: *previously*, *no longer*, *used to*, *renamed from*. Docs state what is true now.
+
+<!-- vale Rome.WordChoice = YES -->
+<!-- vale Rome.Marketing = YES -->
+<!-- vale Rome.History = YES -->
 
 ## Verbs
 
@@ -39,13 +50,17 @@ A project-specific term earns admission only with a one-line separation from its
 
 - Use a real verb for the action, not a nominalization.
 
+  <!-- vale Rome.Nominalizations = NO -->
   > Prefer: "analyze the log."
   > Over: "perform an analysis of the log."
+  <!-- vale Rome.Nominalizations = YES -->
 
 - No stacked auxiliaries or throat-clearing.
 
+  <!-- vale Rome.ThroatClearing = NO -->
   > Prefer: "this improves X."
   > Over: "it is important to note that this may help to improve X."
+  <!-- vale Rome.ThroatClearing = YES -->
 
 - Avoid an "-ing" main verb when a simple tense will do.
 
@@ -75,8 +90,10 @@ A project-specific term earns admission only with a one-line separation from its
 - At most six sentences per paragraph.
 - No preamble, no summary, no closing remarks. The doc starts with content and stops when the content ends.
 
+  <!-- vale Rome.ThroatClearing = NO -->
   > Prefer: opening with the first rule.
   > Over: "This document describes the rules for…" followed by the first rule.
+  <!-- vale Rome.ThroatClearing = YES -->
 
 - Write steps as a numbered list: imperative mood, one action per item.
 
@@ -99,3 +116,15 @@ If a concept has a canonical home, link to it instead of re-explaining it.
 
 > Prefer: "messages are triaged by the [sentinel](../concepts/messaging.md#sentinel)."
 > Over: restating what the sentinel is, then using it.
+
+## Checking
+
+`pnpm lint:prose` runs [Vale](https://vale.sh) over `docs/` and over the comments in `.ts` and `.tsx` sources. The rules it can decide live in [`.vale/styles/Rome`](../../.vale/styles/Rome), one file per section above. The rest — one name per thing, one meaning per word, one topic per paragraph — stay with the reader.
+
+Four words on the lists above are deliberately absent from the gate: *begin*, *initiate*, *acquire*, and *robust*. Each carries a technical sense a word list cannot tell from the prose one, so checking them would report more wrong answers than right ones. Apply them by reading.
+
+Comments follow the same word lists as docs, and three rules are lifted for them. [comments.md](comments.md) admits the history phrasings in present-tense prose, and the bans on semicolons and contractions cover `docs/` only.
+
+Prose written before the check is recorded in [`scripts/prose-baseline.mjs`](../../scripts/prose-baseline.mjs) and gates nothing. A new violation fails the check, and so does a baseline entry that has been fixed, which keeps the list shrinking.
+
+`vale docs` reports the alerts themselves, and `vale <path>` reads one file. Add `--minAlertLevel suggestion` for the advisory word list and the sentence-length rule.

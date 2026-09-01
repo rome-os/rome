@@ -99,7 +99,7 @@ const returnHandlers = new Map<string, Promise<ReturnOutcome>>();
  *    the OAuth primitive and confers. This is the #1611 path.
  *  - SIGN IN with the provider — authentication (guardian → Rome Cloud account),
  *    NOT a connection. No setup is waiting, so this falls through to
- *    `/oauth/redeem`, which redeems the SAME OAuth primitive and additionally
+ *    `/oauth/redeem`, which redeems the SAME OAuth primitive and also
  *    issues the guardian session. It also catches a connect whose in-memory
  *    setup was lost to a restart. `/oauth/redeem` persists as the sign-in entry,
  *    not as debt — sign-in is simply outside the connections concept.

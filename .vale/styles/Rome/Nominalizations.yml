@@ -1,0 +1,27 @@
+# "Use a real verb for the action, not a nominalization." —
+# docs/authoring/WRITING.md, "Verbs".
+#
+# A curated list of the verb-plus-noun frames, not a pattern over the "-tion"
+# suffix. The suffix catches every legitimate noun in the docs as well
+# ("configuration", "migration"), and only the frame is the defect.
+extends: substitution
+message: "Use the verb '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  '(?:perform|conduct|carry out) an analysis of': analyze
+  '(?:perform|conduct|carry out) a review of': review
+  '(?:perform|conduct|carry out) an investigation of': investigate
+  '(?:make|reach) a decision': decide
+  '(?:make|form) an assumption': assume
+  '(?:provide|give) an explanation of': explain
+  '(?:provide|give) a description of': describe
+  'make a comparison': compare
+  'make an adjustment to': adjust
+  'give consideration to': consider
+  'take into consideration': consider
+  'is (?:a )?reflection of': reflects
+  'has the ability to': can
+  'has a requirement for': needs
+  'provides guidance for': guides
+  'is responsible for': handles

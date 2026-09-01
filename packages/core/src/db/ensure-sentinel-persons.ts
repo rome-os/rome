@@ -5,7 +5,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("ensure-sentinel-persons");
 
 /**
- * Ensure the STRANGER sentinel person exists. Idempotent — safe to call on every startup.
+ * Make sure the STRANGER sentinel person exists. Idempotent — safe to call on every startup.
  */
 export async function ensureSentinelPersons(repo: PersonMappingRepository): Promise<void> {
   const existing = await repo.findById(STRANGER_PERSON_ID);

@@ -253,7 +253,7 @@ export const ZERO_GRANT_SERVICES: readonly string[] = ["webchat"];
 
 /**
  * Import a single row: read its settings key, and if it carries usable
- * material, ensure a connection exists for the row's service and import the
+ * material, make sure a connection exists for the row's service and import the
  * credential into the row's grant.
  *
  * `registry.find(service)[0] ?? registry.connect(service)` mints the connection
@@ -388,7 +388,7 @@ export async function reconcileOneChannel(
 }
 
 /**
- * Ensure a connection exists for every zero-grant service. These
+ * Make sure a connection exists for every zero-grant service. These
  * unlock at birth (no credential to import), so all boot needs to do is mint the
  * connection once — the registry builds the Talk epoch immediately and the
  * bridge registers its adapter on the synchronous first unlock. Idempotent:

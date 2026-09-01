@@ -370,7 +370,7 @@ async function ensureInit(dir: string, branch: string): Promise<void> {
   if (!hasGitRepo(dir)) {
     await git(dir, ["init"]);
   }
-  // Ensure HEAD is on `branch`. A pre-existing `.git` may sit on a different
+  // Make sure HEAD is on `branch`. A pre-existing `.git` may sit on a different
   // branch — an older git default (`master`), a leftover from a prior attempt,
   // or a detached HEAD — and without this the later `push … <branch>` fails with
   // "src refspec <branch> does not match any". Guarding on `hasGitRepo` alone

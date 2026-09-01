@@ -56,7 +56,7 @@ A bare figure is the lightness of an OKLCH value. Slate's sit at chroma 0. Ember
 - **Steps bunch at the ends and spread across the middle.** Surfaces stack at the pale end, and in dark mode at the deep end. Text sits mid-ramp, where each text role clears its own contrast bar, so those gaps run wide.
 - **Chroma peaks mid-ramp and drops at both ends.** A status ramp is most saturated near mid lightness. Its pale fills and deep dark-mode fills read as a tinted neutral.
 - **A half step on a status ramp moves chroma, not lightness.** Each carries two steps near L .85: a low-chroma light-mode border and a high-chroma partner beside it. On a neutral ramp the half step means a lightness between two existing steps. `[mech]`
-- **No one step of a hue reads on both ends of its own ramp.** A deep step clears AA on that hue's pale steps and on the neutral canvases; nothing clears it on the saturated middle, where only a near-white or near-black neutral does. A ramp therefore supports a text role against its pale end or against its mid fill, never one role against both.
+- **No one step of a hue reads on both ends of its own ramp.** A deep step clears AA on that hue's pale steps and on the neutral canvases. Nothing clears it on the saturated middle, where only a near-white or near-black neutral does. A ramp therefore supports a text role against its pale end or against its mid fill, never one role against both.
 - **Ash desaturates Ember at constant lightness through the pale half, and copies it through the deep half.** Red minus blue stays at or under 9 across Ash's steps 25 to 400, against 19 on Ember's surfaces and 35 on its text steps. Desaturating rather than lightening holds the contrast ratios steady. Steps 450 and deeper are identical in the two palettes, because those steps sit at chroma .009, where there is no yellow to remove.
 - **`--orange-*` bunches at 500 to 600.** Those three span .04 lightness and differ mainly in chroma. They are the deeper variants Ash needs to clear AA against its lighter surfaces, not three visibly different depths.
 
@@ -78,7 +78,7 @@ Each ratio holds against the named step in the same palette. Moving the value br
 
 Brand identity fixes `--orange-300` and `--orange-400`. A contrast failure resolves by pointing the semantic token at the matching deeper step, never by moving the brand value. `[human]`
 
-`themes-contrast.test.ts` measures every pairing the mapping declares, per theme and mode, and holds each to its bar. The pairings that ship below it are recorded there with the ratio each measures and tracked in [issue #2167](https://github.com/amantru/rome-internal/issues/2167); the record is two-sided, so a value that improves past its bar fails the test until the stale entry goes. `[mech]`
+`themes-contrast.test.ts` measures every pairing the mapping declares, per theme and mode, and holds each to its bar. The pairings that ship below it are recorded there with the ratio each measures and tracked in [issue #2167](https://github.com/amantru/rome-internal/issues/2167). The record is two-sided, so a value that improves past its bar fails the test until the stale entry goes. `[mech]`
 
 ## Forbidden usage
 

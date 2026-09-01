@@ -42,7 +42,7 @@ An invariant a diff must not break belongs in [concepts](concepts.md) or [`archi
 
 A replaced decision flips its record to `Superseded` with a link to the successor record. The record stays as history. `[mech]`
 
-When the surface a decision constrained is gone and the decision can no longer arise, delete the record. `[human]`
+When the surface a decision constrained is gone and the decision cannot arise, delete the record. `[human]`
 
 ## Intake
 

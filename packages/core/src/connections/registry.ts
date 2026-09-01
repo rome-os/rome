@@ -213,7 +213,7 @@ export class ConnectionRegistry {
   }
 
   /** True iff a descriptor has been registered for `service`. Lets callers
-   *  (settings-import's zero-grant ensure) skip services this registry does not
+   *  (settings-import's zero-grant path) skip services this registry does not
    *  know about — e.g. a test that registers only a subset. */
   isRegistered(service: string): boolean {
     return this.descriptors.has(service);
@@ -268,7 +268,7 @@ export class ConnectionRegistry {
   }
 
   /** Mint a new Connection from a registered descriptor. Persists the record,
-   *  ensures every declared grant row exists ("unauthorized"), and builds any
+   *  makes sure every declared grant row exists ("unauthorized"), and builds any
    *  zero-grant capabilities immediately (epoch from birth). */
   async connect(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, async () => {

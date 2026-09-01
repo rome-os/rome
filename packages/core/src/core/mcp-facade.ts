@@ -1171,7 +1171,7 @@ function buildInteractiveTools(
   // to the source — but their handlers refuse at runtime (below) instead of
   // claiming UI was delivered.
   if (!supportsInteractiveSurface) return tools;
-  // confirm_output additionally belongs only to a conversational handback (the
+  // confirm_output also belongs only to a conversational handback (the
   // surface that resolves it is the handoff approval gate); a plain chat never
   // has it.
   if (hasHandback) tools.push(...buildConfirmOutputFacadeTool(interactiveSurfaceDetached));

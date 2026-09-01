@@ -20,7 +20,7 @@ SQL). They can be — and in prod almost always are — the same target.
 Read by `infra/observability/otel-collector-config.yaml` via `${env:VAR}`
 substitution. **Set in `.env.collector` — never in the shared `.env`.**
 The Rome service uses `env_file: .env` and would otherwise pick up these
-secrets too; the separate file is what enforces the credential boundary.
+secrets too. The separate file is what enforces the credential boundary.
 
 `.env.collector` location:
 
@@ -42,7 +42,7 @@ crash-loops at boot. See [`../architecture/observability.md`](../architecture/ob
 ### Query target (ad-hoc SQL)
 
 `scripts/dev-up.sh` writes `.obs/env` at the worktree root on every
-`pnpm dev:all`; the file is shell-exportable:
+`pnpm dev:all`. The file is shell-exportable:
 
 ```
 export $(cat .obs/env | xargs)
@@ -59,12 +59,12 @@ export $(cat .obs/env | xargs)
 | `ROME_OBS_AUTH_TOKEN` | empty                                      | Rome-Cloud-injected            |
 
 In dev, `ROME_OBS_QUERY_URL` points at the local HyperDX bundle (still
-running for offline use). The backend no longer writes there by default —
+running for offline use). The backend does not write there by default —
 its OTLP goes through the central collector defined above. To query the
 data Rome actually emitted, point queries at `CLICKHOUSE_ENDPOINT` with
 `CLICKHOUSE_USERNAME`:`CLICKHOUSE_PASSWORD` and filter on
 `ResourceAttributes['service.instance.id'] = $PANTHEON_SLUG` (`unknown` in dev —
-PANTHEON_SLUG is unset, so all worktrees share it and the filter can't isolate one).
+PANTHEON_SLUG is unset, so all worktrees share it and the filter cannot isolate one).
 
 `deployment.environment` is derived from `NODE_ENV`, not a separate var.
 `<slug>` is the worktree basename (DNS-label-sanitized) — see
@@ -91,7 +91,7 @@ docker compose -f infra/observability/compose.yml logs -f    # tail the obs sing
 
 **Scoping rule**: programmatic queries MUST filter by `service.instance.id`
 to isolate to one instance's telemetry. The helper in `@rome-os/app-runtime`
-injects this filter automatically so the coding agent can't accidentally
+injects this filter automatically so the coding agent cannot accidentally
 read another instance's data.
 
 ## Spans
@@ -145,12 +145,12 @@ schema below:
 Core loggers stamp `LogAttributes['rome.log.source']` as `rome` for platform
 code or `rome-apps` for app-owned code. App-owned records also carry
 `LogAttributes['rome.app.id']`. Both sources run in the Rome process and retain
-the resource-level `ServiceName = 'rome'`; `ScopeName` mirrors the log source so
+the resource-level `ServiceName = 'rome'`. `ScopeName` mirrors the log source so
 raw ClickHouse queries can distinguish them without parsing component names.
 
 `LOG_LEVEL` (default `info`) gates both stdout and OTLP — sub-threshold
 calls are dropped before either sink sees them. Non-primitive `data`
-fields are JSON-stringified when serialised to `LogAttributes`; `Error`
+fields are JSON-stringified when serialised to `LogAttributes`. `Error`
 instances are flattened to their stack.
 
 ## Metrics
@@ -197,7 +197,7 @@ curl -fsS -u "$CLICKHOUSE_USERNAME:$CLICKHOUSE_PASSWORD" \
   -X POST --data "<SQL>" "$CLICKHOUSE_ENDPOINT"
 ```
 
-Dev against the local HyperDX bundle (only meaningful if you've overridden
+Dev against the local HyperDX bundle (only meaningful if you have overridden
 `OTEL_EXPORTER_OTLP_ENDPOINT` back to `rome-obs:4318`):
 
 ```

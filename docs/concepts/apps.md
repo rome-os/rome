@@ -27,7 +27,7 @@ Apps published on the [app store](#app-store) are also identified by a **listing
 - An App Store listing's canonical listing id is also its installed app id. The bundle manifest must declare that exact id. `@foo/bar` never collapses to `bar`.
 - The install appId is derived from the source, never caller-supplied.
 - A scoped app id is encoded when it crosses a filesystem or URL path-segment boundary. The logical id in the manifest, lockfile, APIs, and registries remains unchanged.
-- The app ids `core` and `self` are reserved. Packaged apps cannot declare them. `self` is not a reference shorthand; keeping it reserved prevents historical `self:<local-name>` values from becoming valid canonical ids.
+- The app ids `core` and `self` are reserved. Packaged apps cannot declare them. `self` is not a reference shorthand. Keeping it reserved prevents historical `self:<local-name>` values from becoming valid canonical ids.
 - The two store namespaces are independent: owning the unscoped name `foo` grants no rights over `@foo/*`, and vice versa. A scoped id whose slug equals its handle (`@foo/foo`) is forbidden, so every listing has exactly one canonical id.
 - The handle `rome` is reserved for first-party apps shipped with the platform — the reservation covers both the scoped `@rome/*` namespace and the unscoped name `rome`.
 
@@ -54,13 +54,13 @@ the canonical id `@foo/bar:baz`.
 New format version 2 local names match `^[a-z][a-z0-9_-]{0,63}$`. Every format
 version rejects `:` in a local name. The separator belongs to reference syntax,
 so `coding:app_creation` is a reference, not a valid definition name. Format
-version 1 remains readable for legacy bundles; new apps write format version 2
+version 1 remains readable for legacy bundles. New apps write format version 2
 and use qualified references.
 
 **Contracts:**
 
 - Agent, action, and skill definitions declare only their local name. A definition such as `name: example:foo` is invalid.
-- The Agent local name `main` is reserved for Rome Core. Apps must choose another Agent name; this restriction does not apply to Action or Skill local names.
+- The Agent local name `main` is reserved for Rome Core. Apps must choose another Agent name. This restriction does not apply to Action or Skill local names.
 - Every format version 2 reference uses `<app-id>:<local-name>`, including references to another artifact in the same app.
 - Runtime registries, authorization checks, and new durable references use canonical artifact ids.
 - A bare name is a legacy input. The compatibility resolver maps it to one stable canonical artifact id. New app definitions and references do not create bare-name behavior.
@@ -171,7 +171,7 @@ A remix is a new project directory populated with code from an App Store app, wh
 
 **Contracts:**
 
-- The Apps page derives remixability from the installed `app.yaml#includeSource` field. The Store entry checks `sourceAvailable`; Core still requires `includeSource` in the downloaded bundle.
+- The Apps page derives remixability from the installed `app.yaml#includeSource` field. The Store entry checks `sourceAvailable`. Core still requires `includeSource` in the downloaded bundle.
 - A remix always receives a new app id and a new authoring directory. It never updates or overwrites the installed source app.
 - A scoped remix name maps to a path-safe local app id. For example, `@ray/calendar` maps to `ray-calendar`.
 - Core copies installed code locally. For a Store pin not installed locally, it downloads, verifies, and extracts the bundle without installing the source. Both paths copy the complete code root without assuming a `src/` layout. Creation does not install the new app either.
@@ -205,7 +205,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 **Contracts:**
 
 - Both the data directory and the app's tables survive an install→uninstall→re-install round-trip. Only an explicit purge at uninstall wipes them.
-- A database-backed scoped app must declare `db.tablePrefix`; the scoped app id itself is not a SQL identifier.
+- A database-backed scoped app must declare `db.tablePrefix`. The scoped app id itself is not a SQL identifier.
 
 **Not to be confused with:**
 

@@ -25,7 +25,7 @@ A session remembers the concrete model that produced its history — the **sessi
 **Contracts:**
 
 - A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves by tier until its next successful turn records one.
-- Resolution precedence for a turn is **explicit guardian selection → session pin → agent tier**. An explicit model selection (the webchat model selector) wins over the pin, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model can no longer run.
+- Resolution precedence for a turn is **explicit guardian selection → session pin → agent tier**. An explicit model selection (the webchat model selector) wins over the pin, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection or a new session.
 - Forks inherit the live session's model and never write pins. A new session — including a summoned or subagent session on a shared thread — resolves from its own tier, because session lookup is agent-scoped.
 
@@ -42,7 +42,7 @@ An agent run is one turn of agent work, identified by its turn id — the unit u
 
 - The user inputs, assistant output, and trace evidence produced by the same turn count as one run, not several. A run can consume more than one user input.
 - Failed and interrupted turns still count as runs.
-- Stop targets one run and requests provider cancellation. Until that run ends, Stop can be retried; accepting the request does not mean execution has ended.
+- Stop targets one run and requests provider cancellation. Until that run ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
 - Cancelling provider execution does not close the conversation. The next message opens usable execution state and resumes available history without replaying the cancelled message.
 - A run's outcome and wall-clock duration come from the bracket that closes it, and its model attribution and token cost come from the terminal block's accounting. Neither is read from fields mirrored onto individual messages.
@@ -57,10 +57,10 @@ A conversational input is one independently submitted user message. Its identity
 
 **Contracts:**
 
-- WebChat persists an input before dispatch. Sending during a run attempts non-interrupting provider steering; it does not start a concurrent run or replace the active output stream.
+- WebChat persists an input before dispatch. Sending during a run attempts non-interrupting provider steering. It does not start a concurrent run or replace the active output stream.
 - Provider acceptance and consumption are distinct. An accepted input is not shown as consumed until the provider includes it in context.
 - A definitely unconsumed input can start the next run. If the provider already holds it, the next run adopts it without sending another copy.
-- An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery; they are not silently replayed.
+- An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery. They are not silently replayed.
 - Stop targets the specified running turn. It cannot stop another turn, and it does not cancel separately queued inputs.
 - Independent action, approval, and external-channel callers retain their serial, one-result-per-call turn contract. They do not implicitly opt into the WebChat input lane.
 
@@ -95,7 +95,7 @@ The caller creating the fork chooses one of two modes:
 
 - In both modes the source conversation is untouched: its next turn never sees the fork's prompt, output, or tool calls.
 - The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. Forks never write [model pins](#model-pin).
-- A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable; Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
+- A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
 
 **Not to be confused with:**

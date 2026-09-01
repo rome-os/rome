@@ -1,6 +1,8 @@
 # Code Comments
 
-A **code comment** is prose inside a source file. The code states what happens. A comment carries only what the code cannot state: the contract a caller relies on, the why behind a non-obvious choice, or the argument that a hard algorithm is correct. Tier tags and the bar this rulebook clears come from [authoring.md](authoring.md). The prose in this file follows [WRITING.md](WRITING.md).
+A **code comment** is prose inside a source file. The code states what happens. A comment carries only what the code cannot state: the contract a caller relies on, the why behind a non-obvious choice, or the argument that a hard algorithm is correct. Tier tags and the bar this rulebook clears come from [authoring.md](authoring.md).
+
+A comment is technical writing, so it follows [WRITING.md](WRITING.md) — the same word choice, the same verbs, the same sentence rules — with two carve-outs this file owns. The ban on semicolons and contractions covers `docs/` and not comments. The rule on history words yields to the admission rule below. `pnpm lint:prose` checks comments on those terms.
 
 The miss that earned this guideline: agent-written diffs kept arriving with comments that restate the line below them or narrate the change that produced them. Review caught each one by hand because the bar lived nowhere.
 
@@ -78,10 +80,14 @@ Concurrency is non-trivial when correctness depends on an ordering between tasks
 > Prefer: `// Only the session loop writes activeSessions, so this read needs no lock.`
 > Over: the same unsynchronized read with nothing stating why it is safe.
 
+<!-- vale Rome.History = NO -->
+
 A comment describes the code as it is, for a reader who never saw a previous version. Narrating the change — what the code did before, or how this version differs — fails, whatever the wording. Present-tense prose passes even when it contains a phrase like *no longer* or *used to*. `[llm]`
 
 > Prefer: `// After unref, the timer no longer keeps the process alive.`
 > Over: `// This handler no longer retries — retry moved into the queue worker.`
+
+<!-- vale Rome.History = YES -->
 
 Git history owns provenance. A comment never cites the change, ticket, or PR that produced the code. An external reference enters only when it is a live constraint on the code beside it. `[llm]`
 
