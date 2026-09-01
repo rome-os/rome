@@ -541,6 +541,43 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
+  it("never borrows the source thread for a fork that must survive its turn", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "continuable-fork-thread" } };
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({ sessionId: "source-session", isNewSession: true }),
+    );
+    // Same model, prompt and cwd, branching at the current head: exactly the
+    // shape that borrows today. A "thread" fork has to decline that, because a
+    // borrowed turn is rolled back out of the source and leaves nothing to
+    // resume — and reports the source's own thread id.
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "thread",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({ threadId: "source-thread", ephemeral: false }),
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("thread/rollback", expect.anything());
+    expect(fork.providerThreadId).toBe("continuable-fork-thread");
+
+    await forkSession.close();
+    await source.close();
+  });
+
   it("runs a same-model exact fork on the source thread and rolls it back", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {

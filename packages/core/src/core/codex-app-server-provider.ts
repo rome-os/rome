@@ -1016,7 +1016,14 @@ export class CodexAppServerProvider implements ModelProvider {
           const targetIsCurrentHead =
             forkParams.sourceCheckpoint === undefined ||
             forkParams.sourceCheckpoint === lastCompletedTurnCheckpoint;
-          const borrowSourceThread = compatibility.eligible && targetIsCurrentHead;
+          // Borrowing runs the turn inside the source thread and rolls it back
+          // (a temporary workaround for openai/codex#24704 — see
+          // codex/borrowed-exact-fork.ts). That leaves nothing to resume and
+          // reports the source's own thread id, so a fork that asked to be
+          // persisted must take the native path instead, whatever it costs in
+          // uncached prefix. Every other fork keeps the cheap path.
+          const borrowSourceThread =
+            mode === "ephemeral" && compatibility.eligible && targetIsCurrentHead;
           log.info("codex fork strategy selected", {
             strategy: borrowSourceThread ? "borrow_source_thread" : "native_thread_fork",
             configurationMode: forkParams.configurationMode,
