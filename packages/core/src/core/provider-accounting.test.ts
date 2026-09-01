@@ -2,21 +2,21 @@ import { describe, expect, it } from "vitest";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "./provider-accounting.js";
 
 describe("provider-accounting", () => {
-  it("calculates Anthropic Fable 5 costs using cache read and 5-minute cache write rates", () => {
-    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-fable-5[1m]", {
+  it("calculates Anthropic Fable 5.1 costs using cache read and 5-minute cache write rates", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-fable-5-1[1m]", {
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,
       cacheReadTokens: 1_000_000,
       cacheWriteTokens: 1_000_000,
     });
 
-    expect(impliedCostUsd).toBeCloseTo(73.5);
+    expect(impliedCostUsd).toBeCloseTo(72.75);
   });
 
-  it("uses Anthropic Fable 5 1-hour cache write pricing when reported by usage metadata", () => {
+  it("uses Anthropic Fable 5.1 1-hour cache write pricing when reported by usage metadata", () => {
     const accounting = buildAgentAccounting({
       provider: "anthropic",
-      model: "claude-fable-5[1m]",
+      model: "claude-fable-5-1[1m]",
       usage: {
         inputTokens: 0,
         outputTokens: 0,
@@ -29,6 +29,17 @@ describe("provider-accounting", () => {
     });
 
     expect(accounting.costUsd).toBeCloseTo(20);
+  });
+
+  it("keeps the Fable 5 cache read rate for sessions recorded on the legacy model", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-fable-5[1m]", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    });
+
+    expect(impliedCostUsd).toBeCloseTo(73.5);
   });
 
   it("calculates Anthropic Sonnet 5 costs using cache read and 5-minute cache write rates", () => {

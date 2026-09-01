@@ -119,7 +119,7 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   small: "claude-haiku-4-5-20251001",
 };
 
-const FABLE_MODEL = "claude-fable-5[1m]";
+const FABLE_MODEL = "claude-fable-5-1[1m]";
 
 function providerQuotaExhausted(providerId: ProviderId, state: ProviderState): boolean {
   return state.quotaExhausted && !(providerId === "anthropic" && claudeUsesApiKey(state));

@@ -94,6 +94,18 @@ function openAi56Rates(
 const PRICING_RULES: PricingRule[] = [
   {
     provider: "anthropic",
+    // Fable 5.1 discounts cache reads to 0.025x the input rate; every other
+    // Anthropic model reads at 0.1x.
+    matchesModel: (model) => hasPrefix(model, "claude-fable-5-1"),
+    resolveRates: (rawUsage) => ({
+      inputUsdPerMillion: 10,
+      outputUsdPerMillion: 50,
+      cacheReadUsdPerMillion: 0.25,
+      cacheWriteUsdPerMillion: 10 * getAnthropicCacheWriteMultiplier(rawUsage),
+    }),
+  },
+  {
+    provider: "anthropic",
     matchesModel: (model) => hasPrefix(model, "claude-fable-5[1m]"),
     resolveRates: (rawUsage) => ({
       inputUsdPerMillion: 10,

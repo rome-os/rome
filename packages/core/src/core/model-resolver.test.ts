@@ -95,13 +95,13 @@ describe("ModelResolver", () => {
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-fable-5[1m]",
+      model: "claude-fable-5-1[1m]",
     });
     await expect(
       r.getModelProvider({ tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-fable-5[1m]",
+      model: "claude-fable-5-1[1m]",
     });
     await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
       modelProvider: codex,
@@ -302,9 +302,9 @@ describe("ModelResolver", () => {
     // enableFable is off: tier resolution would never produce Fable, the pin still runs it.
     await expect(
       resolver().getModelProvider({
-        exact: { providerId: "anthropic", model: "claude-fable-5[1m]" },
+        exact: { providerId: "anthropic", model: "claude-fable-5-1[1m]" },
       }),
-    ).resolves.toMatchObject({ modelProvider: claude, model: "claude-fable-5[1m]" });
+    ).resolves.toMatchObject({ modelProvider: claude, model: "claude-fable-5-1[1m]" });
     // enableFable is on: an exact non-Fable pin is not rerouted to Fable.
     await expect(
       resolver({}, { enableFable: true }).getModelProvider({
