@@ -3597,13 +3597,10 @@ describe("Webchat API", () => {
       expect(promoted?.parentSessionId).toBe(SESSION_ID);
       // The unread clock is armed like any ordinary chat's.
       expect(promoted?.lastSeenActivityAt).not.toBeNull();
-      // The raw `branch: …` name never reaches the sidebar: the retitle runs
-      // at promotion. The harness stubs the title generator with the
-      // deterministic fallback, so this settles quickly.
-      await rs.waitFor(async () => {
-        const session = await deps.webchatRepo.getSession("branch-fork-session");
-        expect(session?.name).not.toMatch(/^branch:/);
-      });
+      // The raw `branch: …` name never reaches the sidebar: the fallback
+      // retitle lands BEFORE the type flips, so the instant an observer sees
+      // "webchat" the name is already clean — no waitFor needed here.
+      expect(promoted?.name).not.toMatch(/^branch:/);
       expect(findRow).toHaveBeenCalled();
       // The sidebar list now contains it with no query change.
       const listed = (await (await app.request("/chat/sessions")).json()) as Array<{ id: string }>;

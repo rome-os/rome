@@ -1337,11 +1337,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         );
         if (row?.providerThreadId) {
           const current = await deps.webchatRepo.getSession(forkSessionId);
+          // Retitle BEFORE the flip: the sidebar refetches the moment any
+          // observer sees type "webchat", and nothing re-notifies it when a
+          // late title lands — so the raw `branch: …` name must already be
+          // gone when the type changes. The deterministic fallback (the
+          // branch prompt, truncated) is written synchronously; the generated
+          // title replaces it afterwards unless the guardian renamed the chat
+          // meanwhile. An ordinary chat is titled from its first user
+          // message; the branch's is the prompt typed into the popover.
+          const fallbackTitle = fallbackConversationTitle(input.prompt);
+          if (current && fallbackTitle) {
+            await deps.webchatRepo.updateSessionNameIfCurrent(
+              forkSessionId,
+              current.name,
+              fallbackTitle,
+            );
+          }
           await deps.webchatRepo.promoteForkToChat(forkSessionId);
-          // An ordinary chat is titled from its first user message; the
-          // branch's is the prompt typed into the branch popover.
-          if (current) {
-            void generateAndPersistConversationTitle(forkSessionId, current.name, input.prompt);
+          if (current && fallbackTitle) {
+            void generateAndPersistConversationTitle(forkSessionId, fallbackTitle, input.prompt);
           }
         }
       }
