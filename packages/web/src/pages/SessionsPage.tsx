@@ -40,17 +40,14 @@ import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import {
-  getSession,
   getSessionMetrics,
   getRomeSession,
   listSessionTurns,
   listRomeSessionMessages,
   listRomeSessions,
   openTurnStream,
-  postSessionTurn,
   type ListRomeSessionsOptions,
 } from "@/lib/chat-api";
-import { emitSessionsChanged } from "@/lib/session-events";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
 import type {
