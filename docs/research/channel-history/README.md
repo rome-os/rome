@@ -4,7 +4,7 @@
 
 ## The route question
 
-- [store-routes.md](store-routes.md) — the three resolutions, what each changes and risks. Routes 1 and 2 both reduce to how a store obtains a platform client, which the repo already answers three ways, and both then fail the contract's account verbs. Route 3, a mirror per channel, is the only one that leaves the contract alone.
+- [store-routes.md](store-routes.md) — the three resolutions, what each changes and risks. Routes 1 and 2 both reduce to how a store gets a platform client, which the repo already answers three ways, and both then fail the contract's account verbs. Route 3, a mirror per channel, is the only one that leaves the contract alone.
 - [email-account-verbs.md](email-account-verbs.md) — whether the account verbs can be answered against the mail provider. `count` cannot be, at any layer. A directory render costs at least two full mailbox walks.
 - [discord-rest-history.md](discord-rest-history.md) — what a bot token can read over Discord REST. All four reads are possible for a known direct-message channel, but `count` and the full read pay for walking the channel, and a bot cannot list its open direct-message channels.
 
