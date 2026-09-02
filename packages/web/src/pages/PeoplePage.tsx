@@ -70,15 +70,6 @@ import { usePeopleRoster } from "./people/use-roster";
  *  account read is narrowed by those instead. */
 const PLACED_FILTERS = new Set<PeopleFilter>(["inner-circle", "acquaintance", "other"]);
 
-/** The one-line reading of what each bond level means for Rome's behavior,
- *  sitting beside its group heading. */
-const LEVEL_HINT_KEY: Partial<Record<RowLevel, string>> = {
-  "inner-circle": "levelHints.innerCircle",
-  acquaintance: "levelHints.acquaintance",
-  other: "levelHints.other",
-  stranger: "levelHints.stranger",
-};
-
 /**
  * `/people` is the root the two views share and renders neither: it forwards to
  * the stream, carrying whatever chip and term the link arrived with, so an
@@ -206,7 +197,6 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-title text-foreground">{tCommon("nav.people")}</h1>
-            <p className="mt-1 text-aux text-muted-foreground">{t("page.subtitle")}</p>
           </div>
           {/* Both of this page's one-of-N controls are the kit's radiogroups
               rather than buttons wearing `role="radio"`: Radix supplies the
@@ -241,8 +231,12 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
               value: option,
               label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
               // Unknown is the page's one number that asks for a decision, so
-              // it carries a count; the other chips are plain labels.
+              // it carries a count; the other chips are plain labels. It sits
+              // at the far end for the same reason: the chips before it are
+              // bonds the guardian has given, and this is what is still
+              // waiting on them.
               count: option === "unknown" && counts.unknown > 0 ? counts.unknown : undefined,
+              alignEnd: option === "unknown",
             }))}
           />
         </div>
@@ -347,16 +341,10 @@ function LatestView({
     );
   }
 
+  // No heading: the stream is one ungrouped list, and the segmented control
+  // above it already says which view is on screen.
   return (
     <section>
-      <div className="flex items-baseline gap-2 border-b border-border pb-1">
-        <h2 className="text-section uppercase tracking-wide text-muted-foreground">
-          {t("views.latest")}
-        </h2>
-        <span className="ml-auto text-badge text-subtle-foreground">
-          {searching ? t("stream.searchHint") : t("stream.hint")}
-        </span>
-      </div>
       <div className="flex flex-col">
         {rows.map((row) =>
           row.kind === "account" ? (
@@ -404,11 +392,6 @@ function DirectoryView({
             <span className="font-mono text-badge tabular-nums text-subtle-foreground">
               {counts[group.level]}
             </span>
-            {LEVEL_HINT_KEY[group.level] && (
-              <span className="ml-auto text-badge text-subtle-foreground">
-                {t(LEVEL_HINT_KEY[group.level]!)}
-              </span>
-            )}
           </div>
           <div className="flex flex-col">
             {group.rows.map((row) =>

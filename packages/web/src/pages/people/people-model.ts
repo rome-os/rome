@@ -1,5 +1,6 @@
 import {
   accountRef,
+  ASSIGNABLE_BOND_LEVELS,
   BOND_LADDER,
   compareAccountCursors,
   compareStreamCursors,
@@ -41,18 +42,22 @@ export type PeopleFilter = "all" | RowLevel;
 /**
  * The chips, in rail order.
  *
- * Guardian has none: it is the guardian's own row, which the directory always
- * shows and the stream never does. "All" holds back Stranger, so the dismissed
- * end of the ladder is entered on purpose rather than sitting in the default
- * view.
+ * Guardian has none: it is the guardian's own row, which neither view shows
+ * under a chip — a search is the way to it. "All" holds back both unplaced
+ * ends of the ladder too, so a queue and a dismissal are each entered on
+ * purpose rather than sitting in the default view.
+ *
+ * Unknown comes last and the rail pushes it to the far end, because it is not
+ * a peer of the chips before it: those name a bond the guardian has already
+ * given, and Unknown is the queue of accounts still waiting for one.
  */
 export const FILTER_ORDER: PeopleFilter[] = [
   "all",
-  "unknown",
   "inner-circle",
   "acquaintance",
   "other",
   "stranger",
+  "unknown",
 ];
 
 /**
@@ -327,13 +332,17 @@ export interface PeopleGroup {
  * The directory's groups, in ladder order, after the chip and the search box
  * have each had their say.
  *
- * Every contact Rome holds is in here: a contacts app hides nobody, and a
- * roster that held the address book back would answer "no such contact" for
- * someone the mirror has.
+ * "All" is the people the guardian has placed, and only those: the three
+ * assignable levels. The ladder's other positions each answer a different
+ * question — Unknown is the accounts still waiting on a decision, Stranger is
+ * what was decided against, Guardian is the reader themselves — so each is
+ * entered on purpose rather than padding the list somebody scrolls to look a
+ * contact up in.
  *
- * Guardian survives every filter: a roster that hid it would read as "you are
- * not in your own people list". Empty groups are dropped rather than rendered
- * as headings with nothing under them.
+ * A search still reaches every one of them, held-back positions included: a
+ * roster that filtered the address book would answer "no such contact" for
+ * someone the mirror has. Empty groups are dropped rather than rendered as
+ * headings with nothing under them.
  */
 export function directoryGroups(
   rows: readonly PeopleRow[],
@@ -347,8 +356,10 @@ export function directoryGroups(
     rows: matching.filter((row) => row.level === level).sort(compareRowsByName),
   })).filter((group) => {
     if (group.rows.length === 0) return false;
-    if (searching || group.level === "guardian") return true;
-    return options.filter === "all" ? group.level !== "stranger" : group.level === options.filter;
+    if (searching) return true;
+    return options.filter === "all"
+      ? (ASSIGNABLE_BOND_LEVELS as readonly RowLevel[]).includes(group.level)
+      : group.level === options.filter;
   });
 }
 

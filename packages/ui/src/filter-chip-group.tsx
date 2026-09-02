@@ -14,6 +14,14 @@ export type FilterChipOption<T extends string = string> = {
    * the `--primary` fill.
    */
   count?: number;
+  /**
+   * Pushes this chip, and any after it, to the far end of the rail. For an
+   * option the rest are not peers of — a queue waiting on a decision beside a
+   * set of settled categories — so the gap carries that. Once the row is wide
+   * enough to scroll there is no slack left to push into, and the chip sits
+   * against its neighbor like any other.
+   */
+  alignEnd?: boolean;
   disabled?: boolean;
 };
 
@@ -85,6 +93,7 @@ export function FilterChipGroup<T extends string = string>({
             // every chip after it sideways.
             className={cn(
               "shrink-0 rounded-full border px-3 py-1 text-badge transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50",
+              option.alignEnd && "ml-auto",
               checked
                 ? "border-transparent bg-primary text-primary-foreground"
                 : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",

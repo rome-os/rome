@@ -614,14 +614,16 @@ describe("PeoplePage directory", () => {
     await screen.findByText("Wei Chen");
     await showDirectory(user);
 
-    // Everyone is in a group, the quiet person and the address-book contact
-    // included — a contacts list answers "who does Rome know", not "who said
-    // something".
+    // All is the placed roster, the quiet person included — a contacts list
+    // answers "who does Rome know", not "who said something". The guardian and
+    // the accounts nobody has placed answer other questions, so neither pads it.
     expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
-    expect(screen.getByText("Zhangfan Dong")).toBeTruthy();
-    expect(screen.getByText("Jonas Tan")).toBeTruthy();
+    expect(screen.queryByText("Zhangfan Dong")).toBeNull();
+    expect(screen.queryByText("Jonas Tan")).toBeNull();
+
+    await user.click(chip(/^Unknown/));
     // The heading's number is the directory's own, not the rows on screen.
-    const unknown = screen.getByRole("heading", { name: "Unknown" }).parentElement!;
+    const unknown = (await screen.findByRole("heading", { name: "Unknown" })).parentElement!;
     expect(within(unknown).getByText("2")).toBeTruthy();
   });
 
@@ -652,6 +654,7 @@ describe("PeoplePage directory", () => {
 
     await screen.findByText("Wei Chen");
     await showDirectory(user);
+    await user.click(chip(/^Unknown/));
 
     // The decision is available wherever the account is, but the roster is for
     // reading: the row wears one quiet control, and the stream's three verbs
@@ -687,6 +690,7 @@ describe("PeoplePage directory", () => {
     renderPage();
 
     await showDirectory(user);
+    await user.click(chip(/^Unknown/));
     // By name, so Priya comes first however recently Rachel said something.
     expect(await screen.findByText("Priya Nair")).toBeTruthy();
     expect(screen.queryByText("Rachel Lim")).toBeNull();

@@ -1,6 +1,5 @@
 {
   "page": {
-    "subtitle": "有新动态的人，最新的排在前面。搜索可覆盖 Rome 认识的所有人。",
     "loading": "加载中…",
     "emptyTitle": "暂无新动态",
     "emptyHint": "任何给你发消息的人都会出现在这里，等待你安置。",
@@ -27,12 +26,6 @@
     "acquaintance": "熟人",
     "other": "其他",
     "stranger": "陌生人"
-  },
-  "levelHints": {
-    "innerCircle": "Rome 畅所欲言，及时转达",
-    "acquaintance": "Rome 会回应，但行动前会先确认",
-    "other": "认识，但保持距离",
-    "stranger": "Rome 不予理会 — 随时可以撤回"
   },
   "channels": {
     "telegram": "Telegram",
@@ -107,10 +100,6 @@
     "label": "视图",
     "latest": "最新",
     "directory": "名录"
-  },
-  "stream": {
-    "hint": "每人一行 · 最新在前",
-    "searchHint": "正在搜索 Rome 认识的所有人，包括从未联系过的联系人"
   },
   "detail": {
     "back": "人物",
