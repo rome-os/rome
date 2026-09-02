@@ -1103,10 +1103,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
     return layout
-      .filter(
-        (item) =>
-          !(item && typeof item === "object" && (item as { type?: unknown }).type === "desktop"),
-      )
+      .filter((item) => {
+        if (!item || typeof item !== "object") return true;
+        const widgetType = (item as { type?: unknown }).type;
+        // A desktop card is host-private; a chat card pins a private session
+        // id, and the public renderer has no case for it. Defense on the
+        // stored-layout fallback — the client already excludes both.
+        return widgetType !== "desktop" && widgetType !== "chat";
+      })
       .map((item) => {
         if (!item || typeof item !== "object") return item;
         const widget = item as { type?: unknown; selectedPath?: unknown };
@@ -1172,7 +1176,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
      * fork behind turn feedback is a background errand and stays one-shot.
      */
     continuable: boolean;
-  }): Promise<ForkSessionPlacement | "no_turn_checkpoint" | null> => {
+  }): Promise<
+    { sessionId: string; placement: ForkSessionPlacement | null } | "no_turn_checkpoint" | null
+  > => {
     if (!deps.agentRunner.runForked) {
       log.warn("turn fork unavailable: runner cannot fork", {
         sessionId: input.session.id,
@@ -1354,43 +1360,50 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     });
 
-    try {
-      const result = await deps.actionEngine.run(
-        "show_app",
-        { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
-        {
-          initiator: input.initiator,
-          channelContext: threadContext,
-          sessionId: forkSessionId,
-          turnId: forkTurnId,
-          agentName,
-          channelThreadKey,
-        },
-      );
-      if (
-        result.status === "place_widget" &&
-        result.placement.appId === SESSIONS_HOST_APP_ID &&
-        result.placement.route === forkSessionId
-      ) {
-        return { appId: SESSIONS_HOST_APP_ID, route: forkSessionId };
+    // A branch opens as a real chat card placed by the client; only the
+    // one-shot feedback fork still shows the read-only Sessions tile.
+    if (!input.continuable) {
+      try {
+        const result = await deps.actionEngine.run(
+          "show_app",
+          { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
+          {
+            initiator: input.initiator,
+            channelContext: threadContext,
+            sessionId: forkSessionId,
+            turnId: forkTurnId,
+            agentName,
+            channelThreadKey,
+          },
+        );
+        if (
+          result.status === "place_widget" &&
+          result.placement.appId === SESSIONS_HOST_APP_ID &&
+          result.placement.route === forkSessionId
+        ) {
+          return {
+            sessionId: forkSessionId,
+            placement: { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
+          };
+        }
+        log.warn("show_app did not return the fork session placement", {
+          sessionId: input.session.id,
+          turnId: input.turnId,
+          forkSessionId,
+          label: input.label,
+          status: result.status,
+        });
+      } catch (err) {
+        log.warn("failed to show turn fork session", {
+          sessionId: input.session.id,
+          turnId: input.turnId,
+          forkSessionId,
+          label: input.label,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      log.warn("show_app did not return the fork session placement", {
-        sessionId: input.session.id,
-        turnId: input.turnId,
-        forkSessionId,
-        label: input.label,
-        status: result.status,
-      });
-    } catch (err) {
-      log.warn("failed to show turn fork session", {
-        sessionId: input.session.id,
-        turnId: input.turnId,
-        forkSessionId,
-        label: input.label,
-        error: err instanceof Error ? err.message : String(err),
-      });
     }
-    return null;
+    return { sessionId: forkSessionId, placement: null };
   };
 
   /** Start a private learning fork for a written turn-feedback note. */
@@ -1399,7 +1412,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     turnId: string;
     rating: "positive" | "negative";
     comment: string;
-  }): Promise<ForkSessionPlacement | "no_turn_checkpoint" | null> => {
+  }): Promise<
+    { sessionId: string; placement: ForkSessionPlacement | null } | "no_turn_checkpoint" | null
+  > => {
     // The fork inherits the source transcript at its current head, which may
     // have moved past the rated turn (feedback stays available on older
     // turns). Reconstruct the rated exchange from the persisted transcript
@@ -2453,7 +2468,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: `prompt too long (max ${TURN_BRANCH_PROMPT_MAX_LENGTH} chars)` }, 400);
     }
 
-    const placement = await startForkedSession({
+    const started = await startForkedSession({
       session,
       turnId,
       prompt,
@@ -2461,15 +2476,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       initiator: "system:turn-branch",
       continuable: true,
     });
-    if (placement === "no_turn_checkpoint") {
+    if (started === "no_turn_checkpoint") {
       // Not transient: this turn persisted no provider checkpoint to fork
       // from. A follow-up answer in the same conversation is branchable.
       return c.json({ error: "This answer has no branch point", code: "turn_not_branchable" }, 409);
     }
-    if (!placement) {
+    if (!started) {
       return c.json({ error: "Couldn't start side chat from this conversation" }, 409);
     }
-    return c.json({ placement }, 201);
+    // `placement` is always null for a branch (show_app is feedback-only);
+    // the client places a real chat card from the session id.
+    return c.json({ sessionId: started.sessionId, placement: started.placement }, 201);
   });
 
   // The local row is a UI mirror; the canonical record ships via the
@@ -2583,7 +2600,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : null;
     // The learning fork is best-effort; a turn with no branch point (e.g. a
     // promoted side chat's first answer) just skips it.
-    const processingPlacement = typeof processing === "string" ? null : processing;
+    const processingPlacement =
+      !processing || typeof processing === "string" ? null : processing.placement;
 
     return c.json({
       feedback: formatFeedback(stored),
@@ -3121,12 +3139,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           handback,
           selectionId: modelSelection?.id,
           reasoningEffort,
-          // A side chat's follow-ups render in the read-only Sessions detail
-          // view, whose interaction handlers are all no-ops. Without this the
-          // session would advertise a live surface (its key starts with
-          // "webchat:") and could park a turn on a card nobody can answer —
-          // dead-ending the conversation this is meant to keep alive.
-          interactiveSurfaceDetached: session.parentSessionId !== null,
         },
       );
     } catch (err) {

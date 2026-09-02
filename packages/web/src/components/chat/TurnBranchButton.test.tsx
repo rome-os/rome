@@ -3,9 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { TurnBranchButton } from "./TurnBranchButton";
 
-const autoPlaceApp = rs.fn();
+const placeChatWidget = rs.fn();
 rs.mock("@/pages/free/use-free-cells", () => ({
-  autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
+  placeChatWidget: (...args: unknown[]) => placeChatWidget(...args),
 }));
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -18,7 +18,7 @@ rs.mock("@/lib/session-events", () => ({
 
 afterEach(() => {
   cleanup();
-  autoPlaceApp.mockClear();
+  placeChatWidget.mockClear();
   rs.restoreAllMocks();
 });
 
@@ -27,10 +27,7 @@ describe("TurnBranchButton", () => {
     const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        Response.json(
-          { placement: { appId: "sessions", route: "branch-session" } },
-          { status: 201 },
-        ),
+        Response.json({ sessionId: "branch-session", placement: null }, { status: 201 }),
       );
     render(<TurnBranchButton sessionId="chat-session" turnId="turn-1" />);
 
@@ -38,7 +35,7 @@ describe("TurnBranchButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "message.branch.suggestions.mermaid" }));
 
     await waitFor(() => {
-      expect(autoPlaceApp).toHaveBeenCalledWith("sessions", "branch-session");
+      expect(placeChatWidget).toHaveBeenCalledWith("branch-session");
     });
     // The sidebar learns about the born-webchat branch at creation.
     expect(emitSessionsChanged).toHaveBeenCalled();
@@ -55,10 +52,7 @@ describe("TurnBranchButton", () => {
     const fetchMock = rs
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        Response.json(
-          { placement: { appId: "sessions", route: "custom-branch-session" } },
-          { status: 201 },
-        ),
+        Response.json({ sessionId: "custom-branch-session", placement: null }, { status: 201 }),
       );
     render(<TurnBranchButton sessionId="chat-session" turnId="turn-2" />);
 
@@ -68,7 +62,7 @@ describe("TurnBranchButton", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "message.branch.submit" }));
 
-    await waitFor(() => expect(autoPlaceApp).toHaveBeenCalled());
+    await waitFor(() => expect(placeChatWidget).toHaveBeenCalledWith("custom-branch-session"));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/chat/sessions/chat-session/turns/turn-2/forks",
       expect.objectContaining({
@@ -90,7 +84,7 @@ describe("TurnBranchButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "message.branch.suggestions.mermaid" }));
 
     expect(await screen.findByText("message.branch.notBranchable")).toBeTruthy();
-    expect(autoPlaceApp).not.toHaveBeenCalled();
+    expect(placeChatWidget).not.toHaveBeenCalled();
     expect(emitSessionsChanged).not.toHaveBeenCalled();
   });
 
@@ -104,6 +98,6 @@ describe("TurnBranchButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "message.branch.suggestions.mermaid" }));
 
     expect(await screen.findByText("message.branch.submitFailed")).toBeTruthy();
-    expect(autoPlaceApp).not.toHaveBeenCalled();
+    expect(placeChatWidget).not.toHaveBeenCalled();
   });
 });

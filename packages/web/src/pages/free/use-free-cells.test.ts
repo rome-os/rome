@@ -56,3 +56,32 @@ describe("placeWidgetsIfSessionActive", () => {
     );
   });
 });
+
+describe("placeChatWidget", () => {
+  it("places a pinned chat card once per session, keeping the placement id", async () => {
+    const { placeChatWidget, setActiveSession } = await import("./use-free-cells");
+
+    setActiveSession("layout-session");
+    placeChatWidget("branch-1");
+
+    const read = () =>
+      JSON.parse(localStorage.getItem("rome:free-layout:layout-session") ?? "[]") as Array<{
+        id: string;
+        type: string;
+        targetId?: string;
+      }>;
+    const layout = read();
+    expect(layout).toEqual([expect.objectContaining({ type: "chat", targetId: "branch-1" })]);
+
+    // Re-placing the same session is a no-op with a stable id — a fresh id
+    // would remount the card and tear down its live stream.
+    placeChatWidget("branch-1");
+    const again = read();
+    expect(again).toHaveLength(1);
+    expect(again[0].id).toBe(layout[0].id);
+
+    // A different session gets its own card.
+    placeChatWidget("branch-2");
+    expect(read()).toHaveLength(2);
+  });
+});

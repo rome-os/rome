@@ -3325,7 +3325,7 @@ describe("Webchat API", () => {
       );
     });
 
-    it("resumes the source, runs an exact fork, and shows its Sessions route", async () => {
+    it("resumes the source, runs an exact fork, and returns the branch session id", async () => {
       await deps.webchatRepo.addMessage(
         "branch-later-anchor",
         SESSION_ID,
@@ -3377,8 +3377,10 @@ describe("Webchat API", () => {
       });
 
       expect(res.status).toBe(201);
+      // The client places a real chat card itself — no server-driven widget.
       await expect(res.json()).resolves.toEqual({
-        placement: { appId: "sessions", route: "branch-fork-session" },
+        sessionId: "branch-fork-session",
+        placement: null,
       });
       expect(forkParams).toMatchObject({
         agentName: "main",
@@ -3405,15 +3407,7 @@ describe("Webchat API", () => {
           }),
         }),
       );
-      expect(showApp).toHaveBeenCalledWith(
-        "show_app",
-        { appId: "sessions", route: "branch-fork-session" },
-        expect.objectContaining({
-          initiator: "system:turn-branch",
-          sessionId: "branch-fork-session",
-          turnId: "branch-fork-turn",
-        }),
-      );
+      expect(showApp).not.toHaveBeenCalled();
       // A side chat is a conversation: it asks to be left resumable, keyed by
       // the fork's own id with no model-selection suffix — exactly what
       // handleChatSend will derive for it on a follow-up.
@@ -3840,10 +3834,6 @@ describe("Webchat API", () => {
         channelThreadKey: `webchat:${PROMOTED_ID}`,
       });
       expect(acquiredInit?.romeSessionId).toBe(PROMOTED_ID);
-      // The Sessions detail view renders this read-only, so the session must
-      // not open believing it can mount a card nobody can answer. The guard
-      // keys on lineage, not type — a born-webchat branch must stay detached.
-      expect(acquiredInit?.interactiveSurfaceDetached).toBe(true);
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
@@ -3894,50 +3884,6 @@ describe("Webchat API", () => {
         agentName: "main",
         channelThreadKey: `webchat:${PROMOTED_ID}`,
       });
-    });
-
-    it("leaves an ordinary chat's interactive surface attached", async () => {
-      let acquiredInit: AgentSessionInit | undefined;
-      deps.agentSessionManager = {
-        acquire: rs.fn(async (_key, init) => {
-          acquiredInit = init;
-          return {
-            key: { agentName: "main", channelThreadKey: "webchat:test" },
-            sessionId: "agent-session",
-            status: "idle",
-            sendTurn() {
-              return {
-                turnId: "turn-1",
-                events: (async function* () {
-                  yield { type: "result", content: "" };
-                })(),
-                turnContext: otelContext.active(),
-              };
-            },
-            subscribe: () => () => undefined,
-            onStatusChange: () => () => undefined,
-            interrupt: async () => undefined,
-            close: async () => undefined,
-          } satisfies AgentSession;
-        }),
-        peek: () => undefined,
-        shutdown: async () => undefined,
-      };
-      const app = createWebchatRuntime(deps).routes;
-
-      const sessionRes = await app.request("/chat/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Ordinary chat" }),
-      });
-      const session = (await sessionRes.json()) as { id: string };
-      await app.request(`/chat/sessions/${session.id}/turns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "hello" }),
-      });
-
-      expect(acquiredInit?.interactiveSurfaceDetached).toBe(false);
     });
   });
 

@@ -49,6 +49,7 @@ import { AppWidget } from "./AppWidget";
 import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
+import { PinnedChatWidget } from "./PinnedChatWidget";
 import { WidgetPicker } from "./WidgetPicker";
 import {
   autoPlaceApp,
@@ -153,6 +154,10 @@ function WidgetContent({
           params={widget.params}
           dragging={dragging}
         />
+      ) : null;
+    case "chat":
+      return widget.targetId ? (
+        <PinnedChatWidget sessionId={widget.targetId} placementId={widget.id} />
       ) : null;
     default:
       return null;

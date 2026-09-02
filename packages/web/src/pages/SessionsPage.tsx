@@ -39,7 +39,6 @@ import {
 import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import { ChatComposer, type ChatComposerSnapshot } from "@/components/chat/ChatComposer";
 import {
   getSession,
   getSessionMetrics,
@@ -1134,16 +1133,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     snapshot: TraceSnapshot;
     text: string;
   } | null>(null);
-  // A fork is continuable exactly when the chat API will serve it — that route
-  // 404s for a read-only trajectory and 200s for a branch with a resumable
-  // provider thread, so one probe answers it with no new field on the DTO.
-  const [continuable, setContinuable] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  // Held from the POST until the live-turn effect has settled, so the composer
-  // cannot accept a second turn this view would never render.
-  const [sending, setSending] = useState(false);
-  // Bumped after each send so the live-turn effect re-runs and attaches.
-  const [liveTurnNonce, setLiveTurnNonce] = useState(0);
 
   const handleBack = useCallback(() => {
     // BrowserRouter starts its own history index at zero, so an index above
@@ -1161,87 +1150,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     if (result) setMessages(result);
   }, [sessionId]);
 
-  const probeContinuable = useCallback(
-    async (sessionType: string | undefined) => {
-      // A fork may be continuable once its first answer persists a thread; an
-      // ordinary chat always is (the send routes accept it), which keeps the
-      // composer alive in the branch widget after promotion instead of
-      // forcing a hop to the full chat view. Everything else stays read-only.
-      if (sessionType !== "fork" && sessionType !== "webchat") {
-        setContinuable(false);
-        return;
-      }
-      try {
-        setContinuable((await getSession(sessionId)) !== null);
-      } catch {
-        // `getSession` returns null only on 404 — the definitive "this branch
-        // is read-only". Anything else is transient, and collapsing to
-        // read-only here would drop the composer off a live branch until the
-        // next probe. Leave the current answer standing.
-      }
-    },
-    [sessionId],
-  );
-
-  const handleSideChatSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
-      const text = snapshot.text.trim();
-      if (!text && snapshot.uploads.length === 0) return;
-      setSendError(null);
-      setSending(true);
-      // FormData rather than JSON so an attachment, a `/skill` chip, or an
-      // impersonated persona the composer accepted is actually sent instead of
-      // being dropped silently. Mirrors Chat.tsx's send.
-      const form = new FormData();
-      form.set("text", snapshot.text);
-      form.set("reasoningEffort", snapshot.reasoningEffort);
-      if (snapshot.skillName) form.set("skillName", snapshot.skillName);
-      if (snapshot.personaId) form.set("personaId", snapshot.personaId);
-      for (const upload of snapshot.uploads) form.append("files", upload.file);
-
-      let result: Awaited<ReturnType<typeof postSessionTurn>>;
-      try {
-        result = await postSessionTurn(sessionId, form);
-      } catch (err) {
-        // `postSessionTurn` wraps `fetch`, which rejects outright on a network
-        // failure rather than resolving to `{ ok: false }`. Without this the
-        // composer would stay closed until the view is remounted.
-        setSending(false);
-        setSendError(err instanceof Error ? err.message : "Couldn't continue this side chat");
-        throw err;
-      }
-      if (!result.ok) {
-        setSending(false);
-        setSendError(result.message || "Couldn't continue this side chat");
-        // The composer restores its input when onSend throws.
-        throw new Error(result.message);
-      }
-      // Wake the live-turn effect FIRST. The turn is already accepted, so it,
-      // not this transcript refresh, is what must not be lost: the POST creates
-      // the turn's stream before it responds, so the effect always finds it
-      // running, and that effect is also what clears `sending`.
-      setLiveTurnNonce((n) => n + 1);
-      // Then show the guardian's own message, best-effort. `reloadMessages`
-      // throws on any non-404 failure, and throwing here would both strand the
-      // composer and restore an input that was in fact accepted — the user
-      // would resend and get a duplicate turn.
-      try {
-        await reloadMessages();
-      } catch {
-        // Non-fatal: the accepted turn remains authoritative.
-      }
-    },
-    [reloadMessages, sessionId],
-  );
-
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    // Reset before the fetches: navigating between two side chats must not
-    // briefly show the previous one's composer, nor its send error.
-    setContinuable(false);
-    setSendError(null);
     Promise.all([getRomeSession(sessionId), listRomeSessionMessages(sessionId)])
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
@@ -1253,7 +1165,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         }
         setSession(sessionResult);
         setMessages(messageResult);
-        void probeContinuable(sessionResult.type);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load session");
@@ -1264,7 +1175,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, probeContinuable]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!session) {
@@ -1273,34 +1184,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     }
     const controller = new AbortController();
     let cancelled = false;
-    // Both completion sites below share this: promotion happens server-side
-    // at the same completion, so refetch rather than trusting mount-time
-    // state. A promoted session comes back "webchat", which keeps the
-    // composer (an ordinary chat is continuable right here), surfaces
-    // "Open chat", fixes the badge, and is the sidebar's cue to pick the
-    // new chat up. A transient refetch failure keeps the current state
-    // rather than replacing a just-finished answer with an error card.
-    // The server's promotion usually wins the race against this refetch (a
-    // few local writes vs a network round trip); when it loses, one delayed
-    // retry keeps the sidebar from missing the promotion until an unrelated
-    // refresh.
-    const reconcileFork = async (attempt = 0): Promise<void> => {
-      let refreshed: RomeSessionDetail | null = null;
-      try {
-        refreshed = await getRomeSession(sessionId);
-      } catch {
-        // Transient — the retry, next completion, or navigation reconciles.
-      }
-      if (cancelled) return;
-      if (refreshed) setSession(refreshed);
-      void probeContinuable(refreshed?.type ?? session?.type);
-      if (refreshed?.type === "webchat") {
-        emitSessionsChanged();
-      } else if (attempt === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        if (!cancelled) await reconcileFork(1);
-      }
-    };
     void (async () => {
       const turns = await listSessionTurns(sessionId);
       // A turn is reported `queued` until it becomes the session's current
@@ -1315,16 +1198,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         // leaving the detail view stale until a full page reload.
         if (!cancelled) {
           await reloadMessages();
-          setSending(false);
-          // Probe here too, not only on the completion branch: a short branch
-          // answer can finish between the mount probe (which 404s while it is
-          // still running) and this lookup, and a failed listSessionTurns lands
-          // here as well. Without it the composer would never appear.
-          if (session?.type !== "fork") {
-            void probeContinuable(session?.type);
-          } else {
-            await reconcileFork();
-          }
         }
         return;
       }
@@ -1348,13 +1221,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       publish();
       const response = await openTurnStream(active.turnId, controller.signal);
       if (!response.ok || !response.body) {
-        // The turn is accepted and running; only the attach failed. Release the
-        // composer rather than leaving it disabled until the view remounts, and
-        // refresh so the reply still lands once the turn finishes.
+        // The turn is accepted and running; only the attach failed. Refresh so
+        // the reply still lands once the turn finishes.
         if (!cancelled) {
           setLiveTurn(null);
-          setSending(false);
-          setSendError("Lost the live connection to this turn. Reload to see its reply.");
           await reloadMessages();
         }
         return;
@@ -1398,18 +1268,9 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       if (!cancelled) {
         await reloadMessages();
         setLiveTurn(null);
-        setSending(false);
-        // The branch's own first answer only writes its resumable row on
-        // completion, and this view opened while that turn was still running.
-        if (session?.type !== "fork") {
-          void probeContinuable(session?.type);
-        } else {
-          await reconcileFork();
-        }
       }
     })().catch((err) => {
       if (!cancelled && (err as { name?: string }).name !== "AbortError") {
-        setSending(false);
         setError(err instanceof Error ? err.message : "Failed to attach to live turn");
       }
     });
@@ -1417,7 +1278,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       cancelled = true;
       controller.abort();
     };
-  }, [reloadMessages, session?.id, session?.type, sessionId, liveTurnNonce, probeContinuable]);
+  }, [reloadMessages, session?.id, session?.type, sessionId]);
 
   return (
     <main
@@ -1503,22 +1364,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       ) : (
         <>
           <ReadOnlySessionChat session={session} messages={messages} liveTurn={liveTurn} />
-          {continuable ? (
-            <div className="shrink-0 border-t border-border px-4 py-3">
-              <ChatComposer
-                lockAgentMention
-                // `isStreaming` alone does NOT block sending — the composer
-                // deliberately allows it in the main chat. This view follows
-                // only the first running turn, so `disabled` is what actually
-                // keeps a second turn from being accepted and never rendered.
-                disabled={sending || liveTurn !== null}
-                isStreaming={liveTurn !== null}
-                streamError={sendError}
-                boxClassName="rounded-16 border border-border bg-surface p-3"
-                onSend={handleSideChatSend}
-              />
-            </div>
-          ) : null}
         </>
       )}
       {session ? (

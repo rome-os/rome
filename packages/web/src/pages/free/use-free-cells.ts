@@ -119,6 +119,21 @@ export function autoPlaceProjects(): string | null {
   return id;
 }
 
+/**
+ * Place a chat card pinned to one session (the side-chat surface). Re-placing
+ * the same session is a no-op that keeps the existing placement id — a fresh
+ * id would remount the card and tear down its live stream.
+ */
+export function placeChatWidget(sessionId: string): string {
+  const current = getSnapshot();
+  const existing = current.find((p) => p.type === "chat" && p.targetId === sessionId);
+  if (existing) return existing.id;
+
+  const id = genId();
+  persist([...current, { id, type: "chat", targetId: sessionId, order: nextOrder(current) }]);
+  return id;
+}
+
 export function autoPlaceApp(
   appId: string,
   route?: string,

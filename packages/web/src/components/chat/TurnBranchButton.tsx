@@ -14,7 +14,7 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { placeChatWidget } from "@/pages/free/use-free-cells";
 import { emitSessionsChanged } from "@/lib/session-events";
 
 const SUGGESTION_KEYS = [
@@ -53,13 +53,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           setError(body?.code === "turn_not_branchable" ? "notBranchable" : "generic");
           return;
         }
-        const body = (await res.json()) as {
-          placement: { appId: string; route: string };
-        };
-        autoPlaceApp(body.placement.appId, body.placement.route);
-        // The branch is an ordinary chat from its 201 — tell the sidebar now;
-        // nothing else announces the row at creation.
+        const body = (await res.json()) as { sessionId: string };
+        // The branch is an ordinary chat from its 201 — tell the sidebar and
+        // open it as a real chat card beside this conversation.
         emitSessionsChanged();
+        placeChatWidget(body.sessionId);
         setPrompt("");
         setOpen(false);
       } catch {
