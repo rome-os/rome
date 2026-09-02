@@ -3519,6 +3519,9 @@ describe("Webchat API", () => {
       });
 
       expect(res.status).toBe(409);
+      // The distinct code lets the client say "this answer has no branch
+      // point" instead of implying a transient failure.
+      await expect(res.json()).resolves.toMatchObject({ code: "turn_not_branchable" });
       expect(runForked).not.toHaveBeenCalled();
     });
 

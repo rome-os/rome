@@ -28,7 +28,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<false | "generic" | "notBranchable">(false);
 
   const submit = useCallback(
     async (rawPrompt: string) => {
@@ -43,7 +43,15 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: nextPrompt }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          // A turn with no branch point (a side chat's own first answer is
+          // the common case) is a permanent property of that turn, not a
+          // transient failure — tell the user what to do instead of
+          // suggesting a retry.
+          const body = (await res.json().catch(() => null)) as { code?: string } | null;
+          setError(body?.code === "turn_not_branchable" ? "notBranchable" : "generic");
+          return;
+        }
         const body = (await res.json()) as {
           placement: { appId: string; route: string };
         };
@@ -51,7 +59,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
         setPrompt("");
         setOpen(false);
       } catch {
-        setError(true);
+        setError("generic");
       } finally {
         setSubmitting(false);
       }
@@ -122,7 +130,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           <div className="flex items-center justify-between gap-2">
             {error ? (
               <span aria-live="polite" className="text-aux text-destructive">
-                {t("message.branch.submitFailed")}
+                {t(
+                  error === "notBranchable"
+                    ? "message.branch.notBranchable"
+                    : "message.branch.submitFailed",
+                )}
               </span>
             ) : (
               <span />

@@ -87,7 +87,8 @@
       "promptPlaceholder": "针对这条回复提问…",
       "submit": "发起侧边对话",
       "submitting": "正在创建…",
-      "submitFailed": "无法创建侧边对话"
+      "submitFailed": "无法创建侧边对话",
+      "notBranchable": "无法从这条回复创建侧边对话。发送一条追问，再从新的回复创建即可。"
     }
   },
   "blocks": {

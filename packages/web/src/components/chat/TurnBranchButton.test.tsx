@@ -69,4 +69,33 @@ describe("TurnBranchButton", () => {
       }),
     );
   });
+
+  it("explains a turn with no branch point instead of the generic failure", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { error: "This answer has no branch point", code: "turn_not_branchable" },
+        { status: 409 },
+      ),
+    );
+    render(<TurnBranchButton sessionId="chat-session" turnId="turn-3" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "message.branch.open" }));
+    fireEvent.click(screen.getByRole("button", { name: "message.branch.suggestions.mermaid" }));
+
+    expect(await screen.findByText("message.branch.notBranchable")).toBeTruthy();
+    expect(autoPlaceApp).not.toHaveBeenCalled();
+  });
+
+  it("shows the generic failure on other errors", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ error: "Couldn't start side chat from this conversation" }, { status: 409 }),
+    );
+    render(<TurnBranchButton sessionId="chat-session" turnId="turn-4" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "message.branch.open" }));
+    fireEvent.click(screen.getByRole("button", { name: "message.branch.suggestions.mermaid" }));
+
+    expect(await screen.findByText("message.branch.submitFailed")).toBeTruthy();
+    expect(autoPlaceApp).not.toHaveBeenCalled();
+  });
 });

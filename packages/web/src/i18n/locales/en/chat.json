@@ -87,7 +87,8 @@
       "promptPlaceholder": "Ask a question about this response…",
       "submit": "Start side chat",
       "submitting": "Starting…",
-      "submitFailed": "Couldn't start the side chat"
+      "submitFailed": "Couldn't start the side chat",
+      "notBranchable": "This answer can't be branched. Send a follow-up and branch from the new answer."
     }
   },
   "blocks": {

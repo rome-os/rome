@@ -1172,7 +1172,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
      * fork behind turn feedback is a background errand and stays one-shot.
      */
     continuable: boolean;
-  }): Promise<ForkSessionPlacement | null> => {
+  }): Promise<ForkSessionPlacement | "no_turn_checkpoint" | null> => {
     if (!deps.agentRunner.runForked) {
       log.warn("turn fork unavailable: runner cannot fork", {
         sessionId: input.session.id,
@@ -1254,7 +1254,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           turnId: input.turnId,
           label: input.label,
         });
-        return null;
+        // Distinguishable so the branch route can tell the user this turn has
+        // no branch point (a promoted side chat's own first answer is the
+        // common case) rather than implying a transient failure.
+        return "no_turn_checkpoint";
       }
       sourceCheckpoint = {
         providerId: storedCheckpoint.provider,
@@ -1414,7 +1417,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     turnId: string;
     rating: "positive" | "negative";
     comment: string;
-  }): Promise<ForkSessionPlacement | null> => {
+  }): Promise<ForkSessionPlacement | "no_turn_checkpoint" | null> => {
     // The fork inherits the source transcript at its current head, which may
     // have moved past the rated turn (feedback stays available on older
     // turns). Reconstruct the rated exchange from the persisted transcript
@@ -2476,6 +2479,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       initiator: "system:turn-branch",
       continuable: true,
     });
+    if (placement === "no_turn_checkpoint") {
+      // Not transient: this turn persisted no provider checkpoint to fork
+      // from. A follow-up answer in the same conversation is branchable.
+      return c.json({ error: "This answer has no branch point", code: "turn_not_branchable" }, 409);
+    }
     if (!placement) {
       return c.json({ error: "Couldn't start side chat from this conversation" }, 409);
     }
@@ -2591,10 +2599,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           comment,
         })
       : null;
+    // The learning fork is best-effort; a turn with no branch point (e.g. a
+    // promoted side chat's first answer) just skips it.
+    const processingPlacement = typeof processing === "object" ? processing : null;
 
     return c.json({
       feedback: formatFeedback(stored),
-      ...(processing ? { processing } : {}),
+      ...(processingPlacement ? { processing: processingPlacement } : {}),
     });
   });
 
