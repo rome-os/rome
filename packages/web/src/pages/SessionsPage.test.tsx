@@ -365,6 +365,24 @@ describe("SessionsPage live fork details", () => {
     expect(screen.getByTestId("side-chat-composer")).toBeTruthy();
   });
 
+  it("retries the refetch once when the promotion lands late", async () => {
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    // The completion refetch loses the race (still "fork"); the single
+    // delayed retry sees the promotion and still signals the sidebar.
+    rs.mocked(getRomeSession)
+      .mockResolvedValueOnce(FORK_SESSION)
+      .mockResolvedValueOnce(FORK_SESSION)
+      .mockResolvedValue({ ...FORK_SESSION, type: "webchat" } as never);
+    const finish = mockFinishableTurnStream();
+
+    renderDetail();
+    expect(await screen.findByTestId("side-chat-composer")).toBeTruthy();
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
+    finish();
+
+    await waitFor(() => expect(emitSessionsChanged).toHaveBeenCalled(), { timeout: 4000 });
+  });
+
   it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {
     rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
     rs.mocked(listSessionTurns).mockResolvedValue([]);

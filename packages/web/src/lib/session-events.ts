@@ -21,7 +21,13 @@ export function emitSessionsChanged(): void {
   // window. Without this hop, a branch promoted while its widget is open
   // never appears in the sidebar until an unrelated refresh.
   if (window.parent !== window) {
-    window.parent.dispatchEvent(new CustomEvent(CHAT_SESSIONS_CHANGED_EVENT));
+    try {
+      window.parent.dispatchEvent(new CustomEvent(CHAT_SESSIONS_CHANGED_EVENT));
+    } catch {
+      // A cross-origin parent (no supported embedding today) refuses the
+      // dispatch; the same-window event above has already served this frame,
+      // and a caller's mutation must not fail over a notification.
+    }
   }
 }
 

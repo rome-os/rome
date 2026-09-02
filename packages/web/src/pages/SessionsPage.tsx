@@ -1273,6 +1273,34 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     }
     const controller = new AbortController();
     let cancelled = false;
+    // Both completion sites below share this: promotion happens server-side
+    // at the same completion, so refetch rather than trusting mount-time
+    // state. A promoted session comes back "webchat", which retires this
+    // read-only frame's composer (the probe returns early for non-forks),
+    // surfaces "Open chat", fixes the badge, and is the sidebar's cue to
+    // pick the new chat up. A transient refetch failure keeps the current
+    // state rather than replacing a just-finished answer with an error card.
+    // The server's promotion usually wins the race against this refetch (a
+    // few local writes vs a network round trip); when it loses, one delayed
+    // retry keeps the sidebar from missing the promotion until an unrelated
+    // refresh.
+    const reconcileFork = async (attempt = 0): Promise<void> => {
+      let refreshed: RomeSessionDetail | null = null;
+      try {
+        refreshed = await getRomeSession(sessionId);
+      } catch {
+        // Transient — the retry, next completion, or navigation reconciles.
+      }
+      if (cancelled) return;
+      if (refreshed) setSession(refreshed);
+      void probeContinuable(refreshed?.type ?? session?.type);
+      if (refreshed?.type === "webchat") {
+        emitSessionsChanged();
+      } else if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (!cancelled) await reconcileFork(1);
+      }
+    };
     void (async () => {
       const turns = await listSessionTurns(sessionId);
       // A turn is reported `queued` until it becomes the session's current
@@ -1295,26 +1323,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           if (session?.type !== "fork") {
             void probeContinuable(session?.type);
           } else {
-            // Promotion happens server-side at this same completion. Refetch
-            // rather than trusting mount-time state: a promoted session comes
-            // back "webchat", which retires this read-only frame's composer
-            // (the probe returns early for non-forks), surfaces "Open chat",
-            // fixes the badge, and is the sidebar's cue to pick the new chat
-            // up. A branch that did not promote behaves the same, at the cost
-            // of one extra GET per completion on fork views, and a transient
-            // refetch failure keeps the current state rather than replacing a
-            // just-finished answer with an error card.
-            let refreshed: RomeSessionDetail | null = null;
-            try {
-              refreshed = await getRomeSession(sessionId);
-            } catch {
-              // Transient — the next completion or navigation reconciles.
-            }
-            if (!cancelled) {
-              if (refreshed) setSession(refreshed);
-              void probeContinuable(refreshed?.type ?? session?.type);
-              if (refreshed?.type === "webchat") emitSessionsChanged();
-            }
+            await reconcileFork();
           }
         }
         return;
@@ -1395,26 +1404,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         if (session?.type !== "fork") {
           void probeContinuable(session?.type);
         } else {
-          // Promotion happens server-side at this same completion. Refetch
-          // rather than trusting mount-time state: a promoted session comes
-          // back "webchat", which retires this read-only frame's composer
-          // (the probe returns early for non-forks), surfaces "Open chat",
-          // fixes the badge, and is the sidebar's cue to pick the new chat
-          // up. A branch that did not promote behaves the same, at the cost
-          // of one extra GET per completion on fork views, and a transient
-          // refetch failure keeps the current state rather than replacing a
-          // just-finished answer with an error card.
-          let refreshed: RomeSessionDetail | null = null;
-          try {
-            refreshed = await getRomeSession(sessionId);
-          } catch {
-            // Transient — the next completion or navigation reconciles.
-          }
-          if (!cancelled) {
-            if (refreshed) setSession(refreshed);
-            void probeContinuable(refreshed?.type ?? session?.type);
-            if (refreshed?.type === "webchat") emitSessionsChanged();
-          }
+          await reconcileFork();
         }
       }
     })().catch((err) => {
