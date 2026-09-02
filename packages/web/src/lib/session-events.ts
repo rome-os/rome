@@ -16,6 +16,13 @@ export const CHAT_SESSIONS_CHANGED_EVENT = "rome:chat-sessions-changed";
 export function emitSessionsChanged(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(CHAT_SESSIONS_CHANGED_EVENT));
+  // The Sessions view also runs inside a same-origin app iframe (AppWidget
+  // renders /full/apps/sessions/<id>), and the sidebar listens on the top
+  // window. Without this hop, a branch promoted while its widget is open
+  // never appears in the sidebar until an unrelated refresh.
+  if (window.parent !== window) {
+    window.parent.dispatchEvent(new CustomEvent(CHAT_SESSIONS_CHANGED_EVENT));
+  }
 }
 
 /**

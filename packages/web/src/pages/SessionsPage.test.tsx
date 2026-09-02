@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
+import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
   getRomeSession,
   getSession,
@@ -67,6 +68,12 @@ rs.mock("@/lib/chat-api", () => {
     postSessionTurn: rs.fn(),
   };
 });
+
+const emitSessionsChanged = rs.hoisted(() => rs.fn());
+rs.mock("@/lib/session-events", () => ({
+  ...sessionEventsModule,
+  emitSessionsChanged,
+}));
 
 const FORK_SESSION = {
   id: "feedback-fork-session",
@@ -333,6 +340,29 @@ describe("SessionsPage live fork details", () => {
     finish();
 
     expect(await screen.findByTestId("side-chat-composer")).toBeTruthy();
+    // A branch that did not promote signals nothing.
+    expect(emitSessionsChanged).not.toHaveBeenCalled();
+  });
+
+  it("retires the widget composer and signals the sidebar when the branch promotes", async () => {
+    // Continuable at mount, so the composer is genuinely present…
+    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
+    // …and promoted by the time the completion refetch asks again.
+    rs.mocked(getRomeSession)
+      .mockResolvedValueOnce(FORK_SESSION)
+      .mockResolvedValue({ ...FORK_SESSION, type: "webchat" } as never);
+    const finish = mockFinishableTurnStream();
+
+    renderDetail();
+    expect(await screen.findByTestId("side-chat-composer")).toBeTruthy();
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
+    finish();
+
+    // An ordinary chat is not served by this read-only frame: the composer
+    // retires, and the sidebar is told to pick the new chat up. Both land
+    // behind two awaits, so both assertions must wait.
+    await waitFor(() => expect(emitSessionsChanged).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId("side-chat-composer")).toBeNull());
   });
 
   it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {

@@ -51,6 +51,7 @@ import {
   postSessionTurn,
   type ListRomeSessionsOptions,
 } from "@/lib/chat-api";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
 import type {
@@ -1287,7 +1288,30 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           // answer can finish between the mount probe (which 404s while it is
           // still running) and this lookup, and a failed listSessionTurns lands
           // here as well. Without it the composer would never appear.
-          void probeContinuable(session?.type);
+          if (session?.type !== "fork") {
+            void probeContinuable(session?.type);
+          } else {
+            // Promotion happens server-side at this same completion. Refetch
+            // rather than trusting mount-time state: a promoted session comes
+            // back "webchat", which retires this read-only frame's composer
+            // (the probe returns early for non-forks), surfaces "Open chat",
+            // fixes the badge, and is the sidebar's cue to pick the new chat
+            // up. A branch that did not promote behaves the same, at the cost
+            // of one extra GET per completion on fork views, and a transient
+            // refetch failure keeps the current state rather than replacing a
+            // just-finished answer with an error card.
+            let refreshed: RomeSessionDetail | null = null;
+            try {
+              refreshed = await getRomeSession(sessionId);
+            } catch {
+              // Transient — the next completion or navigation reconciles.
+            }
+            if (!cancelled) {
+              if (refreshed) setSession(refreshed);
+              void probeContinuable(refreshed?.type ?? session?.type);
+              if (refreshed?.type === "webchat") emitSessionsChanged();
+            }
+          }
         }
         return;
       }
@@ -1364,7 +1388,30 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         setSending(false);
         // The branch's own first answer only writes its resumable row on
         // completion, and this view opened while that turn was still running.
-        void probeContinuable(session?.type);
+        if (session?.type !== "fork") {
+          void probeContinuable(session?.type);
+        } else {
+          // Promotion happens server-side at this same completion. Refetch
+          // rather than trusting mount-time state: a promoted session comes
+          // back "webchat", which retires this read-only frame's composer
+          // (the probe returns early for non-forks), surfaces "Open chat",
+          // fixes the badge, and is the sidebar's cue to pick the new chat
+          // up. A branch that did not promote behaves the same, at the cost
+          // of one extra GET per completion on fork views, and a transient
+          // refetch failure keeps the current state rather than replacing a
+          // just-finished answer with an error card.
+          let refreshed: RomeSessionDetail | null = null;
+          try {
+            refreshed = await getRomeSession(sessionId);
+          } catch {
+            // Transient — the next completion or navigation reconciles.
+          }
+          if (!cancelled) {
+            if (refreshed) setSession(refreshed);
+            void probeContinuable(refreshed?.type ?? session?.type);
+            if (refreshed?.type === "webchat") emitSessionsChanged();
+          }
+        }
       }
     })().catch((err) => {
       if (!cancelled && (err as { name?: string }).name !== "AbortError") {
