@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { emitSessionsChanged } from "@/lib/session-events";
 
 const SUGGESTION_KEYS = [
   "message.branch.suggestions.mermaid",
@@ -56,6 +57,9 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           placement: { appId: string; route: string };
         };
         autoPlaceApp(body.placement.appId, body.placement.route);
+        // The branch is an ordinary chat from its 201 — tell the sidebar now;
+        // nothing else announces the row at creation.
+        emitSessionsChanged();
         setPrompt("");
         setOpen(false);
       } catch {

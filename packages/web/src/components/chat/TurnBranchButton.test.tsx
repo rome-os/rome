@@ -11,6 +11,11 @@ rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
+const emitSessionsChanged = rs.hoisted(() => rs.fn());
+rs.mock("@/lib/session-events", () => ({
+  emitSessionsChanged,
+}));
+
 afterEach(() => {
   cleanup();
   autoPlaceApp.mockClear();
@@ -35,6 +40,8 @@ describe("TurnBranchButton", () => {
     await waitFor(() => {
       expect(autoPlaceApp).toHaveBeenCalledWith("sessions", "branch-session");
     });
+    // The sidebar learns about the born-webchat branch at creation.
+    expect(emitSessionsChanged).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/chat/sessions/chat-session/turns/turn-1/forks",
       expect.objectContaining({
@@ -84,6 +91,7 @@ describe("TurnBranchButton", () => {
 
     expect(await screen.findByText("message.branch.notBranchable")).toBeTruthy();
     expect(autoPlaceApp).not.toHaveBeenCalled();
+    expect(emitSessionsChanged).not.toHaveBeenCalled();
   });
 
   it("shows the generic failure on other errors", async () => {

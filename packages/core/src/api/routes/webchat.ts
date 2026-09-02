@@ -1319,48 +1319,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const forkSessionId = first.value.sessionId;
     const forkTurnId = first.value.turnId;
-    void (async () => {
-      let finalStatus: string | undefined;
-      let next = await iterator.next();
-      while (!next.done) {
-        // AgentRunner persists every fork message; this caller only watches
-        // for the terminal turn_end.
-        if (next.value.type === "turn_end") finalStatus = next.value.status;
-        next = await iterator.next();
-      }
-      // A branch that completed on its own provider thread stops being
-      // special. The resumable row is the source of truth: persistForkThread
-      // already declined errored turns and borrowed threads, and promoting
-      // without it would hand the next message a fresh provider thread and
-      // silently drop the branched context.
-      if (input.continuable && finalStatus === "completed") {
-        const row = await deps.sessionManager.findReusableSession(
-          buildWebchatChannelThreadKey(forkSessionId, null),
-          agentName,
+    if (input.continuable) {
+      // Born an ordinary chat: createForkTraceRecorder wrote the row when
+      // turn_start arrived, and the chat surface can already list and stream
+      // this turn. Retitle before anyone can see it (the deterministic
+      // fallback is the branch prompt; the generated title follows
+      // asynchronously and respects a manual rename), then flip the type so
+      // every type-keyed gate grants ordinary-chat behavior from the 201 on.
+      // The send guard in handleChatSend keeps "visible" from outrunning
+      // "continuable" until persistForkThread lands the provider thread.
+      const fallbackTitle = fallbackConversationTitle(input.prompt);
+      const current = await deps.webchatRepo.getSession(forkSessionId);
+      if (current && fallbackTitle) {
+        await deps.webchatRepo.updateSessionNameIfCurrent(
+          forkSessionId,
+          current.name,
+          fallbackTitle,
         );
-        if (row?.providerThreadId) {
-          const current = await deps.webchatRepo.getSession(forkSessionId);
-          // Retitle BEFORE the flip: the sidebar refetches the moment any
-          // observer sees type "webchat", and nothing re-notifies it when a
-          // late title lands — so the raw `branch: …` name must already be
-          // gone when the type changes. The deterministic fallback (the
-          // branch prompt, truncated) is written synchronously; the generated
-          // title replaces it afterwards unless the guardian renamed the chat
-          // meanwhile. An ordinary chat is titled from its first user
-          // message; the branch's is the prompt typed into the popover.
-          const fallbackTitle = fallbackConversationTitle(input.prompt);
-          if (current && fallbackTitle) {
-            await deps.webchatRepo.updateSessionNameIfCurrent(
-              forkSessionId,
-              current.name,
-              fallbackTitle,
-            );
-          }
-          await deps.webchatRepo.promoteForkToChat(forkSessionId);
-          if (current && fallbackTitle) {
-            void generateAndPersistConversationTitle(forkSessionId, fallbackTitle, input.prompt);
-          }
-        }
+        void generateAndPersistConversationTitle(forkSessionId, fallbackTitle, input.prompt);
+      }
+      await deps.webchatRepo.promoteForkToChat(forkSessionId);
+    }
+    void (async () => {
+      while (!(await iterator.next()).done) {
+        // AgentRunner persists every fork message; this caller only has to drain.
       }
     })().catch((err) => {
       log.warn("turn fork failed", {
@@ -2900,6 +2882,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "This chat is archived and read-only" }, 409);
     }
 
+    // A branch is visible in the sidebar from its 201, but its provider thread
+    // only exists once persistForkThread lands at first-answer completion.
+    // Sending before then (or after a failed first answer) would acquire a
+    // fresh thread and silently drop the branched context — refuse instead.
+    if (session.parentSessionId !== null) {
+      const branchThread = await deps.sessionManager.findReusableSession(
+        buildWebchatChannelThreadKey(session.id, null),
+        session.agentName ?? "main",
+      );
+      if (!branchThread?.providerThreadId) {
+        return c.json(
+          {
+            error:
+              "This side chat's thread isn't ready — its first answer is still running or did not complete.",
+            code: "branch_thread_missing",
+          },
+          409,
+        );
+      }
+    }
+
     // The session's open interactions gate resolution: a resolution turn is
     // honored only when it cites the toolUseId of a card still awaiting a
     // result. Several inline components can be open at once, so this is a set
@@ -3030,7 +3033,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // the selection to null so the two derivations cannot drift: a suffix here
     // would open a fresh provider thread and silently lose the branch history.
     const modelSelection =
-      session.type === "fork"
+      session.parentSessionId !== null
         ? null
         : await resolveSessionModelSelectionForTurn(
             {
@@ -3123,7 +3126,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // session would advertise a live surface (its key starts with
           // "webchat:") and could park a turn on a card nobody can answer —
           // dead-ending the conversation this is meant to keep alive.
-          interactiveSurfaceDetached: session.type === "fork",
+          interactiveSurfaceDetached: session.parentSessionId !== null,
         },
       );
     } catch (err) {
