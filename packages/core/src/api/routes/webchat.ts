@@ -2601,7 +2601,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : null;
     // The learning fork is best-effort; a turn with no branch point (e.g. a
     // promoted side chat's first answer) just skips it.
-    const processingPlacement = typeof processing === "object" ? processing : null;
+    const processingPlacement = typeof processing === "string" ? null : processing;
 
     return c.json({
       feedback: formatFeedback(stored),

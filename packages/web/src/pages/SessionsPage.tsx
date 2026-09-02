@@ -1275,11 +1275,11 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     let cancelled = false;
     // Both completion sites below share this: promotion happens server-side
     // at the same completion, so refetch rather than trusting mount-time
-    // state. A promoted session comes back "webchat", which retires this
-    // read-only frame's composer (the probe returns early for non-forks),
-    // surfaces "Open chat", fixes the badge, and is the sidebar's cue to
-    // pick the new chat up. A transient refetch failure keeps the current
-    // state rather than replacing a just-finished answer with an error card.
+    // state. A promoted session comes back "webchat", which keeps the
+    // composer (an ordinary chat is continuable right here), surfaces
+    // "Open chat", fixes the badge, and is the sidebar's cue to pick the
+    // new chat up. A transient refetch failure keeps the current state
+    // rather than replacing a just-finished answer with an error card.
     // The server's promotion usually wins the race against this refetch (a
     // few local writes vs a network round trip); when it loses, one delayed
     // retry keeps the sidebar from missing the promotion until an unrelated
