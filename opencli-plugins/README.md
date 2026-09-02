@@ -96,6 +96,12 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 - `opencli redfin download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
   photo of a public Redfin listing into one folder per listing, in gallery order, with captions and
   room tags in the result rows. `photos URL` lists the same gallery without writing anything.
+- `opencli zillow download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
+  photo of a public Zillow listing into one folder per listing, in gallery order, at the widest
+  original-ratio size Zillow serves. `photos URL` lists the same gallery without writing anything.
+- `opencli gemini video PROMPT [--image A.jpg,B.jpg] [--ratio 16:9|9:16] [--output DIR] [--name FILE]`
+  — generates a clip in the signed-in Gemini web session's video composer, optionally animating
+  uploaded photos, waits for the render, and saves the MP4 with the browser's session cookies.
 
 ## Overriding a built-in command: caveats
 
@@ -398,4 +404,69 @@ result.
 opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461
 opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 --output ~/Pictures --size large --limit 10 -f json
 opencli redfin photos https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 -f json
+```
+
+### Zillow
+
+The Zillow plugin reads a public home details page and works from the Next.js page state Zillow
+server-renders into `<script id="__NEXT_DATA__">`. The `gdpClientCache` entry there holds the
+listing's `responsivePhotosOriginalRatio` list: every photo in display order with the CDN URL of
+each width bucket, plus a caption and subject type when the listing has them. The commands need no
+Zillow account and call no private API. When that state is absent, the commands fall back to the
+CDN URLs present in the HTML.
+
+- `download` saves the gallery to `<output>/<address slug>-<zpid>/`, one file per photo named
+  `<gallery position>-<photo key>.jpg` (for example `01-40a2df03a9e1e7ce67de59c614683f5f.jpg`) so
+  a folder listing matches the order on Zillow. Each result row carries the saved path, byte size,
+  caption, subject type, served width, and source URL. A photo that fails to download gets a failed
+  row with the error, and the run continues with the next photo.
+- `photos` returns the same gallery as rows without touching the disk.
+- `--size` picks the width bucket. `full` (default) is the widest original-ratio bucket, up to
+  1536px wide, which Zillow scales down from the source photo and never scales up. `large` (1344),
+  `medium` (1024), and `small` (800) are the narrower original-ratio buckets. `thumb` is Zillow's
+  384px crop. A bucket the listing does not publish falls back to the nearest one it does. Files
+  for a non-default size carry the size in their name, so variants never overwrite each other.
+- `--limit` caps the number of photos taken from the front of the gallery.
+
+Both a canonical `/homedetails/<address>/<zpid>_zpid/` URL and a `/homes/<address>_rb/` address
+URL work. The address form resolves through a Zillow redirect, so the canonical form is faster.
+
+Zillow's PerimeterX sensor scores each page load and stores its verdict in the `_px*` and `pxcts`
+cookies. A verdict written during an automated load blocks the next load with a "Press & Hold"
+wall or a bare HTTP 5xx. When a command hits either, it deletes only those PerimeterX cookies from
+the browser, which resets the verdict, and loads the page once more. Every other Zillow cookie,
+including a signed-in session, stays in place. A wall that survives the retry fails with a typed
+error, as does a missing listing.
+
+```bash
+opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/
+opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ --output ~/Pictures --size large --limit 10 -f json
+opencli zillow photos https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ -f json
+```
+
+### Gemini video
+
+The Gemini plugin adds `video` next to the built-in `ask` and `image` commands. It opens
+`gemini.google.com/videos`, where Gemini pre-selects its Videos tool, picks the aspect ratio,
+attaches any `--image` files, submits the prompt, polls the newest model turn until a player
+renders or Gemini reports a failure, then downloads the MP4. The clip host refuses anonymous
+requests, so the download forwards the browser's Google session cookies for that host only.
+
+- `--image` takes a comma-separated list of local paths (up to 10). Gemini builds its file input
+  on demand and only a trusted pointer click opens it, so the command intercepts the file chooser
+  over CDP and hands Chrome the paths. That needs the direct CDP backend
+  (`opencli --cdp-endpoint http://127.0.0.1:9222 …`); the Browser Bridge extension does not
+  relay CDP events. The command waits for every attachment tile to finish uploading before it
+  sends, because a message sent mid-upload is dropped without an error.
+- One prompt yields one clip of roughly 8 to 10 seconds at 1280×720 with generated ambient
+  audio. Longer films are several runs stitched together.
+- Gemini enforces a daily video allowance per account (Google AI Pro: 3 videos a day). Once it is
+  spent, Gemini locks the video composer without a message; the command reports that state as a
+  typed error instead of waiting for a clip.
+- A refusal ("I can't generate that video") is returned as a typed error with Gemini's wording.
+  Refusals are often transient; a retry with a simpler prompt usually works.
+
+```bash
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "Slow cinematic dolly toward the house at dusk, subtle motion" --image ./front.jpg --output ./clips --name front-dusk
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "A paper boat drifting on a pond at sunrise" --ratio 9:16 -f json
 ```

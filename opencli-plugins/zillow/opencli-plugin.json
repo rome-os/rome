@@ -1,0 +1,6 @@
+{
+  "name": "rome-zillow",
+  "description": "Public Zillow listing photo commands for OpenCLI",
+  "version": "0.1.0",
+  "opencli": ">=1.8.0"
+}
