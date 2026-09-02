@@ -138,6 +138,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 - `opencli zillow download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
   photo of a public Zillow listing into one folder per listing, in gallery order, at the widest
   original-ratio size Zillow serves. `photos URL` lists the same gallery without writing anything.
+- `opencli gemini video PROMPT [--image A.jpg,B.jpg] [--ratio 16:9|9:16] [--output DIR] [--name FILE]`
+  — generates a clip in the signed-in Gemini web session's video composer, optionally animating
+  uploaded photos, waits for the render, and saves the MP4 with the browser's session cookies.
 
 ## Overriding a built-in command: caveats
 
@@ -495,4 +498,31 @@ error, as does a missing listing.
 opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/
 opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ --output ~/Pictures --size large --limit 10 -f json
 opencli zillow photos https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ -f json
+```
+
+### Gemini video
+
+The Gemini plugin adds `video` next to the built-in `ask` and `image` commands. It opens
+`gemini.google.com/videos`, where Gemini pre-selects its Videos tool, picks the aspect ratio,
+attaches any `--image` files, submits the prompt, polls the newest model turn until a player
+renders or Gemini reports a failure, then downloads the MP4. The clip host refuses anonymous
+requests, so the download forwards the browser's Google session cookies for that host only.
+
+- `--image` takes a comma-separated list of local paths (up to 10). Gemini builds its file input
+  on demand and only a trusted pointer click opens it, so the command intercepts the file chooser
+  over CDP and hands Chrome the paths. That needs the direct CDP backend
+  (`opencli --cdp-endpoint http://127.0.0.1:9222 …`); the Browser Bridge extension does not
+  relay CDP events. The command waits for every attachment tile to finish uploading before it
+  sends, because a message sent mid-upload is dropped without an error.
+- One prompt yields one clip of roughly 8 to 10 seconds at 1280×720 with generated ambient
+  audio. Longer films are several runs stitched together.
+- Gemini enforces a daily video allowance per account (Google AI Pro: 3 videos a day). Once it is
+  spent, Gemini locks the video composer without a message; the command reports that state as a
+  typed error instead of waiting for a clip.
+- A refusal ("I can't generate that video") is returned as a typed error with Gemini's wording.
+  Refusals are often transient; a retry with a simpler prompt usually works.
+
+```bash
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "Slow cinematic dolly toward the house at dusk, subtle motion" --image ./front.jpg --output ./clips --name front-dusk
+opencli --cdp-endpoint http://127.0.0.1:9222 gemini video "A paper boat drifting on a pond at sunrise" --ratio 9:16 -f json
 ```
