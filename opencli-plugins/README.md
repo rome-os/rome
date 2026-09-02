@@ -93,6 +93,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   resolves a restaurant name, OpenTable alias, or `/r/` URL and reads its public profile,
   bookable times and booking links, verified reviews, menus, photos, and dining experiences without
   requiring an OpenTable login.
+- `opencli redfin download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
+  photo of a public Redfin listing into one folder per listing, in gallery order, with captions and
+  room tags in the result rows. `photos URL` lists the same gallery without writing anything.
 
 ## Overriding a built-in command: caveats
 
@@ -367,4 +370,32 @@ opencli opentable reviews lolinda-reservations-san-francisco --sort newest --rat
 opencli opentable menu lolinda-reservations-san-francisco --query steak -f json
 opencli opentable photos lolinda-reservations-san-francisco --category food --limit 10
 opencli opentable experiences lolinda-reservations-san-francisco -f json
+```
+
+### Redfin
+
+The Redfin plugin reads a public listing page and works from the gallery Redfin server-renders into
+the page state (`__reactServerState`), which lists every photo in display order with the CDN URL of
+each size variant, plus Redfin's own captions and room tags per photo. The commands need no Redfin
+account and call no private API. When that state is absent, the commands fall back to the full-size
+CDN URLs present in the HTML.
+
+- `download` saves the gallery to `<output>/<address slug>-<property id>/`, one file per photo named
+  `<gallery position>-<CDN file name>` (for example `01-ML82027150_2.jpg`) so a folder listing
+  matches the order on Redfin. Each result row carries the saved path, byte size, caption, tags,
+  and source URL. A photo that fails to download gets a failed row with the error, and the run
+  continues with the next photo.
+- `photos` returns the same gallery as rows without touching the disk.
+- `--size` picks the variant. `full` (default) is Redfin's uncropped full-screen image, up to 1280px
+  wide. `large` is a fixed 1080×771 crop. `medium`, `small`, and `thumb` are progressively smaller.
+  Files for a non-default size carry the size in their name, so variants never overwrite each other.
+- `--limit` caps the number of photos taken from the front of the gallery.
+
+A Redfin bot-check ("Press & Hold") or a missing listing fails with a typed error instead of an empty
+result.
+
+```bash
+opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461
+opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 --output ~/Pictures --size large --limit 10 -f json
+opencli redfin photos https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 -f json
 ```
