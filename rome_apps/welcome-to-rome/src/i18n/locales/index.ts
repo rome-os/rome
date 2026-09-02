@@ -1,11 +1,11 @@
 import type { AppIdea } from "../../db/repositories/progress.js";
 import type { AskQuestion } from "../../hooks/turn-middleware/component.js";
 import { normalizeWelcomeLocale, type WelcomeLocale } from "../../locale.js";
-import en from "./en.json";
-import zhCN from "./zh-CN.json";
+import en from "./en.js";
+import zhCN from "./zh-CN.js";
 
-// Both files must have the same shape. JSON keeps all guardian-facing copy in
-// one place per locale; this small module only selects it and handles templates.
+// Both locale modules must have the same shape. They keep all guardian-facing
+// copy in one place per locale; this module only selects it and handles templates.
 const MESSAGES_BY_LOCALE: Record<WelcomeLocale, typeof en> = {
   en,
   "zh-CN": zhCN,
