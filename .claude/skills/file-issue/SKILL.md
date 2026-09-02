@@ -1,6 +1,7 @@
 ---
 name: file-issue
 description: File one GitHub issue from a description the user gives — classify it as a bug report, feature request, or task spec, gather what the body needs from the tracker and the code, ask the user only for what those cannot answer, draft it in the repo's issue format, and create it with `gh` after a go-ahead. Use when the user says "file an issue / bug / feature request / task for <description>".
+argument-hint: [description]
 disable-model-invocation: true
 ---
 
@@ -10,7 +11,7 @@ Goal end-state: one issue on the tracker whose type, title, body sections, and l
 
 The description arrives as the skill argument or in the conversation: $ARGUMENTS
 
-The issue format lives in the authoring docs, and this skill does not restate it. Read the shared rules first, then the rulebook of the type chosen in step 1:
+The authoring docs own the issue format, and a rule there wins over any wording here. Read the shared rules first, then the rulebook of the type chosen in step 1:
 
 - [github-issues.md](../../../docs/authoring/github-issues.md) — title shape, the Situation section, the type labels.
 - [github-issues-bug-report.md](../../../docs/authoring/github-issues-bug-report.md)
@@ -31,14 +32,15 @@ When the description supports two readings that change the type — a symptom th
 
 ## 2. Gather
 
-Fill the required sections of the chosen type from three sources, in this order: the description, the tracker, the code.
+Fill the required sections of the chosen type from three sources, in this order: the description, the tracker, the code. When step 1 left two readings open, gather what both readings need, so the answer in step 3 picks a draft rather than a second gather.
 
-1. Search the tracker with `gh issue list --search "<keywords>" --state all`. If an open issue already tracks the same defect, gap, or change, report it and stop. If a closed one covers it, link it from the body.
-2. Read the code and the docs that the description touches. For a bug report, reproduce the symptom when the steps are cheap, and gather the evidence Initial triage and Suspected root cause need. For a feature request, find the PRs, incidents, or threads where the gap bit, because Pain carries evidence. For a task spec, read the files Scope names, and decide for each Acceptance item whether a committed test or a one-time check proves it.
-3. For a bug report, pick one of `P0`, `P1`, `P2`, `P3` from the label descriptions in `gh label list`.
-4. For a task spec, find the issues it depends on and record them as a **Blocked by** line by number.
+1. Resolve the repo with `gh repo view --json nameWithOwner`. The concept URLs in Situation need the owner and repo name.
+2. Search the tracker with `gh issue list --search "<keywords>" --state all`. If an open issue already tracks the same defect, gap, or change, report it and stop. If a closed one covers it, link it from the body.
+3. Read the code and the docs that the description touches. For a bug report, reproduce the symptom when the steps are cheap, and gather the evidence Initial triage and Suspected root cause need. For a feature request, find the PRs, incidents, or threads where the gap bit, because Pain carries evidence. For a task spec, read the files Scope names, and decide for each Acceptance item whether a committed test or a one-time check proves it.
+4. For a bug report, pick one of `P0`, `P1`, `P2`, `P3` from the label descriptions in `gh label list`.
+5. For a task spec, find the issues it depends on and record them as a **Blocked by** line by number.
 
-Step 2 answers what the code can answer. A question goes to the user only for what the description, the tracker, and the code leave open.
+Step 3 answers what the code can answer. A question goes to the user only for what the description, the tracker, and the code leave open.
 
 ## 3. Ask
 
@@ -56,7 +58,7 @@ Skip the round when no question earns a slot. Ask a second round only when an an
 
 ## 4. Draft
 
-1. Write the title in the `<area>: <statement>` shape, in the mood the type's rulebook fixes: symptom in present tense for a bug, pain in present tense for a feature request, imperative action for a task.
+1. Write the title in the shape github-issues.md fixes and in the mood the type's rulebook fixes.
 2. Write every required section of the type, in the order its rulebook lists, and only the optional sections the evidence fills. Situation opens the body and names no file, symbol, or line number. Sections after Situation carry the exact strings, paths, and commands.
 3. For a feature request, write Possible directions only when the user presents a direction in the description or in an answer, and list only the directions the user presented. Otherwise omit the section. A direction the skill would invent on its own stays out of the issue.
 4. Set the labels: the type label, plus exactly one priority label for a bug report, plus `ready-for-agent` for a task spec an agent can implement from the body alone. A feature request never carries `ready-for-agent`.
@@ -68,9 +70,8 @@ Show the full draft — title, labels, body — and ask for the go-ahead in one 
 
 ## 6. Create
 
-1. Resolve the repo: `gh repo view --json nameWithOwner`.
-2. If `gh label list` lacks a label the draft carries, create it with `gh label create <name> --description "<description>"`, using the description the type's rulebook gives the label.
-3. Create the issue, passing the body through a file so that backticks and quotes survive the shell:
+1. If `gh label list` lacks a label the draft carries, stop and report the missing label. The repo's label list is the only source of label descriptions, so the skill creates no label.
+2. Create the issue, passing the body through a file so that backticks and quotes survive the shell:
 
    ```bash
    gh issue create --title "<title>" --body-file <path> --label <type-label> [--label <priority-or-ready-for-agent>]
