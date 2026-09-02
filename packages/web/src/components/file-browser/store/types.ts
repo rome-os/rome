@@ -152,6 +152,7 @@ export interface FileBrowserConfig {
   renderCreateExtra?: (ctx: { type: "file" | "folder"; parentPath: string | null }) => ReactNode;
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
 }

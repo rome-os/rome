@@ -13,11 +13,12 @@ export interface WidgetPlacement {
   // reload. Set by an agent's `show_app`/`place_widget`.
   route?: string;
   params?: Record<string, string | number | boolean>;
-  // Selected file for a `projects` widget — the file the user (or an agent
-  // link) last opened. Persists with the layout so the addressed file survives
-  // reload; the embedded file browser disables its own URL-as-SSOT sync, so
-  // without this the selection is lost on refresh. A `projects/`-rooted logical
-  // path, matching the browser's own selection space.
+  // Selected file or folder for a `projects` widget — wherever the user (or an
+  // agent link) last navigated. Persists with the layout so the addressed spot
+  // survives reload and rides the open-in-new-tab link; the embedded file
+  // browser disables its own URL-as-SSOT sync, so without this the selection is
+  // lost on refresh. A `projects/`-rooted logical path, matching the browser's
+  // own selection space.
   selectedPath?: string;
 }
 
@@ -273,10 +274,10 @@ export function updatePlacementLink(
 }
 
 /**
- * Persist a `projects` tile's currently-selected file back onto its placement
- * so the addressed file survives reload. In place (id unchanged → no remount);
- * no-ops when unchanged to avoid churning localStorage + the server PUT on every
- * click.
+ * Persist a `projects` tile's currently-selected file or folder back onto its
+ * placement so the addressed spot survives reload. In place (id unchanged → no
+ * remount); no-ops when unchanged to avoid churning localStorage + the server
+ * PUT on every click.
  */
 export function updateProjectsSelection(placementId: string, selectedPath: string | null): void {
   const current = getSnapshot();

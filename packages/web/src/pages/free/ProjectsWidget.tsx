@@ -11,7 +11,7 @@ interface ProjectsWidgetProps {
   dragging: boolean;
   /** Placement id — selection changes are persisted back onto this placement. */
   placementId?: string;
-  /** File selected before the last reload, restored once on mount. */
+  /** File or folder selected before the last reload, restored once on mount. */
   initialSelectedPath?: string;
 }
 
@@ -135,9 +135,18 @@ export function ProjectsWidget({
     selectedTreePaths: string[];
   }>({ selectedPath: null, selectedTreePaths: [] });
   const handleSelectionChange = useCallback(
-    (sel: { selectedPath: string | null; selectedTreePaths: string[] }) => {
+    (sel: {
+      selectedPath: string | null;
+      currentFolderPath: string | null;
+      selectedTreePaths: string[];
+    }) => {
       setBrowserSelection(sel);
-      if (placementId) updateProjectsSelection(placementId, sel.selectedPath);
+      // Persist wherever the user is — the open file, or the folder the
+      // browser is showing when no file is open. The restore path already
+      // resolves either kind through `/resolve`.
+      if (placementId) {
+        updateProjectsSelection(placementId, sel.selectedPath ?? sel.currentFolderPath);
+      }
     },
     [placementId],
   );

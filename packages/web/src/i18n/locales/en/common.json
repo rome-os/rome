@@ -165,6 +165,7 @@
     "back": "Back",
     "noApps": "No apps available",
     "newChat": "New chat",
+    "openWidgetNewTab": "Open in new tab",
     "orPickSession": "or pick an existing session"
   },
   "connectChatApp": {

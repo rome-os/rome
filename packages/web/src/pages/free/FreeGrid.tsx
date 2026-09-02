@@ -12,6 +12,7 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { CSS } from "@dnd-kit/utilities";
 import {
   Chrome,
+  ExternalLink,
   FolderKanban,
   GripVertical,
   LayoutGrid,
@@ -49,6 +50,7 @@ import { AppWidget } from "./AppWidget";
 import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
+import { buildFullAppPath, getWidgetFullHref } from "./widget-links";
 import { WidgetPicker } from "./WidgetPicker";
 import {
   autoPlaceApp,
@@ -65,6 +67,7 @@ import {
 } from "./use-free-cells";
 import {
   createWorkspaceContextRegistry,
+  useWorkspaceContextRegistry,
   WorkspaceContextRegistryContext,
 } from "./workspace-context";
 import { createWorkspaceEventBus, WorkspaceEventBusContext } from "./workspace-event-bus";
@@ -178,11 +181,26 @@ function SortableWidgetCard({
   sessionId?: string;
   interaction?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const prefersReducedMotion = useReducedMotion();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
     useSortable({ id: widget.id });
 
   const isActive = widget.id === activeId;
+
+  // The full-screen href for this widget. App tiles freeze their iframe src at
+  // mount and navigate internally, so the placement's stored route can trail
+  // the live screen; re-read the iframe's URL at the moments that precede
+  // opening (hover, press, focus) so the link carries where the user actually
+  // is. Builtins derive fully from the placement.
+  const registry = useWorkspaceContextRegistry();
+  const [liveAppHref, setLiveAppHref] = useState<string | null>(null);
+  const fullHref = liveAppHref ?? getWidgetFullHref(widget);
+  const refreshFullHref = useCallback(() => {
+    if (widget.type !== "app" || !widget.targetId) return;
+    const link = registry?.resolveLink(widget.id);
+    if (link) setLiveAppHref(buildFullAppPath(widget.targetId, link.route, link.params));
+  }, [registry, widget]);
 
   return (
     <div
@@ -212,16 +230,35 @@ function SortableWidgetCard({
         {/* The design surface is system-managed while the handoff holds the
             floor: leaving is the chat's "Main" back bar (non-destructive) and
             cancelling is the surface's own Cancel button — so it carries no
-            generic close affordance that could be mistaken for either. */}
+            generic open/close affordances that could be mistaken for either. */}
         {!interaction && (
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onRemove}
-            className="rounded-4 p-1 text-subtle-foreground hover:bg-surface-hover hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          <>
+            {fullHref && (
+              <a
+                href={fullHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("chat.openWidgetNewTab")}
+                title={t("chat.openWidgetNewTab")}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerEnter={refreshFullHref}
+                onFocus={refreshFullHref}
+                className="rounded-4 p-1 text-subtle-foreground hover:bg-surface-hover hover:text-foreground"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+            <button
+              type="button"
+              aria-label={t("sidebar.remove")}
+              title={t("sidebar.remove")}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onRemove}
+              className="rounded-4 p-1 text-subtle-foreground hover:bg-surface-hover hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
         )}
       </div>
       <div className="relative min-h-0 flex-1 overflow-auto overscroll-y-contain">

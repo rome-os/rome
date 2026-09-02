@@ -165,6 +165,7 @@
     "back": "返回",
     "noApps": "暂无可用应用",
     "newChat": "新对话",
+    "openWidgetNewTab": "在新标签页中打开",
     "orPickSession": "或选择已有对话"
   },
   "connectChatApp": {

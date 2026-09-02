@@ -47,6 +47,7 @@ interface ShellProps {
   onStartChatFromFolder?: (path: string) => void;
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
   folderPanel?: (props: { path: string }) => ReactNode;
