@@ -1419,6 +1419,23 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * A branch whose first answer completed on its own provider thread stops
+   * being special: it becomes an ordinary chat, listed and managed like any
+   * other. Provenance columns are left in place — only the type and the
+   * unread clock change. Guarded on the current type so a double call, or a
+   * call racing a delete, is a no-op.
+   */
+  async promoteForkToChat(id: string): Promise<void> {
+    await this.db
+      .update(romeSessions)
+      .set({
+        type: "webchat",
+        lastSeenActivityAt: sql`${romeSessions.activityAt}`,
+      })
+      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));
+  }
+
   async updateSessionName(id: string, name: string) {
     const rows = await this.db
       .update(romeSessions)

@@ -1317,8 +1317,33 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const forkSessionId = first.value.sessionId;
     const forkTurnId = first.value.turnId;
     void (async () => {
-      while (!(await iterator.next()).done) {
-        // AgentRunner persists every fork message; this caller only has to drain.
+      let finalStatus: string | undefined;
+      let next = await iterator.next();
+      while (!next.done) {
+        // AgentRunner persists every fork message; this caller only watches
+        // for the terminal turn_end.
+        if (next.value.type === "turn_end") finalStatus = next.value.status;
+        next = await iterator.next();
+      }
+      // A branch that completed on its own provider thread stops being
+      // special. The resumable row is the source of truth: persistForkThread
+      // already declined errored turns and borrowed threads, and promoting
+      // without it would hand the next message a fresh provider thread and
+      // silently drop the branched context.
+      if (input.continuable && finalStatus === "completed") {
+        const row = await deps.sessionManager.findReusableSession(
+          buildWebchatChannelThreadKey(forkSessionId, null),
+          agentName,
+        );
+        if (row?.providerThreadId) {
+          const current = await deps.webchatRepo.getSession(forkSessionId);
+          await deps.webchatRepo.promoteForkToChat(forkSessionId);
+          // An ordinary chat is titled from its first user message; the
+          // branch's is the prompt typed into the branch popover.
+          if (current) {
+            void generateAndPersistConversationTitle(forkSessionId, current.name, input.prompt);
+          }
+        }
       }
     })().catch((err) => {
       log.warn("turn fork failed", {
