@@ -703,6 +703,20 @@ describe("PeoplePage directory", () => {
     expect(calls.some((c) => c.url.includes("cursor="))).toBe(true);
   });
 
+  it("says the roster is empty rather than blaming a search nobody ran", async () => {
+    const user = userEvent.setup();
+    // A fresh instance: the guardian exists, and nobody has been placed. All
+    // holds the guardian back, so the directory is legitimately empty with an
+    // empty search box.
+    mockApi({ people: [GUARDIAN], accounts: [] });
+    renderPage();
+
+    await showDirectory(user);
+
+    expect(await screen.findByText("Nobody here yet")).toBeTruthy();
+    expect(screen.queryByText("Nobody matches your search")).toBeNull();
+  });
+
   it("reaches a contact no page has loaded through the search box", async () => {
     const user = userEvent.setup();
     const { calls } = mockApi({ people: [FRIEND], accounts: [SILENT_CONTACT] });

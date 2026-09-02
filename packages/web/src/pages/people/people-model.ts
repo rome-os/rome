@@ -280,9 +280,11 @@ export function compareRowsByName(a: PeopleRow, b: PeopleRow): number {
   );
 }
 
-/** Whether a row belongs to a chip's view. "all" is the placed levels: the two
- *  unplaced ends of the ladder are both entered on purpose, so neither an
- *  account waiting on a decision nor one already dismissed is the default. */
+/** Whether a row belongs to a chip's view, in the stream. "all" holds back the
+ *  two unplaced ends of the ladder, so neither an account waiting on a decision
+ *  nor one already dismissed is the default. It says nothing about the
+ *  guardian, whose row the stream drops through `isRowFixed` whatever the chip
+ *  says — `directoryGroups` states the directory's narrower rule itself. */
 export function rowMatchesFilter(row: PeopleRow, filter: PeopleFilter): boolean {
   return filter === "all"
     ? row.level !== "unknown" && row.level !== "stranger"

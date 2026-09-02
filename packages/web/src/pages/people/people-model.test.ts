@@ -238,9 +238,9 @@ describe("directoryGroups", () => {
     expect(groupsOf({ filter: "inner-circle", search: "" }).map(([level]) => level)).not.toContain(
       "guardian",
     );
-    expect(groupsOf({ filter: "all", search: "guardian" })).toEqual([
-      ["guardian", ["Mock Guardian"]],
-    ]);
+    // By name: "guardian" would also match the level, and the level is not
+    // what a search reads.
+    expect(groupsOf({ filter: "all", search: "mock" })).toEqual([["guardian", ["Mock Guardian"]]]);
   });
 
   it("reaches the address book through a search, whatever chip is lit", () => {

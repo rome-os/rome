@@ -4,6 +4,7 @@
     "emptyTitle": "暂无新动态",
     "emptyHint": "任何给你发消息的人都会出现在这里，等待你安置。",
     "emptyForSearch": "没有符合搜索条件的人",
+    "emptyDirectory": "这里还没有人",
     "loadMore": "显示更多"
   },
   "header": {

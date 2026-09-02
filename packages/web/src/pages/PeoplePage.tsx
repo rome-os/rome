@@ -291,6 +291,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
           <DirectoryView
             groups={groups}
             counts={counts}
+            searching={settled !== ""}
             onOpen={openRow}
             renderUnplaced={(row) => unplaced(row, "directory")}
           />
@@ -361,19 +362,26 @@ function LatestView({
 function DirectoryView({
   groups,
   counts,
+  searching,
   onOpen,
   renderUnplaced,
 }: {
   groups: { level: RowLevel; rows: PeopleRow[] }[];
   counts: LevelCounts;
+  searching: boolean;
   onOpen: (row: PeopleRow) => void;
   renderUnplaced: (row: PeopleRow) => React.ReactNode;
 }) {
   const { t } = useTranslation("people");
+  // An empty roster is not a failed search. A chip whose level nobody sits at
+  // empties this view with the box untouched, and All does it on an instance
+  // where nobody has been placed yet.
   if (groups.length === 0) {
     return (
       <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-10 text-center">
-        <p className="text-ui text-muted-foreground">{t("page.emptyForSearch")}</p>
+        <p className="text-ui text-muted-foreground">
+          {searching ? t("page.emptyForSearch") : t("page.emptyDirectory")}
+        </p>
       </div>
     );
   }
