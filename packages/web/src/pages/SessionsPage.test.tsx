@@ -358,11 +358,11 @@ describe("SessionsPage live fork details", () => {
     await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
     finish();
 
-    // An ordinary chat is not served by this read-only frame: the composer
-    // retires, and the sidebar is told to pick the new chat up. Both land
-    // behind two awaits, so both assertions must wait.
+    // The sidebar is told to pick the new chat up, and the widget keeps its
+    // composer: a promoted branch is an ordinary chat, and ordinary chats can
+    // be continued right here — no forced hop to the full chat view.
     await waitFor(() => expect(emitSessionsChanged).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByTestId("side-chat-composer")).toBeNull());
+    expect(screen.getByTestId("side-chat-composer")).toBeTruthy();
   });
 
   it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {

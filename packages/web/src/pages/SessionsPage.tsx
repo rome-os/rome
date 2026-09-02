@@ -1163,7 +1163,11 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
 
   const probeContinuable = useCallback(
     async (sessionType: string | undefined) => {
-      if (sessionType !== "fork") {
+      // A fork may be continuable once its first answer persists a thread; an
+      // ordinary chat always is (the send routes accept it), which keeps the
+      // composer alive in the branch widget after promotion instead of
+      // forcing a hop to the full chat view. Everything else stays read-only.
+      if (sessionType !== "fork" && sessionType !== "webchat") {
         setContinuable(false);
         return;
       }
