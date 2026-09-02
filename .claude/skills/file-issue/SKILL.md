@@ -58,8 +58,9 @@ Skip the round when no question earns a slot. Ask a second round only when an an
 
 1. Write the title in the `<area>: <statement>` shape, in the mood the type's rulebook fixes: symptom in present tense for a bug, pain in present tense for a feature request, imperative action for a task.
 2. Write every required section of the type, in the order its rulebook lists, and only the optional sections the evidence fills. Situation opens the body and names no file, symbol, or line number. Sections after Situation carry the exact strings, paths, and commands.
-3. Set the labels: the type label, plus exactly one priority label for a bug report, plus `ready-for-agent` for a task spec an agent can implement from the body alone. A feature request never carries `ready-for-agent`.
-4. Check the draft against the type's rulebook once more: every required section present, Possible fixes and Possible directions pick nothing, Suspected root cause states its confidence, every Acceptance item names what proves it, Scope names what stays out.
+3. For a feature request, write Possible directions only when the user presents a direction in the description or in an answer, and list only the directions the user presented. Otherwise omit the section. A direction the skill would invent on its own stays out of the issue.
+4. Set the labels: the type label, plus exactly one priority label for a bug report, plus `ready-for-agent` for a task spec an agent can implement from the body alone. A feature request never carries `ready-for-agent`.
+5. Check the draft against the type's rulebook once more: every required section present, Possible fixes and Possible directions pick nothing, Suspected root cause states its confidence, every Acceptance item names what proves it, Scope names what stays out.
 
 ## 5. Approve
 
