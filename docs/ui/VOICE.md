@@ -138,7 +138,7 @@ Each row was verified against the rendered pair.
 | Uninstall | Remove the app. Its data is preserved for a later reinstall. | The sibling row erases data. Nothing else on screen separates them. |
 | Uninstall and erase data | The app's data is deleted permanently and cannot be recovered. | Cost, spelled-out negative, no softening. |
 | Upgrade Rome to {{version}}? | Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back. | Rome is the actor. Cause, then cost, then what needs no action. |
-| Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | Unchosen state, so the cause leads. No control on this screen fixes it. |
+| Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | A state the guardian did not choose, so the cause leads. No control on this screen fixes it. |
 | Access for {{name}} | Applies to the public Rome URL. Your own dashboard access is not affected. | Scope, plus the misreading it prevents. |
 | Allowed emails | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
 | Fable | Only applies when Claude is available. | Prerequisite. The toggle saves cleanly and does nothing without it. |
