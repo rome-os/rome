@@ -61,7 +61,9 @@ export function PersonConversation({ person }: { person: PersonResource }) {
   const days = useMemo(() => groupByDay(entries), [entries]);
 
   return (
-    <section>
+    // A column that takes the rest of the page, so the composer's floor can sit
+    // at the bottom of the viewport even when the history above it is short.
+    <section className="flex flex-1 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-section uppercase tracking-wide text-muted-foreground">
           {t("detail.timeline")}

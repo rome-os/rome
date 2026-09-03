@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PAGE_FLOOR } from "@/shell/PageShell";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";
 import { accountHandle } from "./send-model";
@@ -24,6 +25,11 @@ import { usePeopleWrites } from "./use-writes";
  * one, so a surface offering a preselected account has to show which one it
  * picked. `defaultSendAccount` decides the preselection, and it is the
  * contract's function rather than a rule restated here.
+ *
+ * The target takes its own line above the box, as a chip after "To". A chip
+ * beside the box cost it a third of the row for a label that is read once and
+ * typed past; on its own line it can carry the whole name and leave the box the
+ * full width, at every card width, with no stacking rule to switch.
  *
  * The picker appears only in the merged view, and only when more than one
  * account can be written to. Inside an account view the view is the target, so a
@@ -124,17 +130,18 @@ export function Composer({
   }
 
   return (
-    <div className="mt-4 border-t border-border pt-3">
-      <div className="flex items-center gap-2">
+    <Floor>
+      <p className="mb-2 flex items-center gap-1.5 text-aux text-muted-foreground">
+        <span>{t("send.to")}</span>
         {onChangeTarget && options.length > 1 ? (
           <TargetMenu options={options} value={target} onChange={onChangeTarget} />
         ) : (
-          <span className="flex shrink-0 items-center gap-1 rounded-8 bg-surface-muted px-2 py-1 text-badge text-muted-foreground">
-            <ChannelGlyph channel={target.channel} />
-            {channelLabel(t, target.channel)} · {accountHandle(target)}
-          </span>
+          <TargetChip account={target} />
         )}
+      </p>
+      <div className="flex items-center gap-2">
         <Input
+          size="sm"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -161,7 +168,7 @@ export function Composer({
           {failed.refusal ? refusalText(t, failed.refusal, failed.account.channel) : failed.message}
         </p>
       )}
-    </div>
+    </Floor>
   );
 }
 
@@ -173,6 +180,22 @@ function refusalText(
   channel: string,
 ): string {
   return t(sendRefusalKey(send, channel), { channel: channelLabel(t, channel) });
+}
+
+/** One chip's worth of target: the channel's glyph and name, and the handle. */
+const CHIP_CLASS =
+  "flex min-w-0 items-center gap-1 rounded-6 bg-surface-muted px-1.5 py-0.5 text-badge text-muted-foreground";
+
+function TargetChip({ account }: { account: LinkedAccount }) {
+  const { t } = useTranslation("people");
+  return (
+    <span className={CHIP_CLASS}>
+      <ChannelGlyph channel={account.channel} />
+      <span className="truncate">
+        {channelLabel(t, account.channel)} · {accountHandle(account)}
+      </span>
+    </span>
+  );
 }
 
 /** The target, visible at rest and one click from being changed. */
@@ -189,13 +212,20 @@ function TargetMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" size="sm" className="shrink-0">
+        <button
+          type="button"
+          className={`${CHIP_CLASS} cursor-pointer outline-none transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-expanded:text-foreground`}
+        >
           <ChannelGlyph channel={value.channel} />
-          {channelLabel(t, value.channel)} · {accountHandle(value)}
-          <ChevronDown aria-hidden="true" />
-        </Button>
+          <span className="truncate">
+            {channelLabel(t, value.channel)} · {accountHandle(value)}
+          </span>
+          <ChevronDown aria-hidden="true" className="size-3 shrink-0" />
+        </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      {/* Opens upward: the chip sits on a floor pinned to the bottom of the
+          viewport, so below it there is nothing but the edge. */}
+      <DropdownMenuContent align="start" side="top">
         {options.map((account) => (
           <DropdownMenuItem
             key={`${account.channel}:${account.channelUserId}`}
@@ -215,6 +245,35 @@ function TargetMenu({
 
 function Note({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-4 border-t border-border pt-3 text-aux text-muted-foreground">{children}</p>
+    <Floor>
+      <p className="text-aux text-muted-foreground">{children}</p>
+    </Floor>
+  );
+}
+
+/**
+ * The slot the composer sits in: a card floating over the bottom of the
+ * viewport.
+ *
+ * The timeline above it is as long as the history, so on any page that does
+ * not fit, the box would otherwise be below the fold: the reader scrolls to
+ * find it, and it moves every time older rows arrive. Sticky keeps it at the
+ * bottom edge while the section runs past, and `mt-auto` puts it there too
+ * when the section is shorter than the viewport, so there is one place it is.
+ * Both the text box and the refusal that takes its place render here, so the
+ * slot holds still across the two.
+ *
+ * A raised surface rather than a footer band, the same floor the chat
+ * composer rides: rows scroll under a translucent card instead of stopping at
+ * a solid edge. The outer slot lets pointer events through so the rows
+ * showing between the card and the viewport's edge stay clickable.
+ */
+function Floor({ children }: { children: React.ReactNode }) {
+  return (
+    <div className={`pointer-events-none sticky bottom-0 z-10 mt-auto pt-4 ${PAGE_FLOOR}`}>
+      <div className="pointer-events-auto rounded-16 border border-border bg-surface/95 p-3 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+        {children}
+      </div>
+    </div>
   );
 }

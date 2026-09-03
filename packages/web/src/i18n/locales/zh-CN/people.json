@@ -106,6 +106,7 @@
     "back": "人物",
     "bond": "亲密度",
     "linkAccount": "关联账号…",
+    "changeBond": "更改亲密度",
     "timeline": "时间线",
     "timelineEmpty": "各个渠道都还没有任何往来。",
     "loadOlder": "加载更早",
@@ -120,6 +121,7 @@
     "noAccounts": "暂无账号"
   },
   "send": {
+    "to": "发送至",
     "segments": {
       "label": "账号",
       "all": "全部",

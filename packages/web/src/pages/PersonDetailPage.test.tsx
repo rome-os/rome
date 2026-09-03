@@ -600,8 +600,13 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("combobox", { name: "Bond" }));
-    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Change bond" }));
+    // Chosen by keyboard: a pointer leaving the submenu's trigger for the item
+    // closes the submenu in jsdom, where the pointer has no position to keep
+    // it inside the grace area. Enter on the focused item is the same select.
+    (await screen.findByRole("menuitemradio", { name: "Inner circle" })).focus();
+    await user.keyboard("{Enter}");
 
     const patch = await waitFor(() => {
       const call = calls.find((c) => c.method === "PATCH");
@@ -620,7 +625,8 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Link account…" }));
     await user.click(await screen.findByRole("button", { name: /Rachel Lim/ }));
 
     const link = await waitFor(() => {
@@ -643,7 +649,8 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Link account…" }));
     await user.click(await screen.findByRole("button", { name: /mira_c/ }));
 
     // The refusal names the owner rather than reading as a failed write.
@@ -670,7 +677,8 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Merge into another person…" }));
     await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
 
     const merge = await waitFor(() => {
@@ -691,8 +699,13 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("combobox", { name: "Bond" }));
-    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Change bond" }));
+    // Chosen by keyboard: a pointer leaving the submenu's trigger for the item
+    // closes the submenu in jsdom, where the pointer has no position to keep
+    // it inside the grace area. Enter on the focused item is the same select.
+    (await screen.findByRole("menuitemradio", { name: "Inner circle" })).focus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
@@ -738,7 +751,8 @@ describe("PersonDetailPage back link survives a merge", () => {
     renderPage("wei-chen", "/people/directory?level=inner-circle");
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Merge into another person…" }));
     await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
     await screen.findByRole("heading", { name: "W. Chen" });
 
@@ -792,6 +806,16 @@ describe("PersonDetailPage back link consumes the dossier's history entry", () =
 // request carries the account that was on screen, and the view that already
 // names an account offers no second choice.
 describe("PersonDetailPage, sending", () => {
+  it("pins the composer so a history longer than the screen scrolls under it", async () => {
+    mockApi();
+    renderPage();
+
+    // The box is a sticky floor at the bottom of the viewport, so it is on
+    // screen at every scroll position instead of only past the last row.
+    const box = await screen.findByRole("textbox", { name: "Message text" });
+    expect(box.closest(".sticky")).toBeTruthy();
+  });
+
   it("names the account it will send to before anything is typed", async () => {
     mockApi();
     renderPage();

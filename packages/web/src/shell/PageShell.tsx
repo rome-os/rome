@@ -7,6 +7,16 @@ import { cn } from "@/lib/utils";
 const PAGE_PADDING = "p-4 sm:p-6 lg:p-8";
 
 /**
+ * For a block that sticks to the bottom of the viewport: it takes over the
+ * page's bottom padding as its own, so it sits the same distance from the
+ * viewport's edge while stuck as it does at rest at the end of the page. A
+ * floor without this jumps by the page padding the moment the page's end
+ * scrolls into view. Kept beside `PAGE_PADDING` because the two have to agree
+ * step for step.
+ */
+export const PAGE_FLOOR = "-mb-4 pb-4 sm:-mb-6 sm:pb-6 lg:-mb-8 lg:pb-8";
+
+/**
  * The frame every routed page renders into.
  *
  * Deliberately full-bleed: it fills the column next to the nav sidebar and
