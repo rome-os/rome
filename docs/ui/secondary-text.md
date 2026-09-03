@@ -53,6 +53,8 @@ When a string sits between `delete` and `rewrite`, choose `delete`, unless the s
 
 These openers are `delete` on sight, even when a fact could be salvaged from them. The fact goes into a new string.
 
+Each one wraps the label's noun in a generic verb, so the three questions already fail it. The list exists because these are the strings an auditor talks into `keep` by reading a fact into the verb, and a match ends that argument.
+
 - "This section lets you …", "Here you can …", "Use this to …"
 - "Manage your …", "Configure your …", "View and edit …"
 - Any sentence whose only verb is manage, configure, view, set, control, adjust, or customize, with the label's noun as its object.
