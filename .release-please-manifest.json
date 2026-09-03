@@ -1,7 +1,7 @@
 {
-  "packages/app-runtime-sdk": "0.6.3",
+  "packages/app-runtime-sdk": "0.6.4",
   "packages/app-web-sdk": "0.3.0",
-  "packages/ui": "0.2.3",
+  "packages/ui": "0.2.4",
   "packages/lib": "0.0.2",
-  "packages/web-content": "0.1.10"
+  "packages/web-content": "0.1.11"
 }

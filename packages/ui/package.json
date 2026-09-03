@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",

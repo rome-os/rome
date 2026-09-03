@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/rome-web-components",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Shared Markdown and Rome News components for Rome web surfaces",
   "repository": {
     "type": "git",

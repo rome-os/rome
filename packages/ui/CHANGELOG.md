@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/rome-os/rome/compare/ui-v0.2.3...ui-v0.2.4) (2026-09-03)
+
+
+### Features
+
+* **people:** make All the placed roster and cut the page's descriptions ([#203](https://github.com/rome-os/rome/issues/203)) ([89eff72](https://github.com/rome-os/rome/commit/89eff72cadd1c6ca28a740ab955b0c0d55dabf79))
+* **ui:** add a Timestamp component ([#218](https://github.com/rome-os/rome/issues/218)) ([c0dd606](https://github.com/rome-os/rome/commit/c0dd6062c90af157d908bfd8fd8cd06c59d9e7b5))
+
 ## [0.2.3](https://github.com/rome-os/rome/compare/ui-v0.2.2...ui-v0.2.3) (2026-08-29)
 
 
