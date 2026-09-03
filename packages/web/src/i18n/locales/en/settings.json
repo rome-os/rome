@@ -73,7 +73,7 @@
       "telegram": {
         "bot": {
           "titleFallback": "Your Telegram bot",
-          "subtitle": "Add a bot from @BotFather",
+          "subtitle": "Add a bot from @BotFather.",
           "bullets": {
             "reply": "Reply when people message {{identity}}",
             "start": "Start a task when a new message arrives"
@@ -85,7 +85,7 @@
         },
         "session": {
           "title": "Your account",
-          "subtitle": "Sign in with your phone number",
+          "subtitle": "Sign in with your phone number.",
           "bullets": {
             "send": "Send messages from your account — reach suppliers and customers as you",
             "read": "Read and summarize your chats and groups",
@@ -97,7 +97,6 @@
       "whatsapp": {
         "bot": {
           "title": "Your WhatsApp",
-          "subtitle": "Pair a device with a pairing code",
           "bullets": {
             "reply": "Reply when people message you on WhatsApp",
             "start": "Start a task when a new message arrives"
@@ -107,7 +106,6 @@
       "wechat": {
         "bot": {
           "title": "Your WeChat",
-          "subtitle": "Link your account by scanning a QR code",
           "bullets": {
             "reply": "Reply when people message you on WeChat",
             "start": "Start a task when a new message arrives"
@@ -117,7 +115,6 @@
       "linkedin": {
         "bot": {
           "title": "Your LinkedIn",
-          "subtitle": "Sign in through Rome's browser",
           "bullets": {
             "read": "Keep a synced copy of your LinkedIn inbox",
             "recap": "Read and recap your LinkedIn conversations"
@@ -127,7 +124,6 @@
       "discord": {
         "bot": {
           "titleFallback": "Your Discord bot",
-          "subtitle": "Add a bot from the Discord Developer Portal",
           "bullets": {
             "reply": "Reply when people message {{identity}} in your servers",
             "start": "Start a task when a new message arrives"
@@ -205,7 +201,6 @@
   },
   "appKeys": {
     "title": "App keys",
-    "subtitle": "Passwords and API keys that apps on your Rome can use.",
     "back": "Connections",
     "openLabel": "Open App keys",
     "keyCount_one": "{{count}} key",
@@ -238,7 +233,7 @@
       "namePlaceholder": "e.g. SHOP_DB_PASSWORD",
       "nameHint": "Uppercase letters, digits, and underscores.",
       "valueField": "Secret value",
-      "valueHint": "Rome keeps this hidden after you save it. To change it later, you'll retype it.",
+      "valueHint": "Rome does not show this value again. To change it, retype it.",
       "valueRequired": "Enter the secret value.",
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
@@ -309,12 +304,6 @@
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "enabled": "Turn off to stop Rome responding here entirely",
-        "respond": "When Rome joins the conversation",
-        "botMessages": "How Rome treats messages from other bots",
-        "whenOthersMentioned": "Someone else is mentioned, not Rome",
-        "replies": "Where Rome posts its reply",
-        "agent": "Which agent handles this conversation",
         "sessionReset": "Clears the provider-side conversation memory"
       },
       "source": {
@@ -453,9 +442,9 @@
     "noPeers": "No peers found in your tailnet.",
     "exitNode": {
       "title": "Exit Node",
-      "description": "Let other devices on your tailnet send internet traffic through this Rome server.",
       "updating": "Updating exit node setting...",
-      "updateFailed": "Failed to update exit node setting."
+      "updateFailed": "Failed to update exit node setting.",
+      "termTooltip": "An exit node routes another device's internet traffic through this server."
     },
     "downloadBannerPrefix": "Running outside Docker. Download the",
     "downloadBannerLink": "Tailscale desktop app",
@@ -483,7 +472,7 @@
   },
   "publicAccess": {
     "title": "Access Control",
-    "description": "Guardian auth protects the dashboard whichever option you pick.",
+    "description": "Dashboard sign-in is still required under every setting here.",
     "savedFlash": "Public access settings saved",
     "saveFailedFallback": "Failed to save public access settings.",
     "openFirst": "Open your Rome Tailscale URL from this device before turning on access control.",
@@ -554,12 +543,12 @@
     "loggingOut": "Logging out…",
     "codexLogout": {
       "title": "Log out of ChatGPT?",
-      "description": "Signs out on this server only. You can sign back in anytime.",
+      "description": "Signs out on this server only.",
       "failed": "Could not log out of ChatGPT. Please try again."
     },
     "claudeLogout": {
       "title": "Log out of Claude?",
-      "description": "Signs out on this server only. You can sign back in anytime.",
+      "description": "Signs out on this server only.",
       "failed": "Could not log out of Claude. Please try again."
     },
     "methods": {

@@ -73,7 +73,7 @@
       "telegram": {
         "bot": {
           "titleFallback": "你的 Telegram 机器人",
-          "subtitle": "通过 @BotFather 添加一个机器人",
+          "subtitle": "通过 @BotFather 添加一个机器人。",
           "bullets": {
             "reply": "有人给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -85,7 +85,7 @@
         },
         "session": {
           "title": "你的账号",
-          "subtitle": "用手机号登录",
+          "subtitle": "用手机号登录。",
           "bullets": {
             "send": "以你的身份从你的账号发消息——像你本人一样联系供应商和客户",
             "read": "阅读并总结你的聊天和群组",
@@ -97,7 +97,6 @@
       "whatsapp": {
         "bot": {
           "title": "你的 WhatsApp",
-          "subtitle": "使用配对码配对设备",
           "bullets": {
             "reply": "有人在 WhatsApp 上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -107,7 +106,6 @@
       "wechat": {
         "bot": {
           "title": "你的微信",
-          "subtitle": "扫描二维码关联账号",
           "bullets": {
             "reply": "有人在微信上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -117,7 +115,6 @@
       "linkedin": {
         "bot": {
           "title": "你的领英",
-          "subtitle": "通过 Rome 的浏览器登录",
           "bullets": {
             "read": "保持同步你的领英收件箱副本",
             "recap": "阅读并总结你的领英对话"
@@ -127,7 +124,6 @@
       "discord": {
         "bot": {
           "titleFallback": "你的 Discord 机器人",
-          "subtitle": "在 Discord 开发者门户添加一个机器人",
           "bullets": {
             "reply": "有人在你的服务器里给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -205,7 +201,6 @@
   },
   "appKeys": {
     "title": "应用密钥",
-    "subtitle": "供你 Rome 上的应用使用的密码和 API 密钥。",
     "back": "连接",
     "openLabel": "打开应用密钥",
     "keyCount_one": "{{count}} 个密钥",
@@ -238,7 +233,7 @@
       "namePlaceholder": "例如：SHOP_DB_PASSWORD",
       "nameHint": "大写字母、数字和下划线。",
       "valueField": "秘密值",
-      "valueHint": "保存后 Rome 会一直隐藏它。以后修改时需要重新输入。",
+      "valueHint": "Rome 不会再次显示该值。若要修改，请重新输入。",
       "valueRequired": "请输入秘密值。",
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
@@ -309,12 +304,6 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "enabled": "关闭后 Rome 将完全不再在此处响应",
-        "respond": "Rome 何时参与该会话",
-        "botMessages": "Rome 如何处理其他机器人的消息",
-        "whenOthersMentioned": "被提及的是其他人，而非 Rome",
-        "replies": "Rome 的回复发布在哪里",
-        "agent": "由哪个智能体处理该会话",
         "sessionReset": "清除提供商侧的会话记忆"
       },
       "source": {
@@ -453,9 +442,9 @@
     "noPeers": "未在 tailnet 中找到对端节点。",
     "exitNode": {
       "title": "出口节点",
-      "description": "允许 tailnet 中的其他设备通过此 Rome 服务器转发互联网流量。",
       "updating": "正在更新出口节点设置…",
-      "updateFailed": "更新出口节点设置失败。"
+      "updateFailed": "更新出口节点设置失败。",
+      "termTooltip": "出口节点会将其他设备的互联网流量通过此服务器转发。"
     },
     "downloadBannerPrefix": "在 Docker 之外运行。请下载",
     "downloadBannerLink": "Tailscale 桌面应用",
@@ -483,7 +472,7 @@
   },
   "publicAccess": {
     "title": "访问控制",
-    "description": "无论选择哪种方式，守护者认证都会保护仪表盘。",
+    "description": "在此处的所有设置下，仪表盘都仍需登录。",
     "savedFlash": "公开访问设置已保存",
     "saveFailedFallback": "保存公开访问设置失败。",
     "openFirst": "请先在本设备上打开 Rome 的 Tailscale URL，然后再开启访问控制。",
@@ -554,12 +543,12 @@
     "loggingOut": "正在退出…",
     "codexLogout": {
       "title": "退出 ChatGPT 登录？",
-      "description": "只在此服务器上退出登录。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。",
       "failed": "退出 ChatGPT 登录失败，请重试。"
     },
     "claudeLogout": {
       "title": "退出 Claude 登录？",
-      "description": "只在此服务器上退出登录。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。",
       "failed": "退出 Claude 登录失败，请重试。"
     },
     "methods": {

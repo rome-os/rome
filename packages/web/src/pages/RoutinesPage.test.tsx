@@ -503,7 +503,7 @@ describe("RoutinesPage", () => {
     // Expanded: the completed task appears, marked with a Done badge.
     expect(await screen.findByText("Ship the report")).toBeTruthy();
     expect(screen.getAllByText("Done").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("one-time tasks that already ran")).toBeTruthy();
+    expect(screen.getByText("One-time routines that already ran.")).toBeTruthy();
   });
 
   it("keeps an unfired one-off in the schedule section with no Done section", async () => {

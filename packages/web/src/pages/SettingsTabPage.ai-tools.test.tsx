@@ -133,9 +133,7 @@ describe("AI Tools destructive actions", () => {
 
     expect(logoutCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Log out of Claude?" });
-    expect(
-      within(dialog).getByText("Signs out on this server only. You can sign back in anytime."),
-    ).toBeTruthy();
+    expect(within(dialog).getByText("Signs out on this server only.")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Log Out" }));
 
