@@ -24,6 +24,7 @@ import {
   type DirectoryAccount,
   type LinkAccountRequest,
   type LinkConflict,
+  type AccountSendState,
   type AccountState,
   type PeopleList,
   type PersonResource,
@@ -59,6 +60,19 @@ import {
  * `accountPresentation`, and no /api/people route addresses the sentinel.
  */
 
+/**
+ * Whether Rome can send on a channel, as the real read answers it.
+ *
+ * Production asks the live connection — `talk.feature("directMessaging")`
+ * answering null is a channel that cannot be written to. Mock mode holds no
+ * connections, so the two channels of the first cut answer yes and every other
+ * answers unsupported, which is what a dashboard built against this has to
+ * render anyway.
+ */
+function sendState(channel: string): AccountSendState {
+  return channel === "whatsapp" || channel === "telegram" ? "yes" : "unsupported";
+}
+
 type PersonFixture = (typeof persons)[number];
 
 function personResource(person: PersonFixture): PersonResource {
@@ -71,6 +85,11 @@ function personResource(person: PersonFixture): PersonResource {
       channel: a.channel,
       channelUserId: a.channelUserId,
       displayName: nameForAccount(a.channel, a.channelUserId),
+      send: sendState(a.channel),
+      // The account's own head, not the person's: the person's newest entry
+      // names a channel and not an address, so it cannot say which of two
+      // accounts on one channel was the recent one.
+      latestAt: accountTimeline(a)[0]?.timestamp ?? null,
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.

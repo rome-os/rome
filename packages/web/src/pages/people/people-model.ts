@@ -124,6 +124,20 @@ export const GROUP_ORDER: RowLevel[] = [...BOND_LADDER];
  * `channel:channelUserId` ref otherwise — never mixed, so nothing has to guess
  * which read a row came from.
  */
+/**
+ * A person a link can land on, as the picker needs them.
+ *
+ * Not a `PersonResource`: the picker names an option and ranks it by bond, and
+ * knows nothing about how the person is reachable. Rebuilding the full resource
+ * from a listing row meant inventing the fields the row does not carry, which
+ * is how a picker ends up asserting a person cannot be written to.
+ */
+export interface LinkTarget {
+  id: string;
+  displayName: string;
+  bondLevel: string;
+}
+
 export interface PeopleRow {
   kind: "person" | "account";
   id: string;

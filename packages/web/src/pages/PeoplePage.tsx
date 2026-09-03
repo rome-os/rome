@@ -159,14 +159,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
     () =>
       rows
         .filter((row) => row.kind === "person" && row.level !== "guardian")
-        .map((row) => ({
-          id: row.id,
-          displayName: row.displayName,
-          bondLevel: row.level,
-          accounts: row.accounts,
-          messageCount: row.messageCount,
-          latest: row.latest,
-        })),
+        .map((row) => ({ id: row.id, displayName: row.displayName, bondLevel: row.level })),
     [rows],
   );
 

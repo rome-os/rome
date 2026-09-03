@@ -32,7 +32,7 @@ import { DirectoryRow, UnknownRow } from "./rows";
 import { levelLabelKey } from "./rows";
 import { TransferConfirm } from "./transfer";
 import { usePeopleWrites } from "./use-writes";
-import type { PeopleRow, PeopleView } from "./people-model";
+import type { LinkTarget, PeopleRow, PeopleView } from "./people-model";
 
 // Placing an account that nobody has decided about, and taking one back.
 //
@@ -187,7 +187,7 @@ function LinkForm({
   onSubmit,
   onCancel,
 }: {
-  people: PersonResource[];
+  people: LinkTarget[];
   error: string | null;
   onSubmit: (personId: string) => Promise<void>;
   onCancel: () => void;
@@ -284,7 +284,7 @@ export function UnknownEntry({
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
-  people: PersonResource[];
+  people: LinkTarget[];
   /** Which view this row is in — see {@link entryRow}. */
   variant: PeopleView;
 }) {

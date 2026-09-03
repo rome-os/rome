@@ -105,8 +105,15 @@ test("proposed /people contract walkthrough", async () => {
     r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === DEV_JID),
   ).toMatchObject({ state: "linked", personId: devikaId });
   r = await call("GET", `/api/people/${devikaId}`);
+  // Exactly one account, and it is the one just linked. Whether Rome can send
+  // there and when it was last active are answers on the same row that this
+  // walkthrough is not about.
   expect(r.body.accounts).toEqual([
-    { channel: "whatsapp", channelUserId: DEV_JID, displayName: expect.any(String) },
+    expect.objectContaining({
+      channel: "whatsapp",
+      channelUserId: DEV_JID,
+      displayName: expect.any(String),
+    }),
   ]);
 
   // Link a second account — an unseen LinkedIn account; linking does not
