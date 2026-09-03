@@ -22,37 +22,37 @@ A term the user would not know ("webhook", "exit node") is explained in a toolti
 
 ## The test
 
-Ask four questions of every sentence, in order. Stop at the first failure.
+Ask four questions of the text, in order. Stop at the first failure.
 
-1. **Is its verb a generic one on the label's noun?** Manage, configure, view, set, control, adjust, customize, "lets you", "here you can", "use this to", or the heading with a period added → drop the sentence, even when a fact follows the verb. The fact goes into a new sentence. This question comes first because these are the sentences an auditor talks into `keep` by reading a fact into the verb.
+1. **Is its verb a generic one on the label's noun?** Manage, configure, view, set, control, adjust, customize, "lets you", "here you can", "use this to", or the heading with a period added → the opener goes, and a fact behind it survives on its own. This question comes first because these are the strings an auditor talks into `keep` by reading a fact into the verb.
 
-   > Label: "Notifications". Text: "Manage how you receive notifications." — "manage" on the label's noun. Dropped.
-   > Label: "Connections". Text: "This section lets you connect services that apps can use." — "lets you" on the label's noun, with a fact behind it. Dropped, and the fact returns as "Apps can only use services connected here."
+   > Label: "Notifications". Text: "Manage how you receive notifications." — "manage" on the label's noun, nothing behind it. `delete`.
+   > Label: "Connections". Text: "This section lets you connect services that apps can use." — "lets you" on the label's noun, with a fact behind it. `rewrite` → "Apps can only use services connected here."
 
-2. **Which fact does it carry?** None → drop the sentence.
+2. **Which fact does it carry?** None → drop it.
 
    > Label: "Default region". Text: "Choose the region for new resources." — no fact, only what the control is. Dropped.
    > Label: "Default region". Text: "Existing resources are not moved." — a cost. Passes.
 
-3. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop the sentence. A badge naming a state does not show its cause.
+3. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop it. A badge naming a state does not show its cause.
 
    > Label: "Upload icon", a file input. Text: "Upload an icon for your workspace." — the label and the input already show it. Dropped.
    > Label: "Webhook relay", beside a "Not configured" badge. Text: "No relay credential is stored, so incoming webhooks are not delivered." — the badge names the state, and the cause is nowhere else. Passes.
 
-4. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move the sentence.
+4. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move it.
 
    > Section: "Access Control". Text: "Apps marked public stay reachable from the public host." — a limit on the app access control, one section away. Moved there.
    > Field: "Workspace icon". Text: "PNG or SVG, up to 2 MB." — a limit on this field, on this field. Passes.
 
-The string's verdict follows from its sentences:
+The verdict:
 
-- Every sentence dropped → `delete`.
-- A sentence dropped, moved, or reworded → `rewrite`, with the replacement written out. The replacement passes the four questions on its own and follows `VOICE.md`.
-- Every sentence passes → `keep`.
+- No fact → `delete`.
+- A fact, plus anything else → `rewrite` to the fact alone. The replacement passes the four questions on its own and follows `VOICE.md`.
+- Only the fact → `keep`.
 
-When a string sits between `delete` and `rewrite`, choose `delete`, unless the string carries a cost, a limit, or a cause. Those resolve to `rewrite`: trim to the fact and keep it. Never invent a cause.
+When unsure whether something is a fact, it is not, unless it is a cost, a limit, or a cause. Never invent a cause.
 
-> "Remove the app and erase its data. This cannot be undone." — sentence one restates the label. Sentence two is a cost with its subject removed. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
+> "Remove the app and erase its data. This cannot be undone." — the first half restates the label, the second is a cost with its subject removed. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
 
 ## Repo rules
 

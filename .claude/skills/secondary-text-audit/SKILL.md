@@ -118,11 +118,10 @@ For each surface, read the component and write down, before judging anything:
 This step is what separates a verdict from a guess. Skipping it produces
 plausible-sounding tables that are wrong about half the rows.
 
-### Step 5 — Run the test per sentence
+### Step 5 — Run the test per string
 
-Ask the four questions of every sentence, in order, stopping at the first
-failure. Derive the string's verdict from its sentences. Then, for `rewrite`
-rows, check that the replacement passes the four questions on its own and
+Ask the four questions of every string, in order, stopping at the first
+failure. Then, for `rewrite` rows, check that the replacement passes the four questions on its own and
 obeys `VOICE.md`.
 
 ### Step 6 — Verdict-hardening pass
