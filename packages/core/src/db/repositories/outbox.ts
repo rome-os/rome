@@ -77,17 +77,27 @@ export class OutboxRepository {
       .where(eq(outboundMessages.id, id));
   }
 
-  /** Put a failed row back in flight, under its own id, so a retry does not
-   *  read as a second message the guardian never wrote. */
+  /**
+   * Put a failed row back in flight, under its own id, so a retry does not read
+   * as a second message the guardian never wrote.
+   *
+   * The claim is the update itself, not a check before it. Reading the state
+   * and then writing lets two retries of one row both pass the read and both
+   * reach the provider — a double-clicked button delivering the message twice,
+   * which is the harm this whole surface is arranged to avoid. Guarding on
+   * `failed` and answering off the affected count makes exactly one of them
+   * win, and the loser sees a row that is no longer theirs to send.
+   */
   async reopen(id: string): Promise<OutboxRow | null> {
-    const row = await this.find(id);
-    if (row === null || row.state !== "failed") return null;
     const updatedAt = new Date();
-    await this.db
+    const claimed = await this.db
       .update(outboundMessages)
       .set({ state: "sending", error: null, providerMessageId: null, updatedAt })
-      .where(eq(outboundMessages.id, id));
-    return { ...row, state: "sending", error: null, providerMessageId: null, updatedAt };
+      .where(and(eq(outboundMessages.id, id), eq(outboundMessages.state, "failed")));
+    if (claimed.changes === 0) return null;
+
+    const row = await this.find(id);
+    return row === null ? null : { ...row, updatedAt };
   }
 
   /** Give up on a send Rome is not going to make. Refuses any other state: a

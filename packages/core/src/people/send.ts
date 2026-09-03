@@ -70,7 +70,12 @@ export async function resolveSendTarget(deps: SendDeps, account: SendAccount): P
   const direct = deps.talkRouter.feature(connectionId, "directMessaging");
   if (!direct) return { ok: false, send: "unsupported" };
 
-  const conversationId = await direct.conversationFor(account.channelUserId);
+  // A channel that throws asking for a thread is a channel that could not
+  // produce one, which is the same answer as null and the same answer the
+  // person read already gives for this account. Letting it escape would make
+  // the send path report a 500 where the read reported `no-conversation`, so
+  // the two would disagree about one condition.
+  const conversationId = await direct.conversationFor(account.channelUserId).catch(() => null);
   if (conversationId === null) return { ok: false, send: "no-conversation" };
 
   return { ok: true, target: { connectionId, conversationId } };

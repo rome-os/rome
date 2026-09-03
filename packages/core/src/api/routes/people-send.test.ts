@@ -359,4 +359,62 @@ describe("People send API — delivery bookkeeping", () => {
     expect(res.status).toBe(404);
     expect(await outbox()).toHaveLength(1);
   });
+
+  it("sends once when a failed row is retried twice at the same moment", async () => {
+    const adapter = deps.channelPortMap.get("whatsapp")!;
+    adapter.sendMessage = async () => {
+      throw new Error("nope");
+    };
+    await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "retry me once" }),
+    });
+    const [failed] = await outbox();
+
+    adapter.sendMessage = async (channelUserId, threadId, message) => {
+      adapter.sentMessages.push({ channelUserId, threadId, message });
+    };
+
+    // A double-clicked Retry. Reading the state and then writing would let both
+    // requests past, and the guardian's one message would arrive twice.
+    const both = await Promise.all([
+      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
+      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
+    ]);
+
+    expect(both.map((r) => r.status).sort()).toEqual([202, 404]);
+    expect(adapter.sentMessages).toHaveLength(1);
+  });
+
+  it("answers no-conversation when the channel throws looking for a thread", async () => {
+    // What a thread-keyed channel does when it cannot open a DM. The person
+    // read already calls this account `no-conversation`; the send path has to
+    // agree rather than answering with a stack trace.
+    const throwing = {
+      ...deps,
+      talkRouter: {
+        ...deps.talkRouter,
+        feature: (_connectionId: string, name: string) =>
+          name === "directMessaging"
+            ? {
+                conversationFor: async () => {
+                  throw new Error("provider is down");
+                },
+              }
+            : null,
+      },
+    } as unknown as TestDeps;
+
+    const res = await new Hono()
+      .route("/", peopleRoutes(throwing))
+      .request(`/people/${personId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "no thread" }),
+      });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()) as SendRefusal).toMatchObject({ send: "no-conversation" });
+  });
 });
