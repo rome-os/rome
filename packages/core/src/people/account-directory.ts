@@ -35,7 +35,7 @@ export interface AccountDirectoryDeps {
    *  the stream reads a history from. */
   channels: Channels;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings">;
-  sentinelLogRepo: Pick<SentinelLogRepository, "listSenderActivity">;
+  sentinelLogRepo: Pick<SentinelLogRepository, "listSenders">;
   accountNames: Pick<AccountNames, "displayNames">;
   /** Where the message stores live. Read by the stream alone — the contacts
    *  list never reaches a history. */
@@ -165,7 +165,7 @@ async function observeAccounts(deps: AccountDirectoryDeps): Promise<DirectoryAcc
     // Rome mirrors no address book for has no other row saying the account
     // exists. Only that it saw them is read here; what they said is a message
     // store's answer.
-    deps.sentinelLogRepo.listSenderActivity(),
+    deps.sentinelLogRepo.listSenders(),
     // One statement, so an account moving between two people mid-read cannot
     // land under both of them.
     deps.personMappingRepo.findAllWithMappings(),
