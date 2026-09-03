@@ -99,7 +99,7 @@ register, the person, and what a description must carry, and every `rewrite`
 row is written in it. Then read
 [`docs/ui/secondary-text.md`](../../../docs/ui/secondary-text.md) in full. It
 carries the scope, the five kinds of fact, the three-question test, the
-forbidden openers, the repo rules, and verified examples from this repo. Do not
+forbidden openers, and the repo rules. Do not
 audit from memory of the kind names.
 
 ### Step 4 — Establish the rendered context
