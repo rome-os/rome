@@ -93,13 +93,13 @@
     "update": "Update",
     "updateBanner": "Version {{version}} is available.",
     "enabledTitle": "Enabled",
-    "enabledHint": "Turn off to hide this app and stop its agents, actions, and hooks.",
+    "enabledHint": "When off, the app is hidden and its agents, actions, and hooks stop running.",
     "chatTitle": "Update with chat",
-    "chatHint": "Open a chat in this app's source project to change it.",
+    "chatHint": "Opens a chat in this app's source project.",
     "publishTitle": "Publish to App Store",
-    "publishHint": "Upload the installed bundle (v{{version}}) to the Rome App Store.",
+    "publishHint": "Uploads the installed bundle (v{{version}}) to the Rome App Store.",
     "uninstallHint": "Remove the app. Its data is preserved for a later reinstall.",
-    "uninstallPurgeHint": "Remove the app and erase its data. This cannot be undone."
+    "uninstallPurgeHint": "The app's data is deleted permanently and cannot be recovered."
   },
   "installed": {
     "loading": "Loading apps...",
@@ -141,7 +141,7 @@
     "publishSuccess": "Published {{name}} v{{version}} to the App Store.",
     "publishDialog": {
       "title": "Publish {{name}} to the App Store?",
-      "description": "The installed bundle (v{{version}}) will be uploaded to the Rome App Store and become publicly available to install.",
+      "description": "Anyone can find and install v{{version}} from the Rome App Store.",
       "confirm": "Publish"
     },
     "uninstallDialog": {
@@ -159,13 +159,13 @@
     "accessPrivate": "Private (login required)",
     "accessDialog": {
       "title": "Access for {{name}}",
-      "description": "Choose who can open this app from the public Rome URL.",
+      "description": "Applies to the public Rome URL. Your own dashboard access is not affected.",
       "privateTitle": "Private",
-      "privateDescription": "Only you can use this app.",
+      "privateDescription": "Only you can open this app.",
       "publicTitle": "Public",
       "publicDescription": "Anyone with the app URL can open and use it.",
       "cloudEmailTitle": "Rome Cloud email list",
-      "cloudEmailDescription": "Visitors sign in with Rome Cloud, then Rome checks their email before the app loads.",
+      "cloudEmailDescription": "Visitors sign in with Rome Cloud, and only the emails you list can open the app.",
       "emailLabel": "Allowed Rome Cloud emails",
       "emailPlaceholder": "ada@example.com",
       "emailHelp": "Press Enter to add. Paste a list and we'll split it on commas, spaces, or new lines.",

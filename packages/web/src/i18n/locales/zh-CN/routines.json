@@ -1,7 +1,6 @@
 {
   "header": {
     "title": "例程",
-    "subtitle": "当触发条件满足时自动运行动作的自动化任务。",
     "createButton": "创建例程"
   },
   "loading": "正在加载例程...",
@@ -207,16 +206,13 @@
   },
   "sections": {
     "schedule": {
-      "title": "按时间",
-      "subtitle": "这些会在固定时间运行"
+      "title": "按时间"
     },
     "event": {
-      "title": "当某事发生时",
-      "subtitle": "没有固定时间——它们会等待，然后运行"
+      "title": "当某事发生时"
     },
     "manual": {
-      "title": "手动运行",
-      "subtitle": "没有触发条件——只有点击「立即运行」时才会执行"
+      "title": "手动运行"
     },
     "done": {
       "title": "已完成",

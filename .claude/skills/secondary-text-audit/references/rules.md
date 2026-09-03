@@ -62,6 +62,7 @@ Which ONE of the following does the text carry?
 | `irreversibility` | Cannot be undone, or undo has a time limit | "Deleted files are not recoverable." |
 | `empty-state-guidance` | What to do first, shown only when there is no content | "Send a message from Telegram to see it here." |
 | `unfamiliar-term` | The label uses a term the target user genuinely would not know | "Webhook — the URL a service calls when something happens." |
+| `unchosen-state` | Why the surface is in a state the user did not pick | "No relay credential is stored, so incoming webhooks are not delivered." |
 
 If the text does not fit exactly one category → omit.
 
@@ -78,11 +79,26 @@ Category qualifiers:
   "bond level" may qualify; "settings", "project", "agent" do not.
 - `consequence` covers what happens *after* the action. A restatement of what
   the control does *is* the action, not its consequence.
+- `unchosen-state` applies only where the user did not choose the state — an
+  empty panel, a disconnected service, a blocked queue. A nearby status badge
+  naming the state does **not** make the cause redundant: "Not configured"
+  names the state, and the cause tells the user what to go fix. Drop the cause
+  only when the surface offers a control that fixes it, and name the control
+  instead. Never invent a cause — an inaccurate reason is worse than none.
 
 ### 3. Restatement test
 
 Remove every word that also appears in the label or heading, including synonyms
 and inflections. Is there substantive information left? If no → omit.
+
+**Run this per sentence, not per string.** A two-sentence description whose
+first sentence restates the label and whose second carries a real category is a
+`rewrite` that drops sentence one, never a `delete` of both. The payload
+usually sits in the second sentence.
+
+> "Remove the app and erase its data. This cannot be undone." — sentence one
+> restates the label, sentence two is `irreversibility`. Drop sentence one.
+> Do not delete the string.
 
 ### 4. Placement test
 
@@ -115,9 +131,27 @@ so. The pattern never survives, the information does.
 
 ## Style rules for text that passes
 
-- One sentence. Two only if the second is a distinct category.
-- Lead with the payload, not with context. "Up to 2 MB" not "Files can be up to
-  2 MB in size."
+Tone, register, person, and contractions are not decided here. They live in
+[`docs/ui/VOICE.md`](../../../../docs/ui/VOICE.md), and a replacement string
+must obey it. The rules below are the ones tied to information content.
+
+`VOICE.md` carries two register settings. Every string this skill judges takes
+the **standard** setting: the economical setting covers failure copy, and error
+and validation messages are outside this skill's scope entirely. A replacement
+written as a bare phrase has reached for the wrong setting.
+
+- One sentence. Two only if the second is a distinct category. Three only when
+  the third states what needs no action.
+- Lead with the information, not with throat-clearing. "Up to 2 MB" not "Files
+  can be up to 2 MB in size."
+- **Purpose before action.** When a sentence carries both a reason and the
+  keystroke that serves it, the reason goes first — it is the payload, and the
+  keystroke is the throwaway. This is `WRITING.md`'s condition-before-command
+  rule, and Microsoft, Material, and Apple publish it independently.
+
+  > Prefer: "To restrict the dashboard to your tailnet, connect this machine to Tailscale."
+  > Over: "Connect this machine to Tailscale to restrict the dashboard to your tailnet."
+
 - State facts, not permissions. "Notifies all members" not "You may want to know
   this notifies all members."
 - No terminal period on fragments; keep periods on full sentences.
@@ -189,7 +223,9 @@ Each row below was verified against the rendered pair, not the key name.
 | Label | Secondary text | Verdict | Why |
 |---|---|---|---|
 | Uninstall | Remove the app. Its data is preserved for a later reinstall. | keep | `disambiguation` — "Uninstall and erase data" renders directly below it, and nothing else says which one keeps the data. |
-| Uninstall and erase data | Remove the app and erase its data. This cannot be undone. | rewrite | Sentence one restates the label word for word. Sentence two is real `irreversibility`. → "Cannot be undone." |
+| Uninstall and erase data | Remove the app and erase its data. This cannot be undone. | rewrite | Sentence one restates the label word for word. Sentence two is real `irreversibility`, but "Cannot be undone." alone strands the reader on *what* cannot be undone. → "The app's data is deleted permanently and cannot be recovered." |
+| Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | keep | `unchosen-state`. A "Not configured" badge renders beside it, and trimming to the effect alone ("Webhooks are not delivered") deletes the only thing telling the reader what to fix. No control on this surface stores a credential. |
+| Upgrade Rome to {{version}}? | Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back. | keep | Three sentences, three jobs: cause, cost, and what needs no action. The restart is not restatement of the title — it is the mechanism that explains the downtime. |
 | Access Control | Control who can reach the dashboard. Guardian auth always protects it: allow specific Rome Cloud accounts to sign in, or restrict access to your Tailscale network. Apps marked public or restricted to Rome Cloud email lists stay reachable from the public host. | rewrite | Opens with a generic verb on the label's noun, then buries two payloads in 42 words. Split by placement: `hidden-state` → "Guardian auth protects the dashboard whichever option you pick"; the public-host carve-out belongs on the app access control, not this section header. |
 | Appearance | Customize the language and look of the dashboard. These preferences are stored on this device. | delete | Unrendered — no call site anywhere. It would also fail on the forbidden opener; the surviving `hidden-state` payload ("stored on this device") is worth re-adding on the control that owns it, as new text. |
 | Model selector | Show a chat composer selector for the large model mapping. | delete | Generic verb on the label's own noun. The toggle label "Enable model selector in chat" already says where it appears. |

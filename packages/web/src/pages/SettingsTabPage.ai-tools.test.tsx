@@ -192,7 +192,9 @@ describe("AI Tools destructive actions", () => {
     expect(deleteCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Remove MiniMax API key?" });
     expect(
-      within(dialog).getByText("Claude sessions stop using MiniMax. Restoring it needs a new key."),
+      within(dialog).getByText(
+        "Claude sessions stop using MiniMax. Restoring it requires a new key.",
+      ),
     ).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));

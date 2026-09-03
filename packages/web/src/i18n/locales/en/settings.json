@@ -513,7 +513,6 @@
   },
   "aiTools": {
     "title": "AI Tools",
-    "description": "Use your existing subscription to power the agent.",
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshFailed": "Could not refresh AI tools. Please try again.",
@@ -588,7 +587,7 @@
       "removeFailedFallback": "Failed to remove provider key.",
       "removeConfirm": {
         "title": "Remove {{providerName}} API key?",
-        "description": "Claude sessions stop using {{providerName}}. Restoring it needs a new key."
+        "description": "Claude sessions stop using {{providerName}}. Restoring it requires a new key."
       },
       "custom": {
         "providerName": "Custom",
@@ -665,7 +664,7 @@
         "retrying": "Retrying delivery",
         "blocked": "Delivery blocked"
       },
-      "notConfiguredHint": "No relay credential is stored, so webhooks are not being drained to this instance.",
+      "notConfiguredHint": "No relay credential is stored, so incoming webhooks are not delivered to this instance.",
       "depositUrl": "Deposit URL",
       "drainUrl": "Drain URL",
       "targetApp": "Target app",
@@ -742,7 +741,7 @@
     "checkFailed": "Update check failed: {{message}}",
     "checkFailedFallback": "Update check failed.",
     "confirmTitle": "Upgrade Rome to {{version}}?",
-    "confirmDescription": "Rome will restart to apply the upgrade. Expect a few minutes of downtime, and any in-progress work will be interrupted. This page reconnects automatically once Rome is back.",
+    "confirmDescription": "Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back.",
     "confirmButton": "Upgrade and restart",
     "targetChanged": "A newer version ({{version}}) was published in the meantime — confirm again to upgrade to it.",
     "upgradeFailed": "Upgrade request failed: {{message}}",

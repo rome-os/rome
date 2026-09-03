@@ -5,6 +5,7 @@ The Rsbuild SPA dashboard, served by the backend. Guardian-only. It owns the the
 ## Playbook
 
 - Before changing UI, tokens, themes, or component choice, read [`docs/design-system.md`](../../docs/design-system.md).
+- Before adding or editing a string a guardian reads, read [`docs/ui/VOICE.md`](../../docs/ui/VOICE.md). A copy change lands in every locale under `src/i18n/locales/`, not just `en`.
 - Before adding or editing a mock handler, read [`docs/dashboard-mock-mode.md`](../../docs/dashboard-mock-mode.md).
 - When working without a backend, run `pnpm start:web:mock` and open http://localhost:3200.
 - When changing a `ui/` primitive or a token, open `/dev/gallery` under `pnpm start:web` — a value defined in only one half of a theme shows up as a broken specimen immediately.

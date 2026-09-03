@@ -22,12 +22,17 @@ string.
    the skill useful. An audit that keeps most of what it finds has not applied
    the ruleset; it has admired the copy. If your table is mostly `keep`, re-run
    the category test on every `keep` row and mean it.
-2. **Uncertainty resolves to `delete`.** When a string sits between `delete` and
-   `rewrite`, choose `delete` — the primary label almost always suffices. This
-   is the opposite of the precision-over-recall bias in `ux-semantics-audit`,
-   and deliberately so: there, a false positive makes an agent break working UI;
-   here, the cost of a wrong `delete` is one line of copy, and the cost of a
-   wrong `keep` is permanent noise on the screen.
+2. **Uncertainty resolves to `delete`, with one exception.** When a string sits
+   between `delete` and `rewrite`, choose `delete` — the primary label almost
+   always suffices. This is the opposite of the precision-over-recall bias in
+   `ux-semantics-audit`, and deliberately so: a wrong `keep` is permanent noise
+   on the screen.
+
+   The exception is a string carrying a cost, a scope, or a cause. Deleting one
+   of those does not cost a line of copy, it costs the reader the fact that made
+   the screen actionable. When the string tells the user what an action breaks,
+   where a setting stops applying, or why a surface is in a state they did not
+   choose, uncertainty resolves to `rewrite`. Trim it to the fact and keep it.
 3. **Judge the rendered pair, never the key name.** A verdict needs the label
    the user actually sees next to the text. A key called `*.description` may
    render as a card subtitle, a tooltip body, a dialog description, or nothing
@@ -36,8 +41,13 @@ string.
    carries before deciding anything. A string you cannot categorize is
    `delete` — that is the rule, not a shortcut.
 5. **A rewrite must be a real string.** "Tighten this" is not a replacement.
-   Write the sentence that ships. If you cannot write one that passes the rules,
-   the verdict was `delete`.
+   Write the sentence that ships, in the register
+   [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) fixes. If you cannot write
+   one that passes the rules, the verdict was `delete`.
+
+6. **A shorter string is not automatically a better one.** Trimming is the means,
+   not the goal. A replacement that reads as a system log has failed even when
+   every word left is load-bearing — check it against `VOICE.md` before it ships.
 
 ## Workflow
 
@@ -82,9 +92,11 @@ Its flags are **advisory triage**, not verdicts:
 - `label-inferred` means the label shown is a guess from the key path. Read the
   component before judging that row.
 
-### Step 3 — Read the ruleset
+### Step 3 — Read the ruleset and the voice
 
-Read `references/rules.md` in full. It carries the scope exclusions, the four
+Read [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) first — it fixes the
+register, the person, and what a description must carry, and every `rewrite`
+row is written in it. Then read `references/rules.md` in full. It carries the scope exclusions, the four
 authoring tests, the seven categories with their qualifiers, the forbidden
 patterns, the style rules, the verdict rules, and worked examples — including
 verified examples from this repo. Do not audit from memory of the category
@@ -197,7 +209,9 @@ replacement that props up a bad label.
 ## What this skill does NOT do
 
 - Judge labels, button text, or headings — that is the primary layer.
-- Judge tone or brand voice — the rules are about information content.
+- Own tone or brand voice — [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) does.
+  This skill decides whether a string exists and what it must carry; every
+  replacement it writes must obey that file.
 - Rewrite error messages or validation text — different rules, out of scope.
 - Translate. It flags locales that need retranslation; it does not write them.
 - Apply its own verdicts unless asked. The table is the deliverable.

@@ -183,9 +183,7 @@ describe("RoutinesPage", () => {
     renderPage();
 
     expect(await screen.findByText("On a schedule")).toBeTruthy();
-    expect(screen.getByText("these run at a set time")).toBeTruthy();
     expect(screen.getByText("When something happens")).toBeTruthy();
-    expect(screen.getByText("no set time — these wait, then run")).toBeTruthy();
   });
 
   it("renders a derived behavior sentence for a weekday-9am routine", async () => {

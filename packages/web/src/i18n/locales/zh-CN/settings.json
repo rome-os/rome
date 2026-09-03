@@ -483,7 +483,7 @@
   },
   "publicAccess": {
     "title": "访问控制",
-    "description": "控制谁可以访问仪表盘。守护者认证始终会保护仪表盘：你可以允许特定 Rome Cloud 账号登录，或将访问限制在你的 Tailscale 网络内。标记为公开或限制为 Rome Cloud 邮箱列表的应用仍可从公开主机访问。",
+    "description": "无论选择哪种方式，守护者认证都会保护仪表盘。",
     "savedFlash": "公开访问设置已保存",
     "saveFailedFallback": "保存公开访问设置失败。",
     "openFirst": "请先在本设备上打开 Rome 的 Tailscale URL，然后再开启访问控制。",
@@ -497,7 +497,7 @@
     "publicEnabledNote": "已启用公网主机访问。仪表盘仍需登录，但公开应用和 Rome Cloud 邮箱访问应用除外。",
     "dashboardEmails": {
       "title": "允许的邮箱",
-      "description": "这些账号可以登录完整 Web 仪表盘。",
+      "description": "授予的是完整仪表盘权限，而不只是单个应用。",
       "accountCount_one": "{{count}} 个账号",
       "accountCount_other": "{{count}} 个账号",
       "inputLabel": "添加邮箱地址",
@@ -513,7 +513,6 @@
   },
   "aiTools": {
     "title": "AI 工具",
-    "description": "使用你现有的订阅来驱动智能体。",
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshFailed": "无法刷新 AI 工具，请重试。",
@@ -555,12 +554,12 @@
     "loggingOut": "正在退出…",
     "codexLogout": {
       "title": "退出 ChatGPT 登录？",
-      "description": "Rome 将在此服务器上退出你的 ChatGPT 账户。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。你可以随时重新登录。",
       "failed": "退出 ChatGPT 登录失败，请重试。"
     },
     "claudeLogout": {
       "title": "退出 Claude 登录？",
-      "description": "Rome 将在此服务器上退出你的 Claude 账户。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。你可以随时重新登录。",
       "failed": "退出 Claude 登录失败，请重试。"
     },
     "methods": {
@@ -588,7 +587,7 @@
       "removeFailedFallback": "移除提供方密钥失败。",
       "removeConfirm": {
         "title": "移除 {{providerName}} API 密钥？",
-        "description": "Rome 将永久删除已保存的 API 密钥。Claude 会话将停止使用 {{providerName}}。若要再次使用，你需要添加新密钥。"
+        "description": "Claude 会话会停止使用 {{providerName}}。若要恢复，需要提供新的密钥。"
       },
       "custom": {
         "providerName": "自定义",
@@ -629,7 +628,7 @@
     "title": "高级设置",
     "presentationMode": {
       "title": "演示模式",
-      "description": "所有聊天均以主助手身份呈现——隐藏固定代理的名称、头像和输入框标签，让录屏和演示看起来与普通对话无异。仅影响显示，且仅对当前浏览器生效。",
+      "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",
       "toggleLabel": "在聊天中隐藏代理身份"
     },
     "developerSettings": {
@@ -637,7 +636,7 @@
     },
     "fable": {
       "title": "Fable",
-      "description": "Claude 可用时，优先使用 Fable 处理 large 模型请求。",
+      "description": "仅在 Claude 可用时生效。",
       "toggleLabel": "将 large 模型路由到 Fable"
     },
     "modelSelector": {
@@ -650,7 +649,7 @@
     },
     "aiToolUsage": {
       "title": "AI 工具用量",
-      "description": "在 AI 工具设置页显示 Claude 和 ChatGPT 的用量窗口。",
+      "description": "用量窗口会显示在 AI 工具标签页。",
       "toggleLabel": "显示 Claude 和 ChatGPT 用量"
     },
     "relayHealth": {
@@ -665,7 +664,7 @@
         "retrying": "正在重试投递",
         "blocked": "投递已阻塞"
       },
-      "notConfiguredHint": "未存储中继凭据，Webhook 不会被排空到本实例。",
+      "notConfiguredHint": "未存储中继凭据，因此传入的 Webhook 不会送达本实例。",
       "depositUrl": "投递 URL",
       "drainUrl": "排空 URL",
       "targetApp": "目标应用",

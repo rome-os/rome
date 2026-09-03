@@ -1,7 +1,6 @@
 {
   "header": {
     "title": "Routines",
-    "subtitle": "Automations that fire actions when their trigger condition is met.",
     "createButton": "Create Routine"
   },
   "loading": "Loading routines...",
@@ -207,16 +206,13 @@
   },
   "sections": {
     "schedule": {
-      "title": "On a schedule",
-      "subtitle": "these run at a set time"
+      "title": "On a schedule"
     },
     "event": {
-      "title": "When something happens",
-      "subtitle": "no set time — these wait, then run"
+      "title": "When something happens"
     },
     "manual": {
-      "title": "On demand",
-      "subtitle": "no trigger — these run only when you press Run now"
+      "title": "On demand"
     },
     "done": {
       "title": "Done",

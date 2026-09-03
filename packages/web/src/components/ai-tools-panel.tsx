@@ -774,7 +774,6 @@ export function AiToolsPanel({
           <div className="mb-4 flex items-start justify-between gap-4">
             <div>
               <h2 className="text-title text-foreground">{t("aiTools.title")}</h2>
-              <p className="mt-1 text-body text-muted-foreground">{t("aiTools.description")}</p>
             </div>
             <Button
               type="button"
