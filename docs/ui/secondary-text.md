@@ -36,7 +36,7 @@ Ask four questions of the text, in order. Stop at the first failure.
 
 3. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop it. A badge naming a state does not show its cause.
 
-   > Label: "Upload icon", a file input. Text: "Upload an icon for your workspace." — the label and the input already show it. Dropped.
+   > Label: "Uninstall and erase data". Text: "Remove the app and erase its data. This cannot be undone." — the first half is the label again. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
    > Label: "Webhook relay", beside a "Not configured" badge. Text: "No relay credential is stored, so incoming webhooks are not delivered." — the badge names the state, and the cause is nowhere else. Passes.
 
 4. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move it.
@@ -45,8 +45,6 @@ Ask four questions of the text, in order. Stop at the first failure.
    > Field: "Workspace icon". Text: "PNG or SVG, up to 2 MB." — a limit on this field, on this field. Passes.
 
 When unsure whether something is a fact, it is not, unless it is a cost, a limit, or a cause. Never invent a cause.
-
-> "Remove the app and erase its data. This cannot be undone." — the first half restates the label, the second is a cost with its subject removed. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
 
 ## Repo rules
 
