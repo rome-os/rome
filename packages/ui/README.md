@@ -7,8 +7,8 @@ each copying shadcn components by hand and drifting apart.
 > **Status: filling up.** The publish rail, the CSS canon (`./styles.css`), the
 > [control primitives](#controls), the [floating family](#floating-family),
 > [`Alert`](#alert), [`Card`](#card), [`Spinner`](#spinner),
-> [`Toaster`](#toaster), [`Calendar`](#calendar), [`Command`](#command), and
-> [`Markdown`](#markdown) are in. The remaining containers land in follow-up
+> [`Timestamp`](#timestamp), [`Toaster`](#toaster), [`Calendar`](#calendar),
+> [`Command`](#command), and [`Markdown`](#markdown) are in. The remaining containers land in follow-up
 > tickets. The app scaffold (`packages/app-template/template`) depends on the
 > published package, so a release here reaches external apps.
 
@@ -224,6 +224,45 @@ import { Spinner } from "@rome-os/ui/spinner";
   it — `disabled={busy}` is an attribute the caller passes anyway, and the size
   match above keeps the width stable — so a prop would only add a second way to
   say the same thing.
+
+### `Timestamp`
+
+An instant rendered inline as text, in the zone the user configured rather
+than the one the browser happens to be in.
+
+```tsx
+import { Timestamp, TimestampProvider } from "@rome-os/ui/timestamp";
+
+// Once, at the host's root, with the zone the user configured.
+<TimestampProvider timeZone={guardianTimezone}>
+  <App />
+</TimestampProvider>;
+
+// Anywhere below it.
+<Timestamp value={session.createdAt} />; // "3 minutes ago", and it keeps counting
+<Timestamp value={run.finishedAt} format="datetime" />; // "Sep 3, 2026, 3:04 PM"
+```
+
+- `value` is anything `new Date()` accepts, or nothing. Empty or unparseable
+  renders `fallback` (an em dash by default), so a nullable API field needs no
+  guard at the call site.
+- `format` is `relative` (the default), `time`, `date`, `datetime`, `full`, or
+  an `Intl.DateTimeFormatOptions` object for a layout the presets do not cover.
+- `relative` is live. The element re-renders at the moment its wording changes
+  and not before: at the minute mark, then once a minute, hourly past an hour,
+  and at local midnight once the label is a calendar day. Under a day the
+  wording is elapsed time, rounded to the nearest unit; from a day up it is
+  calendar days in the zone, so "yesterday" means the previous local date
+  whatever the hour.
+- Zone and locale resolve prop first, then provider, then the browser. A zone
+  the runtime cannot resolve falls back to the browser's. `useTimestampSettings()`
+  returns the resolved pair for anything else on the page that formats a date,
+  so an axis label agrees with the timestamps beside it.
+- Renders a `<time dateTime="…">`, and every layout but `full` carries the
+  `full` rendering as its `title`, so hovering a relative or a clock-only label
+  shows the exact moment. Pass `title` to replace that.
+- `formatTimestamp(value, { format, timeZone, locale, now })` is the same
+  rendering as a plain string, for tests and code outside React.
 
 ### `Calendar`
 

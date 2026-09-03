@@ -139,5 +139,19 @@ export { Switch } from "./switch.js";
 export { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table.js";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.js";
 export { Textarea } from "./textarea.js";
+export {
+  formatTimestamp,
+  Timestamp,
+  TimestampProvider,
+  useTimestampSettings,
+  type FormatTimestampOptions,
+  type ResolvedTimestampSettings,
+  type TimestampFormat,
+  type TimestampPreset,
+  type TimestampProps,
+  type TimestampProviderProps,
+  type TimestampSettings,
+  type TimestampValue,
+} from "./timestamp.js";
 export { Toggle, type ToggleProps } from "./toggle.js";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip.js";

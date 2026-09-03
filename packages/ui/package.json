@@ -143,6 +143,10 @@
       "types": "./dist/textarea.d.ts",
       "default": "./dist/textarea.js"
     },
+    "./timestamp": {
+      "types": "./dist/timestamp.d.ts",
+      "default": "./dist/timestamp.js"
+    },
     "./toggle": {
       "types": "./dist/toggle.d.ts",
       "default": "./dist/toggle.js"

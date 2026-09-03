@@ -22,18 +22,12 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@rome-os/ui/spinner";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { RomeSessionRecord } from "@/lib/chat-types";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { cn } from "@/lib/utils";
+import { Timestamp } from "@rome-os/ui/timestamp";
 import { SessionsTrendChart } from "./SessionsTrendChart";
-import {
-  costCoverage,
-  formatCompactNumber,
-  formatCost,
-  formatOutcome,
-  formatRelativeDate,
-} from "./sessions-format";
+import { costCoverage, formatCompactNumber, formatCost, formatOutcome } from "./sessions-format";
 
 const METRIC_LABELS: Record<SessionsMetric, string> = {
   runs: "Runs",
@@ -176,9 +170,7 @@ function RecentSessions({
               </span>
             </span>
             <span className="shrink-0 text-right text-aux text-muted-foreground">
-              <span className="block">
-                {formatRelativeDate(session.activityAt ?? session.createdAt)}
-              </span>
+              <Timestamp value={session.activityAt ?? session.createdAt} className="block" />
               <span className="mt-1 block tabular-nums">
                 {formatCompactNumber(session.stats.usage.totalTokens)} tokens
               </span>
@@ -339,14 +331,7 @@ export function SessionsOverview({
     {
       id: "activity",
       header: "Last activity",
-      cell: (group) => (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span>{formatRelativeDate(group.lastActivityAt)}</span>
-          </TooltipTrigger>
-          <TooltipContent>{new Date(group.lastActivityAt).toLocaleString()}</TooltipContent>
-        </Tooltip>
-      ),
+      cell: (group) => <Timestamp value={group.lastActivityAt} />,
     },
   ];
 
@@ -540,7 +525,7 @@ export function SessionsOverview({
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-4 text-aux text-muted-foreground">
                   <span className="truncate">{formatOutcome(group.outcomes)}</span>
-                  <span className="shrink-0">{formatRelativeDate(group.lastActivityAt)}</span>
+                  <Timestamp value={group.lastActivityAt} className="shrink-0" />
                 </div>
               </button>
             ))
