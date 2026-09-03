@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, SendHorizontal } from "lucide-react";
 import { canSend, type LinkedAccount, type PersonResource } from "@rome/api-types/people";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -131,7 +132,7 @@ export function Composer({
 
   return (
     <Floor>
-      <p className="mb-2 flex items-center gap-1.5 text-aux text-muted-foreground">
+      <p className="mb-2 flex items-center gap-2 text-aux text-muted-foreground">
         <span>{t("send.to")}</span>
         {onChangeTarget && options.length > 1 ? (
           <TargetMenu options={options} value={target} onChange={onChangeTarget} />
@@ -182,19 +183,17 @@ function refusalText(
   return t(sendRefusalKey(send, channel), { channel: channelLabel(t, channel) });
 }
 
-/** One chip's worth of target: the channel's glyph and name, and the handle. */
-const CHIP_CLASS =
-  "flex min-w-0 items-center gap-1 rounded-6 bg-surface-muted px-1.5 py-0.5 text-badge text-muted-foreground";
-
+/** One chip's worth of target: the channel's glyph and name, and the handle.
+ *  A `Badge`, so the chip's box comes from the badge tokens. */
 function TargetChip({ account }: { account: LinkedAccount }) {
   const { t } = useTranslation("people");
   return (
-    <span className={CHIP_CLASS}>
+    <Badge variant="muted" className="min-w-0">
       <ChannelGlyph channel={account.channel} />
       <span className="truncate">
         {channelLabel(t, account.channel)} · {accountHandle(account)}
       </span>
-    </span>
+    </Badge>
   );
 }
 
@@ -212,16 +211,18 @@ function TargetMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={`${CHIP_CLASS} cursor-pointer outline-none transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-expanded:text-foreground`}
-        >
-          <ChannelGlyph channel={value.channel} />
-          <span className="truncate">
-            {channelLabel(t, value.channel)} · {accountHandle(value)}
-          </span>
-          <ChevronDown aria-hidden="true" className="size-3 shrink-0" />
-        </button>
+        <Badge variant="muted" asChild>
+          <button
+            type="button"
+            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-expanded:text-foreground"
+          >
+            <ChannelGlyph channel={value.channel} />
+            <span className="truncate">
+              {channelLabel(t, value.channel)} · {accountHandle(value)}
+            </span>
+            <ChevronDown aria-hidden="true" />
+          </button>
+        </Badge>
       </DropdownMenuTrigger>
       {/* Opens upward: the chip sits on a floor pinned to the bottom of the
           viewport, so below it there is nothing but the edge. */}
