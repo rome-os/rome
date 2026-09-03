@@ -268,7 +268,13 @@ async function main() {
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
   await webchatRepo.recoverInterruptedInputs();
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  // `routineEngine` is built further down; the closure only runs on a profile
+  // write, which happens after boot.
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+  });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);

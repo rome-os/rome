@@ -4105,6 +4105,62 @@ describe("Webchat API", () => {
       });
     });
 
+    // The connect-AI card is the second host-owned card. Only its own tool may
+    // mount it: a tool_result under any other name is a spoof and is dropped.
+    it.each([
+      ["persists", "connect_ai", true],
+      ["rejects", "ask_question", false],
+      ["rejects", "welcome_card", false],
+    ])("%s an ai-tools-card emitted by the %s tool", async (_label, tool, persisted) => {
+      const sessionId = `sess-ai-tools-${tool}`;
+      await deps.webchatRepo.createSession(sessionId, "AI tools card");
+      const { runtime } = createWebchatRuntime(deps);
+      const toolUseId = `ai-tools-${tool}`;
+
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({
+          type: "tool_result",
+          tool,
+          toolUseId,
+          output: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  pendingInteraction: true,
+                  appId: "core",
+                  render: {
+                    kind: "inline",
+                    componentId: "ai-tools-card",
+                    props: {},
+                    builtin: true,
+                  },
+                }),
+              },
+            ],
+          },
+        });
+        emit({ type: "result", content: "Connect an AI above." });
+      });
+
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      const cards = messages
+        .filter((message) => message.role === "assistant")
+        .flatMap((message) => JSON.parse(message.content) as Array<Record<string, unknown>>)
+        .filter((part) => part.type === "pending_interaction");
+      if (persisted) {
+        expect(cards).toEqual([
+          expect.objectContaining({
+            toolUseId,
+            appId: "core",
+            render: { kind: "inline", componentId: "ai-tools-card", props: {}, builtin: true },
+          }),
+        ]);
+      } else {
+        expect(cards).toEqual([]);
+      }
+    });
+
     it("returns 404 for message events on a missing session", async () => {
       const app = createWebchatRuntime(deps).routes;
 

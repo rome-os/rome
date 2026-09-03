@@ -8,46 +8,11 @@ interface WelcomeWebCopy {
     opening: string;
     openError: string;
   };
-  emailHandshake: {
-    confirmed: string;
-    settingUp: string;
-    unavailable: string;
-    continue: string;
-    agentAddress: string;
-    guardianAddress: string;
-    agree: string;
-  };
-  emailReceipt: {
-    inbox: string;
-    connected: string;
-    sentTo: string;
-    sentAfter: string;
-    received: string;
-    missing: string;
-    spamHint: string;
-    resend: string;
-    continue: string;
-  };
-  introChoice: {
-    importTitle: string;
-    importDescription: string;
-    answerTitle: string;
-    answerDescription: string;
-  };
-  browserStep: {
-    heading: string;
-    openBefore: string;
-    addBrowser: string;
-    openAfter: string;
-    signIn: string;
-    returnWhenReady: string;
-    openHeading: string;
-    openDescription: string;
-    notSignedIn: string;
-    signedIn: string;
-    checking: string;
-    skip: string;
-    skipSummary: string;
+  names: {
+    guardianLabel: string;
+    agentLabel: string;
+    confirm: string;
+    summary(guardianName: string, agentName: string): string;
   };
   scouts: {
     skippedSummary: string;
@@ -70,15 +35,6 @@ interface WelcomeWebCopy {
     build: string;
     explore: string;
     exploreSummary: string;
-  };
-  completion: {
-    fallbackHeading: string;
-    copied: string;
-    copyPrompt: string;
-    explore: string;
-    opening: string;
-    openShowcases: string;
-    runAgain: string;
   };
 }
 
@@ -103,6 +59,11 @@ export function getWelcomeCopy(locale: string | undefined): WelcomeWebCopy {
     landing: {
       ...copy.landing,
       greeting: (agentName) => formatMessage(copy.landing.greeting, { agentName }),
+    },
+    names: {
+      ...copy.names,
+      summary: (guardianName, agentName) =>
+        formatMessage(copy.names.summary, { guardianName, agentName }),
     },
     scouts: {
       ...copy.scouts,

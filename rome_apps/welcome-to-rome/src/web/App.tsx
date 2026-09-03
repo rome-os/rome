@@ -11,13 +11,9 @@ import { getWelcomeCopy } from "@/lib/copy";
 // an inline chat component into the SDK registry at bundle load, so the host can
 // mount them when the welcome-to-rome turn-middleware renders them in the
 // transcript during the conversation this screen kicks off.
-import "@/email-handshake";
-import "@/email-receipt";
-import "@/intro-choice";
-import "@/browser-step";
+import "@/name-card";
 import "@/idea-picker";
 import "@/scout-suggestions";
-import "@/completion-card";
 
 // The animated Rome brand mark. Resolved relative to this module so it works
 // from the app's asset base at runtime; the build script copies it into

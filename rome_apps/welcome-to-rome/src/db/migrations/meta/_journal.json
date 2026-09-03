@@ -8,6 +8,13 @@
       "when": 1781774324196,
       "tag": "0000_magical_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788423361341,
+      "tag": "0001_ai_connected",
+      "breakpoints": true
     }
   ]
 }

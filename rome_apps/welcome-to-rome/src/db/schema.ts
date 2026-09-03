@@ -1,4 +1,4 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // Single-row table holding the welcome-to-rome conversation's progress. The
 // `node` column is the state-machine cursor: each user turn the
@@ -20,6 +20,9 @@ export function createAppDbSchema(tablePrefix: string = "welcome_to_rome") {
     // JSON-encoded AppIdea[] (`[{ title, prompt }]`).
     appIdeas: text("app_ideas"),
     appIdeasGeneratedAt: text("app_ideas_generated_at"),
+    // Whether the connect-AI step ended with a provider logged in. Decides
+    // whether the later steps summon agents or show static content.
+    aiConnected: integer("ai_connected", { mode: "boolean" }),
     completedAt: text("completed_at"),
     updatedAt: text("updated_at").notNull(),
   });

@@ -440,7 +440,11 @@ export async function buildTestDeps(
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+  });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);

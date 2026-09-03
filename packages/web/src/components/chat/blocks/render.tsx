@@ -3,6 +3,7 @@ import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallBlock } from "./AgentCallBlock";
+import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentBlock } from "./AppComponentBlock";
 import { ErrorRunBlock } from "./ErrorBlock";
 import { HandoffCard } from "./HandoffCard";
@@ -145,9 +146,19 @@ export function renderSingleBlock(
       return null;
     case "pending_interaction": {
       if (!block.toolUseId || !block.appId || !block.render) return null;
-      // Host built-in component (e.g. the ask_question card): rendered directly
-      // by rome-web, no app bundle to mount. Resolves through the same
-      // interaction_result path as an app component.
+      // Host built-in components (the ask_question card, the connect_ai card):
+      // rendered directly by rome-web, no app bundle to mount. They resolve
+      // through the same interaction_result path as an app component.
+      if (block.render.builtin && block.render.componentId === "ai-tools-card") {
+        return (
+          <AiToolsCard
+            key={`ai-tools-card-${block.toolUseId}`}
+            toolUseId={block.toolUseId}
+            result={resultFor(block.toolUseId)}
+            onSubmit={submit}
+          />
+        );
+      }
       if (block.render.builtin && block.render.componentId === "question-card") {
         return (
           <QuestionCard

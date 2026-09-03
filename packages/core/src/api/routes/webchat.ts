@@ -352,21 +352,34 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
   return null;
 }
 
-/** Validate and shape the one host-owned suspension a tool result may emit.
+/** The host-owned inline cards rome-web renders itself, each paired with the
+ * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
+ * has no agent tool and is emitted by turn middleware alone (the welcome
+ * conversation), so an exact name is the whole allow-list. */
+const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
+  [
+    {
+      componentId: "question-card",
+      emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
+    },
+    { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+  ];
+
+/** Validate and shape a host-owned suspension a tool result may emit.
  *
  * `readSuspensionFromOutput` intentionally parses arbitrary tool output, so a
- * caller must not trust `builtin: true` by itself. Only the genuine
- * `ask_question` tool may mount the core `question-card`. Keep this check shared
- * by foreground turns and system-initiated backend continuations so a deferred
- * turn cannot claim the card was shown while leaving it only in the trace. */
-function buildBuiltinQuestionCard(
+ * caller must not trust `builtin: true` by itself. Only the tool paired with a
+ * card in `BUILTIN_CARDS` may mount it. Keep this check shared by foreground
+ * turns and system-initiated backend continuations so a deferred turn cannot
+ * claim the card was shown while leaving it only in the trace. */
+function buildBuiltinCard(
   msg: Extract<AgentMessage, { type: "tool_result" }>,
   suspension: Extract<Suspension, { kind: "inline" }>,
   sessionId: string,
 ): PendingInteractionPart | null {
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
-  const isAskQuestion = toolName === "ask_question" || toolName.endsWith("__ask_question");
-  if (isAskQuestion && suspension.appId === "core" && suspension.componentId === "question-card") {
+  const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
+  if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -3412,9 +3425,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               if (msg.type === "tool_result") {
                 const suspension = readSuspensionFromOutput(msg.output);
                 if (suspension && suspension.kind === "inline" && suspension.builtin) {
-                  // Host built-in inline card (the ask_question question-card):
-                  // rendered by rome-web, so there is no owning app to validate.
-                  const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
+                  // Host built-in inline card (the ask_question question-card,
+                  // the connect_ai ai-tools-card): rendered by rome-web, so
+                  // there is no owning app to validate.
+                  const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
                     await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
                   }
@@ -3744,7 +3758,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
         if (suspension && suspension.kind === "inline" && suspension.builtin) {
-          const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
+          const card = buildBuiltinCard(msg, suspension, sessionId);
           if (card) builtinQuestionCards.push(card);
         }
       }

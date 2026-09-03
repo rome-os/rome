@@ -1,17 +1,17 @@
 import { createRoot } from "react-dom/client";
 import { Compass } from "lucide-react";
-import { defineComponent, startChat, type AppComponentContext } from "@rome-os/app-web-sdk";
+import { defineComponent, navigateRome, type AppComponentContext } from "@rome-os/app-web-sdk";
 import { Button } from "@rome-os/ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { getWelcomeCopy } from "@/lib/copy";
 
 // The "pick your first app" card. props: `{ ideas: [{title, prompt}] }`. Each
 // idea renders as a shadcn Item (title + description, with a "Build this" action
-// on the right). "Build this" opens a FRESH chat seeded with the idea's kickoff
-// prompt (not this welcome session) via `startChat`, so the guardian can come
-// back and build another. Only "I'll explore on my own" resolves this turn,
-// submitting the `EXPLORE` sentinel so the script closes out with the completion
-// card.
+// on the right). Either button resolves this turn, which ends the welcome, and
+// then hands the guardian to a FRESH chat (not this welcome session): "Build
+// this" opens it with the idea's kickoff prompt in the composer, ready to send,
+// and "I'll explore on my own" submits the `EXPLORE` sentinel and opens it
+// empty.
 export const EXPLORE = "__explore__";
 
 interface Idea {
@@ -36,9 +36,17 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
   const ideas = readIdeas(ctx.props.ideas);
   const resolved = ctx.host.resolved;
 
-  // Open the build in a brand-new conversation, seeded with the idea's kickoff
-  // prompt — exactly as if the guardian started a new chat and asked for it.
-  const build = (idea: Idea) => void startChat({ message: idea.prompt });
+  // The submit posts the resolution first, so the welcome session records the
+  // choice before the shell swaps the route to the new chat.
+  const build = (idea: Idea) => {
+    ctx.host.submit({ ideaTitle: idea.title }, idea.title);
+    navigateRome({ path: "chat/new", draft: idea.prompt });
+  };
+
+  const explore = () => {
+    ctx.host.submit({ ideaTitle: EXPLORE }, copy.ideas.exploreSummary);
+    navigateRome({ path: "chat/new" });
+  };
 
   return (
     <div className="w-full max-w-md space-y-2">
@@ -63,7 +71,7 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
         size="sm"
         disabled={resolved}
         className="text-muted-foreground"
-        onClick={() => ctx.host.submit({ ideaTitle: EXPLORE }, copy.ideas.exploreSummary)}
+        onClick={explore}
       >
         <Compass /> {copy.ideas.explore}
       </Button>

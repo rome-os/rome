@@ -16,35 +16,42 @@ changes to the webchat route, storage, or the front-end Chat component.
 ## How it works
 
 - `agents/welcome-to-rome.yaml` — a **code-backed agent**. The
-  model declared here is never called; it exists only so the webchat send route
+  model declared here is never called. It exists only so the webchat send route
   accepts the agent name and acquires a real session/transcript. The middleware
   short-circuits before any model round.
 - `hooks/turn-middleware/` — the middleware. `script.ts` is the state machine
-  (one node per conversation step: greet → email handshake → collect intro →
-  brainstorm → finish); `copy.ts` holds the user-facing strings so wording
-  changes don't touch logic; `index.ts` wires them to `ctx.emit` and the
-  progress repo. The email handshake is a script step (no model): the
-  `email-handshake` card reads the agent address from the email connection's
-  `inbox` grant (`GET /api/connections`) and the guardian address from the
-  settings row (`GET /api/settings`), and provisions a mailbox if needed by
-  running the email conferral setup (`POST
-  /api/connections/email/grants/inbox/setup` + poll); on agree, the middleware
-  sends a hello
-  via the `send_message` action and shows the `email-receipt` card.
+  (one node per conversation step: greet → confirm the names → connect an AI →
+  one question → brainstorm → pick an idea → done). `copy.ts` holds the
+  user-facing strings so wording changes do not touch logic. `index.ts` wires
+  them to `ctx.emit` and the progress repo. The name card writes the guardian
+  name and the agent name through the host's guardian profile repository, which
+  updates the settings and the guardian person row together. The connect-AI
+  step is the host's `ai-tools-card` (rendered by rome-web, the same panel the
+  settings page uses). It resolves itself when the status probe reports a
+  provider logged in, and it can be skipped.
 - `agents/welcome-memory.yaml` / `agents/welcome-app-ideas.yaml` — the
-  **side-effect** agents (folding the guardian's self-description into memory,
+  **side-effect** agents (folding the guardian's answer into memory,
   brainstorming first-app ideas). The conversation is scripted, but these heavy
-  steps remain real agents the middleware `summon`s — "the conversation doesn't
-  use the model" is not "no model anywhere".
-- `db/` — the singleton progress table. `node` is the state-machine cursor;
-  captured artifacts are cached so a reload or restart resumes mid-conversation.
+  steps remain real agents the middleware `summon`s. A scripted conversation is
+  not "no model anywhere". A skipped connect defers the fold (the raw answer
+  stays in the progress row) and shows the generic idea list instead of
+  summoning.
+- `db/` — the singleton progress table. `node` is the state-machine cursor.
+  Captured artifacts are cached so a reload or restart resumes mid-conversation,
+  which is how a Codex browser login that leaves the page lands back on the
+  connect step.
+- The idea picker ends the conversation: the build button opens a fresh chat
+  with the idea's kickoff prompt in the composer, and the explore button opens
+  an empty one.
 
 ## The landing screen
 
-`src/web/App.tsx` is the **first screen a guardian sees in Rome**. The web SPA
-lands a freshly-onboarded guardian on `/apps/welcome-to-rome` (see
-`resolveAuthRouting` in `packages/web/src/lib/auth-routing.ts` and `OnboardPage`),
-so this app's web bundle is the entry point into the product.
+`src/web/App.tsx` is the **first screen a guardian sees in Rome**. The cloud
+sign-in callback and the local onboarding page both land a freshly set-up
+guardian on `/full/apps/welcome-to-rome` (see `resolveAuthRouting` in
+`packages/web/src/lib/auth-routing.ts`), so this app's web bundle is the entry
+point into the product. It is also the reset point: its one button clears the
+progress row and replays the welcome.
 
 It is deliberately a moment of delight rather than a form: a confetti burst on
 mount (`canvas-confetti`, lazily code-split, honouring `prefers-reduced-motion`),

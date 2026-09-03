@@ -1174,6 +1174,16 @@ export const handlers = [
     Object.assign(settings, (await request.json()) as SettingsMap);
     return HttpResponse.json(settings);
   }),
+  // The auth gate reports the browser timezone once per load; adopt it only
+  // while no zone is stored, as core does.
+  http.post("/api/settings/guardian-timezone/detected", async ({ request }) => {
+    const body = (await request.json()) as { timezone?: string };
+    if (typeof settings.guardianTimezone === "string" && settings.guardianTimezone) {
+      return HttpResponse.json({ status: "unchanged", tzid: settings.guardianTimezone });
+    }
+    settings.guardianTimezone = body.timezone;
+    return HttpResponse.json({ status: "set", tzid: body.timezone });
+  }),
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
   http.get("/api/projects/tree", ({ request }) => {
     const params = new URL(request.url).searchParams;

@@ -236,6 +236,16 @@
     "dismiss": "跳过",
     "send": "发送"
   },
+  "aiToolsCard": {
+    "title": "连接 Claude 或 ChatGPT",
+    "hint": "我会使用你已有的订阅来思考。登录其中一个，我就可以开始工作了。",
+    "waiting": "等待登录",
+    "connected": "已连接",
+    "skipped": "暂时跳过",
+    "skip": "暂时跳过",
+    "connectedSummary": "已连接 AI",
+    "skippedSummary": "暂时跳过连接 AI"
+  },
   "modelSelector": {
     "label": "模型",
     "saveFailed": "保存模型选择失败。",

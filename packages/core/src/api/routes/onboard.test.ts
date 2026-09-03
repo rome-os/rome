@@ -3,12 +3,24 @@
  * minted guardian session cookie. Pins the behavior that keeps the
  * "Hi <accountId-uuid>" greeting from coming back: the guardian's display name
  * is required, and a blank one is rejected BEFORE anything is persisted (so the
- * accountId can never be silently written into settings.guardianName).
+ * accountId can never be silently written into settings.guardianName). The
+ * write itself is the shared `applyGuardianProfile`, the same function the cloud
+ * sign-in callback uses, so both leave the same rows.
  */
-import { afterAll, beforeEach, describe, expect, it } from "@rstest/core";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
+
+rs.mock("../../profile-memory.js", () => ({
+  ensureProfileMemoryInitialized: rs.fn(() => mkdtempSync(join(tmpdir(), "onboard-"))),
+}));
+
 import { onboardRoutes } from "./onboard.js";
+import { AGENT_PRESETS } from "../../lib/agent-presets.js";
+import * as guardianProfile from "../../lib/guardian-profile.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
@@ -73,5 +85,63 @@ describe("/api/onboard/setup — guardian name is required", () => {
       .where(eq(settings.key, "guardianName"))
       .all();
     expect(nameSetting).toBeUndefined();
+  });
+});
+
+describe("/api/onboard/setup — writes the profile through the shared function", () => {
+  it("writes the same fields the cloud sign-in callback writes", async () => {
+    insertCloudGuardian();
+    const { app, cookie } = await buildApp();
+    const spy = rs.spyOn(guardianProfile, "applyGuardianProfile");
+
+    const res = await app.request("/api/onboard/setup", {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profile: {
+          guardianName: "Alex Doe",
+          agentName: "Atlas",
+          agentPurpose: "A creature of weight.",
+          guardianTimezone: "Asia/Tokyo",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledOnce();
+    expect(spy.mock.calls[0][0]).toMatchObject({ guardianName: "Alex Doe", agentName: "Atlas" });
+    const [person] = testDb.db
+      .select()
+      .from(persons)
+      .where(eq(persons.bondLevel, "guardian"))
+      .all();
+    expect(person).toMatchObject({ id: "alex-doe", displayName: "Alex Doe", approved: true });
+    const stored = Object.fromEntries(
+      testDb.db
+        .select()
+        .from(settings)
+        .all()
+        .map((row) => [row.key, row.value]),
+    );
+    expect(stored).toMatchObject({
+      guardianName: "Alex Doe",
+      agentName: "Atlas",
+      agentPurpose: "A creature of weight.",
+      guardianTimezone: "Asia/Tokyo",
+    });
+    spy.mockRestore();
+  });
+});
+
+describe("/api/onboard/draft", () => {
+  it("carries the agent presets so the page can offer a default identity", async () => {
+    insertCloudGuardian();
+    const { app, cookie } = await buildApp();
+
+    const res = await app.request("/api/onboard/draft", { headers: { Cookie: cookie } });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { agentPresets: unknown };
+    expect(body.agentPresets).toEqual(AGENT_PRESETS);
   });
 });

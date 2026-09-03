@@ -20,13 +20,31 @@ import {
 import { Input } from "@/components/ui/input";
 import { Stepper } from "@/components/ui/stepper";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
-import { getRandomAgentPreset } from "@/lib/agent-presets";
 
 const ONBOARDING_HIDDEN_AI_PROVIDERS = ["gemini", "grok"] as const;
 
 interface AgentIdentity {
   name: string;
   purpose: string;
+}
+
+// The preset list lives in core and rides the draft response, so every setup
+// path draws from the same names.
+function pickPreset(presets: AgentIdentity[]): AgentIdentity | null {
+  if (presets.length === 0) return null;
+  return presets[Math.floor(Math.random() * presets.length)];
+}
+
+function readPresets(value: unknown): AgentIdentity[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((p) =>
+    p &&
+    typeof p === "object" &&
+    typeof (p as AgentIdentity).name === "string" &&
+    typeof (p as AgentIdentity).purpose === "string"
+      ? [{ name: (p as AgentIdentity).name, purpose: (p as AgentIdentity).purpose }]
+      : [],
+  );
 }
 
 type Step = "account" | "profile";
@@ -43,8 +61,9 @@ export default function OnboardPage() {
   const { t } = useTranslation("onboard");
   // The bootstrap phase decides the first step. `needs-account`
   // (local-first, no seat yet) opens on the create-account step; everything else
-  // — including every cloud box, whose seat was created by the sign-in callback —
-  // is profile/agent/AI-tools only. Captured at mount so advancing past the
+  // is profile/agent/AI-tools only. A cloud box normally never lands here: the
+  // sign-in callback finishes setup with defaults, and this page is only its
+  // fallback when that write failed. Captured at mount so advancing past the
   // account step (which flips the backend phase to needs-onboarding) doesn't tear
   // down the stepper mid-flow.
   const { bootstrap } = useAuthStateSnapshot();
@@ -218,16 +237,15 @@ function ProfileStep() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [agent, setAgent] = useState<AgentIdentity>(() => {
-    const preset = getRandomAgentPreset();
-    return { name: preset.name, purpose: preset.purpose };
-  });
+  const [agent, setAgent] = useState<AgentIdentity>({ name: "", purpose: "" });
+  const [presets, setPresets] = useState<AgentIdentity[]>([]);
   const [guardianName, setGuardianName] = useState("");
   const [anyAiConnected, setAnyAiConnected] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Bootstrap: load any persisted agent/guardian name.
+  // Bootstrap: load any persisted agent/guardian name and the preset list, and
+  // start from a random preset when no agent name is stored yet.
   // AuthGate handles the "onboarding already complete" redirect; we deliberately
   // don't navigate here too, because the two redirect sources race (each
   // location change aborts AuthGate's in-flight state refresh).
@@ -237,15 +255,21 @@ function ProfileStep() {
         const res = await fetch("/api/onboard/draft", { credentials: "include" });
         if (!res.ok) return;
         const data = await res.json();
+        const loaded = readPresets(data.agentPresets);
+        setPresets(loaded);
         const s = data.settings as Record<string, unknown> | undefined;
-        if (s) {
-          setAgent((prev) => ({
-            name: typeof s.agentName === "string" && s.agentName ? s.agentName : prev.name,
-            purpose:
-              typeof s.agentPurpose === "string" && s.agentPurpose ? s.agentPurpose : prev.purpose,
-          }));
-          if (typeof s.guardianName === "string") setGuardianName(s.guardianName);
-        }
+        const fallback = pickPreset(loaded);
+        setAgent((prev) => ({
+          name:
+            typeof s?.agentName === "string" && s.agentName
+              ? s.agentName
+              : prev.name || fallback?.name || "",
+          purpose:
+            typeof s?.agentPurpose === "string" && s.agentPurpose
+              ? s.agentPurpose
+              : prev.purpose || fallback?.purpose || "",
+        }));
+        if (typeof s?.guardianName === "string") setGuardianName(s.guardianName);
       } catch {
         /* ignore */
       }
@@ -253,8 +277,8 @@ function ProfileStep() {
   }, []);
 
   function rerollAgentName() {
-    const preset = getRandomAgentPreset();
-    setAgent({ name: preset.name, purpose: preset.purpose });
+    const preset = pickPreset(presets);
+    if (preset) setAgent({ name: preset.name, purpose: preset.purpose });
   }
 
   async function enterRome() {

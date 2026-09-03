@@ -2,14 +2,20 @@ import type {
   AppRuntimeRepositories,
   AppSettingsRepository,
   ConversationRepository,
+  GuardianProfileRepository,
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
+import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { applyGuardianProfile } from "../lib/guardian-profile.js";
 
 export interface CreateAppRuntimeRepositoriesDeps {
   settingsRepo: SettingsRepository;
   webchatRepo: WebChatRepository;
+  /** Present in the main process only, where the profile write can reschedule
+   *  floating routines. An action worker gets no guardianProfile repository. */
+  guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
 }
 
 export function createAppRuntimeRepositories(
@@ -19,6 +25,31 @@ export function createAppRuntimeRepositories(
     settings: createAppSettingsRepository(deps.settingsRepo),
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
     conversations: createConversationRepository(deps.webchatRepo),
+    ...(deps.guardianProfile
+      ? {
+          guardianProfile: createGuardianProfileRepository({
+            db: deps.guardianProfile.db,
+            settingsRepo: deps.settingsRepo,
+            reactivateFloating: deps.guardianProfile.reactivateFloating,
+          }),
+        }
+      : {}),
+  };
+}
+
+function createGuardianProfileRepository(deps: {
+  db: DrizzleDb;
+  settingsRepo: SettingsRepository;
+  reactivateFloating: () => Promise<void>;
+}): GuardianProfileRepository {
+  return {
+    write: async (input) => {
+      const result = await applyGuardianProfile(
+        { guardianName: input.guardianName, agentName: input.agentName },
+        deps,
+      );
+      return { ok: result.ok };
+    },
   };
 }
 

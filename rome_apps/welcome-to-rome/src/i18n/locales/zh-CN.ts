@@ -1,34 +1,22 @@
 const zhCN = {
   server: {
-    emailIntro:
-      "👋 你好，我是 {{agentName}}。\n\n先确认一下我们的邮件是否互通。下面是我的邮箱和你的邮箱，确认后我会发一封简短的问候邮件。",
-    emailSentLead: "📬 已发送，几秒后应该就会到达。",
-    helloEmailSubject: "来自 Rome 的问候 👋",
-    helloEmailBody:
-      "# 你好 👋\n\n我是 **{{agentName}}**，你的 AI 助手。\n\n这是一封简短的问候邮件，用来确认我们之间的邮件正常送达。接下来你可以：\n\n- 随时**回复这封邮件**，我会阅读并回复。\n- 转发任何希望我处理的内容给我。\n- 让我持续留意某件事，并向你汇报。\n\n回头见，\n\n**{{agentName}}**",
-    greet: "接下来，我想多了解你一些。\n\n有两种简单方式，选你喜欢的：",
-    magicTrick: "✨ 看看浏览器：我会问 ChatGPT 它记得哪些关于你的信息，然后带回重点。稍等一下……",
-    chatgptNoMemory: "ChatGPT 还没有保存关于你的信息——没关系，我们直接用简短问答来完成。",
-    chatgptFailed: "刚才没能从 ChatGPT 读取到信息——我们改用简短问答来完成。",
-    questionsLead: "很好，回答几个小问题吧。点击或输入都可以：",
+    greet:
+      "👋 你好 {{guardianName}}，我是 {{agentName}}。\n\n开始之前先确认一下：我这样称呼你可以吗？你喜欢我的名字吗？",
+    connectAiLead:
+      "接下来，我需要一个可以用来思考的 AI。在下方登录 Claude 或 ChatGPT（我会使用你已有的订阅），也可以暂时跳过，我会先保持简单。",
+    questionLead: "只问一个问题，然后我们就开始做点东西：",
     savingMemoryLead: "谢谢，我正在把这些信息整理进你的记忆。",
     scoutsLead: "我还可以为你的 Briefing 添加几个观察任务，让 Rome 持续留意对你有用的信息。",
     ideasHandoffLead: "了解。我正在为你想几个适合先做的小应用……",
     ideasFailed: "我暂时没能按你的情况定制，但这里有几个不错的起点。",
+    ideasOffline:
+      "还没有连接 AI，我暂时无法为你定制，这里有几个不错的起点。你随时可以在设置中连接一个。",
     unexpectedError: "欢迎流程出了点问题，不过你可以直接开始和 Rome 聊天。",
     takeaway: "**我记住了什么**\n\n{{summary}}",
-    pickedIdea: {
-      heading: "我们来做「{{title}}」。",
-      body: "这里有一段启动提示词。准备好后，把它发到与 Rome 的普通聊天中即可。",
-    },
-    finishedNoPick: {
-      heading: "设置完成。",
-      body: "想做点什么时，直接告诉 Rome 就好。欢迎加入。",
-    },
-    alreadyDone: {
-      heading: "你已经完成欢迎流程。",
-      body: "现在可以直接和 Rome 聊天，也可以在下方重新运行欢迎流程。",
-    },
+    pickedIdea:
+      "我们来做「{{title}}」。我已经打开了一个新的聊天，启动提示词准备好了，准备好后发送即可。",
+    finishedNoPick: "设置完成。想做点什么时，在新的聊天里告诉我你的想法就好。欢迎加入。",
+    alreadyDone: "你已经完成欢迎流程。现在可以直接和 Rome 聊天，或者说「重新开始」再来一次。",
   },
   web: {
     landing: {
@@ -39,46 +27,11 @@ const zhCN = {
       opening: "正在打开…",
       openError: "暂时无法打开聊天。请再试一次。",
     },
-    emailHandshake: {
-      confirmed: "邮件已确认",
-      settingUp: "正在设置邮件…",
-      unavailable: "这个环境暂时还没有设置邮件，之后可以再处理。",
-      continue: "继续",
-      agentAddress: "我的邮箱",
-      guardianAddress: "你的邮箱",
-      agree: "确认并发送问候",
-    },
-    emailReceipt: {
-      inbox: "你的收件箱",
-      connected: "谢谢，我们已经连上了。",
-      sentTo: "我刚刚发了一封邮件到",
-      sentAfter: "。请看看是否收到。",
-      received: "收到了",
-      missing: "没有收到？",
-      spamHint: "先检查垃圾邮件或广告邮件。第一封邮件有时会被放进去。还是没有？",
-      resend: "重新发送",
-      continue: "仍然继续",
-    },
-    introChoice: {
-      importTitle: "从 ChatGPT 导入",
-      importDescription: "使用 ChatGPT 已经记住的关于你的信息。",
-      answerTitle: "回答几个问题",
-      answerDescription: "用几次简单点击介绍你自己。",
-    },
-    browserStep: {
-      heading: "从 ChatGPT 借用它记得的关于你的信息 ✨",
-      openBefore: "在这里打开浏览器：点击",
-      addBrowser: "➕ 添加小组件 → 浏览器",
-      openAfter: "（跟着箭头操作）。",
-      signIn: "在该浏览器中登录 chatgpt.com。",
-      returnWhenReady: "回来后点击「我已登录」。",
-      openHeading: "在浏览器中登录 ChatGPT",
-      openDescription: "在右侧的 chatgpt.com 登录，然后点击「我已登录」。",
-      notSignedIn: "还没有检测到 ChatGPT 已登录——请完成登录后再点击「我已登录」。",
-      signedIn: "我已登录",
-      checking: "正在检查…",
-      skip: "暂时跳过",
-      skipSummary: "跳过，改为回答问题",
+    names: {
+      guardianLabel: "我怎么称呼你",
+      agentLabel: "你怎么称呼我",
+      confirm: "没问题",
+      summary: "{{guardianName}} · {{agentName}}",
     },
     scouts: {
       skippedSummary: "已跳过 Briefing 观察任务",
@@ -110,15 +63,6 @@ const zhCN = {
       explore: "我想自己探索",
       exploreSummary: "我想自己探索",
     },
-    completion: {
-      fallbackHeading: "设置完成。",
-      copied: "已复制",
-      copyPrompt: "复制提示词",
-      explore: "浏览更多 Rome 应用，看看接下来可以做什么。",
-      opening: "正在打开…",
-      openShowcases: "打开 Showcases",
-      runAgain: "重新开始欢迎流程",
-    },
   },
   genericIdeas: [
     {
@@ -137,56 +81,13 @@ const zhCN = {
         "帮我做一个阅读清单应用，让我粘贴链接、添加笔记和标签、标记正在阅读或已完成的内容，并能按主题或状态在之后浏览。",
     },
   ],
-  introQuestions: [
-    {
-      id: "role",
-      question: "你的角色或所在领域是什么？",
-      type: "single",
-      freeText: true,
-      options: ["工程", "设计", "产品", "创业 / 商业", "研究", "运营", "市场 / 内容"],
-    },
-    {
-      id: "interests",
-      question: "你感兴趣哪些方向？可多选。",
-      type: "multi",
-      freeText: true,
-      options: [
-        "软件与工程",
-        "AI 与机器学习",
-        "数据与分析",
-        "科学与研究",
-        "设计与用户体验",
-        "产品与策略",
-        "商业与创业",
-        "财务与投资",
-        "市场与增长",
-        "写作与内容",
-        "教育与学习",
-        "健康与健身",
-        "效率与组织",
-      ],
-    },
-    {
-      id: "helpFirst",
-      question: "最想先获得哪方面的帮助？",
-      type: "single",
-      freeText: true,
-      options: ["邮件与消息", "调研与摘要", "写作与内容", "日程与提醒", "构建小工具"],
-    },
-    {
-      id: "commStyle",
-      question: "你希望 Rome 用什么方式和你交流？",
-      type: "single",
-      freeText: true,
-      options: ["简短直接", "详细全面", "随意友好", "正式专业"],
-    },
-    {
-      id: "anythingElse",
-      question: "还有什么希望我知道的吗？",
-      type: "text",
-      optional: true,
-    },
-  ],
+  introQuestion: {
+    id: "helpFirst",
+    question: "最想先获得哪方面的帮助？",
+    type: "single",
+    freeText: true,
+    options: ["邮件与消息", "调研与摘要", "写作与内容", "日程与提醒", "构建小工具"],
+  },
   scouts: {
     templates: [
       {

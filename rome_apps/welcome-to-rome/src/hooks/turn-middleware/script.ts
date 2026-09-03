@@ -1,25 +1,21 @@
 // The welcome-to-rome conversation as a state machine. Each user
 // turn, `runTurn` reads the persisted node, decides what the turn should emit
-// (a text block or one of the app's own inline components), advances the node,
-// and returns it. Two intro branches:
+// (a text block, one of the app's own inline components, or a host card),
+// advances the node, and returns it. The path is:
 //
-//   • Import from ChatGPT — guide the guardian to open the Desktop browser,
-//     drive the server Chrome to ChatGPT (CDP), wait for sign-in, scrape what
-//     ChatGPT remembers. Zero-model.
-//   • Answer questions — show the host's built-in ask_question card (a fixed
-//     question set) and read the answers back.
+//   greet → await_names → await_ai → await_question → (await_scouts) → await_idea → done
 //
-// Both branches end the same way: fold the gathered text into memory by
-// summoning `welcome-memory` INLINE (no child session/approval), then summon the
-// idea specialist INLINE and show the idea picker → done. Everything the heavy
-// steps need is a blocking `summon`; nothing hands off anymore. The middleware
-// (index.ts) turns each reply into events; this file owns *what to show / ask,
-// and when*.
+// The script spends no tokens of its own, so it runs before any AI provider is
+// connected. Two steps summon real agents: the memory fold after the question
+// and the app-idea brainstorm. The connect-AI step comes before both, and a
+// skipped connect keeps the raw answer for a later fold and shows the generic
+// idea list instead of summoning. The middleware (index.ts) turns each reply
+// into events; this file owns *what to show / ask, and when*.
 
-import { copyFor, type CompletionProps, type WelcomeCopy } from "./copy.js";
+import { copyFor, type WelcomeCopy } from "./copy.js";
 import type { AppIdea, ProgressRepository } from "../../db/repositories/progress.js";
 import { encodeIdeas } from "../../db/repositories/progress.js";
-import { genericIdeas, introQuestionsFor } from "../../i18n/locales/index.js";
+import { genericIdeas, introQuestionFor } from "../../i18n/locales/index.js";
 import { guardianLanguageInstruction, type WelcomeLocale } from "../../locale.js";
 import { isDismissedInteraction, readResolutionJson } from "./resolution.js";
 import type { AskQuestion } from "./component.js";
@@ -37,15 +33,9 @@ export type TurnReply =
   // One of welcome-to-rome's own inline components; its result returns next turn.
   | { kind: "component"; lead?: string; componentId: string; props: Record<string, unknown> }
   // The host's built-in ask_question card; its answers return as the next turn.
-  | { kind: "ask"; lead?: string; questions: AskQuestion[] };
-
-/** Result of driving ChatGPT in the server browser. */
-export interface ChatGptScrape {
-  ok: boolean;
-  reply?: string;
-  noMemory?: boolean;
-  reason?: string;
-}
+  | { kind: "ask"; lead?: string; questions: AskQuestion[] }
+  // The host's built-in connect-AI card; `{ connected }` or `{ skip }` returns next turn.
+  | { kind: "connect_ai"; lead?: string };
 
 /** Result of summoning a specialist agent inline (blocking). */
 export interface SummonResult {
@@ -55,13 +45,18 @@ export interface SummonResult {
 }
 
 /** The side-effect / output port the state machine drives. Kept abstract so the
- *  machine is testable without the AgentSession or a live browser. */
+ *  machine is testable without the AgentSession. */
 export interface WelcomeEffects {
   progress: ProgressRepository;
   /** Read the guardian-chosen name for the main agent, falling back to Rome. */
   getAgentName(): Promise<string>;
+  /** Read the guardian's display name, or null when setup left none. */
+  getGuardianName(): Promise<string | null>;
   /** Read the guardian's selected Rome language. */
   getLocale(): Promise<WelcomeLocale>;
+  /** Write the two names through the host's profile path: settings and the
+   *  guardian person row. The only write effect the script has. */
+  writeNames(names: { guardianName: string; agentName: string }): Promise<{ ok: boolean }>;
   /** Emit an intermediate narration block (commentary), typed out word by word.
    *  Resolves once the whole block has streamed, so callers `await` it to keep
    *  ordering against later emits. */
@@ -69,17 +64,6 @@ export interface WelcomeEffects {
   /** Run a specialist agent inline (no child session / approval) and return its
    *  structured output. Used for autonomous steps like the idea brainstorm. */
   summon(agentName: string, prompt: string): Promise<SummonResult>;
-  chatgpt: {
-    openTab(): Promise<void>;
-    checkLogin(): Promise<{ loggedIn: boolean; reason: string }>;
-    scrape(): Promise<ChatGptScrape>;
-  };
-  /** Send the onboarding "hello" email — a deterministic script step (no model),
-   *  implemented over the `send_message` action. `to` is the guardian's address
-   *  or the literal "guardian" (the email channel resolves it). */
-  email: {
-    send(to: string, subject: string, text: string): Promise<{ ok: boolean }>;
-  };
 }
 
 interface WelcomeLanguage {
@@ -103,7 +87,7 @@ function ideasFromSummon(output: unknown): AppIdea[] {
 
 // The summon prompt fed to `welcome-memory`. Its system prompt already carries
 // the full fold-into-memory instructions, so this just frames + carries the
-// source text (a ChatGPT export, or the formatted questionnaire answers).
+// source text (the formatted answer).
 function memoryPrompt(source: string, locale: WelcomeLocale): string {
   return [
     "Here is what we just learned about the guardian. Fold the useful facts into",
@@ -114,17 +98,10 @@ function memoryPrompt(source: string, locale: WelcomeLocale): string {
   ].join("\n");
 }
 
-/** Render the questionnaire answers into a readable block for the memory agent.
- *  Values are already strings (the ask_question card joins multi-select with
- *  ", "); blank/omitted answers simply don't appear. */
+/** Render the answer into a readable line for the memory agent. A blank
+ *  answer yields an empty string. */
 function formatAnswers(answers: Record<string, string>): string {
-  const lines: string[] = [];
-  if (answers.role) lines.push(`Role / field: ${answers.role}`);
-  if (answers.interests) lines.push(`Interested in: ${answers.interests}`);
-  if (answers.helpFirst) lines.push(`Wants help with first: ${answers.helpFirst}`);
-  if (answers.commStyle) lines.push(`Preferred communication style: ${answers.commStyle}`);
-  if (answers.anythingElse) lines.push(`Anything else: ${answers.anythingElse}`);
-  return lines.join("\n");
+  return answers.helpFirst ? `Wants help with first: ${answers.helpFirst}` : "";
 }
 
 function ideasBrief(basis: string, locale: WelcomeLocale): string {
@@ -138,76 +115,48 @@ function ideasBrief(basis: string, locale: WelcomeLocale): string {
   ].join("\n");
 }
 
-/** The greeting (text) + the two-way intro choice component. */
-/** The email handshake card (the first step): shows the agent's + guardian's
- *  addresses and an "agree & send" button. The card itself reads identity and
- *  provisions if needed (via core APIs); the script sends the hello on agree. */
-async function emailHandshakeReply(
-  fx: WelcomeEffects,
-  language: WelcomeLanguage,
-): Promise<TurnReply> {
+/** The greeting plus the name-confirmation card, prefilled from settings. */
+async function namesReply(fx: WelcomeEffects, language: WelcomeLanguage): Promise<TurnReply> {
+  const agentName = await fx.getAgentName();
+  const guardianName = (await fx.getGuardianName()) ?? "";
   return {
     kind: "component",
-    lead: language.copy.emailIntro(await fx.getAgentName()),
-    componentId: "email-handshake",
-    props: {},
+    lead: language.copy.greet(guardianName, agentName),
+    componentId: "name-card",
+    props: { guardianName, agentName },
   };
 }
 
-/** The "check your inbox" card shown after the hello is sent. */
-function receiptReply(guardianEmail: string, language: WelcomeLanguage): TurnReply {
-  return {
-    kind: "component",
-    lead: language.copy.emailSentLead,
-    componentId: "email-receipt",
-    props: { guardianEmail },
-  };
+function connectAiReply(language: WelcomeLanguage): TurnReply {
+  return { kind: "connect_ai", lead: language.copy.connectAiLead };
 }
 
-function greetReply(language: WelcomeLanguage): TurnReply {
-  return { kind: "component", lead: language.copy.greet, componentId: "intro-choice", props: {} };
-}
-
-/** The "open the browser, then continue" component (ChatGPT-import branch). */
-function browserStep(notSignedIn = false): TurnReply {
-  return { kind: "component", componentId: "browser-step", props: { notSignedIn } };
-}
-
-// Card submissions use stable English action codes; each locale also accepts
+// Typed requests use stable English words; each locale also accepts
 // natural-language input in the guardian's language.
-const ACTION_PATTERNS_BY_LOCALE: Record<
-  WelcomeLocale,
-  { import: RegExp; answer: RegExp; skip: RegExp; none: RegExp; restart: RegExp }
-> = {
+const ACTION_PATTERNS_BY_LOCALE: Record<WelcomeLocale, { none: RegExp; restart: RegExp }> = {
   en: {
-    import: /import|chatgpt/,
-    answer: /answer|question/,
-    skip: /skip/,
     none: /^(none|no|nope|skip|later|not now)\b/,
     restart: /\b(start over|restart|revisit|do (it|this) again|run again)\b/,
   },
   "zh-CN": {
-    import: /import|chatgpt|导入/,
-    answer: /answer|question|回答|问题|问答/,
-    skip: /skip|跳过|暂不|以后/,
     none: /^(none|no|nope|skip|later|not now)\b|^(跳过|以后|暂不)/,
     restart: /\b(start over|restart|revisit|do (it|this) again|run again)\b|重新开始|再来一次|重来/,
   },
 };
 
-/** The fixed getting-to-know-you questionnaire (built-in ask_question card).
+/** The one getting-to-know-you question (built-in ask_question card).
  *  Resolves next turn with `{ answers: [{ questionId, value }] }`. */
-function introQuestions(language: WelcomeLanguage): TurnReply {
+function introQuestion(language: WelcomeLanguage): TurnReply {
   return {
     kind: "ask",
-    lead: language.copy.questionsLead,
-    questions: introQuestionsFor(language.locale),
+    lead: language.copy.questionLead,
+    questions: [introQuestionFor(language.locale)],
   };
 }
 
-/** The "pick your first app" buttons (the ideas themselves render above as a
- *  markdown text message). Each "Build this" opens a fresh chat client-side;
- *  only the explore opt-out resolves this turn. */
+/** The "pick your first app" buttons. Each "Build this" resolves this turn and
+ *  opens a fresh chat client-side with the prompt in the composer; the explore
+ *  opt-out resolves with the EXPLORE sentinel and opens an empty chat. */
 function ideaPicker(ideas: AppIdea[]): TurnReply {
   return { kind: "component", componentId: "idea-picker", props: { ideas } };
 }
@@ -221,16 +170,12 @@ function scoutSuggestions(scouts: ScoutSuggestion[], language: WelcomeLanguage):
   };
 }
 
-/** The completion component (closing message + copyable kickoff + revisit). */
-function completionCard(props: CompletionProps): TurnReply {
-  return { kind: "component", componentId: "completion-card", props: { ...props } };
-}
-
 const FRESH_PROGRESS = {
   introRawInput: null,
   introSummary: null,
   appIdeas: null,
   appIdeasGeneratedAt: null,
+  aiConnected: null,
   completedAt: null,
 } as const;
 
@@ -252,128 +197,59 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
 
   switch (p.node) {
     case "greet": {
-      // First contact: greet + the email handshake (the first onboarding step,
-      // before getting-to-know-you). The kickoff message the user typed to open
-      // the conversation is intentionally not consumed.
-      fx.progress.patch({ node: "await_email" });
-      return emailHandshakeReply(fx, language);
+      // First contact: greet by name and confirm the two names. The kickoff
+      // message the user typed to open the conversation is not consumed.
+      fx.progress.patch({ node: "await_names" });
+      return namesReply(fx, language);
     }
 
-    case "await_email": {
-      // The handshake card resolves with `{ agreed, guardianEmail }` once the
-      // guardian confirms, or `{ skip }` when email isn't available in this
-      // environment (or they opt out). Skip / dismiss → straight to getting to
-      // know you.
+    case "await_names": {
+      // The name card resolves with `{ guardianName, agentName }`. A dismissal
+      // keeps the prefilled names. Free text (typed in the composer instead of
+      // the card) re-shows the card and stays parked.
       const res = readResolutionJson(userText);
-      if (res?.skip === true || isDismissedInteraction(userText)) {
-        fx.progress.patch({ node: "await_choice" });
-        return greetReply(language);
+      if (!res && !isDismissedInteraction(userText)) {
+        return namesReply(fx, language);
       }
-      // Only an explicit `{ agreed: true }` from the card sends mail. Anything
-      // else — free text like "why do I need this?", or a malformed resolution —
-      // must not fire an email; re-show the handshake and wait for a real choice.
-      if (res?.agreed !== true) {
-        return emailHandshakeReply(fx, language);
+      const guardianName = field(userText, "guardianName")?.trim() || (await fx.getGuardianName());
+      const agentName = field(userText, "agentName")?.trim() || (await fx.getAgentName());
+      if (guardianName) {
+        await fx.writeNames({ guardianName, agentName });
       }
-      // Agreed: send the hello (script, no model). On failure, don't pretend a
-      // mail is coming — just move on.
-      const to = field(userText, "guardianEmail") ?? "guardian";
-      const agentName = await fx.getAgentName();
-      const sent = await fx.email.send(
-        to,
-        language.copy.helloEmailSubject,
-        language.copy.helloEmailBody(agentName),
-      );
-      if (!sent.ok) {
-        fx.progress.patch({ node: "await_choice" });
-        return greetReply(language);
-      }
-      fx.progress.patch({ node: "await_email_receipt" });
-      return receiptReply(to, language);
+      fx.progress.patch({ node: "await_ai" });
+      return connectAiReply(language);
     }
 
-    case "await_email_receipt": {
-      // The receipt card resolves with `{ received }` / `{ skip }` (both move on)
-      // or `{ resend }` (send again, re-show the card). Confirming receipt is
-      // optional — either button continues.
+    case "await_ai": {
+      // The host card resolves with `{ connected: true }` once the status probe
+      // reports a provider logged in, or `{ skip: true }`. A dismissal counts as
+      // a skip. Free text re-shows the card and stays parked, which is also how
+      // a return from the Codex browser login lands back on this step.
       const res = readResolutionJson(userText);
-      if (res?.resend === true) {
-        const to = field(userText, "guardianEmail") ?? "guardian";
-        const agentName = await fx.getAgentName();
-        await fx.email.send(
-          to,
-          language.copy.helloEmailSubject,
-          language.copy.helloEmailBody(agentName),
-        );
-        return receiptReply(to, language);
+      if (!res && !isDismissedInteraction(userText)) {
+        return connectAiReply(language);
       }
-      fx.progress.patch({ node: "await_choice" });
-      return greetReply(language);
+      fx.progress.patch({ node: "await_question", aiConnected: res?.connected === true });
+      return introQuestion(language);
     }
 
-    case "await_choice": {
-      const choice = field(userText, "choice") ?? normalize(userText);
-      const patterns = ACTION_PATTERNS_BY_LOCALE[language.locale];
-      if (patterns.import.test(choice)) {
-        // Pre-open ChatGPT in the server Chrome so it's already showing when the
-        // guardian opens the Browser widget. Best-effort.
-        await fx.chatgpt.openTab().catch(() => {});
-        fx.progress.patch({ node: "await_browser" });
-        return browserStep();
-      }
-      if (patterns.answer.test(choice)) {
-        fx.progress.patch({ node: "await_questions" });
-        return introQuestions(language);
-      }
-      return greetReply(language);
-    }
-
-    case "await_browser": {
-      const action = field(userText, "action") ?? normalize(userText);
-      if (ACTION_PATTERNS_BY_LOCALE[language.locale].skip.test(action)) {
-        fx.progress.patch({ node: "await_questions" });
-        return introQuestions(language);
-      }
-      // "Continue": confirm sign-in, then scrape.
-      const login = await fx.chatgpt.checkLogin();
-      if (!login.loggedIn) {
-        return browserStep(true);
-      }
-      await fx.say(language.copy.magicTrick);
-      const scrape = await fx.chatgpt.scrape();
-      if (scrape.ok && scrape.reply) {
-        // Fold the export into memory inline, then continue in this same turn.
-        fx.progress.patch({ introRawInput: scrape.reply });
-        await foldMemory(fx, scrape.reply, language);
-        return continueAfterMemory(fx, now, language);
-      }
-      // No memory stored, or the scrape failed — fall back to the questionnaire.
-      await fx.say(scrape.noMemory ? language.copy.chatgptNoMemory : language.copy.chatgptFailed);
-      fx.progress.patch({ node: "await_questions" });
-      return introQuestions(language);
-    }
-
-    case "await_questions": {
+    case "await_question": {
       // The built-in question card resolves with `{ answers: [...] }`. A
-      // dismissal means the guardian opted out — move on. But plain typed text
-      // (they wrote in the composer instead of submitting the card) is NOT a
-      // completed questionnaire: re-show the card and stay parked, so their
-      // input isn't dropped and onboarding doesn't jump ahead.
+      // dismissal means the guardian opted out — move on. Plain typed text is
+      // NOT an answer: re-show the card and stay parked.
       if (isDismissedInteraction(userText)) {
-        return continueAfterMemory(fx, now, language);
+        return continueAfterQuestion(fx, now, language);
       }
       const answers = readAnswers(userText);
       if (!answers) {
-        return introQuestions(language);
+        return introQuestion(language);
       }
-      // A real submission — fold the answers into memory inline (an all-blank
-      // submit yields no source and just continues), then continue this turn.
       const source = formatAnswers(answers);
       if (source) {
         fx.progress.patch({ introRawInput: source });
-        await foldMemory(fx, source, language);
+        if (p.aiConnected) await foldMemory(fx, source, language);
       }
-      return continueAfterMemory(fx, now, language);
+      return continueAfterQuestion(fx, now, language);
     }
 
     case "await_scouts": {
@@ -384,17 +260,20 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       const ideas = p.ideas.length > 0 ? p.ideas : genericIdeas(language.locale);
       const idea = resolveChosenIdea(userText, ideas, language.locale);
       fx.progress.patch({ node: "done", completedAt: now() });
-      return completionCard(idea ? language.copy.pickedIdea(idea) : language.copy.finishedNoPick);
+      return {
+        kind: "text",
+        text: idea ? language.copy.pickedIdea(idea) : language.copy.finishedNoPick,
+      };
     }
 
     case "done":
     default: {
-      // The "run again" button (or a typed "start over") resets and re-greets.
-      if (readResolutionJson(userText)?.revisit === true || isRestart(userText, language.locale)) {
-        fx.progress.patch({ node: "await_choice", ...FRESH_PROGRESS });
-        return greetReply(language);
+      // A typed "start over" resets and re-greets.
+      if (isRestart(userText, language.locale)) {
+        fx.progress.patch({ node: "await_names", ...FRESH_PROGRESS });
+        return namesReply(fx, language);
       }
-      return completionCard(language.copy.alreadyDone);
+      return { kind: "text", text: language.copy.alreadyDone };
     }
   }
 }
@@ -438,15 +317,19 @@ async function foldMemory(
   if (summary) fx.progress.patch({ introSummary: summary });
 }
 
-/** Shared tail of both intro branches: surface the memory takeaway, then either
- *  offer briefing scouts or go straight to the first-app brainstorm. Runs inline
- *  within the triggering turn (the memory fold already happened via summon). */
-async function continueAfterMemory(
+/** Shared tail of the question step. With an AI connected: surface the memory
+ *  takeaway, then either offer briefing scouts or go straight to the first-app
+ *  brainstorm. Without one, the scouts (which need a model to run) and the
+ *  brainstorm are skipped for the static idea list. */
+async function continueAfterQuestion(
   fx: WelcomeEffects,
   now: () => string,
   language: WelcomeLanguage,
 ): Promise<TurnReply> {
   const current = fx.progress.get();
+  if (!current.aiConnected) {
+    return staticIdeas(fx, now, language);
+  }
   // Surface what we learned as a normal assistant text block (markdown), not a
   // bordered card inside the picker.
   const takeaway = current.introSummary;
@@ -459,6 +342,21 @@ async function continueAfterMemory(
     return scoutSuggestions(scouts, language);
   }
   return brainstormAppIdeas(fx, now, language);
+}
+
+async function staticIdeas(
+  fx: WelcomeEffects,
+  now: () => string,
+  language: WelcomeLanguage,
+): Promise<TurnReply> {
+  const ideas = genericIdeas(language.locale);
+  fx.progress.patch({
+    node: "await_idea",
+    appIdeas: encodeIdeas(ideas),
+    appIdeasGeneratedAt: now(),
+  });
+  await fx.say(language.copy.ideasOffline);
+  return ideaPicker(ideas);
 }
 
 async function brainstormAppIdeas(
@@ -518,7 +416,7 @@ function isNone(text: string, locale: WelcomeLocale): boolean {
   return ACTION_PATTERNS_BY_LOCALE[locale].none.test(normalize(text));
 }
 
-/** A typed request to run onboarding again (fallback for the revisit button). */
+/** A typed request to run onboarding again. */
 function isRestart(text: string, locale: WelcomeLocale): boolean {
   return ACTION_PATTERNS_BY_LOCALE[locale].restart.test(normalize(text));
 }
