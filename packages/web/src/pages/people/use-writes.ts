@@ -74,9 +74,16 @@ export interface PeopleWrites {
     account: AccountRef,
     text: string,
   ): Promise<WriteOutcome<OutboxMessage, SendRefusal>>;
-  /** Try a failed send again, under its own outbox id. */
+  /**
+   * Try a failed send again, under its own outbox id.
+   *
+   * Refuses with a 404 for a row that is not this person's failed row — one
+   * already discarded, or one a concurrent retry has claimed. Both re-read the
+   * outbox, so a caller has nothing to report and nothing to undo.
+   */
   retry(personId: string, messageId: string): Promise<WriteOutcome<OutboxMessage>>;
-  /** Give up on a failed send. */
+  /** Give up on a failed send. Refuses the same way {@link retry} does, and a
+   *  send still in flight is not discardable — it may yet arrive. */
   discard(personId: string, messageId: string): Promise<WriteOutcome<void>>;
 }
 
@@ -110,6 +117,23 @@ export function usePeopleWrites(): PeopleWrites {
       return outcome;
     };
 
+    // The two outbox gestures settle whichever way they went.
+    //
+    // Every other verb here refuses by naming something the caller must then do
+    // — the person who holds an account, the channel that cannot be written to
+    // — so its refusal is worth surfacing and there is nothing to re-read. A
+    // refused outbox gesture says only that the row is not what this page
+    // thought it was: somebody else's, already discarded, or claimed by a retry
+    // that won. Every one of those is answered by reading the outbox again, and
+    // none of them is the guardian's to fix. Settling anyway is what keeps a
+    // double-clicked Retry quiet — the loser re-reads and finds the row the
+    // winner is already sending.
+    const resettling = async <T, C>(write: () => Promise<WriteOutcome<T, C>>) => {
+      const outcome = await write();
+      await settle();
+      return outcome;
+    };
+
     // Callers hand over whatever row they are holding — a directory account, a
     // person's linked account — so the pair is projected here rather than
     // spread, and a request never carries a field the verb has no place for.
@@ -131,8 +155,8 @@ export function usePeopleWrites(): PeopleWrites {
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
       say: (personId, account, text) =>
         settling(() => sendMessage(personId, { ...ref(account), text }, t)),
-      retry: (personId, messageId) => settling(() => retrySend(personId, messageId, t)),
-      discard: (personId, messageId) => settling(() => discardSend(personId, messageId, t)),
+      retry: (personId, messageId) => resettling(() => retrySend(personId, messageId, t)),
+      discard: (personId, messageId) => resettling(() => discardSend(personId, messageId, t)),
     };
   }, [settle, t]);
 }

@@ -63,29 +63,43 @@ export function Outbox({
 }
 
 /**
- * A refused send, with the two gestures that can end it.
+ * A send Rome has stopped trying to deliver, with the two gestures that can end
+ * it.
  *
- * `error` is the channel's own words and is shown as detail beneath copy the
- * dashboard owns — the contract says so, and a provider sentence is not a line
- * this page can localize or promise the shape of.
+ * `error` is what stopped it, shown as the row's detail. Usually the channel's
+ * own words, which this page can neither localize nor promise the shape of. One
+ * of them is not: a send whose process died before the channel answered carries
+ * the server's own equivocal line, because Rome genuinely does not know whether
+ * it went out. Both read as the reason this row is waiting, which is what the
+ * slot is for.
+ *
+ * Neither gesture reports its own refusal. A 404 here means the row is not what
+ * this page thought it was — already discarded, or claimed by a retry that won —
+ * and the outbox read that follows says which. Alarming the loser of a
+ * double-click would be reporting a failure for a message that is being sent.
  */
 function FailedRow({ personId, message }: { personId: string; message: OutboxMessage }) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
   const [busy, setBusy] = useState(false);
 
+  // Released once the read behind the gesture has settled. Not left set: a
+  // refused gesture leaves this row on screen, and a row whose only two
+  // gestures stay disabled is one the guardian can no longer act on at all.
   const act = (run: () => Promise<unknown>) => async () => {
     setBusy(true);
-    await run();
-    // No `setBusy(false)`: both gestures settle by invalidating the outbox, and
-    // this row is either gone or back in flight by the time that read lands.
+    try {
+      await run();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <span className="flex items-center gap-2">
       <span className="flex items-center gap-1 text-badge text-destructive">
         <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
-        <span>{message.error ?? t("send.state.failed")}</span>
+        <span>{message.error ?? t("send.state.stopped")}</span>
       </span>
       <Button
         type="button"

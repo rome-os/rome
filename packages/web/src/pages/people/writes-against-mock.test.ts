@@ -202,6 +202,52 @@ describe("Sending, against the contract's own handlers", () => {
     expect(refused.conflict.send).toBe("unsupported");
   });
 
+  it("lets one of two retries of a row win, so a double click sends once", async () => {
+    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail then retry twice" }, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    await outboxUntil(RAY, (page) =>
+      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
+    );
+
+    // Both reach the route; the state is what claims the row, so the second
+    // finds a row that is no longer theirs to send. Sending the guardian's
+    // message twice is the exact harm the outbox is arranged around.
+    const [first, second] = await Promise.all([
+      retrySend(RAY, sent.value.id, t),
+      retrySend(RAY, sent.value.id, t),
+    ]);
+    expect([first!.ok, second!.ok].filter(Boolean)).toHaveLength(1);
+  });
+
+  it("refuses a retry of a row still in flight, and a discard of one too", async () => {
+    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "still going" }, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    // A send that may yet arrive is not the guardian's to retry or to drop the
+    // record of — losing it would leave them with no account of the message.
+    expect(await retrySend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
+    expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
+    await outboxUntil(RAY, (page) => !holds(page, sent.value.id));
+  });
+
+  it("refuses an outbox row of somebody else's, reached through this person", async () => {
+    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail for the scope check" }, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    await outboxUntil(RAY, (page) =>
+      page.messages.some((m) => m.id === sent.value.id && m.state === "failed"),
+    );
+
+    // A message id is not a capability. The person in the path is whose outbox
+    // it is, and Ray's row is not reachable through Sam's.
+    expect(await retrySend("sam-okafor", sent.value.id, t)).toMatchObject({ ok: false });
+    expect(await discardSend("sam-okafor", sent.value.id, t)).toMatchObject({ ok: false });
+    expect(holds(await readOutbox(RAY), sent.value.id)).toBe(true);
+    await discardSend(RAY, sent.value.id, t);
+  });
+
   it("refuses an account the person does not hold, before anything is sent", async () => {
     // Not a refusal about a channel — a request this person's page cannot
     // answer, and sending anyway would deliver a message addressed to someone

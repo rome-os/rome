@@ -167,6 +167,13 @@ const strangerRow = () => persons.find((p) => p.id === STRANGER_PERSON_ID);
 
 const notFound = (what: string) => HttpResponse.json({ error: `Unknown ${what}` }, { status: 404 });
 
+/** What both outbox mutations answer for a row that is not this person's failed
+ *  row. One reply for "no such row", "not yours" and "already claimed": the
+ *  caller re-reads the outbox either way, and telling them apart would be
+ *  telling a caller about somebody else's rows. */
+const notTheirs = () =>
+  HttpResponse.json({ error: "No failed message of theirs with that id" }, { status: 404 });
+
 const linkConflict = (ref: AccountRef, owner: { id: string; displayName: string }) =>
   ({
     error: "account is already linked to another person",
@@ -247,13 +254,6 @@ const ACCEPTED_AFTER_MS = 700;
 const LANDS_AFTER_MS = 1_400;
 
 /**
- * Whether this attempt is refused.
- *
- * Text-triggered, because nothing else in mock mode can fail: there is no
- * provider to be down. Only the first attempt, so Retry has something to
- * succeed at — the gesture is the point of the state.
- */
-/**
  * The fallback line on a refusal, in the route's own words.
  *
  * A fallback and not the copy: the dashboard keys off `send` and owns every
@@ -271,8 +271,46 @@ function refusalMessage(send: Exclude<AccountSendState, "yes">): string {
   }
 }
 
-function refuses(row: OutboxRow): boolean {
-  return row.attempts === 1 && row.text.toLowerCase().startsWith("fail");
+/**
+ * The server's own line for a send whose process died before the channel
+ * answered. Not a provider message, and deliberately equivocal — Rome does not
+ * know whether it went out. Kept identical to `people/outbox.ts`'s, so the
+ * dashboard is exercised against the text production actually sends.
+ */
+const STRANDED_ERROR =
+  "Rome stopped before the channel answered; this may or may not have been sent";
+
+/**
+ * Why this attempt stops, or null when it goes through.
+ *
+ * Text-triggered, because nothing else in mock mode can go wrong: there is no
+ * provider to be down and no process to die. `fail` stops only the first
+ * attempt, so Retry has something to succeed at — the gesture is the point of
+ * the state. `stranded` keeps answering the same way, because it stands in for
+ * a row nothing will ever move.
+ */
+function stops(row: OutboxRow): string | null {
+  const text = row.text.toLowerCase();
+  if (text.startsWith("stranded")) return STRANDED_ERROR;
+  if (text.startsWith("fail") && row.attempts === 1) return "the channel rejected this message";
+  return null;
+}
+
+/**
+ * This person's failed row with that id, or null.
+ *
+ * Both outbox mutations resolve their row through this, because both are scoped
+ * the same way: a message id is not a capability, the person in the path is
+ * whose outbox it is, and neither verb may touch a row still in flight — a send
+ * that may yet arrive is not one to retry or to drop the record of.
+ */
+function failedRowOf(person: PersonFixture, messageId: string): OutboxRow | null {
+  const row = outbox.find((candidate) => candidate.id === messageId);
+  if (!row || row.state !== "failed") return null;
+  const held = person.channelMappings.some(
+    (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
+  );
+  return held ? row : null;
 }
 
 function openRow(account: AccountRef, text: string): OutboxRow {
@@ -317,9 +355,10 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
   for (const row of outbox.filter(held)) {
     const elapsed = now - row.attemptedAt;
     if (row.state === "sending" && elapsed >= ACCEPTED_AFTER_MS) {
-      if (refuses(row)) {
+      const stopped = stops(row);
+      if (stopped !== null) {
         row.state = "failed";
-        row.error = "the channel rejected this message";
+        row.error = stopped;
       } else {
         row.state = "unconfirmed";
         // The id the channel gives back, and the `ref` the entry will carry
@@ -562,8 +601,11 @@ export const peopleHandlers = [
   http.post("/api/people/:id/outbox/:messageId/retry", ({ params }) => {
     const person = findVisiblePerson(String(params.id));
     if (!person) return notFound("person");
-    const row = outbox.find((candidate) => candidate.id === String(params.messageId));
-    if (!row) return notFound("message");
+    // The row is claimed by the state it is in: a second retry of one already
+    // reopened finds nothing, which is what stops a double-clicked Retry
+    // delivering the guardian's message twice.
+    const row = failedRowOf(person, String(params.messageId));
+    if (!row) return notTheirs();
     row.state = "sending";
     row.error = null;
     row.ref = null;
@@ -577,8 +619,9 @@ export const peopleHandlers = [
   http.delete("/api/people/:id/outbox/:messageId", ({ params }) => {
     const person = findVisiblePerson(String(params.id));
     if (!person) return notFound("person");
-    const at = outbox.findIndex((candidate) => candidate.id === String(params.messageId));
-    if (at !== -1) outbox.splice(at, 1);
+    const row = failedRowOf(person, String(params.messageId));
+    if (!row) return notTheirs();
+    outbox.splice(outbox.indexOf(row), 1);
     return new HttpResponse(null, { status: 204 });
   }),
 

@@ -129,12 +129,12 @@
     "retry": "Retry",
     "discard": "Discard this message",
     "outbox": {
-      "label": "Messages Rome is still sending"
+      "label": "Outbox"
     },
     "state": {
       "sending": "Sending",
       "unconfirmed": "Sent, not confirmed yet",
-      "failed": "The channel refused it"
+      "stopped": "Rome stopped trying to send this"
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
