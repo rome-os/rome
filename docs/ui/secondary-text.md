@@ -44,12 +44,6 @@ Ask four questions of the text, in order. Stop at the first failure.
    > Section: "Access Control". Text: "Apps marked public stay reachable from the public host." — a limit on the app access control, one section away. Moved there.
    > Field: "Workspace icon". Text: "PNG or SVG, up to 2 MB." — a limit on this field, on this field. Passes.
 
-The verdict:
-
-- No fact → `delete`.
-- A fact, plus anything else → `rewrite` to the fact alone. The replacement passes the four questions on its own and follows `VOICE.md`.
-- Only the fact → `keep`.
-
 When unsure whether something is a fact, it is not, unless it is a cost, a limit, or a cause. Never invent a cause.
 
 > "Remove the app and erase its data. This cannot be undone." — the first half restates the label, the second is a cost with its subject removed. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
