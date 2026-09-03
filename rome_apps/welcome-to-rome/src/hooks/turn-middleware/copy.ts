@@ -7,6 +7,8 @@ import type { WelcomeLocale } from "../../locale.js";
 
 export interface WelcomeCopy {
   greet(guardianName: string, agentName: string): string;
+  /** Used when setup stored no guardian name, so the card asks for it. */
+  greetNoName(agentName: string): string;
   connectAiLead: string;
   questionLead: string;
   savingMemoryLead: string;
@@ -29,6 +31,7 @@ export function copyFor(locale: WelcomeLocale): WelcomeCopy {
   const copy = serverCopy(locale);
   return {
     greet: (guardianName, agentName) => formatMessage(copy.greet, { guardianName, agentName }),
+    greetNoName: (agentName) => formatMessage(copy.greetNoName, { agentName }),
     connectAiLead: copy.connectAiLead,
     questionLead: copy.questionLead,
     savingMemoryLead: copy.savingMemoryLead,

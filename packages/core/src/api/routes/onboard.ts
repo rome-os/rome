@@ -3,11 +3,14 @@ import { getCookie } from "hono/cookie";
 import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
 import { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "../../constants.js";
-import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { COOKIE_NAME, hashPassword, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
-import { applyGuardianProfile, type GuardianProfileInput } from "../../lib/guardian-profile.js";
+import {
+  applyGuardianProfile,
+  applySetupDefaults,
+  type GuardianProfileInput,
+} from "../../lib/guardian-profile.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { getInstanceToken } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
@@ -55,9 +58,9 @@ export function onboardRoutes(deps: ApiDeps): Hono {
     return c.json(state);
   });
 
-  // Returns the authenticated guardian's id, any partially-filled onboarding
-  // settings, and the agent presets, so OnboardPage can rehydrate and offer a
-  // default agent identity. Only a signed-in guardian mid-onboarding calls this.
+  // Returns the authenticated guardian's id and any partially-filled onboarding
+  // settings. Setup writes both names itself, so this serves a legacy instance
+  // that was mid-onboarding before setup moved into the welcome conversation.
   app.get("/onboard/draft", async (c) => {
     const session = await resolveGuardianSession(c, deps.db);
     if (!session) {
@@ -71,9 +74,14 @@ export function onboardRoutes(deps: ApiDeps): Hono {
       draft[row.key] = row.value;
     }
 
-    return c.json({ userId: session.userId, settings: draft, agentPresets: AGENT_PRESETS });
+    return c.json({ userId: session.userId, settings: draft });
   });
 
+  // The whole of local-first setup. Creating the seat also finishes it: the
+  // username becomes the guardian display name, the agent gets a preset
+  // identity, and onboarding is marked complete, so the box drops straight into
+  // the welcome conversation the way a cloud box does. The two names are
+  // confirmed there rather than in a form.
   app.post("/onboard/create-account", async (c) => {
     // On a cloud-default instance the guardian seat is created
     // from the Rome Cloud session by the cloud sign-in callback, not here. This
@@ -122,6 +130,12 @@ export function onboardRoutes(deps: ApiDeps): Hono {
         createdAt: new Date(),
       })
       .onConflictDoNothing();
+
+    await applySetupDefaults(userId, {
+      db: deps.db,
+      settingsRepo: deps.settingsRepo,
+      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+    });
 
     issueGuardianSession(c, userId);
 

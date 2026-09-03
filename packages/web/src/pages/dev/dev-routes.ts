@@ -80,7 +80,7 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         path: "/dev/onboard",
         title: "Onboarding page",
         description:
-          "The real OnboardPage on its profile step. Reachable without an un-onboarded backend, which the route under AuthGate needs.",
+          "The real OnboardPage on its create-account step. Reachable without an un-onboarded backend, which the route under AuthGate needs.",
         Component: lazy(() => import("./OnboardPreviewPage")),
       },
     ]

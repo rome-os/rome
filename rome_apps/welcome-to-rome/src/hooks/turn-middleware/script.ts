@@ -121,7 +121,9 @@ async function namesReply(fx: WelcomeEffects, language: WelcomeLanguage): Promis
   const guardianName = (await fx.getGuardianName()) ?? "";
   return {
     kind: "component",
-    lead: language.copy.greet(guardianName, agentName),
+    lead: guardianName
+      ? language.copy.greet(guardianName, agentName)
+      : language.copy.greetNoName(agentName),
     componentId: "name-card",
     props: { guardianName, agentName },
   };

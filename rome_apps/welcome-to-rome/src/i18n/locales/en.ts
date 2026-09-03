@@ -2,6 +2,8 @@ const en = {
   server: {
     greet:
       "👋 Hi {{guardianName}} — I'm {{agentName}}.\n\nBefore we start, a quick check: is this what I should call you, and do you like my name?",
+    greetNoName:
+      "👋 Hi — I'm {{agentName}}.\n\nBefore we start: what should I call you? And do you like my name?",
     connectAiLead:
       "Next, I need something to think with. Sign in to Claude or ChatGPT below — I run on your existing subscription — or skip for now and I'll keep it simple.",
     questionLead: "One question, then we build something:",

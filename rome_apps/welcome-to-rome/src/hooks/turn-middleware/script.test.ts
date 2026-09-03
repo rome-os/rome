@@ -62,6 +62,21 @@ describe("runTurn — greeting and the name card", () => {
     expect(getNode()).toBe("await_names");
   });
 
+  it("asks for the name instead of guessing when setup stored none", async () => {
+    const { fx } = makeEffects("greet");
+    rs.mocked(fx.getGuardianName).mockResolvedValue(null);
+
+    const reply = await runTurn("Let's get started", fx);
+
+    expect(reply).toMatchObject({
+      componentId: "name-card",
+      lead: expect.stringContaining("what should I call you?"),
+      props: { guardianName: "", agentName: "Rome" },
+    });
+    // No blank interpolated into the greeting.
+    expect(reply.kind === "component" && reply.lead).not.toContain("Hi  ");
+  });
+
   it("uses Chinese copy from the first welcome step", async () => {
     const { fx } = makeEffects("greet");
     rs.mocked(fx.getLocale).mockResolvedValue("zh-CN");

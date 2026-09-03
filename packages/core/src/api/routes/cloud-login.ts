@@ -3,21 +3,19 @@ import { hostname } from "node:os";
 import { verifyIdToken } from "@rome-os/libs/oidc";
 import { createPkce } from "@rome-os/libs/pkce";
 import { Hono, type Context } from "hono";
-import { pickRandomAgentPreset } from "../../lib/agent-presets.js";
 import { COOKIE_NAME, createGuardianSession, issueGuardianSession } from "../../lib/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../lib/guardian-auth-state.js";
-import { applyGuardianProfile, defaultGuardianName } from "../../lib/guardian-profile.js";
+import { applySetupDefaults, defaultGuardianName } from "../../lib/guardian-profile.js";
 import {
   getInstanceToken,
   isValidInstanceToken,
   persistInstanceToken,
 } from "../../lib/instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import { guardianAuth } from "../../db/schema.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";
@@ -464,20 +462,11 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   // both, so the onboarding page is never shown on this path.
   async function createGuardianSeat(identity: CloudIdentity): Promise<void> {
     await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
-    const preset = pickRandomAgentPreset();
-    await applyGuardianProfile(
-      {
-        guardianName: defaultGuardianName(identity),
-        agentName: preset.name,
-        agentPurpose: preset.purpose,
-      },
-      {
-        db: deps.db,
-        settingsRepo: deps.settingsRepo,
-        reactivateFloating: () => deps.routineEngine.reactivateFloating(),
-      },
-    );
-    await deps.db.update(guardianAuth).set({ onboardingComplete: true });
+    await applySetupDefaults(defaultGuardianName(identity), {
+      db: deps.db,
+      settingsRepo: deps.settingsRepo,
+      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+    });
   }
 
   // The row is created BEFORE the cookie so a session never outruns a backing

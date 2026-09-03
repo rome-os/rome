@@ -21,6 +21,7 @@ rs.mock("../../profile-memory.js", () => ({
 import { onboardRoutes } from "./onboard.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import * as guardianProfile from "../../lib/guardian-profile.js";
+import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
@@ -133,15 +134,56 @@ describe("/api/onboard/setup — writes the profile through the shared function"
   });
 });
 
-describe("/api/onboard/draft", () => {
-  it("carries the agent presets so the page can offer a default identity", async () => {
-    insertCloudGuardian();
-    const { app, cookie } = await buildApp();
+// Local-first setup is the account step alone: creating the seat also names the
+// guardian from the username, gives the agent a preset identity, and marks
+// onboarding complete, so the box drops straight into the welcome conversation.
+describe("/api/onboard/create-account — finishes setup with defaults", () => {
+  async function buildLocalApp(): Promise<Hono> {
+    const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => false };
+    return new Hono().route("/api", onboardRoutes(deps));
+  }
 
-    const res = await app.request("/api/onboard/draft", { headers: { Cookie: cookie } });
+  async function createAccount(app: Hono) {
+    return app.request("/api/onboard/create-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: "alex", password: "hunter2hunter2" }),
+    });
+  }
+
+  it("names the guardian from the username and marks onboarding complete", async () => {
+    expect(getRomeCloudOrigin()).toBeNull();
+    const app = await buildLocalApp();
+
+    const res = await createAccount(app);
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { agentPresets: unknown };
-    expect(body.agentPresets).toEqual(AGENT_PRESETS);
+    const [guardian] = testDb.db.select().from(guardianAuth).all();
+    expect(guardian.userId).toBe("alex");
+    expect(guardian.onboardingComplete).toBe(true);
+    const [person] = testDb.db
+      .select()
+      .from(persons)
+      .where(eq(persons.bondLevel, "guardian"))
+      .all();
+    expect(person).toMatchObject({ displayName: "alex", approved: true });
+  });
+
+  it("gives the agent a preset name and purpose", async () => {
+    const app = await buildLocalApp();
+
+    await createAccount(app);
+
+    const stored = Object.fromEntries(
+      testDb.db
+        .select()
+        .from(settings)
+        .all()
+        .map((row) => [row.key, row.value]),
+    );
+    const preset = AGENT_PRESETS.find((p) => p.name === stored.agentName);
+    expect(preset).toBeDefined();
+    expect(stored.agentPurpose).toBe(preset?.purpose);
+    expect(stored.guardianName).toBe("alex");
   });
 });

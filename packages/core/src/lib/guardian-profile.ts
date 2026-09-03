@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import type { DrizzleDb } from "../db/index.js";
-import { persons } from "../db/schema.js";
+import { guardianAuth, persons } from "../db/schema.js";
+import { pickRandomAgentPreset } from "./agent-presets.js";
 import { generatePersonSlug } from "../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
@@ -92,6 +93,30 @@ export async function applyGuardianProfile(
   }
 
   return { ok: true, guardianName, personId };
+}
+
+/**
+ * Finish a fresh seat's setup: write the display name the caller derived from
+ * its identity source, give the agent a preset name and purpose, and mark
+ * onboarding complete. Both seat origins call this — the cloud sign-in callback
+ * with the identity assertion's name, the local create-account route with the
+ * chosen username — so every fresh instance reaches the welcome conversation
+ * with both names already set and no setup form left to fill.
+ *
+ * Call once, after the guardian row exists. A blank `guardianName` leaves the
+ * profile unwritten but still completes setup, so a caller with no usable name
+ * is never stranded mid-onboarding.
+ */
+export async function applySetupDefaults(
+  guardianName: string,
+  deps: GuardianProfileDeps,
+): Promise<void> {
+  const preset = pickRandomAgentPreset();
+  await applyGuardianProfile(
+    { guardianName, agentName: preset.name, agentPurpose: preset.purpose },
+    deps,
+  );
+  await deps.db.update(guardianAuth).set({ onboardingComplete: true });
 }
 
 /** The guardian name a cloud sign-in starts with: the identity assertion's
