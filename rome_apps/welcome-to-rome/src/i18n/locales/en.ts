@@ -5,7 +5,7 @@ const en = {
     greetNoName:
       "👋 Hi — I'm {{agentName}}.\n\nBefore we start: what should I call you? And do you like my name?",
     connectAiLead:
-      "Next, I need something to think with. Sign in to Claude or ChatGPT below — I run on your existing subscription — or skip for now and I'll keep it simple.",
+      "Next, I need something to think with. I run on your existing Claude or ChatGPT subscription rather than a separate API key.",
     questionLead: "One question, then we build something:",
     savingMemoryLead: "Thanks — folding that into your memory now.",
     scoutsLead:

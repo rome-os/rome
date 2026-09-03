@@ -244,7 +244,9 @@
     "skipped": "暂时跳过",
     "skip": "暂时跳过",
     "connectedSummary": "已连接 AI",
-    "skippedSummary": "暂时跳过连接 AI"
+    "skippedSummary": "暂时跳过连接 AI",
+    "connectedTitle": "AI 已连接",
+    "checking": "正在检查你的 AI 连接…"
   },
   "modelSelector": {
     "label": "模型",

@@ -244,7 +244,9 @@
     "skipped": "Skipped for now",
     "skip": "Skip for now",
     "connectedSummary": "Connected an AI",
-    "skippedSummary": "Skipped connecting an AI"
+    "skippedSummary": "Skipped connecting an AI",
+    "connectedTitle": "AI connected",
+    "checking": "Checking your AI connections…"
   },
   "modelSelector": {
     "label": "Model",

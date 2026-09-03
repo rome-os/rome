@@ -4,7 +4,7 @@ const zhCN = {
       "👋 你好 {{guardianName}}，我是 {{agentName}}。\n\n开始之前先确认一下：我这样称呼你可以吗？你喜欢我的名字吗？",
     greetNoName: "👋 你好，我是 {{agentName}}。\n\n开始之前：我该怎么称呼你？你喜欢我的名字吗？",
     connectAiLead:
-      "接下来，我需要一个可以用来思考的 AI。在下方登录 Claude 或 ChatGPT（我会使用你已有的订阅），也可以暂时跳过，我会先保持简单。",
+      "接下来，我需要一个可以用来思考的 AI。我会使用你已有的 Claude 或 ChatGPT 订阅，而不需要单独的 API 密钥。",
     questionLead: "只问一个问题，然后我们就开始做点东西：",
     savingMemoryLead: "谢谢，我正在把这些信息整理进你的记忆。",
     scoutsLead: "我还可以为你的 Briefing 添加几个观察任务，让 Rome 持续留意对你有用的信息。",
