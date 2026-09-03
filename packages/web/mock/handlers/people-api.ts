@@ -253,6 +253,11 @@ const outbox: OutboxRow[] = [];
 const ACCEPTED_AFTER_MS = 700;
 const LANDS_AFTER_MS = 1_400;
 
+/** How long a row may sit unconfirmed before it counts as stuck. The route's
+ *  five minutes; a mock row lands in under two seconds, so anything still here
+ *  after this has been deliberately wedged. */
+const STRANDED_AFTER_MS = 5 * 60_000;
+
 /**
  * The fallback line on a refusal, in the route's own words.
  *
@@ -297,20 +302,50 @@ function stops(row: OutboxRow): string | null {
 }
 
 /**
- * This person's failed row with that id, or null.
+ * A send the channel took and whose message never reaches the timeline.
+ *
+ * The phantom Discard exists for: on a channel with no mirror of its own,
+ * Rome's transcript write is how a sent message lands, so a write that failed
+ * leaves a row nothing will ever move. Text-triggered, because a mock has no
+ * transcript to fail. Its row is backdated past the landing window on the way
+ * to `unconfirmed`, since nobody is going to sit here for five minutes to watch
+ * a button appear.
+ */
+function wedges(row: OutboxRow): boolean {
+  return row.text.toLowerCase().startsWith("wedged");
+}
+
+/**
+ * This person's row with that id, or null.
  *
  * Both outbox mutations resolve their row through this, because both are scoped
- * the same way: a message id is not a capability, the person in the path is
- * whose outbox it is, and neither verb may touch a row still in flight — a send
- * that may yet arrive is not one to retry or to drop the record of.
+ * the same way: a message id is not a capability, and the person in the path is
+ * whose outbox it is. Which states each verb then accepts is its own question,
+ * and the two answers differ.
  */
-function failedRowOf(person: PersonFixture, messageId: string): OutboxRow | null {
+function rowOf(person: PersonFixture, messageId: string): OutboxRow | null {
   const row = outbox.find((candidate) => candidate.id === messageId);
-  if (!row || row.state !== "failed") return null;
+  if (!row) return null;
   const held = person.channelMappings.some(
     (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
   );
   return held ? row : null;
+}
+
+/**
+ * Whether a row can be given up on: the route's rule, kept here so the mock and
+ * production never disagree about whether a button works.
+ *
+ * A row is dismissable once nothing is going to happen to it on its own. A
+ * `failed` one is finished. An `unconfirmed` one inside the landing window is
+ * ordinary and about to clear itself, so dropping it would race the clearing;
+ * past the window it was delivered and will never be seen, and on a channel
+ * with no mirror of its own that is the only way out it has. A `sending` one
+ * has not been answered yet.
+ */
+function isDismissableRow(row: OutboxRow, now: number): boolean {
+  if (row.state === "failed") return true;
+  return row.state === "unconfirmed" && now - row.attemptedAt >= STRANDED_AFTER_MS;
 }
 
 function openRow(account: AccountRef, text: string): OutboxRow {
@@ -361,13 +396,28 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
         row.error = stopped;
       } else {
         row.state = "unconfirmed";
-        // The id the channel gives back, and the `ref` the entry will carry
-        // when it lands. A row the channel never named could not be recognized
-        // on arrival, which is why the contract requires one.
+        // The id the channel gives back. A hint at the entry this would become
+        // at the address it was sent to, not a key: the server recognizes an
+        // arrival across every address the account folds, and this is the mock
+        // playing server rather than anything a client may rely on.
         row.ref = `${row.channelUserId}:${row.id}`;
+        if (wedges(row)) {
+          // Backdated on the wire as well as in the bookkeeping. The row stands
+          // in for one accepted five minutes ago, and a reader decides whether
+          // to offer Discard from `timestamp` — the only age the contract
+          // carries. A row old to the route and fresh to the client would be a
+          // button that looks wrong rather than a state worth looking at.
+          row.attemptedAt = now - STRANDED_AFTER_MS;
+          row.timestamp = Math.floor((now - STRANDED_AFTER_MS) / 1000);
+        }
       }
     }
-    if (row.state === "unconfirmed" && elapsed >= LANDS_AFTER_MS && row.ref !== null) {
+    if (
+      row.state === "unconfirmed" &&
+      elapsed >= LANDS_AFTER_MS &&
+      row.ref !== null &&
+      !wedges(row)
+    ) {
       recordDelivered(row, { timestamp: row.timestamp, body: row.text, ref: row.ref });
     }
   }
@@ -604,8 +654,11 @@ export const peopleHandlers = [
     // The row is claimed by the state it is in: a second retry of one already
     // reopened finds nothing, which is what stops a double-clicked Retry
     // delivering the guardian's message twice.
-    const row = failedRowOf(person, String(params.messageId));
-    if (!row) return notTheirs();
+    // Retry accepts a failed row and nothing else, and the state is what claims
+    // it: the second of two retries finds a row that is no longer theirs to
+    // send.
+    const row = rowOf(person, String(params.messageId));
+    if (!row || row.state !== "failed") return notTheirs();
     row.state = "sending";
     row.error = null;
     row.ref = null;
@@ -619,8 +672,8 @@ export const peopleHandlers = [
   http.delete("/api/people/:id/outbox/:messageId", ({ params }) => {
     const person = findVisiblePerson(String(params.id));
     if (!person) return notFound("person");
-    const row = failedRowOf(person, String(params.messageId));
-    if (!row) return notTheirs();
+    const row = rowOf(person, String(params.messageId));
+    if (!row || !isDismissableRow(row, Date.now())) return notTheirs();
     outbox.splice(outbox.indexOf(row), 1);
     return new HttpResponse(null, { status: 204 });
   }),

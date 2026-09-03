@@ -176,9 +176,13 @@ function mockApi(
      * persists and the only one a guardian can act on.
      */
     send?: "land" | "refuse" | "fail";
-    /** The 404 a retry earns when the row is no longer this reader's to send —
-     *  claimed by a concurrent retry, or already discarded. */
-    retry?: "refuse";
+    /**
+     * How the retry route answers. `"refuse"` is the 404 for a row no longer
+     * this reader's to send — claimed by a concurrent retry, or already
+     * discarded. `"fail"` is the request itself going wrong, which has changed
+     * nothing and is the guardian's to try again.
+     */
+    retry?: "refuse" | "fail";
     /** Rows already in the outbox when the page opens — how a send stranded by
      *  an earlier process reaches a reader. */
     outbox?: OutboxMessage[];
@@ -237,6 +241,7 @@ function mockApi(
       const row = outbox.find((candidate) => path.includes(candidate.id));
       // Only a failed row of theirs is retryable, and the state is what claims
       // it: the second of two retries finds a row no longer theirs to send.
+      if (options.retry === "fail") return json({ error: "retry store unavailable" }, 500);
       if (!row || row.state !== "failed" || options.retry === "refuse") {
         return json({ error: "No failed message of theirs with that id" }, 404);
       }
@@ -935,6 +940,108 @@ describe("PersonDetailPage, sending", () => {
       calls.filter((call) => call.method === "GET" && call.url.endsWith("/outbox")).length,
     ).toBeGreaterThan(1);
     expect(screen.queryByText(/No failed message/)).toBeNull();
+  });
+
+  it("retires a refusal when the target changes, so it never names the wrong channel", async () => {
+    const user = userEvent.setup();
+    mockApi({ send: "refuse" });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "on my way");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    // The 409 renders as the line the composer would have shown had the read
+    // been fresh — WhatsApp's, because WhatsApp is the target.
+    const refusal = await screen.findByText(
+      "WhatsApp isn't connected, so Rome can't send there. Connect it in Settings.",
+    );
+    expect(refusal).toBeTruthy();
+
+    // Switching account retires it. A refusal names a channel, so one left
+    // standing here would be describing a channel that is no longer the one
+    // being written to.
+    await user.click(screen.getByRole("button", { name: /WhatsApp · / }));
+    await user.click(await screen.findByRole("menuitem", { name: /Telegram/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "WhatsApp isn't connected, so Rome can't send there. Connect it in Settings.",
+        ),
+      ).toBeNull(),
+    );
+    expect(screen.getByText(/Telegram · 418820113/)).toBeTruthy();
+  });
+
+  it("says why a retry could not be made, and leaves the row actionable", async () => {
+    const user = userEvent.setup();
+    mockApi({ send: "fail", retry: "fail" });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "are you there");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const outbox = await screen.findByRole("list", { name: "Outbox" });
+    await user.click(within(outbox).getByRole("button", { name: "Retry" }));
+
+    // A gesture that never reached the server has changed nothing and is the
+    // guardian's to try again — and this row is the only place the attempt can
+    // be made, so it says what happened rather than going quiet.
+    expect(
+      await within(screen.getByRole("list", { name: "Outbox" })).findByRole("status"),
+    ).toBeTruthy();
+
+    // And it stays usable. An outbox with nothing in flight has stopped
+    // polling, so a row left disabled here is one nothing else recovers.
+    const rows = screen.getByRole("list", { name: "Outbox" });
+    expect(within(rows).getByRole("button", { name: "Retry" })).toHaveProperty("disabled", false);
+    expect(within(rows).getByRole("button", { name: "Discard this message" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("gives a stuck unconfirmed row a way out, and a fresh one none", async () => {
+    const WINDOW = 5 * 60;
+    // Against the real clock, not the fixture's noon anchor: staleness is what
+    // is under test, and the block that renders it reads `Date.now()`. Noon is
+    // in the future for any run that starts before it.
+    const REAL_NOW = Math.floor(Date.now() / 1000);
+    const stuck = {
+      id: "outbox-stuck",
+      channel: "whatsapp",
+      channelUserId: "6591881123@s.whatsapp.net",
+      text: "delivered but never seen",
+      timestamp: REAL_NOW - WINDOW - 10,
+      state: "unconfirmed" as const,
+      ref: "sent-stuck",
+      error: null,
+    };
+    mockApi({
+      outbox: [
+        stuck,
+        { ...stuck, id: "outbox-fresh", text: "just went out", timestamp: REAL_NOW - 5 },
+      ],
+    });
+    renderPage();
+
+    const outbox = await screen.findByRole("list", { name: "Outbox" });
+    const rows = within(outbox).getAllByRole("listitem");
+    const stuckRow = rows.find((row) => row.textContent?.includes("delivered but never seen"))!;
+    const freshRow = rows.find((row) => row.textContent?.includes("just went out"))!;
+
+    // Past the landing window nothing will move it on its own, so dismissing it
+    // is the only exit it has. Retry is not offered — a refusal is what can be
+    // tried again, and this was accepted.
+    expect(within(stuckRow).getByRole("button", { name: "Discard this message" })).toBeTruthy();
+    expect(within(stuckRow).queryByRole("button", { name: "Retry" })).toBeNull();
+
+    // Inside the window it is ordinary and about to clear itself, so there is
+    // nothing to offer — and the route would refuse it anyway.
+    expect(within(freshRow).queryByRole("button", { name: "Discard this message" })).toBeNull();
+    expect(within(freshRow).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("replaces the composer with the reason when the account cannot be written to", async () => {

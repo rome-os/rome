@@ -50,8 +50,19 @@ export function Composer({
   const writes = usePeopleWrites();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [refusal, setRefusal] = useState<{ send: RefusedSendState; channel: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // How the last send went, and which account it was addressed to.
+  //
+  // The account is carried so the line can be shown only while it is still
+  // about the target on screen. A refusal names a channel, so one left standing
+  // after the guardian switches accounts is not merely stale — it describes a
+  // channel that is no longer the one being written to, which is worse than
+  // showing nothing. Held together and compared at render rather than cleared
+  // by an effect, so there is no ordering in which the wrong pair can be shown.
+  const [attempt, setAttempt] = useState<{
+    account: { channel: string; channelUserId: string };
+    refusal: RefusedSendState | null;
+    message: string | null;
+  } | null>(null);
 
   // Nothing at all for a person Rome holds no address for. The dossier header
   // already says they have no accounts, and this slot is for a channel giving a
@@ -79,14 +90,22 @@ export function Composer({
 
   const options = person.accounts.filter(canSend);
   const text = draft.trim();
+  // Shown only while it still describes the account being written to. A switch
+  // of target retires it without anything having to remember to.
+  const failed =
+    attempt &&
+    attempt.account.channel === target.channel &&
+    attempt.account.channelUserId === target.channelUserId
+      ? attempt
+      : null;
 
   async function submit() {
     // `target` is narrowed above; the closure is re-created every render, so it
     // is the account rendered beside the box and not an earlier one.
     if (target === null || text === "" || sending) return;
+    const account = { channel: target.channel, channelUserId: target.channelUserId };
     setSending(true);
-    setRefusal(null);
-    setError(null);
+    setAttempt(null);
     const outcome = await writes.say(person.id, target, text);
     setSending(false);
     if (outcome.ok) {
@@ -97,8 +116,11 @@ export function Composer({
     // and is not now. It renders as the line the composer would have shown had
     // the read been fresh, which is what carrying the state rather than a
     // sentence buys.
-    if ("conflict" in outcome) setRefusal({ send: outcome.conflict.send, channel: target.channel });
-    else setError(outcome.message);
+    setAttempt(
+      "conflict" in outcome
+        ? { account, refusal: outcome.conflict.send, message: null }
+        : { account, refusal: null, message: outcome.message },
+    );
   }
 
   return (
@@ -134,12 +156,11 @@ export function Composer({
           {t("send.submit")}
         </Button>
       </div>
-      {refusal && (
+      {failed && (
         <p className="mt-2 text-aux text-destructive">
-          {refusalText(t, refusal.send, refusal.channel)}
+          {failed.refusal ? refusalText(t, failed.refusal, failed.account.channel) : failed.message}
         </p>
       )}
-      {error && <p className="mt-2 text-aux text-destructive">{error}</p>}
     </div>
   );
 }

@@ -104,3 +104,35 @@ export function segmentOutbox(
       )
     : [...messages];
 }
+
+/**
+ * How long a send is given to arrive before a reader may offer to dismiss it.
+ *
+ * The server's own landing window, mirrored here to decide whether to *offer*
+ * the gesture — never whether it is allowed. The route holds the rule and
+ * answers 404 for a row that is not dismissable yet, so a copy that drifts
+ * shows the button a moment early or late rather than deciding anything. Which
+ * is also why this measures `timestamp` rather than reconstructing the
+ * `updatedAt` the server compares: that column is not on the wire, and a client
+ * that needed it would be deciding.
+ */
+const SETTLES_WITHIN_SECONDS = 5 * 60;
+
+/**
+ * Whether a reader may offer to give up on this row.
+ *
+ * A row is dismissable once nothing is going to happen to it on its own. A
+ * `failed` one is finished. An `unconfirmed` one still inside the window is
+ * ordinary and about to clear itself, so offering to drop it would race the
+ * clearing; past the window it was delivered and will never be seen, and on a
+ * channel with no mirror of its own that is the only way out it has. A
+ * `sending` one is never offered — it has not been answered yet.
+ */
+export function isDismissable(
+  message: Pick<OutboxMessage, "state" | "timestamp">,
+  nowSeconds: number,
+): boolean {
+  if (message.state === "failed") return true;
+  if (message.state !== "unconfirmed") return false;
+  return nowSeconds - message.timestamp >= SETTLES_WITHIN_SECONDS;
+}

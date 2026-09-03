@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { defaultSendAccount, type LinkedAccount, type TimelineEntry } from "@rome/api-types/people";
 import {
   ALL_ACCOUNTS,
+  isDismissable,
   accountHandle,
   accountSegments,
   segmentAccount,
@@ -153,5 +154,35 @@ describe("the account a composer opens on", () => {
 
   it("is null when nothing is sendable, which is a reason to render and not an empty box", () => {
     expect(defaultSendAccount([account({ channel: "linkedin", send: "unsupported" })])).toBeNull();
+  });
+});
+
+describe("isDismissable", () => {
+  const NOW = 1_800_000;
+  const WINDOW = 5 * 60;
+  const row = (state: "sending" | "unconfirmed" | "failed", age: number) => ({
+    state,
+    timestamp: NOW - age,
+  });
+
+  it("offers the gesture on a failed row, which is finished", () => {
+    expect(isDismissable(row("failed", 0), NOW)).toBe(true);
+  });
+
+  it("withholds it from a sending row, which has not been answered", () => {
+    expect(isDismissable(row("sending", WINDOW * 10), NOW)).toBe(false);
+  });
+
+  it("withholds it from a fresh unconfirmed row, which is about to clear itself", () => {
+    // Offering to drop one inside the window would race the clearing, and the
+    // route refuses it for the same reason.
+    expect(isDismissable(row("unconfirmed", WINDOW - 1), NOW)).toBe(false);
+  });
+
+  it("offers it once an unconfirmed row has outlived the landing window", () => {
+    // The phantom this exists for: delivered, never seen, and on a channel with
+    // no mirror of its own this is the only way the row ever leaves.
+    expect(isDismissable(row("unconfirmed", WINDOW), NOW)).toBe(true);
+    expect(isDismissable(row("unconfirmed", WINDOW * 3), NOW)).toBe(true);
   });
 });

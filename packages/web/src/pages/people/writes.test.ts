@@ -203,7 +203,10 @@ describe("people writes — what an answer becomes", () => {
 
     const result = await createPerson({ displayName: " " }, t);
 
-    expect(result).toEqual({ ok: false, message: "displayName is required" });
+    // The status rides along beside the message: most callers render the line
+    // and ignore it, and the outbox gestures read it to tell a row that is not
+    // theirs to act on from a write that actually failed.
+    expect(result).toEqual({ ok: false, message: "displayName is required", status: 400 });
   });
 
   it("never puts a server fault on screen in its own words", async () => {
@@ -213,7 +216,7 @@ describe("people writes — what an answer becomes", () => {
 
     // A 5xx body carries the same shape as a 4xx one and not the same meaning:
     // the API error handler serializes an unhandled exception into it.
-    expect(result).toEqual({ ok: false, message: t("errors.requestFailed") });
+    expect(result).toEqual({ ok: false, message: t("errors.requestFailed"), status: 500 });
   });
 
   it("says the server was unreachable rather than throwing at a click handler", async () => {

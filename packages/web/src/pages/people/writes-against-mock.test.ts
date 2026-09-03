@@ -232,6 +232,26 @@ describe("Sending, against the contract's own handlers", () => {
     await outboxUntil(RAY, (page) => !holds(page, sent.value.id));
   });
 
+  it("lets a delivered-but-unseen send be discarded once it is past the window", async () => {
+    // The phantom the rule exists for: the channel took it, the message never
+    // reached the timeline, and nothing will ever move the row. On a channel
+    // with no mirror of its own this is the only way out it has.
+    const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "wedged forever" }, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    const stuck = await outboxUntil(RAY, (page) =>
+      page.messages.some((m) => m.id === sent.value.id && m.state === "unconfirmed"),
+    );
+    expect(stuck.messages.find((m) => m.id === sent.value.id)?.error).toBeNull();
+
+    // Not retryable — a refusal is what can be tried again, and this was
+    // accepted — but dismissable, because it has outlived the landing window.
+    expect(await retrySend(RAY, sent.value.id, t)).toMatchObject({ ok: false });
+    expect(await discardSend(RAY, sent.value.id, t)).toMatchObject({ ok: true });
+    expect(holds(await readOutbox(RAY), sent.value.id)).toBe(false);
+  });
+
   it("refuses an outbox row of somebody else's, reached through this person", async () => {
     const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "fail for the scope check" }, t);
     expect(sent.ok).toBe(true);

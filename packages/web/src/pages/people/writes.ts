@@ -45,7 +45,20 @@ export interface AccountRef {
 export type WriteOutcome<T, C = LinkConflict> =
   | { ok: true; value: T }
   | { ok: false; conflict: C }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      message: string;
+      /**
+       * What the server answered, absent when nothing was reached.
+       *
+       * Beside the message rather than instead of it: every caller has a line
+       * to render and most have nothing to say about the code. It is here for
+       * the ones that do — a 404 on an outbox gesture means the row is not
+       * this reader's to act on, which is a different thing from a write that
+       * failed, and only the status tells the two apart.
+       */
+      status?: number;
+    };
 
 function isLinkConflict(payload: unknown): payload is LinkConflict {
   if (typeof payload !== "object" || payload === null) return false;
@@ -109,11 +122,13 @@ async function send<T, C = LinkConflict>(
     const conflict = readConflict(payload);
     if (conflict !== null) return { ok: false, conflict };
   }
-  if (response.status >= 500) return { ok: false, message: t("errors.requestFailed") };
+  const status = response.status;
+  if (status >= 500) return { ok: false, message: t("errors.requestFailed"), status };
   const error = (payload as { error?: unknown } | null)?.error;
   return {
     ok: false,
     message: typeof error === "string" && error !== "" ? error : t("errors.requestFailed"),
+    status,
   };
 }
 
