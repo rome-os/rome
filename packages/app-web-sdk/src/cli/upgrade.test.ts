@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@rstest/core";
 import YAML from "yaml";
-import { bumpVersion, upgradeAppVersion } from "./upgrade";
+import { bumpVersion, upgradeAppVersion } from "./upgrade.js";
 
 describe("bumpVersion", () => {
   it("increments patch versions", () => {

@@ -62,9 +62,17 @@ export class RomeAppManifestPlugin implements RspackPluginInstance {
   }
 }
 
-function findEntryChunk(compilation: Compilation): Chunk | null {
-  for (const chunk of compilation.chunks) {
-    if (chunk.canBeInitial()) {
+/** The chunk holding the generated entry module, which is the one that exports
+ *  `mount`. Read it off the entrypoint rather than scanning `compilation.chunks`
+ *  for the first initial chunk: an app whose build splits a runtime chunk out —
+ *  any app with a dynamic import — has two initial chunks, and the runtime one
+ *  exports nothing. Which of them came first depended on the module graph, so a
+ *  source edit could silently repoint the manifest at the runtime chunk and the
+ *  host would fail to mount the app. */
+export function findEntryChunk(compilation: Compilation): Chunk | null {
+  for (const entrypoint of compilation.entrypoints.values()) {
+    const chunk = entrypoint.getEntrypointChunk();
+    if (chunk) {
       return chunk;
     }
   }
