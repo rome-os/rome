@@ -181,7 +181,9 @@ export async function discardSend(
   id: string,
 ): Promise<boolean> {
   if (!(await heldBy(deps, accounts, id))) return false;
-  return await deps.outboxRepo.discard(id);
+  // The same window a send is given to arrive in. Inside it an unconfirmed row
+  // is ordinary and usually clears itself; past it, it is stuck.
+  return await deps.outboxRepo.discard(id, new Date(Date.now() - STRANDED_AFTER_MS));
 }
 
 /** Whether a row is addressed to one of these accounts. */

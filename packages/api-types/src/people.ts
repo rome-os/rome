@@ -1347,8 +1347,13 @@ export type OutboxState = "sending" | "unconfirmed" | "failed";
  * its cursor is written against — free of rows that may yet be withdrawn, and
  * keep each account owned by exactly one store.
  *
- * `ref` matches the timeline entry this message will become, so a reader can
- * tell that a row has landed without being told twice.
+ * `ref` is the entry this message would become at the address it was sent to.
+ * It is a hint and not a key: a channel that folds several addresses onto one
+ * account may deliver under another of them, and then the landed entry carries
+ * that address instead. Recognizing an arrival is the server's job, which is
+ * why it enumerates every folded address and why a client must not dedupe the
+ * timeline against this value — the row is gone from the outbox by the time
+ * there is anything to dedupe against.
  */
 export interface OutboxMessage {
   id: string;
@@ -1359,8 +1364,8 @@ export interface OutboxMessage {
    *  lands. */
   timestamp: number;
   state: OutboxState;
-  /** The timeline `ref` this will carry once it surfaces. Null while the
-   *  channel has not named the message yet. */
+  /** The entry this would become at the address it was sent to, or null while
+   *  the channel has not named the message yet. A hint — see above. */
   ref: string | null;
   /** Why the channel refused, for a `failed` row. Provider text, shown as
    *  detail beneath copy the dashboard owns. */

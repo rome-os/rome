@@ -220,9 +220,9 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       : c.json({ error: "No failed message of theirs with that id" }, 404);
   });
 
-  /** Give up on a failed send. The only way a row leaves the outbox without
-   *  having been delivered — a send still in flight may yet arrive, and
-   *  dropping its record would leave the guardian with no account of it. */
+  /** Give up on a send. The only way a row leaves the outbox without having
+   *  been observed on the timeline. Refused only while the provider call is
+   *  outstanding, since until it answers nobody knows what happened. */
   app.delete("/people/:id/outbox/:messageId", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
@@ -230,7 +230,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const discarded = await discardSend(deps, person.channelMappings, c.req.param("messageId"));
     return discarded
       ? c.body(null, 204)
-      : c.json({ error: "No failed message of theirs with that id" }, 404);
+      : c.json({ error: "No dismissable message of theirs with that id" }, 404);
   });
 
   app.get("/people/:id/messages", async (c) => {

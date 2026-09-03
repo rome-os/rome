@@ -346,18 +346,105 @@ describe("People send API — delivery bookkeeping", () => {
     expect(((await still.json()) as OutboxPage).messages).toHaveLength(1);
   });
 
-  it("will not discard a send that is still in flight", async () => {
+  it("will not discard a send while the channel has not answered", async () => {
     const row = await deps.outboxRepo.open({
       channel: "whatsapp",
       channelUserId: LID,
       conversationId: LID,
       text: "still going",
     });
-    // Dropping this row would leave the guardian with no account of a message
-    // that may yet arrive.
+    // The one state where Rome does not yet know what happened. Dropping the
+    // row here would lose the only record of a call that is still outstanding.
     const res = await app.request(`/people/${personId}/outbox/${row.id}`, { method: "DELETE" });
     expect(res.status).toBe(404);
     expect(await outbox()).toHaveLength(1);
+  });
+
+  it("dismisses a delivered send Rome never managed to record", async () => {
+    // Telegram keeps no mirror, so Rome's own transcript is how a sent message
+    // reaches the timeline. If that write fails the message is delivered and
+    // will never appear, and the row would otherwise be a phantom the guardian
+    // can neither retry nor dismiss.
+    deps.webchatRepo.recordOutboundConversationMessage = async () => {
+      throw new Error("disk is full");
+    };
+    const tgPersonId = await deps.personMappingRepo.create({
+      displayName: "Unmirrored",
+      bondLevel: "other",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+    });
+    await app.request(`/people/${tgPersonId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channel: "telegram",
+        channelUserId: "tg-unmirrored",
+        text: "delivered but unseen",
+      }),
+    });
+
+    const listing = await app.request(`/people/${tgPersonId}/outbox`);
+    const [stuck] = ((await listing.json()) as OutboxPage).messages;
+    expect(stuck).toMatchObject({ state: "unconfirmed" });
+
+    // Fresh, it is an ordinary row that usually clears itself, and dismissing
+    // it would race the clearing.
+    expect(
+      (await app.request(`/people/${tgPersonId}/outbox/${stuck!.id}`, { method: "DELETE" })).status,
+    ).toBe(404);
+
+    // Past the window a message lands in, it is a phantom and the guardian gets
+    // a way out.
+    testDb.db.run(
+      sql`UPDATE outbound_messages SET updated_at = ${Math.floor(Date.now() / 1000) - 3600} WHERE id = ${stuck!.id}`,
+    );
+    const res = await app.request(`/people/${tgPersonId}/outbox/${stuck!.id}`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(204);
+    const after = await app.request(`/people/${tgPersonId}/outbox`);
+    expect(((await after.json()) as OutboxPage).messages).toEqual([]);
+  });
+
+  it("never leaves a delivered message with no record when discard races retry", async () => {
+    const adapter = deps.channelPortMap.get("whatsapp")!;
+    adapter.sendMessage = async () => {
+      throw new Error("nope");
+    };
+    await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "contested" }),
+    });
+    const [failed] = await outbox();
+
+    adapter.sentMessages.length = 0;
+    adapter.sendMessage = async (channelUserId, threadId, message) => {
+      adapter.sentMessages.push({ channelUserId, threadId, message });
+    };
+
+    // Whichever wins is fine. What must never happen is the discard passing a
+    // `failed` check, the retry claiming the row in between, and the delete
+    // then removing a row whose message is already on its way.
+    await Promise.all([
+      app.request(`/people/${personId}/outbox/${failed!.id}/retry`, { method: "POST" }),
+      app.request(`/people/${personId}/outbox/${failed!.id}`, { method: "DELETE" }),
+    ]);
+
+    expect(adapter.sentMessages.length).toBeLessThanOrEqual(1);
+    if (adapter.sentMessages.length === 1) {
+      // Somewhere, not necessarily the outbox: a message that reached the
+      // timeline has left the outbox legitimately, and that is the row doing
+      // its job rather than being lost. What must never happen is a delivered
+      // message the guardian can find no trace of.
+      const res = await app.request(`/people/${personId}/messages`);
+      const onTimeline = ((await res.json()) as { entries: { body: string | null }[] }).entries;
+      const stillQueued = await outbox();
+      expect(
+        onTimeline.some((entry) => entry.body === "contested") || stillQueued.length === 1,
+      ).toBe(true);
+    }
   });
 
   it("sends once when a failed row is retried twice at the same moment", async () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt, or } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { outboundMessages } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -100,14 +100,40 @@ export class OutboxRepository {
     return row === null ? null : { ...row, updatedAt };
   }
 
-  /** Give up on a send Rome is not going to make. Refuses any other state: a
-   *  row still in flight is a message that may yet arrive, and dropping its
-   *  record would leave the guardian with no account of it. */
-  async discard(id: string): Promise<boolean> {
-    const row = await this.find(id);
-    if (row === null || row.state !== "failed") return false;
-    await this.db.delete(outboundMessages).where(eq(outboundMessages.id, id));
-    return true;
+  /**
+   * Give up on a send, and answer whether there was one to give up on.
+   *
+   * A row is dismissable once nothing is going to happen to it on its own. A
+   * `failed` one is finished. An `unconfirmed` one that has outlived the window
+   * a message lands in was delivered and will never be seen — on a channel with
+   * no mirror, one whose transcript write failed has no other way out, and
+   * leaving it would be a phantom the guardian can neither retry nor dismiss.
+   *
+   * Everything else is refused. A send whose provider call is still outstanding
+   * has no known outcome, and one that has just been accepted is about to clear
+   * itself; dismissing either loses the record of a message already on its way.
+   *
+   * Both conditions ride in the WHERE clause rather than a read before it. A
+   * discard racing a retry could otherwise pass its check, have the retry claim
+   * and deliver the row in between, and delete it a moment later — a message
+   * sent with no record of it, which is the thing this table exists to prevent.
+   */
+  async discard(id: string, settledBefore: Date): Promise<boolean> {
+    const deleted = await this.db
+      .delete(outboundMessages)
+      .where(
+        and(
+          eq(outboundMessages.id, id),
+          or(
+            eq(outboundMessages.state, "failed"),
+            and(
+              eq(outboundMessages.state, "unconfirmed"),
+              lt(outboundMessages.updatedAt, settledBefore),
+            ),
+          ),
+        ),
+      );
+    return deleted.changes > 0;
   }
 
   /** A send whose process died before the channel answered, marked so it can
