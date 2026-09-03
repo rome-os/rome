@@ -48,14 +48,15 @@ describe("formatTimestamp", () => {
   });
 
   it("takes raw Intl options for a layout the presets lack", () => {
-    const text = plain(
-      formatTimestamp(INSTANT, {
-        format: { weekday: "short", hour: "numeric" },
-        timeZone: "UTC",
-        locale: EN,
-      }),
+    const options: Intl.DateTimeFormatOptions = { weekday: "short", hour: "numeric" };
+    const text = formatTimestamp(INSTANT, { format: options, timeZone: "UTC", locale: EN });
+
+    // ICU builds differ on the punctuation between a weekday and a clock, so
+    // the pin is Intl's own rendering of the same options, not a literal.
+    expect(text).toBe(
+      new Intl.DateTimeFormat(EN, { ...options, timeZone: "UTC" }).format(new Date(INSTANT)),
     );
-    expect(text).toBe("Thu, 3 PM");
+    expect(text).toMatch(/^Thu.*3 PM$/);
   });
 
   it("accepts a Date, an ISO string, and epoch milliseconds alike", () => {
