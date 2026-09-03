@@ -22,19 +22,24 @@ A term the user would not know ("webhook", "exit node") is explained in a toolti
 
 ## The test
 
-Ask three questions of every sentence, in order. Stop at the first failure.
+Ask four questions of every sentence, in order. Stop at the first failure.
 
-1. **Which fact does it carry?** None → drop the sentence.
+1. **Is its verb a generic one on the label's noun?** Manage, configure, view, set, control, adjust, customize, "lets you", "here you can", "use this to", or the heading with a period added → drop the sentence, even when a fact follows the verb. The fact goes into a new sentence. This question comes first because these are the sentences an auditor talks into `keep` by reading a fact into the verb.
+
+   > Label: "Notifications". Text: "Manage how you receive notifications." — "manage" on the label's noun. Dropped.
+   > Label: "Connections". Text: "This section lets you connect services that apps can use." — "lets you" on the label's noun, with a fact behind it. Dropped, and the fact returns as "Apps can only use services connected here."
+
+2. **Which fact does it carry?** None → drop the sentence.
 
    > Label: "Default region". Text: "Choose the region for new resources." — no fact, only what the control is. Dropped.
    > Label: "Default region". Text: "Existing resources are not moved." — a cost. Passes.
 
-2. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop the sentence. A badge naming a state does not show its cause.
+3. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop the sentence. A badge naming a state does not show its cause.
 
    > Label: "Upload icon", a file input. Text: "Upload an icon for your workspace." — the label and the input already show it. Dropped.
    > Label: "Webhook relay", beside a "Not configured" badge. Text: "No relay credential is stored, so incoming webhooks are not delivered." — the badge names the state, and the cause is nowhere else. Passes.
 
-3. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move the sentence.
+4. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move the sentence.
 
    > Section: "Access Control". Text: "Apps marked public stay reachable from the public host." — a limit on the app access control, one section away. Moved there.
    > Field: "Workspace icon". Text: "PNG or SVG, up to 2 MB." — a limit on this field, on this field. Passes.
@@ -42,23 +47,12 @@ Ask three questions of every sentence, in order. Stop at the first failure.
 The string's verdict follows from its sentences:
 
 - Every sentence dropped → `delete`.
-- A sentence dropped, moved, or reworded → `rewrite`, with the replacement written out. The replacement passes the three questions on its own and follows `VOICE.md`.
+- A sentence dropped, moved, or reworded → `rewrite`, with the replacement written out. The replacement passes the four questions on its own and follows `VOICE.md`.
 - Every sentence passes → `keep`.
 
 When a string sits between `delete` and `rewrite`, choose `delete`, unless the string carries a cost, a limit, or a cause. Those resolve to `rewrite`: trim to the fact and keep it. Never invent a cause.
 
 > "Remove the app and erase its data. This cannot be undone." — sentence one restates the label. Sentence two is a cost with its subject removed. `rewrite` → "The app's data is deleted permanently and cannot be recovered."
-
-## Never
-
-These openers are `delete` on sight, even when a fact could be salvaged from them. The fact goes into a new string.
-
-Each one wraps the label's noun in a generic verb, so the three questions already fail it. The list exists because these are the strings an auditor talks into `keep` by reading a fact into the verb, and a match ends that argument.
-
-- "This section lets you …", "Here you can …", "Use this to …"
-- "Manage your …", "Configure your …", "View and edit …"
-- Any sentence whose only verb is manage, configure, view, set, control, adjust, or customize, with the label's noun as its object.
-- The heading with a period added.
 
 ## Repo rules
 

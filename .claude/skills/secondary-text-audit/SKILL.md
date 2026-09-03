@@ -98,8 +98,8 @@ Read [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) first — it fixes the
 register, the person, and what a description must carry, and every `rewrite`
 row is written in it. Then read
 [`docs/ui/secondary-text.md`](../../../docs/ui/secondary-text.md) in full. It
-carries the scope, the five kinds of fact, the three-question test, the
-forbidden openers, and the repo rules. Do not
+carries the scope, the five kinds of fact, the four-question test, and the
+repo rules. Do not
 audit from memory of the kind names.
 
 ### Step 4 — Establish the rendered context
@@ -120,9 +120,9 @@ plausible-sounding tables that are wrong about half the rows.
 
 ### Step 5 — Run the test per sentence
 
-Ask the three questions of every sentence, in order, stopping at the first
+Ask the four questions of every sentence, in order, stopping at the first
 failure. Derive the string's verdict from its sentences. Then, for `rewrite`
-rows, check that the replacement passes the three questions on its own and
+rows, check that the replacement passes the four questions on its own and
 obeys `VOICE.md`.
 
 ### Step 6 — Verdict-hardening pass
@@ -132,7 +132,7 @@ Before emitting, re-examine the table:
 - Every `keep` — name its kind of fact out loud. If naming it takes a paragraph of
   justification, it is `rewrite` or `delete`.
 - Every `rewrite` — read the replacement alone, without the original. Does it
-  pass the three questions as a new string? Does it lead with the fact?
+  pass the four questions as a new string? Does it lead with the fact?
 - Every `delete` — confirm the information is not lost: either it was
   restatement, or the surviving payload moved into another row's replacement.
   Say which.
