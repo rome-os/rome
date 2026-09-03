@@ -1777,7 +1777,7 @@ function TailscaleDaemonSection({
                   section, so it labels a control rather than heading a section.
                   "Exit node" is a term rather than a fact, so its meaning sits in
                   a tooltip and the row carries no description. */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <h4 className="text-ui text-foreground">{t("tailscale.exitNode.title")}</h4>
                 <TooltipProvider delayDuration={150}>
                   <Tooltip>
