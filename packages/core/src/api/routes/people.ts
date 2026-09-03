@@ -189,8 +189,23 @@ export function peopleRoutes(deps: ApiDeps): Hono {
         );
   });
 
-  /** Every send of this person's still in flight. Unpaged — an outbox long
-   *  enough to page is an incident rather than a listing. */
+  /**
+   * Every send of this person's still in flight. Unpaged — an outbox long
+   * enough to page is an incident rather than a listing.
+   *
+   * Deliberately not a safe GET. The read is what notices a message landing,
+   * so it clears the rows that have, and it is also what notices a send whose
+   * process died, so it marks those failed. That is the design — an outbox row
+   * is derived from a comparison against the timeline, and deriving it is the
+   * only moment anything is in a position to see the answer.
+   *
+   * The consequence to respect: this endpoint must not be prefetched,
+   * revalidated in the background, or wrapped in an HTTP cache on the
+   * assumption that a GET is free. Clearing a landed row and deleting it again
+   * are both idempotent, so a repeat is harmless there; stranding is the one
+   * transition that is not, and it is gated on an age no fresh row can meet.
+   * A caller that adds caching here is choosing that, not inheriting it.
+   */
   app.get("/people/:id/outbox", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
