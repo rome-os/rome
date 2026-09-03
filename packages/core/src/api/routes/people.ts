@@ -20,7 +20,7 @@ import {
 } from "@rome/api-types/people";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
-import { readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
+import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
@@ -201,24 +201,36 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     } satisfies OutboxPage);
   });
 
-  /** Try a failed send again. Under its own id, so a retry never reads as a
-   *  second message the guardian did not write. */
+  /**
+   * Try a failed send again. Under its own id, so a retry never reads as a
+   * second message the guardian did not write.
+   *
+   * Both outbox mutations are scoped to the person in the path. A message id
+   * is not a capability, and the person named is the one whose outbox this is
+   * — a row of somebody else's reached through this address is a 404, not a
+   * shortcut.
+   */
   app.post("/people/:id/outbox/:messageId/retry", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const message = await retrySend(deps, c.req.param("messageId"));
-    return message ? c.json(message, 202) : c.json({ error: "Unknown message" }, 404);
+    const message = await retrySend(deps, person.channelMappings, c.req.param("messageId"));
+    return message
+      ? c.json(message, 202)
+      : c.json({ error: "No failed message of theirs with that id" }, 404);
   });
 
   /** Give up on a failed send. The only way a row leaves the outbox without
-   *  having been delivered. */
+   *  having been delivered — a send still in flight may yet arrive, and
+   *  dropping its record would leave the guardian with no account of it. */
   app.delete("/people/:id/outbox/:messageId", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    await deps.outboxRepo.remove(c.req.param("messageId"));
-    return c.body(null, 204);
+    const discarded = await discardSend(deps, person.channelMappings, c.req.param("messageId"));
+    return discarded
+      ? c.body(null, 204)
+      : c.json({ error: "No failed message of theirs with that id" }, 404);
   });
 
   app.get("/people/:id/messages", async (c) => {

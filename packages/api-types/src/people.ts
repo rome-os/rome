@@ -11,6 +11,8 @@
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
 //   GET    /api/people/:id/outbox   -> OutboxPage
 //   POST   /api/people/:id/messages -> OutboxMessage (202) | SendRefusal (409)
+//   POST   /api/people/:id/outbox/:messageId/retry -> OutboxMessage (202)
+//   DELETE /api/people/:id/outbox/:messageId       -> 204
 //
 // The rest are request types that lead, with the backend following (issues
 // #64, #65):

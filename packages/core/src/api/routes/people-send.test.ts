@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "@rstest/core";
 import { Hono } from "hono";
+import { sql } from "drizzle-orm";
 import type {
   LinkedAccount,
   OutboxMessage,
@@ -195,5 +196,167 @@ describe("People send API", () => {
     });
     const account = await accountOf("signal");
     expect(account.send).toBe("not-connected");
+  });
+});
+
+// Regressions found in review of #208. Each one is a way the outbox could
+// disagree with what actually happened to a message.
+describe("People send API — delivery bookkeeping", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+  let app: Hono;
+  let personId: string;
+
+  // A WhatsApp contact reachable two ways. WhatsApp addresses one person by
+  // phone JID and by privacy LID, holds a chat under each, and folds both onto
+  // one account — so a message sent to one can be echoed back under the other.
+  const PN = "15550007777@s.whatsapp.net";
+  const LID = "77770000@lid";
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db, { channels: ["whatsapp", "telegram"] });
+    app = new Hono().route("/", peopleRoutes(deps));
+
+    await deps.whatsAppStoreRepo.upsertContacts([
+      { jid: PN, phoneNumber: "15550007777", name: "Folded Contact" },
+      { jid: LID, phoneNumber: "15550007777", name: "Folded Contact" },
+    ]);
+
+    // Linked by the LID, which is the half of the fold a send would address.
+    personId = await deps.personMappingRepo.create({
+      displayName: "Folded Contact",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "whatsapp", channelUserId: LID }],
+    });
+  });
+
+  const outbox = async (): Promise<OutboxMessage[]> => {
+    const res = await app.request(`/people/${personId}/outbox`);
+    return ((await res.json()) as OutboxPage).messages;
+  };
+
+  it("clears a row whose echo lands under the account's other address", async () => {
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "sent to the lid" }),
+    });
+    expect(res.status).toBe(202);
+    const sent = (await res.json()) as OutboxMessage;
+    const providerId = sent.ref!.split(":").pop()!;
+
+    // WhatsApp echoes Rome's own message back, and the chat it hangs off is the
+    // phone JID rather than the LID the send named. Predicting only the address
+    // sent to would leave this row waiting on a ref that never appears.
+    await deps.whatsAppStoreRepo.upsertMessages([
+      {
+        id: providerId,
+        chatJid: PN,
+        senderJid: PN,
+        fromMe: true,
+        timestamp: new Date(),
+        type: "text",
+        text: "sent to the lid",
+        hasMedia: false,
+      },
+    ]);
+
+    expect(await outbox()).toEqual([]);
+  });
+
+  it("keeps a delivered send delivered when Rome's own record of it fails", async () => {
+    // The provider accepted the message: it is out on a network Rome does not
+    // own. A local write failing afterwards cannot take it back, and reporting
+    // the send as failed invites a retry that delivers a second real message.
+    deps.webchatRepo.recordOutboundConversationMessage = async () => {
+      throw new Error("disk is full");
+    };
+
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "went out anyway" }),
+    });
+
+    expect(res.status).toBe(202);
+    expect((await res.json()) as OutboxMessage).toMatchObject({ state: "unconfirmed" });
+    expect((await outbox())[0]).toMatchObject({ state: "unconfirmed" });
+  });
+
+  it("recovers a send whose process died before the channel answered", async () => {
+    const row = await deps.outboxRepo.open({
+      channel: "whatsapp",
+      channelUserId: LID,
+      conversationId: LID,
+      text: "stranded",
+    });
+    // Older than the window a send is given to answer in.
+    testDb.db.run(
+      sql`UPDATE outbound_messages SET updated_at = ${Math.floor(Date.now() / 1000) - 3600} WHERE id = ${row.id}`,
+    );
+
+    // Not cleared — the message may well have gone out — but no longer stuck:
+    // it says what happened and can be tried again.
+    const [recovered] = await outbox();
+    expect(recovered).toMatchObject({ id: row.id, state: "failed" });
+    expect(recovered!.error).toMatch(/may or may not have been sent/);
+
+    const retried = await app.request(`/people/${personId}/outbox/${row.id}/retry`, {
+      method: "POST",
+    });
+    expect(retried.status).toBe(202);
+  });
+
+  it("will not retry or discard a row belonging to somebody else", async () => {
+    const otherId = await deps.personMappingRepo.create({
+      displayName: "Somebody Else",
+      bondLevel: "other",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-elsewhere" }],
+    });
+    deps.channelPortMap.get("telegram")!.sendMessage = async () => {
+      throw new Error("nope");
+    };
+    await app.request(`/people/${otherId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channel: "telegram",
+        channelUserId: "tg-elsewhere",
+        text: "theirs",
+      }),
+    });
+    const res = await app.request(`/people/${otherId}/outbox`);
+    const [theirs] = ((await res.json()) as OutboxPage).messages;
+
+    // A message id is not a capability. The person in the path owns the outbox
+    // the request is addressing.
+    expect(
+      (await app.request(`/people/${personId}/outbox/${theirs!.id}/retry`, { method: "POST" }))
+        .status,
+    ).toBe(404);
+    expect(
+      (await app.request(`/people/${personId}/outbox/${theirs!.id}`, { method: "DELETE" })).status,
+    ).toBe(404);
+
+    const still = await app.request(`/people/${otherId}/outbox`);
+    expect(((await still.json()) as OutboxPage).messages).toHaveLength(1);
+  });
+
+  it("will not discard a send that is still in flight", async () => {
+    const row = await deps.outboxRepo.open({
+      channel: "whatsapp",
+      channelUserId: LID,
+      conversationId: LID,
+      text: "still going",
+    });
+    // Dropping this row would leave the guardian with no account of a message
+    // that may yet arrive.
+    const res = await app.request(`/people/${personId}/outbox/${row.id}`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+    expect(await outbox()).toHaveLength(1);
   });
 });

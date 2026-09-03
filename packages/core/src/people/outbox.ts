@@ -11,10 +11,11 @@
 // is exactly a send whose entry is not there yet.
 
 import type { OutboxMessage, OutboxState } from "@rome/api-types/people";
+import { createLogger } from "../logger.js";
 import type { MessageAccount, Messages } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
-import type { OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
+import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
 import {
   resolveSendTarget,
   sendToTarget,
@@ -29,10 +30,21 @@ import { readPersonTimeline } from "./timeline.js";
  *  wide enough that a burst of sends cannot push an entry past it. */
 const LANDING_WINDOW = 100;
 
+/** How long a send may sit `sending` before it is treated as abandoned. A send
+ *  is one provider call inside one request, so minutes here is generous — long
+ *  enough that a slow channel is never called dead, short enough that a crash
+ *  does not leave a row spinning until someone looks. */
+const STRANDED_AFTER_MS = 5 * 60_000;
+
+const STRANDED_ERROR =
+  "Rome stopped before the channel answered; this may or may not have been sent";
+
 /** What Rome writes into its own transcript when it sends. `senderId` is the
  *  mark every outbound path stamps, and `messages-agent.ts` reads it back to
  *  put the line on Rome's side of the conversation. */
 const ROME_SENDER = { senderId: "rome", senderName: "Rome" } as const;
+
+const log = createLogger("people-outbox");
 
 /** The slice of the conversation repository this needs: a channel thread's
  *  session, and Rome's own record of what it said there. Named as `ApiDeps`
@@ -87,33 +99,69 @@ export async function sendToAccount(
   return { ok: true, message: await attempt(deps, row, resolution.target) };
 }
 
-/** Send a `sending` row and record whichever way it went. Shared by the first
- *  attempt and by a retry, so the two cannot drift. */
+/**
+ * Send a `sending` row and record whichever way it went. Shared by the first
+ * attempt and by a retry, so the two cannot drift.
+ *
+ * Only the provider call decides whether this failed. Once it returns, the
+ * message is out on a network Rome does not own and no local mishap can take
+ * it back — so the acceptance is written first and alone, and everything after
+ * it is bookkeeping that may fail without changing what happened. Wrapping the
+ * two together reported a delivered message as refused, which invites a retry
+ * and a second real message to someone who already got the first.
+ */
 async function attempt(
   deps: OutboxDeps,
   row: OutboxRow,
   target: SendTarget,
 ): Promise<OutboxMessage> {
+  let receipt: Awaited<ReturnType<typeof sendToTarget>>;
   try {
-    const receipt = await sendToTarget(deps, target, row.text);
-    await deps.outboxRepo.accepted(row.id, receipt.messageId);
-    // Rome's own transcript of what it said, the same record every other
-    // outbound path writes. On a channel with no mirror of its own this IS the
-    // timeline entry; on one with a mirror it sits behind the provider's copy,
-    // which is the store precedence in timeline-sources.ts and not a special
-    // case here.
-    await record(deps, row, receipt.messageId);
-    return wire({ ...row, state: "unconfirmed", providerMessageId: receipt.messageId });
+    receipt = await sendToTarget(deps, target, row.text);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await deps.outboxRepo.refused(row.id, message);
     return wire({ ...row, state: "failed", error: message });
   }
+
+  await deps.outboxRepo.accepted(row.id, receipt.messageId);
+
+  // Rome's own transcript of what it said, the same record every other outbound
+  // path writes. On a channel with no mirror of its own this IS the timeline
+  // entry; on one with a mirror it sits behind the provider's copy, which is
+  // the store precedence in timeline-sources.ts and not a special case here.
+  //
+  // A failure here leaves the row `unconfirmed`, which is the truth: the
+  // message was sent and Rome cannot yet see it. On a mirrored channel the
+  // provider's own copy still lands and clears the row; on an unmirrored one
+  // the row stays, visibly, which is the outbox doing its job.
+  try {
+    await record(deps, row, receipt.messageId);
+  } catch (error) {
+    log.warn("outbound message delivered but recording failed", {
+      outboxId: row.id,
+      channel: row.channel,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return wire({ ...row, state: "unconfirmed", providerMessageId: receipt.messageId });
 }
 
-/** Retry a failed send, under its own id so it does not read as a second
- *  message the guardian never wrote. */
-export async function retrySend(deps: OutboxDeps, id: string): Promise<OutboxMessage | null> {
+/**
+ * Retry a failed send, under its own id so it does not read as a second
+ * message the guardian never wrote.
+ *
+ * Scoped to the accounts given. A message id is not a capability: the route
+ * that reaches this names a person, and a row belonging to someone else is not
+ * that person's to move, however plausible the id looks.
+ */
+export async function retrySend(
+  deps: OutboxDeps,
+  accounts: readonly OutboxAccount[],
+  id: string,
+): Promise<OutboxMessage | null> {
+  if (!(await heldBy(deps, accounts, id))) return null;
   const row = await deps.outboxRepo.reopen(id);
   if (row === null) return null;
   const resolution = await resolveSendTarget(deps, row);
@@ -123,6 +171,32 @@ export async function retrySend(deps: OutboxDeps, id: string): Promise<OutboxMes
     return wire({ ...row, state: "failed", error });
   }
   return attempt(deps, row, resolution.target);
+}
+
+/** Give up on a failed send of this person's. Answers whether there was one to
+ *  give up on, so the route can tell a wrong id from a done job. */
+export async function discardSend(
+  deps: OutboxDeps,
+  accounts: readonly OutboxAccount[],
+  id: string,
+): Promise<boolean> {
+  if (!(await heldBy(deps, accounts, id))) return false;
+  return await deps.outboxRepo.discard(id);
+}
+
+/** Whether a row is addressed to one of these accounts. */
+async function heldBy(
+  deps: OutboxDeps,
+  accounts: readonly OutboxAccount[],
+  id: string,
+): Promise<boolean> {
+  const row = await deps.outboxRepo.find(id);
+  return (
+    row !== null &&
+    accounts.some(
+      (account) => account.channel === row.channel && account.channelUserId === row.channelUserId,
+    )
+  );
 }
 
 async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null): Promise<void> {
@@ -163,6 +237,19 @@ export async function readOutbox(
   );
   if (rows.length === 0) return [];
 
+  // A row still `sending` long after its attempt began is one whose process
+  // died between the insert and the channel's answer. Nothing will ever move
+  // it, so the read that notices says so: it becomes a failed row the guardian
+  // can see and retry, carrying the only honest error there is. It is not
+  // cleared — the message may well have gone out.
+  const stale = Date.now() - STRANDED_AFTER_MS;
+  const stranded = rows.filter((row) => row.state === "sending" && row.updatedAt.getTime() < stale);
+  for (const row of stranded) {
+    await deps.outboxRepo.stranded(row.id, STRANDED_ERROR);
+    row.state = "failed";
+    row.error = STRANDED_ERROR;
+  }
+
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
   if (awaiting.length === 0) return rows.map(wire);
 
@@ -174,7 +261,9 @@ export async function readOutbox(
   // wrong, and the requirement that makes it unreachable is stated on
   // `TalkDirectMessaging`.
   const landed = awaiting.filter(
-    (row) => row.providerMessageId === null || refsFor(row).some((ref) => arrived.has(ref)),
+    (row) =>
+      row.providerMessageId === null ||
+      refsFor(row, addressesOf(accounts, row)).some((ref) => arrived.has(ref)),
   );
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
@@ -183,26 +272,44 @@ export async function readOutbox(
 }
 
 /**
- * The two `ref`s a delivered message can carry, because two stores can hold it.
+ * Every `ref` a delivered message could carry, because two stores can hold it
+ * and one of them keys by an address the send did not necessarily name.
  *
- * A channel mirror keys its rows by the provider's own id under the
- * conversation (`wa_messages` is `chat_jid || ':' || id`). Rome's transcript
- * keys its own row by a digest of the session and that same provider id, which
- * is why `conversationPlatformMessageId` is derived and not random. Whichever
- * store ends up owning the account, one of these is the entry.
+ * A channel mirror keys its rows by the provider's id under the conversation
+ * (`wa_messages` is `chat_jid || ':' || id`). Rome's transcript keys its own
+ * row by a digest of the session and that same provider id, which is why
+ * `conversationPlatformMessageId` is derived and not random.
  *
- * Both need the provider's id, so a channel offering `directMessaging` has to
- * return one from `send` — see the note there. A send that is accepted without
+ * The mirror form is generated over every address of the account, not only the
+ * one the send was addressed to. A channel folds several addresses onto one
+ * account — WhatsApp reaches a contact as both a phone JID and an `@lid`, and
+ * holds a chat under each — so a message sent to one can be echoed back under
+ * the other. Predicting only the address we sent to left the row waiting on a
+ * ref that would never appear, which is a send accepted and then stuck.
+ *
+ * All of them need the provider's id, so a channel offering `directMessaging`
+ * has to return one from `send` — see the note there. A send accepted without
  * one cannot be tracked, and the row is cleared rather than left waiting on an
  * answer that will never come.
  */
-function refsFor(row: OutboxRow): string[] {
-  if (row.providerMessageId === null) return [];
+function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
+  const messageId = row.providerMessageId;
+  if (messageId === null) return [];
   const sessionId = channelConversationId(row.channel, row.conversationId);
   return [
-    `${row.conversationId}:${row.providerMessageId}`,
-    `agent:${conversationPlatformMessageId(sessionId, row.providerMessageId)}`,
+    ...new Set(addresses.map((address) => `${address}:${messageId}`)),
+    `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
   ];
+}
+
+/** Every address the channel folds onto this row's account, the row's own
+ *  included. Falls back to that one alone for a channel that folds nothing. */
+function addressesOf(accounts: readonly MessageAccount[], row: OutboxRow): readonly string[] {
+  const account = accounts.find(
+    (candidate) =>
+      candidate.channel === row.channel && candidate.addresses.includes(row.channelUserId),
+  );
+  return account?.addresses ?? [row.channelUserId];
 }
 
 function wire(row: OutboxRow): OutboxMessage {
@@ -213,7 +320,7 @@ function wire(row: OutboxRow): OutboxMessage {
     text: row.text,
     timestamp: Math.floor(row.createdAt.getTime() / 1000),
     state: row.state as OutboxState,
-    ref: refsFor(row)[0] ?? null,
+    ref: row.providerMessageId ? `${row.conversationId}:${row.providerMessageId}` : null,
     error: row.error,
   };
 }

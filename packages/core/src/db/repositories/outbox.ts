@@ -25,6 +25,10 @@ export interface OutboxRow {
   providerMessageId: string | null;
   error: string | null;
   createdAt: Date;
+  /** When the row last changed state. A retry moves this and not `createdAt`,
+   *  so "how long has this been in flight" is asked of the attempt rather than
+   *  of the first one. */
+  updatedAt: Date;
 }
 
 export interface OutboxAccount {
@@ -78,11 +82,32 @@ export class OutboxRepository {
   async reopen(id: string): Promise<OutboxRow | null> {
     const row = await this.find(id);
     if (row === null || row.state !== "failed") return null;
+    const updatedAt = new Date();
     await this.db
       .update(outboundMessages)
-      .set({ state: "sending", error: null, providerMessageId: null, updatedAt: new Date() })
+      .set({ state: "sending", error: null, providerMessageId: null, updatedAt })
       .where(eq(outboundMessages.id, id));
-    return { ...row, state: "sending", error: null, providerMessageId: null };
+    return { ...row, state: "sending", error: null, providerMessageId: null, updatedAt };
+  }
+
+  /** Give up on a send Rome is not going to make. Refuses any other state: a
+   *  row still in flight is a message that may yet arrive, and dropping its
+   *  record would leave the guardian with no account of it. */
+  async discard(id: string): Promise<boolean> {
+    const row = await this.find(id);
+    if (row === null || row.state !== "failed") return false;
+    await this.db.delete(outboundMessages).where(eq(outboundMessages.id, id));
+    return true;
+  }
+
+  /** A send whose process died before the channel answered, marked so it can
+   *  be seen and retried. Rome cannot know whether it went out, and the error
+   *  says exactly that rather than guessing either way. */
+  async stranded(id: string, error: string): Promise<void> {
+    await this.db
+      .update(outboundMessages)
+      .set({ state: "failed", error, updatedAt: new Date() })
+      .where(and(eq(outboundMessages.id, id), eq(outboundMessages.state, "sending")));
   }
 
   async find(id: string): Promise<OutboxRow | null> {
