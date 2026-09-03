@@ -6,7 +6,7 @@ Three rulebooks meet here, and they do not overlap.
 
 | Question | Rulebook |
 |---|---|
-| Should this string exist at all? | [`secondary-text-audit`](../../.claude/skills/secondary-text-audit/references/rules.md) |
+| Should this string exist at all? | [`secondary-text.md`](secondary-text.md) |
 | How does it sound once it earns its place? | This file |
 | How does prose in `docs/` read? | [`authoring/WRITING.md`](../authoring/WRITING.md) |
 

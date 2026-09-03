@@ -17,7 +17,7 @@ scope, and never a finding:
   string whose only job is to satisfy `aria-describedby`, is assistive-tech
   copy, not secondary text. Radix warns without it. Never delete one.
 - **Placeholders.** In-control affordance, judged by different rules.
-- **Error and validation messages.** They exist because something failed; the
+- **Error and validation messages.** They exist because something failed. The
   delete test does not apply.
 - **Long-form prose surfaces.** Docs pages, onboarding walkthrough bodies, and
   release notes are content, not subordinate copy.
@@ -58,7 +58,7 @@ Which ONE of the following does the text carry?
 | `consequence` | What happens after the action, especially side effects on other people, other data, or billing | "Notifies all 12 members." |
 | `constraint` | Format, limit, allowed values, prerequisite | "PNG or SVG, up to 2 MB." / "Requires admin role." |
 | `hidden-state` | A default, inheritance, or current condition not visible in the control | "Currently inherited from workspace." |
-| `disambiguation` | How this option differs from a sibling that could plausibly be confused with it | "Bot posts as itself; session posts as you." |
+| `disambiguation` | How this option differs from a sibling that could plausibly be confused with it | "Bot posts as itself. Session posts as you." |
 | `irreversibility` | Cannot be undone, or undo has a time limit | "Deleted files are not recoverable." |
 | `empty-state-guidance` | What to do first, shown only when there is no content | "Send a message from Telegram to see it here." |
 | `unfamiliar-term` | The label uses a term the target user genuinely would not know | "Webhook — the URL a service calls when something happens." |
@@ -72,11 +72,11 @@ Category qualifiers:
   screen**. Check the render, not the intent. A card whose sibling lives on
   another tab does not qualify.
 - `empty-state-guidance` must **disappear once content exists**. Text that
-  renders in both states is not empty-state guidance; judge it as if the empty
+  renders in both states is not empty-state guidance. Judge it as if the empty
   state did not exist.
 - `unfamiliar-term` — prefer a tooltip or one-time onboarding over permanent
   secondary text. Rome's users are non-technical: "webhook", "exit node",
-  "bond level" may qualify; "settings", "project", "agent" do not.
+  "bond level" may qualify. "Settings", "project", and "agent" do not.
 - `consequence` covers what happens *after* the action. A restatement of what
   the control does *is* the action, not its consequence.
 - `unchosen-state` applies only where the user did not choose the state — an
@@ -121,18 +121,20 @@ could be salvaged from them is the failure mode this list exists to stop.
 - "Use this to …"
 - Any sentence whose only verb is a generic action verb (manage, configure,
   view, set, control, adjust, customize) with the label's noun as object.
+<!-- vale Rome.Marketing = NO -->
 - Marketing adjectives: easily, seamlessly, powerful, simple, quickly.
+<!-- vale Rome.Marketing = YES -->
 - Repeating the heading with a period added.
 
 **Exception — none.** If a forbidden-pattern string is the only place a real
 constraint or consequence is stated, the verdict is still `delete` for that
-string; write the payload as a new sentence in the `Replacement` column and say
+string. Write the payload as a new sentence in the `Replacement` column and say
 so. The pattern never survives, the information does.
 
 ## Style rules for text that passes
 
 Tone, register, person, and contractions are not decided here. They live in
-[`docs/ui/VOICE.md`](../../../../docs/ui/VOICE.md), and a replacement string
+[`VOICE.md`](VOICE.md), and a replacement string
 must obey it. The rules below are the ones tied to information content.
 
 `VOICE.md` carries two register settings. Every string this skill judges takes
@@ -154,14 +156,14 @@ written as a bare phrase has reached for the wrong setting.
 
 - State facts, not permissions. "Notifies all members" not "You may want to know
   this notifies all members."
-- No terminal period on fragments; keep periods on full sentences.
+- No terminal period on fragments. Keep periods on full sentences.
 - Numbers, units, and conditions are signals of real content. If the text has
   none of: a number, a unit, a condition word (if / when / only / unless /
   until / after), a negation, or a named sibling — re-examine it. It is probably
   description.
 
 The last rule is a prompt to re-examine, not a verdict. `consequence` text often
-carries a condition word; `constraint` text often carries a number. Text with
+carries a condition word, and `constraint` text often carries a number. Text with
 neither is usually description, but "Existing resources are not moved" passes on
 its negation alone.
 
@@ -179,7 +181,7 @@ Assign exactly one of `keep`, `rewrite`, `delete`.
 - Passes everything → `keep`.
 
 Do not soften verdicts. When uncertain between `delete` and `rewrite`, choose
-`delete`; the primary label almost always suffices.
+`delete`. The primary label almost always suffices.
 
 `rewrite` requires a `Replacement`. `delete` leaves it empty. A `rewrite` whose
 replacement would itself fail these rules is a `delete`.
@@ -188,7 +190,7 @@ replacement would itself fail these rules is a `delete`.
 
 - **Every verdict lands in every locale.** Copy lives in
   `packages/web/src/i18n/locales/<locale>/*.json`. A `delete` removes the key
-  from `en` *and* `zh-CN`; a `rewrite` updates both. A verdict applied to `en`
+  from `en` *and* `zh-CN`, and a `rewrite` updates both. A verdict applied to `en`
   alone leaves the other locale rendering the deleted text.
 - **A locale key with no call site is dead copy**, whatever its verdict would
   have been. Report it as `delete` with the reason `unrendered` — the string
@@ -204,8 +206,8 @@ replacement would itself fail these rules is a `delete`.
 
 | Label | Secondary text | Verdict | Why |
 |---|---|---|---|
-| Notifications | Manage how you receive notifications. | delete | Forbidden pattern; restatement. |
-| Notifications | Applies to email only. In-app alerts are always on. | keep | `constraint` + `hidden-state`; not inferable. |
+| Notifications | Manage how you receive notifications. | delete | Forbidden pattern, and restatement. |
+| Notifications | Applies to email only. In-app alerts are always on. | keep | `constraint` + `hidden-state`. Not inferable. |
 | Team members | View and manage the people in your workspace. | delete | Forbidden pattern. |
 | Team members | Removing a member revokes their API keys immediately. | keep | `consequence` + `irreversibility`. |
 | Workspace icon | Upload an icon for your workspace. | delete | Restatement of label + control shape. |
@@ -213,7 +215,7 @@ replacement would itself fail these rules is a `delete`.
 | Connections | This section lets you connect third-party services that Rome apps can use. | rewrite | Buried `hidden-state`. → "Apps can only use services connected here." (Or delete if the page has an empty state saying this.) |
 | Default region | Choose the region for new resources. | delete | Restatement. |
 | Default region | Existing resources are not moved. | keep | `consequence`, non-obvious. |
-| Danger zone | Actions here are irreversible. | keep | `irreversibility`, and it's the section's whole point. |
+| Danger zone | Actions here are irreversible. | keep | `irreversibility`, and it is the section's whole point. |
 | Danger zone | This section contains destructive actions for your workspace. | delete | Restatement of "Danger zone" with more words. |
 
 ### Worked examples from this repo
@@ -226,6 +228,6 @@ Each row below was verified against the rendered pair, not the key name.
 | Uninstall and erase data | Remove the app and erase its data. This cannot be undone. | rewrite | Sentence one restates the label word for word. Sentence two is real `irreversibility`, but "Cannot be undone." alone strands the reader on *what* cannot be undone. → "The app's data is deleted permanently and cannot be recovered." |
 | Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | keep | `unchosen-state`. A "Not configured" badge renders beside it, and trimming to the effect alone ("Webhooks are not delivered") deletes the only thing telling the reader what to fix. No control on this surface stores a credential. |
 | Upgrade Rome to {{version}}? | Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back. | keep | Three sentences, three jobs: cause, cost, and what needs no action. The restart is not restatement of the title — it is the mechanism that explains the downtime. |
-| Access Control | Control who can reach the dashboard. Guardian auth always protects it: allow specific Rome Cloud accounts to sign in, or restrict access to your Tailscale network. Apps marked public or restricted to Rome Cloud email lists stay reachable from the public host. | rewrite | Opens with a generic verb on the label's noun, then buries two payloads in 42 words. Split by placement: `hidden-state` → "Guardian auth protects the dashboard whichever option you pick"; the public-host carve-out belongs on the app access control, not this section header. |
-| Appearance | Customize the language and look of the dashboard. These preferences are stored on this device. | delete | Unrendered — no call site anywhere. It would also fail on the forbidden opener; the surviving `hidden-state` payload ("stored on this device") is worth re-adding on the control that owns it, as new text. |
+| Access Control | Control who can reach the dashboard. Guardian auth always protects it: allow specific Rome Cloud accounts to sign in, or restrict access to your Tailscale network. Apps marked public or restricted to Rome Cloud email lists stay reachable from the public host. | rewrite | Opens with a generic verb on the label's noun, then buries two payloads in 42 words. Split by placement: `hidden-state` → "Guardian auth protects the dashboard whichever option you pick". The public-host carve-out belongs on the app access control, not this section header. |
+| Appearance | Customize the language and look of the dashboard. These preferences are stored on this device. | delete | Unrendered — no call site anywhere. It would also fail on the forbidden opener. The surviving `hidden-state` payload ("stored on this device") is worth re-adding on the control that owns it, as new text. |
 | Model selector | Show a chat composer selector for the large model mapping. | delete | Generic verb on the label's own noun. The toggle label "Enable model selector in chat" already says where it appears. |

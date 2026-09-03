@@ -96,7 +96,8 @@ Its flags are **advisory triage**, not verdicts:
 
 Read [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) first — it fixes the
 register, the person, and what a description must carry, and every `rewrite`
-row is written in it. Then read `references/rules.md` in full. It carries the scope exclusions, the four
+row is written in it. Then read
+[`docs/ui/secondary-text.md`](../../../docs/ui/secondary-text.md) in full. It carries the scope exclusions, the four
 authoring tests, the seven categories with their qualifiers, the forbidden
 patterns, the style rules, the verdict rules, and worked examples — including
 verified examples from this repo. Do not audit from memory of the category
