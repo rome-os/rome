@@ -25,8 +25,19 @@ A term the user would not know ("webhook", "exit node") is explained in a toolti
 Ask three questions of every sentence, in order. Stop at the first failure.
 
 1. **Which fact does it carry?** None → drop the sentence.
+
+   > Label: "Default region". Text: "Choose the region for new resources." — no fact, only what the control is. Dropped.
+   > Label: "Default region". Text: "Existing resources are not moved." — a cost. Passes.
+
 2. **Is the fact already on the screen?** The label, the control's shape (a toggle, a file input, a destructive button), a badge, or a sibling already shows it → drop the sentence. A badge naming a state does not show its cause.
+
+   > Label: "Upload icon", a file input. Text: "Upload an icon for your workspace." — the label and the input already show it. Dropped.
+   > Label: "Webhook relay", beside a "Not configured" badge. Text: "No relay credential is stored, so incoming webhooks are not delivered." — the badge names the state, and the cause is nowhere else. Passes.
+
 3. **Is this where the user meets it?** A fact about one control belongs on that control, not on its section → move the sentence.
+
+   > Section: "Access Control". Text: "Apps marked public stay reachable from the public host." — a limit on the app access control, one section away. Moved there.
+   > Field: "Workspace icon". Text: "PNG or SVG, up to 2 MB." — a limit on this field, on this field. Passes.
 
 The string's verdict follows from its sentences:
 
