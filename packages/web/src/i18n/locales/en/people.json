@@ -119,6 +119,32 @@
     "linkDescription": "The account you pick starts resolving to this person, and its history joins this timeline.",
     "noAccounts": "No accounts yet"
   },
+  "send": {
+    "segments": {
+      "label": "Account",
+      "all": "All",
+      "empty": "Nothing on this {{channel}} account yet."
+    },
+    "submit": "Send",
+    "retry": "Retry",
+    "discard": "Discard this message",
+    "outbox": {
+      "label": "Messages Rome is still sending"
+    },
+    "state": {
+      "sending": "Sending",
+      "unconfirmed": "Sent, not confirmed yet",
+      "failed": "The channel refused it"
+    },
+    "refusal": {
+      "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
+      "noConversation": "Rome has no {{channel}} conversation with them yet, so there is nowhere to send. It opens once either of you writes first.",
+      "unsupported": {
+        "linkedin": "Rome reads {{channel}} but cannot write to it. Reply from {{channel}} itself.",
+        "default": "Rome cannot send on {{channel}} yet."
+      }
+    }
+  },
   "timeline": {
     "today": "Today",
     "yesterday": "Yesterday"

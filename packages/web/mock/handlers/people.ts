@@ -681,11 +681,42 @@ export function accountTimeline(ref: AccountRef): TimelineEntry[] {
   return timelineForChannels([ref]);
 }
 
+/**
+ * What Rome has said through the send route and the channel has since surfaced.
+ *
+ * The mock's stand-in for the store a real channel's mirror would put a
+ * delivered message into. It is a store of its own rather than a flag on an
+ * outbox row for the reason the contract gives: an outbox row is exactly a send
+ * whose message is not on the timeline yet, so the outbox read has to be able
+ * to look the message up here and find it — the same comparison the route runs,
+ * rather than a delivery bit someone remembered to set.
+ */
+const deliveredEntries: (TimelineEntry & { channelUserId: string })[] = [];
+
+/** Put a sent message where the timeline will find it. The `ref` is the one the
+ *  outbox row is waiting on, which is what clears the row. */
+export function recordDelivered(
+  account: AccountRef,
+  entry: Omit<TimelineEntry, "source" | "direction">,
+): void {
+  deliveredEntries.push({
+    ...entry,
+    source: account.channel,
+    channelUserId: account.channelUserId,
+    direction: "outbound",
+  });
+}
+
 /** One channel set's dynamics, newest first. The row's `latest` is this
  *  sequence's head, so the two cannot disagree about what happened last. */
 function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const mapping of channels) {
+    for (const sent of deliveredEntries) {
+      if (sent.source !== mapping.channel || sent.channelUserId !== mapping.channelUserId) continue;
+      const { channelUserId: _address, ...entry } = sent;
+      entries.push(entry);
+    }
     if (mapping.channel === "whatsapp") {
       const jid = mapping.channelUserId;
       const mirrored = threads[jid] ?? [];

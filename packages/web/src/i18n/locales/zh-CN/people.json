@@ -119,6 +119,32 @@
     "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
     "noAccounts": "暂无账号"
   },
+  "send": {
+    "segments": {
+      "label": "账号",
+      "all": "全部",
+      "empty": "这个 {{channel}} 账号还没有往来。"
+    },
+    "submit": "发送",
+    "retry": "重试",
+    "discard": "放弃这条消息",
+    "outbox": {
+      "label": "Rome 仍在发送的消息"
+    },
+    "state": {
+      "sending": "发送中",
+      "unconfirmed": "已发出，尚未确认",
+      "failed": "渠道拒绝了这条消息"
+    },
+    "refusal": {
+      "notConnected": "{{channel}} 未连接，Rome 无法从这里发送。请在设置中连接。",
+      "noConversation": "Rome 与他们还没有 {{channel}} 会话，因此无处可发。任一方先开口后即可建立。",
+      "unsupported": {
+        "linkedin": "Rome 只能读取 {{channel}}，无法写入。请直接在 {{channel}} 上回复。",
+        "default": "Rome 还不支持在 {{channel}} 上发送。"
+      }
+    }
+  },
   "timeline": {
     "today": "今天",
     "yesterday": "昨天"
