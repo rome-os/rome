@@ -9,6 +9,8 @@
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
+//   GET    /api/people/:id/outbox   -> OutboxPage
+//   POST   /api/people/:id/messages -> OutboxMessage (202) | SendRefusal (409)
 //
 // The rest are request types that lead, with the backend following (issues
 // #64, #65):
@@ -820,6 +822,67 @@ export interface LinkedAccount {
   channel: string;
   channelUserId: string;
   displayName: string;
+  /** Whether Rome can send here, and when it cannot, which of the reasons it
+   *  is. See {@link AccountSendState}. */
+  send: AccountSendState;
+  /**
+   * When this account itself was last active, in epoch seconds, or null when
+   * nothing has ever passed on it.
+   *
+   * Per account rather than per person, and that is the point: the person's
+   * own {@link PersonResource.latest} names a channel and not an address, so it
+   * cannot say which of two accounts on one channel was the recent one. This
+   * can, which is what lets a composer open on the account the guardian last
+   * heard from without inventing the answer.
+   */
+  latestAt: number | null;
+}
+
+/**
+ * Whether Rome can send a message to an account, and why not when it cannot.
+ *
+ * Four states rather than a boolean, because the three failures are different
+ * things to a reader and to a retry: one is fixed by connecting a channel, one
+ * is a permanent fact about the channel, and one clears on its own once a
+ * direct conversation exists.
+ *
+ * - `yes` — the channel is connected and can address this account directly.
+ * - `not-connected` — no live connection for the channel. The guardian fixes
+ *   this in Settings.
+ * - `unsupported` — the connection is live but does not do direct messaging.
+ *   LinkedIn mirrors an inbox it cannot write to; a channel Rome has not
+ *   taught to send reads the same way. Why is a fact about the channel rather
+ *   than about this account, so the copy is keyed on the channel name and no
+ *   reason string crosses the wire — the dashboard localizes it, the same way
+ *   it already localizes every channel's own label.
+ * - `no-conversation` — the channel sends, but has no thread that reaches this
+ *   account yet, and could not open one. Per account, and recoverable.
+ */
+export type AccountSendState = "yes" | "not-connected" | "unsupported" | "no-conversation";
+
+export function canSend(account: Pick<LinkedAccount, "send">): boolean {
+  return account.send === "yes";
+}
+
+/**
+ * The account a composer opens on: the sendable one that was active most
+ * recently, ties broken by address so the answer is the same on every reload.
+ *
+ * A default, not an inference. Rome never picks a recipient on the guardian's
+ * behalf — {@link SendMessageRequest} names the account and has no form that
+ * omits it. This only decides which of the offered accounts is filled in
+ * first, and the surface showing it is expected to show it.
+ *
+ * Null when the person holds no account Rome can send to, which a caller must
+ * render as the reason rather than as an empty composer.
+ */
+export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAccount | null {
+  const sendable = accounts.filter(canSend);
+  if (sendable.length === 0) return null;
+  return [...sendable].sort(
+    (a, b) =>
+      (b.latestAt ?? 0) - (a.latestAt ?? 0) || compareCodePoints(a.channelUserId, b.channelUserId),
+  )[0]!;
 }
 
 /**
@@ -1211,4 +1274,115 @@ export function whatsAppDisplayName(contact: {
     contact.chatName ||
     formatWhatsAppPhone(contact.phoneNumber || contact.jid)
   );
+}
+
+// ---------------------------------------------------------------------------
+// Sending, and the outbox a send lives in until it lands
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /api/people/:id/messages` — say something to one of a person's
+ * accounts.
+ *
+ * The account is named, always. There is no shape of this request that omits
+ * it and no rule anywhere that fills it in, because every rule that could is a
+ * rule that decides who receives a message on evidence too thin to carry it:
+ * a timeline entry names its channel and not its address, so "reply where they
+ * last wrote" cannot separate two numbers on one channel, and "use another
+ * channel when this one is down" silently sends somewhere nobody chose.
+ * {@link defaultSendAccount} exists for surfaces that want a preselected
+ * account, and it is a default on screen rather than a decision off it.
+ */
+export interface SendMessageRequest {
+  channel: string;
+  channelUserId: string;
+  text: string;
+}
+
+export function parseSendMessageRequest(
+  body: unknown,
+): { request: SendMessageRequest } | { error: string } {
+  if (typeof body !== "object" || body === null) return { error: "body must be an object" };
+  const raw = body as Record<string, unknown>;
+  const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
+  const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
+  const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  if (!channel) return { error: "channel is required" };
+  if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
+  if (!channelUserId) return { error: "channelUserId is required" };
+  if (!text) return { error: "text is required" };
+  if (text.length > SEND_MESSAGE_MAX_LENGTH) {
+    return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
+  }
+  return { request: { channel, channelUserId, text } };
+}
+
+/** Long enough for anything a person types, short enough that no adapter has to
+ *  defend itself against a megabyte. Channels with tighter limits of their own
+ *  still chunk or refuse downstream. */
+export const SEND_MESSAGE_MAX_LENGTH = 8000;
+
+/**
+ * Where a send is between the guardian pressing Send and the message appearing
+ * on the timeline.
+ *
+ * - `sending` — handed to the channel, no answer yet.
+ * - `unconfirmed` — the channel accepted it and named it, but it has not
+ *   surfaced in the store the timeline reads. Normally under a second; a state
+ *   at all because "we sent it and cannot see it" is a thing that happens and
+ *   is worth saying rather than papering over.
+ * - `failed` — the channel refused. The only state a guardian can act on, and
+ *   the only one that persists without something else having gone wrong.
+ */
+export type OutboxState = "sending" | "unconfirmed" | "failed";
+
+/**
+ * One message Rome is still trying to deliver.
+ *
+ * Deliberately not a {@link TimelineEntry} with a status on it. A timeline
+ * entry is a message that happened; these have not, and some never will. Two
+ * nouns keep the timeline's contract — its `ref` uniqueness and the ordering
+ * its cursor is written against — free of rows that may yet be withdrawn, and
+ * keep each account owned by exactly one store.
+ *
+ * `ref` matches the timeline entry this message will become, so a reader can
+ * tell that a row has landed without being told twice.
+ */
+export interface OutboxMessage {
+  id: string;
+  channel: string;
+  channelUserId: string;
+  text: string;
+  /** Epoch seconds of the attempt, which is also the entry's timestamp once it
+   *  lands. */
+  timestamp: number;
+  state: OutboxState;
+  /** The timeline `ref` this will carry once it surfaces. Null while the
+   *  channel has not named the message yet. */
+  ref: string | null;
+  /** Why the channel refused, for a `failed` row. Provider text, shown as
+   *  detail beneath copy the dashboard owns. */
+  error: string | null;
+}
+
+/** `GET /api/people/:id/outbox` — every send of this person's that has not
+ *  reached their timeline. Unpaged: an outbox with enough rows to page is an
+ *  incident, not a listing. */
+export interface OutboxPage {
+  messages: OutboxMessage[];
+}
+
+/**
+ * A send the server would not attempt, and which of the reasons it was.
+ *
+ * Carries the same {@link AccountSendState} the person read carries, so the
+ * refusal renders as the copy the composer would already have shown had the
+ * read been fresh. A client that raced a disconnect therefore says the same
+ * thing either way instead of surfacing a bare 409.
+ *
+ * `error` is a fallback line, not the copy: the dashboard keys off `send`.
+ */
+export interface SendRefusal {
+  error: string;
+  send: Exclude<AccountSendState, "yes">;
 }

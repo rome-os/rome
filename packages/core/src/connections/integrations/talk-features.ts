@@ -5,6 +5,7 @@ import type {
   MessageReceipt,
   NormalizedMessage,
   TalkActivity,
+  TalkDirectMessaging,
   TalkHistory,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
@@ -106,6 +107,25 @@ export function inboundMediaFeature(adapter: {
 }): TalkInboundMedia {
   return {
     materialize: (message) => adapter.saveIncomingAttachments(normalizedFromInbound(message)),
+  };
+}
+
+/**
+ * Direct messaging for a channel whose direct chat is addressed by the contact
+ * themselves — WhatsApp, Telegram — where the account's own address already
+ * names the conversation.
+ *
+ * Costs nothing and cannot fail, so a caller may ask it per account across a
+ * whole listing. A channel that keys threads separately writes its own
+ * implementation instead, opening or looking up the thread; that one is a
+ * provider call and should be priced as one.
+ */
+export function addressIsConversationFeature(): TalkDirectMessaging {
+  return {
+    async conversationFor(channelUserId: string) {
+      const trimmed = channelUserId.trim();
+      return trimmed === "" ? null : (trimmed as ConversationId);
+    },
   };
 }
 

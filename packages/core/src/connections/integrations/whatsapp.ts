@@ -47,6 +47,7 @@ import {
   type WhatsAppAuthMaterial,
 } from "./whatsapp-auth-state.js";
 import {
+  addressIsConversationFeature,
   historyFeature,
   inboundMediaFeature,
   toInboundMessage,
@@ -344,6 +345,9 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
                 history: historyFeature(adapter),
+                // A WhatsApp direct chat is addressed by the contact's own JID,
+                // so the address is already the conversation.
+                directMessaging: addressIsConversationFeature(),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },

@@ -428,6 +428,13 @@
       "when": 1787898378247,
       "tag": "0061_nervous_human_fly",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1788402301789,
+      "tag": "0062_gorgeous_star_brand",
+      "breakpoints": true
     }
   ]
 }

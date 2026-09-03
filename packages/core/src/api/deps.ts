@@ -1,6 +1,7 @@
 import type { ActionEngine } from "../actions/engine.js";
 import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
+import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import type { Channels } from "../channels/channel.js";
@@ -83,6 +84,10 @@ export interface ApiDeps {
    *  person or account serializer puts on the wire. */
   accountNames: AccountNames;
   webchatRepo: WebChatRepository;
+  /** Messages Rome is still trying to deliver — the People surface's
+   *  outbox. Separate from every message store on purpose: a row here is a
+   *  send that has not happened yet. */
+  outboxRepo: OutboxRepository;
   webhookInvocationsRepo: WebhookInvocationsRepository;
   approvalsRepo: ApprovalsRepository;
   approvalHandler: ApprovalHandler;

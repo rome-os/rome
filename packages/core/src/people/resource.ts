@@ -9,16 +9,18 @@
 // account is linked to, not someone the guardian knows. It is excluded here,
 // once, so no route can serve it by forgetting to.
 
-import type { PersonResource } from "@rome/api-types/people";
+import type { AccountSendState, PersonResource, TimelineEntry } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { Channels } from "../channels/channel.js";
+import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import { readPeopleActivity } from "./activity.js";
+import { readActivity } from "./activity.js";
+import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
-export interface PeopleReadDeps {
+export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
   channels: Channels;
@@ -71,25 +73,55 @@ async function serialize(
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
-  const [accountsByPerson, names] = await Promise.all([
+  const [accountsByPerson, names, sendStates] = await Promise.all([
     timelineAccounts(
       deps,
       persons.map((person) => person.channelMappings),
     ),
     deps.accountNames.displayNames(refs),
+    // Whether each mapping can be written to, asked of the live connections
+    // rather than stored: a channel that went down between two reads has to
+    // change this answer, and nothing writes a row when it does.
+    readSendStates(deps, refs),
   ]);
-  const activity = await readPeopleActivity(personMessageStores(deps), accountsByPerson);
+  const activity = await readActivity(personMessageStores(deps), accountsByPerson);
 
   let next = 0;
   return persons.map((person, i) => ({
     id: person.id,
     displayName: person.displayName,
     bondLevel: person.bondLevel,
-    accounts: person.channelMappings.map((mapping) => ({
-      channel: mapping.channel,
-      channelUserId: mapping.channelUserId,
-      displayName: names[next++],
-    })),
-    ...activity[i],
+    accounts: person.channelMappings.map((mapping) => {
+      const index = next++;
+      return {
+        channel: mapping.channel,
+        channelUserId: mapping.channelUserId,
+        displayName: names[index],
+        send: sendStates[index] ?? ("not-connected" as AccountSendState),
+        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
+      };
+    }),
+    ...activity.perPerson[i],
   }));
+}
+
+/**
+ * When the account behind one mapping was last active.
+ *
+ * The activity read is keyed by folded account and this is asked per mapping,
+ * and the two are not the same count: a channel that folds a phone JID and its
+ * `@lid` form onto one account answers one head for the two links naming it.
+ * So the mapping is matched by the address the fold put on its account, which
+ * is the same rule `timelineAccounts` grouped by.
+ */
+function latestAtOf(
+  heads: Map<MessageAccount, TimelineEntry>,
+  accounts: readonly MessageAccount[] | undefined,
+  mapping: { channel: string; channelUserId: string },
+): number | null {
+  const account = accounts?.find(
+    (candidate) =>
+      candidate.channel === mapping.channel && candidate.addresses.includes(mapping.channelUserId),
+  );
+  return (account && heads.get(account)?.timestamp) ?? null;
 }

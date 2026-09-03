@@ -222,7 +222,14 @@ export function channelConversationId(channel: string, threadId: string): string
   return `channel:${channel}:${threadId}`;
 }
 
-function conversationPlatformMessageId(sessionId: string, platformMessageId: string): string {
+/** The row id a recorded outbound message takes when the provider named it.
+ *  Derived rather than random so a caller that knows the provider's id can
+ *  predict the timeline `ref` the message will carry — which is how the
+ *  outbox knows a send has landed (`src/people/outbox.ts`). */
+export function conversationPlatformMessageId(
+  sessionId: string,
+  platformMessageId: string,
+): string {
   const digest = createHash("sha256")
     .update(sessionId)
     .update("\0")

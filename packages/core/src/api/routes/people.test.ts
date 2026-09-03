@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import {
   latestDynamic,
   type PeopleList,
+  type LinkedAccount,
   type PersonResource,
   type TimelinePage,
 } from "@rome/api-types/people";
@@ -25,6 +26,18 @@ const GROUP_THREAD = "tg-group-timeline";
 
 const at = (iso: string) => new Date(iso);
 const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+/** An account's naming, and only that. The assertions that use it are about
+ *  which name a channel puts on an account; whether Rome can send there and
+ *  when it was last active are separate answers on the same row, and a test
+ *  about naming should not restate them. */
+function naming(accounts: readonly LinkedAccount[]) {
+  return accounts.map(({ channel, channelUserId, displayName }) => ({
+    channel,
+    channelUserId,
+    displayName,
+  }));
+}
 
 describe("People timeline API", () => {
   let testDb: TestDb;
@@ -593,7 +606,7 @@ describe("People API", () => {
     expect(ids).not.toContain(STRANGER_PERSON_ID);
 
     const alice = people.find((person) => person.id === baseline.persons.innerCircleId);
-    expect(alice?.accounts).toEqual([
+    expect(naming(alice?.accounts ?? [])).toEqual([
       // Telegram mirrors no address book, so the name is the one the sender put
       // on their own messages — the directory seam's second fallback.
       { channel: "telegram", channelUserId: "tg-alice", displayName: "Alice Inner" },
@@ -602,7 +615,7 @@ describe("People API", () => {
     const carol = people.find((person) => person.id === baseline.persons.otherId);
     // Nothing has ever named this account, so it is rendered as its identifier
     // rather than as an empty string.
-    expect(carol?.accounts).toEqual([
+    expect(naming(carol?.accounts ?? [])).toEqual([
       { channel: "whatsapp", channelUserId: "wa-carol", displayName: "wa-carol" },
     ]);
   });
@@ -611,7 +624,7 @@ describe("People API", () => {
     const nadia = await fetchPerson(nadiaId);
     // One account, two mappings: a client addresses the link it stored, and
     // both carry the mirror's name for the account rather than the raw jid.
-    expect(nadia.accounts).toEqual([
+    expect(naming(nadia.accounts)).toEqual([
       { channel: "whatsapp", channelUserId: NADIA_JID, displayName: "Nadia Cross" },
       { channel: "whatsapp", channelUserId: NADIA_LID, displayName: "Nadia Cross" },
     ]);
@@ -796,7 +809,7 @@ describe("People create API", () => {
     const person = (await res.json()) as PersonResource;
     expect(person.id).toBe("bob-reyes");
     expect(person.bondLevel).toBe("inner-circle");
-    expect(person.accounts).toEqual([
+    expect(naming(person.accounts)).toEqual([
       { channel: "whatsapp", channelUserId: BOB_JID, displayName: "Bob Reyes" },
       // No mirror answers for telegram, so the address is the only name there
       // is — the person's own name never stands in for it.

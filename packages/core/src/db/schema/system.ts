@@ -143,6 +143,48 @@ export const waContacts = sqliteTable("wa_contacts", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Messages Rome is still trying to deliver — the
+ * [outbox](docs/concepts/people.md).
+ *
+ * Not a message store, and deliberately not part of the timeline. A row here
+ * is a send that has not happened yet and may never; a timeline entry is one
+ * that did. Keeping them apart is what lets `TimelineEntry`'s `ref` stay unique
+ * and its ordering stay total — a cursor cannot be written across rows that may
+ * still be withdrawn — and what keeps each account owned by exactly one message
+ * store rather than two that disagree.
+ *
+ * A row leaves by being delivered: once `provider_message_id` names a message
+ * the channel's own store holds, the entry is on the timeline and the row is
+ * redundant. Nothing has to remember to clear it, because the read derives
+ * that (`src/people/outbox.ts`).
+ *
+ * Addressed by the account rather than by the person, because that is what a
+ * send names. A merge moves the link, and this row keeps pointing at the
+ * address it was sent to, which stays true whoever ends up holding it.
+ */
+export const outboundMessages = sqliteTable(
+  "outbound_messages",
+  {
+    id: text("id").primaryKey(),
+    channel: text("channel").notNull(),
+    channelUserId: text("channel_user_id").notNull(),
+    /** The conversation the channel resolved the address to, kept so a retry
+     *  does not have to ask again. */
+    conversationId: text("conversation_id").notNull(),
+    text: text("text").notNull(),
+    state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
+    /** The channel's own id for the message, once it has taken it. Null while
+     *  sending and after a failure. Half of the ref the delivered entry
+     *  carries, which is how the read knows the row has landed. */
+    providerMessageId: text("provider_message_id"),
+    error: text("error"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
+);
+
 export const waChats = sqliteTable("wa_chats", {
   jid: text("jid").primaryKey(),
   name: text("name"),

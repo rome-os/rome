@@ -1465,6 +1465,44 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
 }
 
+/**
+ * Reaching one account directly, rather than replying inside a conversation
+ * that already exists.
+ *
+ * A channel that offers this can be written to from a surface that knows only
+ * who it wants to talk to — the People page, which holds addresses and no
+ * thread ids. A channel that does not offer it can still be replied to, and
+ * still delivers inbound: `feature("directMessaging")` answering null is the
+ * whole declaration, which is why LinkedIn's read-only inbox needs no flag of
+ * its own and no exception anywhere else.
+ *
+ * Presence is the capability; the method is how the address becomes a thread.
+ * The two are separate answers because they fail differently — a channel that
+ * does not do direct messaging at all is a different thing from one that does
+ * but has no thread with this person yet.
+ */
+export interface TalkDirectMessaging {
+  /**
+   * The conversation that reaches `channelUserId` directly, or null when the
+   * channel cannot produce one.
+   *
+   * On channels where a direct chat is addressed by the contact — WhatsApp,
+   * Telegram — this is the address itself and costs nothing. On channels that
+   * key a thread separately, it opens or looks up that thread, which is a
+   * provider call: callers pricing a listing should treat it as one.
+   */
+  conversationFor(channelUserId: string): Promise<ConversationId | null>;
+}
+
+/**
+ * A talker offering {@link TalkDirectMessaging} must return a `messageId` from
+ * `send`. Rome recognizes a sent message when it comes back — from the
+ * provider's own mirror, or from Rome's transcript of the exchange — and the
+ * provider's id is the only thing both spellings of that entry share. A send
+ * accepted anonymously cannot be followed, and is reported as delivered the
+ * moment the channel takes it.
+ */
+
 export interface ConversationInteraction {
   id: string;
   conversationId: ConversationId;
@@ -1491,6 +1529,7 @@ export interface TalkFeatureMap {
   inboundMedia: TalkInboundMedia;
   activity: TalkActivity;
   directory: TalkDirectory;
+  directMessaging: TalkDirectMessaging;
   interactions: TalkInteractions;
 }
 

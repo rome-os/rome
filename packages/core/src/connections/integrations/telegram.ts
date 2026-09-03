@@ -23,7 +23,12 @@ import { tokenPaste } from "../schemes.js";
 import { SetupAbortError } from "../setup/session.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import { inboundMediaFeature, toInboundMessage, toMessageReceipt } from "./talk-features.js";
+import {
+  addressIsConversationFeature,
+  inboundMediaFeature,
+  toInboundMessage,
+  toMessageReceipt,
+} from "./talk-features.js";
 
 /**
  * True iff `err` is a Telegram "credential refused" — a grammy `GrammyError`
@@ -458,6 +463,9 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
+                // A Telegram private chat carries the user's own id as its chat
+                // id, so the address is already the conversation.
+                directMessaging: addressIsConversationFeature(),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },

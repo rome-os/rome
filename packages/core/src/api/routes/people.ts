@@ -7,15 +7,20 @@ import {
   parseLinkAccountRequest,
   parseMergeRequest,
   parsePersonFilterLevel,
+  parseSendMessageRequest,
   parseTimelineCursor,
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
   timelinePageLimit,
+  type AccountSendState,
+  type OutboxPage,
   type PeopleList,
+  type SendRefusal,
 } from "@rome/api-types/people";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
+import { readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
@@ -147,6 +152,75 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     return respondWithPerson(deps, c, person.id);
   });
 
+  /**
+   * Say something to one of this person's accounts.
+   *
+   * 202 rather than 200: the channel taking a message is not the message
+   * arriving, and the body says which of those has happened. A refusal answers
+   * the same `send` state the person read carries, so a client that raced a
+   * disconnect renders the reason it would already have shown.
+   */
+  app.post("/people/:id/messages", async (c) => {
+    const person = await findPerson(deps, c.req.param("id"));
+    if (!person) return c.json({ error: "Unknown person" }, 404);
+
+    const parsed = parseSendMessageRequest(await c.req.json().catch(() => null));
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+
+    // The account has to be one of theirs. A client that names another
+    // person's address is not making a request this person's page can answer,
+    // and sending anyway would deliver a message the guardian addressed to
+    // someone else.
+    const held = person.channelMappings.some(
+      (mapping) =>
+        mapping.channel === parsed.request.channel &&
+        mapping.channelUserId === parsed.request.channelUserId,
+    );
+    if (!held) {
+      return c.json({ error: "That account is not linked to this person" }, 400);
+    }
+
+    const result = await sendToAccount(deps, parsed.request, parsed.request.text);
+    return result.ok
+      ? c.json(result.message, 202)
+      : c.json(
+          { error: refusalMessage(result.send), send: result.send } satisfies SendRefusal,
+          409,
+        );
+  });
+
+  /** Every send of this person's still in flight. Unpaged — an outbox long
+   *  enough to page is an incident rather than a listing. */
+  app.get("/people/:id/outbox", async (c) => {
+    const person = await findPerson(deps, c.req.param("id"));
+    if (!person) return c.json({ error: "Unknown person" }, 404);
+
+    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    return c.json({
+      messages: await readOutbox(deps, personMessageStores(deps), accounts),
+    } satisfies OutboxPage);
+  });
+
+  /** Try a failed send again. Under its own id, so a retry never reads as a
+   *  second message the guardian did not write. */
+  app.post("/people/:id/outbox/:messageId/retry", async (c) => {
+    const person = await findPerson(deps, c.req.param("id"));
+    if (!person) return c.json({ error: "Unknown person" }, 404);
+
+    const message = await retrySend(deps, c.req.param("messageId"));
+    return message ? c.json(message, 202) : c.json({ error: "Unknown message" }, 404);
+  });
+
+  /** Give up on a failed send. The only way a row leaves the outbox without
+   *  having been delivered. */
+  app.delete("/people/:id/outbox/:messageId", async (c) => {
+    const person = await findPerson(deps, c.req.param("id"));
+    if (!person) return c.json({ error: "Unknown person" }, 404);
+
+    await deps.outboxRepo.remove(c.req.param("messageId"));
+    return c.body(null, 204);
+  });
+
   app.get("/people/:id/messages", async (c) => {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
@@ -182,4 +256,23 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 async function respondWithPerson(deps: ApiDeps, c: Context, id: string) {
   const person = await readPerson(deps, id);
   return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
+}
+
+/**
+ * The line a refusal carries when a client has nothing better.
+ *
+ * A fallback, not the copy: the dashboard renders `send` through its own
+ * locale files, because why a channel cannot be written to is a fact about the
+ * channel and every surface that states it has to state it in the reader's
+ * language.
+ */
+function refusalMessage(send: Exclude<AccountSendState, "yes">): string {
+  switch (send) {
+    case "not-connected":
+      return "That channel is not connected";
+    case "unsupported":
+      return "Rome cannot send on that channel";
+    case "no-conversation":
+      return "Rome has no conversation open with that account";
+  }
 }

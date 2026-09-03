@@ -51,6 +51,7 @@ import { runMigrations } from "./db/migrate.js";
 import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PersonMappingRepository } from "./db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
+import { OutboxRepository } from "./db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
@@ -235,6 +236,7 @@ async function main() {
   const sessionsRepo = new SessionsRepository(db);
   const personMappingRepo = new PersonMappingRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
+  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
@@ -1225,6 +1227,7 @@ async function main() {
       actionEngine,
       actionLoader,
       personMappingRepo,
+      outboxRepo,
       whatsAppStoreRepo,
       channels,
       accountNames,

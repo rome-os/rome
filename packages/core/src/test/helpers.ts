@@ -43,6 +43,7 @@ import { SystemUpgradeService } from "../system-upgrade/service.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
 import type {
   ConversationId,
+  TalkFeatureMap,
   ConversationSettingsControl,
   InboundMessage,
   TalkRouter,
@@ -50,6 +51,7 @@ import type {
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
+import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
@@ -217,6 +219,7 @@ export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>)
   const byConnection = new Map<string, { service: string; adapter: MockProviderAdapter }>(
     [...adapters].map(([service, adapter]) => [`test:${service}`, { service, adapter }] as const),
   );
+  let sent = 0;
   return {
     list: async () =>
       [...byConnection].map(([connectionId, value]) => ({
@@ -249,9 +252,22 @@ export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>)
       const target = byConnection.get(connectionId);
       if (!target) throw new Error(`Unknown test connection ${connectionId}`);
       await target.adapter.sendMessage(conversationId, conversationId, message);
-      return { conversationId };
+      // A message id, the way every real talker answers with one. The outbox
+      // recognizes a delivered message by it, so a router that named nothing
+      // would make every send untrackable in tests and only in tests.
+      return { conversationId, messageId: `sent-${++sent}` };
     },
-    feature: () => null,
+    // Every test channel addresses a direct chat by the contact, like the two
+    // channels that ship with sending. A test needing a channel that cannot be
+    // written to overrides `feature` to answer null.
+    feature: (_connectionId, name) =>
+      name === "directMessaging"
+        ? ({
+            async conversationFor(channelUserId: string) {
+              return channelUserId as ConversationId;
+            },
+          } as TalkFeatureMap[typeof name])
+        : null,
   };
 }
 
@@ -409,6 +425,7 @@ export async function buildTestDeps(
   const sessionsRepo = new SessionsRepository(db);
   const personMappingRepo = new PersonMappingRepository(db);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
+  const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
@@ -574,6 +591,7 @@ export async function buildTestDeps(
     db,
     sessionsRepo,
     personMappingRepo,
+    outboxRepo,
     whatsAppStoreRepo,
     whatsAppAccounts,
     linkedInStoreRepo,

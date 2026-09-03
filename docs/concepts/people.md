@@ -1,4 +1,4 @@
-# People: Guardian, Visitor, Persons, Accounts, Addresses & Links
+# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Outbox
 
 ## Guardian
 
@@ -97,6 +97,23 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 
 - **[Bond level](#bond-levels)** — a bond level grades trust in a person. A link attributes an account to a person.
 - **Connection** — a connection joins the Rome instance to a service. A link joins an account to a person.
+
+## Outbox
+
+The outbox holds messages Rome has been asked to send and has not yet seen arrive. A message leaves it by appearing on the recipient's [timeline](#account). Nothing marks one delivered.
+
+**Contracts:**
+
+- A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
+- A channel can be sent to only if it says so. `talk.feature("directMessaging")` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
+- An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
+- A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
+- A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.
+
+**Not to be confused with:**
+
+- **Timeline** — a timeline entry is a message that happened. An outbox row is one that has not, and may never.
+- **[Link](#link)** — a link says who an account belongs to. An outbox row is addressed to the account itself, so a merge moving the link leaves it true.
 
 ## Bond levels
 
