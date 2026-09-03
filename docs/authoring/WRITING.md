@@ -31,6 +31,14 @@ A project-specific term earns admission only with a one-line separation from its
   > Prefer: "a group has several people on it, and every line any of them sent reads the same way."
   > Over: "a group conversation has more than two ends, and three people talking are one undifferentiated voice."
 
+- Say what you mean. Where a literal phrase exists, use it instead of a metaphor or a flourish.
+
+  > Prefer: "a parameter worth varying."
+  > Over: "a dial worth turning."
+
+  > Prefer: "this point still matters."
+  > Over: "this point earns its keep."
+
 <!-- vale Rome.WordChoice = NO -->
 <!-- vale Rome.Marketing = NO -->
 <!-- vale Rome.History = NO -->
@@ -124,7 +132,7 @@ If a concept has a canonical home, link to it instead of re-explaining it.
 
 ## Checking
 
-`pnpm lint:prose` runs [Vale](https://vale.sh) over `docs/` and over the comments in `.ts` and `.tsx` sources. The rules it can decide live in [`.vale/styles/Rome`](../../.vale/styles/Rome), one file per section above. The rest — one name per thing, one meaning per word, the mechanism over a picture of it, one topic per paragraph — stay with the reader.
+`pnpm lint:prose` runs [Vale](https://vale.sh) over `docs/` and over the comments in `.ts` and `.tsx` sources. The rules it can decide live in [`.vale/styles/Rome`](../../.vale/styles/Rome), one file per section above. The rest — one name per thing, one meaning per word, the mechanism over a picture of it, the literal phrase over the metaphor, one topic per paragraph — stay with the reader.
 
 Four words on the lists above are deliberately absent from the gate: *begin*, *initiate*, *acquire*, and *robust*. Each carries a technical sense a word list cannot tell from the prose one, so checking them would report more wrong answers than right ones. Apply them by reading.
 
