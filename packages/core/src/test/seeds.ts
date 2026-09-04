@@ -7,6 +7,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
+import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
 /**
  * Unified, deterministic baseline seed.
@@ -88,7 +89,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
   await repo.createWithId(guardianId, {
     displayName: "Guardian",
     bondLevel: "guardian",
-    profilePath: "memory/relationship/GUARDIAN.md",
+    profilePath: GUARDIAN_PROFILE_PATH,
     approved: true,
   });
   await repo.addChannelMapping(guardianId, "telegram", "tg-guardian", "Guardian");

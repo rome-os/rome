@@ -10,7 +10,7 @@ import {
 } from "@opentelemetry/api";
 import { createLogger } from "../../logger.js";
 import { logInboundChannelMessage } from "../../telemetry.js";
-import { resolveProfileMemoryPath } from "../../profile-memory.js";
+import { getGuardianProfileFile } from "../../profile-memory.js";
 import { toWebchatSessionResponse, type TraceableAgentMessage } from "../helpers.js";
 import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
 import {
@@ -1545,7 +1545,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    */
   const readGuardianProfile = (): string | null => {
     try {
-      const path = resolveProfileMemoryPath("memory/relationship/GUARDIAN.md");
+      const path = getGuardianProfileFile();
       if (!existsSync(path)) return null;
       const content = readFileSync(path, "utf-8").trim();
       return content || null;

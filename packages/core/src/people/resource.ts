@@ -12,7 +12,7 @@
 import { readdir } from "node:fs/promises";
 import type { AccountSendState, PersonResource, TimelineEntry } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
-import { resolveProfileMemoryPath } from "../profile-memory.js";
+import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { Channels } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
@@ -109,10 +109,6 @@ async function serialize(
   }));
 }
 
-/** Where every memory profile lives, as the memory file browser addresses it.
- *  `memory/relationship/BONDS.md` states the rule. */
-const RELATIONSHIP_DIR = "memory/relationship";
-
 /**
  * The profile written about each of these people, in the order given — the path
  * where one exists, null where none does.
@@ -133,15 +129,13 @@ const RELATIONSHIP_DIR = "memory/relationship";
  * a file nobody wrote is a link to nothing.
  */
 async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(string | null)[]> {
-  const written = new Set(
-    await readdir(resolveProfileMemoryPath(RELATIONSHIP_DIR)).catch(() => []),
-  );
+  const written = new Set(await readdir(getRelationshipDir()).catch(() => []));
 
   return persons.map((person) => {
     const stored = person.profilePath?.startsWith(`${RELATIONSHIP_DIR}/`)
       ? person.profilePath.slice(RELATIONSHIP_DIR.length + 1)
       : null;
-    const fileName = stored ?? `${person.id}.md`;
+    const fileName = stored ?? personProfileFileName(person.id);
     return written.has(fileName) ? `${RELATIONSHIP_DIR}/${fileName}` : null;
   });
 }

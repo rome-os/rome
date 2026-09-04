@@ -6,7 +6,12 @@ import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
 import { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "../../constants.js";
 import { generatePersonSlug } from "../../db/repositories/person-mapping.js";
-import { ensureProfileMemoryInitialized } from "../../profile-memory.js";
+import {
+  ensureProfileMemoryInitialized,
+  getGuardianProfileFile,
+  getRelationshipDir,
+  GUARDIAN_PROFILE_PATH,
+} from "../../profile-memory.js";
 import { COOKIE_NAME, hashPassword, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
@@ -184,7 +189,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
         id: guardianPersonId,
         displayName: guardianName,
         bondLevel: "guardian",
-        profilePath: "memory/relationship/GUARDIAN.md",
+        profilePath: GUARDIAN_PROFILE_PATH,
         approved: true,
         createdAt: new Date(),
       })
@@ -192,10 +197,10 @@ export function onboardRoutes(deps: ApiDeps): Hono {
 
     if (profile) {
       const profileMemoryDir = ensureProfileMemoryInitialized();
-      const memoryDir = join(profileMemoryDir, "relationship");
+      const relationshipDir = getRelationshipDir();
 
       try {
-        mkdirSync(memoryDir, { recursive: true });
+        mkdirSync(relationshipDir, { recursive: true });
 
         const guardianLines = ["# Guardian Profile", ""];
         guardianLines.push(`**Name:** ${guardianName}`, "");
@@ -213,7 +218,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
           guardianLines.push("## Interests", "", profile.interests.join(", "), "");
         }
         if (guardianLines.length > 2) {
-          writeFileSync(join(memoryDir, "GUARDIAN.md"), guardianLines.join("\n"));
+          writeFileSync(getGuardianProfileFile(), guardianLines.join("\n"));
         }
 
         mkdirSync(profileMemoryDir, { recursive: true });
