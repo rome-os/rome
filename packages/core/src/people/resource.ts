@@ -9,8 +9,10 @@
 // account is linked to, not someone the guardian knows. It is excluded here,
 // once, so no route can serve it by forgetting to.
 
+import { existsSync } from "node:fs";
 import type { AccountSendState, PersonResource, TimelineEntry } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
+import { resolveProfileMemoryPath } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { Channels } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
@@ -101,8 +103,28 @@ async function serialize(
         latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
       };
     }),
+    memoryPath: memoryPathOf(person),
     ...activity.perPerson[i],
   }));
+}
+
+/**
+ * The memory profile written about a person, or null when none is.
+ *
+ * Two ways a person's profile is addressed and one answer: the path stored on
+ * the row where something wrote one — the guardian's, at onboarding — and
+ * otherwise the convention every other profile is written under,
+ * `memory/relationship/<id>.md` (`memory/relationship/BONDS.md` states it).
+ *
+ * Answered only when the file is there. Creating a person writes no profile,
+ * and the agent writes one when it has something to remember, so a path served
+ * for a file nobody wrote is a link to nothing. That check is a stat of the
+ * local profile dir — the one thing here that runs per person, and the reason
+ * it is a stat rather than a read.
+ */
+function memoryPathOf(person: PersonRow): string | null {
+  const path = person.profilePath || `memory/relationship/${person.id}.md`;
+  return existsSync(resolveProfileMemoryPath(path)) ? path : null;
 }
 
 /**

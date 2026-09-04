@@ -107,6 +107,7 @@
     "bond": "Bond",
     "linkAccount": "Link account…",
     "changeBond": "Change bond",
+    "memoryProfile": "Memory profile",
     "timeline": "Timeline",
     "timelineEmpty": "Nothing has happened on any channel yet.",
     "loadOlder": "Load older",

@@ -67,6 +67,7 @@ const PERSON: PersonResource = {
   ],
   messageCount: 12,
   latest: { source: "whatsapp", timestamp: NOW - 300, preview: "the landlord replies fast" },
+  memoryPath: "memory/relationship/wei-chen.md",
 };
 
 /** Reachable on one channel Rome mirrors and cannot write to — the composer's
@@ -86,6 +87,7 @@ const READ_ONLY_PERSON: PersonResource = {
   ],
   messageCount: 1,
   latest: null,
+  memoryPath: null,
 };
 
 const ENTRIES: TimelineEntry[] = [
@@ -120,6 +122,7 @@ const DUPLICATE: PersonResource = {
   accounts: [],
   messageCount: 2,
   latest: null,
+  memoryPath: null,
 };
 
 const UNPLACED: DirectoryAccount = {
@@ -419,6 +422,7 @@ describe("PersonDetailPage", () => {
         timestamp: NOW - 300,
         preview: "sent you a note about the role",
       },
+      memoryPath: null,
     };
     mockApi({
       person,
@@ -617,6 +621,34 @@ describe("PersonDetailPage management", () => {
     // An omitted field is one the update leaves alone, so a bond change must
     // not carry a name and blank it.
     expect(patch.body).toEqual({ bondLevel: "inner-circle" });
+  });
+
+  it("opens the memory profile Rome wrote about them, at the address Memory reads it from", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+
+    // A link out to Memory, not a fourth write: the profile is a file, and the
+    // editor, the history and the sync state are all on that page.
+    const item = await screen.findByRole("menuitem", { name: "Memory profile" });
+    expect(item.getAttribute("href")).toBe("/memory/relationship/wei-chen.md");
+  });
+
+  it("offers no memory profile for a person nobody has written one about", async () => {
+    const user = userEvent.setup();
+    // Creating a person writes no profile, so the read answers none — and an
+    // item that opened nothing would be on most people's menu.
+    mockApi({ person: { ...PERSON, memoryPath: null } });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Link account\u2026" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Memory profile" })).toBeNull();
   });
 
   it("links an account the directory holds onto this person", async () => {

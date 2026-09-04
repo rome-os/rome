@@ -108,6 +108,11 @@ function personResource(person: PersonFixture): PersonResource {
     // history GET /api/people/:id/messages pages.
     messageCount: entries.length,
     latest: latestDynamic(entries),
+    // The convention core answers with for a profile that exists
+    // (`memory/relationship/<id>.md`). Every fixture has one: the mock serves
+    // no memory tree to check against, so the honest choice is the one that
+    // leaves the roster's link on screen to exercise.
+    memoryPath: `memory/relationship/${person.id}.md`,
   };
 }
 

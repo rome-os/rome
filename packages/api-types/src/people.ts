@@ -902,6 +902,11 @@ export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAc
  * what the dossier will show. A group conversation contributes to neither: a
  * timeline entry names no sender, so nothing said in a room of ten people is
  * attributable to one of them.
+ *
+ * `memoryPath` is the profile Rome has written about them, as a path under the
+ * memory root — the same address the memory file browser reads. Null when no
+ * profile has been written: nothing writes one when a person is created, so a
+ * path here means a file a reader can actually open.
  */
 export interface PersonResource {
   id: string;
@@ -910,6 +915,7 @@ export interface PersonResource {
   accounts: LinkedAccount[];
   messageCount: number;
   latest: AccountDynamic | null;
+  memoryPath: string | null;
 }
 
 /**

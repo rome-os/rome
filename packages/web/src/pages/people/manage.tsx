@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react";
 import {
@@ -42,6 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { usePeople } from "@/hooks/use-people";
+import { getFileBrowserUrlPath } from "@/lib/file-browser-routing";
 import { ChannelPill } from "./channel-meta";
 import { MutationError } from "./triage";
 import { levelLabelKey } from "./rows";
@@ -141,6 +143,22 @@ export function PersonManagement({
             <DropdownMenuItem onSelect={() => setPicker("merge")}>
               {t("actions.mergeInto")}
             </DropdownMenuItem>
+            {person.memoryPath && (
+              <>
+                <DropdownMenuSeparator />
+                {/* Leaves for Memory rather than rendering the profile here: it
+                    is a file the guardian edits, and the editor, the history and
+                    the sync state are all there. Offered only when the read
+                    names one — nothing writes a profile when a person is
+                    created, so an item on every person would usually open
+                    nothing. */}
+                <DropdownMenuItem asChild>
+                  <Link to={getFileBrowserUrlPath("memory", person.memoryPath)}>
+                    {t("detail.memoryProfile")}
+                  </Link>
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
