@@ -140,6 +140,34 @@ describe("provider-accounting", () => {
     );
   });
 
+  it("calculates GPT-6 Astra costs with cache pricing", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6-astra", usage)).toBeCloseTo(73.5);
+    expect(calculateImpliedCostUsd("openai", "gpt-6-astra:high", usage)).toBeCloseTo(73.5);
+  });
+
+  it("applies the long-context input and output multipliers to GPT-6 Astra", () => {
+    const impliedCostUsd = calculateImpliedCostUsd(
+      "openai",
+      "gpt-6-astra",
+      {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheWriteTokens: 1_000_000,
+      },
+      { input_tokens: 272_001 },
+    );
+
+    expect(impliedCostUsd).toBeCloseTo(122);
+  });
+
   it("calculates GPT-5.6 Sol, Terra, and Luna costs with cache pricing", () => {
     const usage = {
       inputTokens: 1_000_000,

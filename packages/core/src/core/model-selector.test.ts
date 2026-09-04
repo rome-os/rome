@@ -39,6 +39,10 @@ describe("webchat model selector", () => {
   });
 
   it("maps GPT selections to the Codex provider", () => {
+    expect(resolveWebchatLargeModelSelection("gpt-6-astra")).toMatchObject({
+      providerId: "openai",
+      model: "gpt-6-astra",
+    });
     expect(resolveWebchatLargeModelSelection("gpt-5-6-sol")).toMatchObject({
       providerId: "openai",
       model: "gpt-5.6-sol",
