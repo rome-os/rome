@@ -203,6 +203,18 @@ const AI_TOOL_PROVIDERS = [
 
 export type AiToolProviderId = (typeof AI_TOOL_PROVIDERS)[number]["statusKey"];
 
+/** Whether any provider this panel would show is signed in. The connect step in
+ *  chat probes `/api/ai-tools/status` and reads the answer through this, so it
+ *  and the panel cannot disagree on what counts as connected. */
+export function hasConnectedAiProvider(
+  status: Partial<Record<string, { loggedIn?: boolean } | null>>,
+  hiddenProviders: readonly AiToolProviderId[] = [],
+): boolean {
+  return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
+    (provider) => status[provider.statusKey]?.loggedIn === true,
+  );
+}
+
 const LOGOUT_PROVIDER_CONFIG = {
   claude: {
     icon: undefined,
@@ -758,9 +770,7 @@ export function AiToolsPanel({
   const visibleProviders = AI_TOOL_PROVIDERS.filter(
     (provider) => !hiddenProviders.includes(provider.statusKey),
   );
-  const anyConnected = visibleProviders.some(
-    (provider) => toolStatus[provider.statusKey]?.loggedIn === true,
-  );
+  const anyConnected = hasConnectedAiProvider(toolStatus, hiddenProviders);
   const logoutConfig = logoutProvider ? LOGOUT_PROVIDER_CONFIG[logoutProvider] : null;
 
   useEffect(() => {

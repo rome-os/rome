@@ -200,4 +200,44 @@ describe("Settings API", () => {
       expect(spy).not.toHaveBeenCalled();
     });
   });
+
+  describe("POST /settings/guardian-timezone/detected", () => {
+    async function postDetected(timezone: unknown) {
+      return app.request("/settings/guardian-timezone/detected", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone }),
+      });
+    }
+
+    it("adopts the browser zone when none is stored and reschedules floating routines", async () => {
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected("Asia/Tokyo");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: "set", tzid: "Asia/Tokyo" });
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBe("Asia/Tokyo");
+      expect(reactivate).toHaveBeenCalledOnce();
+    });
+
+    it("never overwrites a stored zone", async () => {
+      await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "Europe/Paris" });
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected("Asia/Tokyo");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: "unchanged", tzid: "Europe/Paris" });
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBe("Europe/Paris");
+      expect(reactivate).not.toHaveBeenCalled();
+    });
+
+    it("rejects a value that is not an IANA zone", async () => {
+      const res = await postDetected("Mars/Olympus");
+
+      expect(res.status).toBe(400);
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();
+    });
+  });
 });

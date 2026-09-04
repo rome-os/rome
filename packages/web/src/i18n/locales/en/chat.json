@@ -236,6 +236,18 @@
     "dismiss": "Dismiss",
     "send": "Send"
   },
+  "aiToolsCard": {
+    "title": "Connect Claude or ChatGPT",
+    "hint": "I think with your existing subscription. Sign in to one so I can start working.",
+    "waiting": "Waiting for a sign-in",
+    "connected": "Connected",
+    "skipped": "Skipped for now",
+    "skip": "Skip for now",
+    "connectedSummary": "Connected an AI",
+    "skippedSummary": "Skipped connecting an AI",
+    "connectedTitle": "AI connected",
+    "checking": "Checking your AI connections…"
+  },
   "modelSelector": {
     "label": "Model",
     "saveFailed": "Failed to save model selection.",

@@ -1,39 +1,28 @@
 const en = {
   server: {
-    emailIntro:
-      "👋 Hi — I'm {{agentName}}.\n\nFirst things first: let's make sure we can reach each other by email. Here's my address and the one I have for you — give it a look, and I'll send you a quick hello.",
-    emailSentLead: "📬 Sent! It should land in a few seconds.",
-    helloEmailSubject: "Hello from Rome 👋",
-    helloEmailBody:
-      "# Hello 👋\n\nI'm **{{agentName}}** — your new AI, here to help with whatever you need.\n\nThis is just a quick hello so we know email works between us. From here you can:\n\n- **Reply to this email** any time — I'll read it and get back to you.\n- Forward me anything you'd like me to handle.\n- Ask me to keep an eye on something and report back.\n\nTalk soon,\n\n**{{agentName}}**",
-    greet: "Now, let me get to know you a little.\n\nTwo easy ways — pick whichever you like:",
-    magicTrick:
-      "✨ Watch the browser — I'll ask ChatGPT what it remembers about you and bring the highlights back. One moment…",
-    chatgptNoMemory:
-      "ChatGPT didn't have anything stored about you yet — no problem, let's just do the quick version.",
-    chatgptFailed:
-      "I couldn't read that from ChatGPT just now — let's do the quick version instead.",
-    questionsLead: "Great — a few quick questions (tap or type, whatever's easier):",
+    greet:
+      "👋 Hi {{guardianName}} — I'm {{agentName}}.\n\nBefore we start, a quick check: is this what I should call you, and do you like my name?",
+    greetNoName:
+      "👋 Hi — I'm {{agentName}}.\n\nBefore we start: what should I call you? And do you like my name?",
+    connectAiLead:
+      "Next, I need something to think with. I run on your existing Claude or ChatGPT subscription rather than a separate API key.",
+    questionLead: "One question, then we build something:",
     savingMemoryLead: "Thanks — folding that into your memory now.",
     scoutsLead:
       "I can also set up a few scouting tasks for your briefing app, so Rome keeps an eye on useful things for you.",
     ideasHandoffLead: "Got it. Brainstorming a few first apps for you…",
     ideasFailed: "I couldn't tailor these to you, but here are a few solid starters.",
+    ideasOffline:
+      "Without an AI connected I can't tailor these yet, so here are a few solid starters. Connect one from Settings any time.",
     unexpectedError:
       "Something went wrong with the welcome — you can start chatting with Rome normally.",
     takeaway: "**What I took away**\n\n{{summary}}",
-    pickedIdea: {
-      heading: 'Let\'s build "{{title}}".',
-      body: "Here's a prompt to kick it off — copy it into a normal chat with Rome when you're ready. You're all set!",
-    },
-    finishedNoPick: {
-      heading: "You're all set.",
-      body: "When you're ready to build something, just tell Rome what you have in mind. Welcome aboard.",
-    },
-    alreadyDone: {
-      heading: "You've already finished the welcome.",
-      body: "You can start chatting with Rome normally — or run it again below.",
-    },
+    pickedIdea:
+      "Let's build \"{{title}}\". I've opened a fresh chat with the kickoff prompt ready — send it when you're ready.",
+    finishedNoPick:
+      "You're all set. Whenever you want to build something, tell me what you have in mind in a new chat. Welcome aboard.",
+    alreadyDone:
+      'You\'ve already finished the welcome. Start chatting with Rome normally, or say "start over" to run it again.',
   },
   web: {
     landing: {
@@ -44,46 +33,11 @@ const en = {
       opening: "Opening…",
       openError: "Couldn't open the chat just yet — give it another tap.",
     },
-    emailHandshake: {
-      confirmed: "Email confirmed",
-      settingUp: "Setting up email…",
-      unavailable: "Email isn't set up in this environment yet — we can sort that out later.",
-      continue: "Continue",
-      agentAddress: "My address",
-      guardianAddress: "Yours",
-      agree: "Looks right — say hello",
-    },
-    emailReceipt: {
-      inbox: "your inbox",
-      connected: "Thanks — we're connected.",
-      sentTo: "I just emailed",
-      sentAfter: ". Take a look — did it arrive?",
-      received: "Got it",
-      missing: "Didn't get it?",
-      spamHint: "Check your spam / junk folder — first emails often land there. Still nothing?",
-      resend: "Resend",
-      continue: "Continue anyway",
-    },
-    introChoice: {
-      importTitle: "Import from ChatGPT",
-      importDescription: "Borrow what ChatGPT already remembers about you.",
-      answerTitle: "Answer a few questions",
-      answerDescription: "Tell me about yourself in a few quick taps.",
-    },
-    browserStep: {
-      heading: "Let's borrow what ChatGPT knows about you ✨",
-      openBefore: "Open the browser here: click",
-      addBrowser: "➕ Add widget → Browser",
-      openAfter: "(follow the arrow).",
-      signIn: "Sign in to chatgpt.com in that browser.",
-      returnWhenReady: "Come back and hit “I've signed in.”",
-      openHeading: "Sign in to ChatGPT in the browser",
-      openDescription: "Sign in to chatgpt.com on the right, then hit “I've signed in.”",
-      notSignedIn: "I don't see ChatGPT signed in yet — sign in, then hit “I've signed in” again.",
-      signedIn: "I've signed in",
-      checking: "Checking…",
-      skip: "Skip for now",
-      skipSummary: "Skip — ask me questions",
+    names: {
+      guardianLabel: "What I call you",
+      agentLabel: "What you call me",
+      confirm: "Looks good",
+      summary: "{{guardianName}} · {{agentName}}",
     },
     scouts: {
       skippedSummary: "Skipped briefing scouts",
@@ -116,15 +70,6 @@ const en = {
       explore: "I'll explore on my own",
       exploreSummary: "I'll explore on my own",
     },
-    completion: {
-      fallbackHeading: "You're all set.",
-      copied: "Copied",
-      copyPrompt: "Copy prompt",
-      explore: "Browse more Rome apps and see what you can build next.",
-      opening: "Opening…",
-      openShowcases: "Open Showcases",
-      runAgain: "Run the welcome again",
-    },
   },
   genericIdeas: [
     {
@@ -143,75 +88,19 @@ const en = {
         "Build me a reading-list app where I can paste links, add notes and tags, mark items as reading or finished, and browse everything later by topic or status.",
     },
   ],
-  introQuestions: [
-    {
-      id: "role",
-      question: "What's your role or field?",
-      type: "single",
-      freeText: true,
-      options: [
-        "Engineering",
-        "Design",
-        "Product",
-        "Founder / business",
-        "Research",
-        "Operations",
-        "Marketing / content",
-      ],
-    },
-    {
-      id: "interests",
-      question: "What are you into? Pick as many as apply.",
-      type: "multi",
-      freeText: true,
-      options: [
-        "Software & engineering",
-        "AI & machine learning",
-        "Data & analytics",
-        "Science & research",
-        "Design & UX",
-        "Product & strategy",
-        "Business & entrepreneurship",
-        "Finance & investing",
-        "Marketing & growth",
-        "Writing & content",
-        "Education & learning",
-        "Health & fitness",
-        "Productivity & organization",
-      ],
-    },
-    {
-      id: "helpFirst",
-      question: "What would you love help with first?",
-      type: "single",
-      freeText: true,
-      options: [
-        "Email & messages",
-        "Research & summaries",
-        "Writing & content",
-        "Scheduling & reminders",
-        "Building little tools",
-      ],
-    },
-    {
-      id: "commStyle",
-      question: "How should Rome talk to you?",
-      type: "single",
-      freeText: true,
-      options: [
-        "Short & to the point",
-        "Detailed & thorough",
-        "Casual & friendly",
-        "Formal & professional",
-      ],
-    },
-    {
-      id: "anythingElse",
-      question: "Anything else I should know?",
-      type: "text",
-      optional: true,
-    },
-  ],
+  introQuestion: {
+    id: "weekLooksLike",
+    question: "Which of these sounds most like your week?",
+    type: "single",
+    freeText: true,
+    options: [
+      "Hunting through email for one detail",
+      "Twelve tabs open, none of them read",
+      "Staring at an empty document",
+      "Trying to remember what I promised whom",
+      "Copying the same numbers between two places",
+    ],
+  },
   scouts: {
     templates: [
       {

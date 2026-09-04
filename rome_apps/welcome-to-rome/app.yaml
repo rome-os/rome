@@ -3,7 +3,7 @@ id: welcome-to-rome
 name: Welcome to Rome
 icon: assets/icon.svg
 version: 0.1.0
-description: Conversational first-run onboarding. The guardian chats with Rome in the standard Chat UI; a turn-middleware state machine drives the conversation, rendering the app's own inline cards and handing the heavy steps to specialist agents.
+description: Conversational first-run onboarding. The guardian chats with Rome in the standard Chat UI; a turn-middleware state machine confirms the names, connects an AI, asks one question, and hands off to a first chat, rendering the app's own inline cards and handing the heavy steps to specialist agents.
 appRoot: dist
 
 web:
@@ -18,13 +18,9 @@ api:
 # Inline chat components this app registers (via defineComponent) and renders
 # into the transcript. Core validates an emitted componentId against this list.
 components:
-  - email-handshake
-  - email-receipt
-  - intro-choice
-  - browser-step
+  - name-card
   - scout-suggestions
   - idea-picker
-  - completion-card
 
 db:
   migrations: db/migrations

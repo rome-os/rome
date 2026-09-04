@@ -9,6 +9,7 @@ import {
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../lib/guardian-auth-state.js";
+import { applySetupDefaults, defaultGuardianName } from "../../lib/guardian-profile.js";
 import {
   getInstanceToken,
   isValidInstanceToken,
@@ -50,12 +51,14 @@ const OAUTH_CLIENT_ID = "rome-instance";
 // Every callback outcome redirects to one of these constant internal paths —
 // never anything derived from the request — so the callback can't be turned into
 // an open redirector. Success bounces to the dashboard root (a hard navigation so
-// the SPA re-bootstraps with the new session). Failures return to /login, the
-// cloud-default sign-in entry: whatever the instance state, the
-// retry affordance and the error banner live there.
+// the SPA re-bootstraps with the new session). A sign-in that creates the seat
+// lands on the welcome conversation instead: setup is already complete, so the
+// welcome app is the first screen. Failures return to /login, the cloud-default
+// sign-in entry: whatever the instance state, the retry affordance and the error
+// banner live there.
 const SUCCESS_PATH = "/";
 const LOGIN_PATH = "/login";
-const ONBOARD_PATH = "/onboard";
+const WELCOME_PATH = "/full/apps/welcome-to-rome";
 
 interface PendingLogin {
   channel: "browser" | "native";
@@ -245,7 +248,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       if (guardian.exists) {
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
       } else {
-        await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
+        await createGuardianSeat(identity);
       }
 
       const session = createGuardianSession(identity.accountId);
@@ -372,7 +375,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       // owner); on an existing username/password instance this IS the implicit
       // link — the accountId lands on the guardian row, the local password stays.
       await setGuardianAccount(deps.db, accountId, accountEmail, accountAvatarUrl);
-      return await finishSignedIn(c, accountId, accountEmail, accountAvatarUrl);
+      return await finishSignedIn(c, identity);
     } catch (err) {
       // A network throw at any leg is non-terminal: offer retry/local fallback.
       log.warn("cloud login errored", {
@@ -415,15 +418,19 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     return tokens ? { ok: true, tokens } : { ok: false, status: 502 };
   }
 
+  interface CloudIdentity {
+    accountId: string;
+    email?: string;
+    avatarUrl?: string;
+    /** The `name` claim, when Rome Cloud sends one. */
+    name?: string;
+  }
+
   async function verifyCloudIdentity(
     tokens: TokenResponse,
     issuer: string,
     entry: PendingLogin,
-  ): Promise<{
-    accountId: string;
-    email?: string;
-    avatarUrl?: string;
-  } | null> {
+  ): Promise<CloudIdentity | null> {
     if (typeof tokens.id_token !== "string") return null;
     try {
       const verified = await verifyIdToken(tokens.id_token, {
@@ -433,10 +440,12 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         jwksUri: new URL("/oauth2/jwks", issuer).toString(),
         fetch: fetchImpl,
       });
+      const name = verified.payload.name;
       return {
         accountId: verified.sub,
         email: verified.email,
         avatarUrl: verified.picture,
+        name: typeof name === "string" && name.trim() ? name.trim() : undefined,
       };
     } catch (err) {
       log.warn("id_token verification failed; failing closed", {
@@ -447,20 +456,33 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   }
 
   // On a fresh instance the cloud round trip is the sole account source, so
-  // the guardian seat is created here from the consenting cloud account. The
-  // row is created BEFORE the cookie so a session never outruns a backing
-  // guardian, then the box drops into onboarding (profile only). A guardian
-  // that already exists is simply signed in.
-  async function finishSignedIn(c: Context, accountId: string, email?: string, avatarUrl?: string) {
+  // the guardian seat is created from the consenting cloud account, and setup
+  // finishes right here with defaults: the display name from the identity
+  // assertion and a preset agent identity. The welcome conversation confirms
+  // both, so the onboarding page is never shown on this path.
+  async function createGuardianSeat(identity: CloudIdentity): Promise<void> {
+    await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
+    await applySetupDefaults(defaultGuardianName(identity), {
+      db: deps.db,
+      settingsRepo: deps.settingsRepo,
+      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+    });
+  }
+
+  // The row is created BEFORE the cookie so a session never outruns a backing
+  // guardian. A guardian that already exists is simply signed in.
+  async function finishSignedIn(c: Context, identity: CloudIdentity) {
     const guardian = await getGuardianAuthState(deps.db);
     if (!guardian.exists) {
-      await createCloudGuardian(deps.db, accountId, email, avatarUrl);
-      issueGuardianSession(c, accountId);
-      log.info("cloud login created the guardian seat and signed in", { accountId });
-      return c.redirect(ONBOARD_PATH);
+      await createGuardianSeat(identity);
+      issueGuardianSession(c, identity.accountId);
+      log.info("cloud login created the guardian seat and signed in", {
+        accountId: identity.accountId,
+      });
+      return c.redirect(WELCOME_PATH);
     }
-    issueGuardianSession(c, accountId);
-    log.info("cloud login signed in", { accountId });
+    issueGuardianSession(c, identity.accountId);
+    log.info("cloud login signed in", { accountId: identity.accountId });
     return c.redirect(successRedirect());
   }
 

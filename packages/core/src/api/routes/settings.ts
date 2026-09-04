@@ -9,6 +9,7 @@ import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
 } from "../../routines/guardian-timezone.js";
+import { parseTimeZone } from "../../lib/timezone.js";
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
@@ -57,6 +58,28 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     }
 
     return c.json({ ok: true });
+  });
+
+  // The zone the SPA detects in the browser on first load. A cloud sign-in
+  // completes setup server-side and cannot know the guardian's zone, so this
+  // fills it in. It only writes when no zone is stored: a zone the guardian set
+  // is never overwritten by whichever browser loads the dashboard next.
+  app.post("/settings/guardian-timezone/detected", async (c) => {
+    const body = await c.req
+      .json<Record<string, unknown>>()
+      .catch(() => ({}) as Record<string, unknown>);
+    const stored = parseTimeZone(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY));
+    if (stored) {
+      return c.json({ status: "unchanged", tzid: stored });
+    }
+    const result = await applyGuardianTimezoneWrite(body.timezone, {
+      settingsRepo: deps.settingsRepo,
+      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+    });
+    if (result.status === "invalid") {
+      return c.json({ error: result.error }, 400);
+    }
+    return c.json(result);
   });
 
   return app;
