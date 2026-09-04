@@ -175,7 +175,10 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("keeps explicit Sol/Luna exact and never falls back", async () => {
+  it("keeps explicit Astra/Sol/Luna exact and never falls back", async () => {
+    await expect(
+      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-astra" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-astra" });
     await expect(
       resolver().getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-5.6-sol" });
@@ -193,6 +196,9 @@ describe("ModelResolver", () => {
     });
     await expect(
       unavailable.getModelProvider({ tier: "large", selectionId: "gpt-5-6-sol" }),
+    ).rejects.toThrow("Selected model is unavailable");
+    await expect(
+      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-astra" }),
     ).rejects.toThrow("Selected model is unavailable");
   });
 
@@ -358,6 +364,13 @@ describe("ModelResolver", () => {
   it("denies an exact request for a model whose access was lost", async () => {
     const noEntitlements = resolver({
       codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+    });
+    await expect(
+      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-astra" } }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
     });
     await expect(
       noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-sol" } }),
