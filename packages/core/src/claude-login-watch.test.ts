@@ -26,9 +26,10 @@ afterEach(() => {
 });
 
 // The real shapes printed by the `claude /login` first-run wizard (an Ink TUI):
-// words are positioned with cursor-forward (CUF, `\x1b[1C`) escapes instead of
-// spaces, and the sign-in URL is an OSC-8 hyperlink whose target holds the full
-// URL (terminated by BEL) followed by wrapped, truncated visible text.
+// words are positioned with cursor escapes instead of spaces — cursor-forward
+// (CUF, `\x1b[1C`) and, on newer CLIs, also column-absolute (CHA, `\x1b[9G`) —
+// and the sign-in URL is an OSC-8 hyperlink whose target holds the full URL
+// (terminated by BEL) followed by wrapped, truncated visible text.
 const URL =
   "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e" +
   "&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback" +
@@ -67,6 +68,22 @@ const LOGIN_OUTPUT =
   "Select login method:\x1b[K\r\n" +
   "\x1b[38;2;177;185;249m❯\x1b[4CClaude account with subscription · \x1b[38;2;153;153;153mPro, Max, Team, or Enterprise\r\n";
 
+// CLI 2.1.251 shapes, captured from a live `claude /login` PTY run. The theme
+// screen positions words with CHA (`\x1b[9G`) and ends rendered lines with
+// CR CR LF; the login screen keeps real spaces inside its phrases and joins
+// lines with CR + CUF + CUD — the same stream mixes both escape families, so
+// only the theme fixture exercises the CHA→space stripping.
+const THEME_OUTPUT_CHA =
+  "\x1b[2GLet's\x1b[8Gget\x1b[12Gstarted.\r\r\n" +
+  "\x1b[2G\x1b[1mChoose\x1b[9Gthe\x1b[13Gtext\x1b[18Gstyle\x1b[24Gthat\x1b[29Glooks\x1b[35Gbest\x1b[40Gwith\x1b[45Gyour\x1b[50Gterminal\x1b[22m\r\r\n" +
+  "\x1b[2G\x1b[38;2;177;185;249m❯\x1b[4G\x1b[38;2;153;153;153m2.\x1b[7G\x1b[38;2;78;186;101mDark\x1b[12Gmode\x1b[17G✔\x1b[39m\r\r\n";
+
+const LOGIN_OUTPUT_CHA =
+  "\x1b[1mClaude Code can be used with your Claude subscription or billed based on API \r\x1b[1C\x1b[1B" +
+  "usage through your Console account.\r\x1b[1C\x1b[1B\x1b[22m\x1b[K\r\x1b[1C\x1b[1B" +
+  "Select login method:\x1b[K\r\x1b[1C\x1b[2B" +
+  "\x1b[38;2;177;185;249m❯\x1b[7GClaude account with subscription · \x1b[38;2;153;153;153mPro, Max, Team, or Enterprise\r\r\n";
+
 const NOT_LOGGED_IN_OUTPUT =
   "\x1b[2m╭─── Claude Code v2.1.251 ─────────────────────────────────────────────────────╮\r\n" +
   "\x1b[2m│\x1b[22m Opus 4.7 (1M context) · API Usage Billing                            \x1b[2m│\r\n" +
@@ -87,6 +104,10 @@ const UNPARSEABLE_POST_PICKER_OUTPUT =
 describe("stripAnsi", () => {
   it("turns cursor-forward escapes into spaces so glued words separate", () => {
     expect(stripAnsi("Choose\x1b[1Cthe\x1b[1Ctext\x1b[1Cstyle")).toBe("Choose the text style");
+  });
+
+  it("turns column-absolute escapes into spaces so glued words separate", () => {
+    expect(stripAnsi("Choose\x1b[9Gthe\x1b[13Gtext\x1b[18Gstyle")).toBe("Choose the text style");
   });
 
   it("drops OSC-8 hyperlinks and CSI colour codes", () => {
@@ -313,6 +334,13 @@ describe("createClaudeLoginWatcher", () => {
       watcher.push(THEME_OUTPUT); // redraw — must not press again
       watcher.push(LOGIN_OUTPUT);
       watcher.push(LOGIN_OUTPUT); // redraw — must not press again
+      expect(sends).toEqual(["\r", "\r"]);
+    });
+
+    it("advances theme then login on CHA-positioned screens (CLI 2.1.251)", () => {
+      const { sends, watcher } = collect();
+      watcher.push(THEME_OUTPUT_CHA);
+      watcher.push(LOGIN_OUTPUT_CHA);
       expect(sends).toEqual(["\r", "\r"]);
     });
 
