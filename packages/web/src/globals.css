@@ -395,6 +395,28 @@
   padding-top: var(--rome-safe-area-top);
 }
 
+/* Overlay-style scrollbar for inner panes. The track keeps its width at all
+   times, so revealing the thumb never reflows the content beside it: only the
+   thumb's color changes, and only while the pointer or keyboard focus is
+   inside the scroller. macOS and iOS already hide idle scrollbars this way —
+   this makes Windows and Linux match instead of parking a permanent bar down
+   the edge of a pane nobody is scrolling.
+
+   Standard properties only, no `::-webkit-scrollbar` rules: styling that
+   pseudo-element opts Chrome out of overlay scrollbars entirely, which would
+   hand macOS a permanent 8px gutter it does not have today. Browsers too old
+   for `scrollbar-color` are the ones with auto-hiding overlay scrollbars
+   already, so the fallback is the behavior we are asking for. */
+@utility scrollbar-idle-hidden {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover,
+  &:focus-within {
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
 /* Opt-in utilities for dashboard list rows on touch devices: reveal an action
    whose visual style depends on group-hover, and hold a row tall enough to tap.
    Pair `touch-show` with the `group-hover:...` classes on the same element.
