@@ -63,6 +63,22 @@ describe("A person's memory profile", () => {
     expect(await memoryPathOf("Wei Chen")).toBe(`memory/relationship/${id}.md`);
   });
 
+  it("answers none for a profile stored outside the relationship dir", async () => {
+    // The dashboard opens what this answers under the memory root, and only
+    // this one directory holds profiles — so a row pointing anywhere else falls
+    // back to the convention rather than handing out a path to link against.
+    const id = await deps.personMappingRepo.create({
+      displayName: "Wei Chen",
+      bondLevel: "inner-circle",
+      approved: true,
+    });
+    await deps.personMappingRepo.updatePerson(id, { profilePath: "memory/IDENTITY.md" });
+    mkdirSync(join(mockPaths.profileDir, "memory"), { recursive: true });
+    writeFileSync(join(mockPaths.profileDir, "memory", "IDENTITY.md"), "# Identity\n");
+
+    expect(await memoryPathOf("Wei Chen")).toBe(null);
+  });
+
   it("answers none for a person nobody has written a profile about", async () => {
     // Creating a person writes no profile, so this is the ordinary case rather
     // than a broken one — and a path served for it would be a link to nothing.

@@ -9,7 +9,7 @@
 // account is linked to, not someone the guardian knows. It is excluded here,
 // once, so no route can serve it by forgetting to.
 
-import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import type { AccountSendState, PersonResource, TimelineEntry } from "@rome/api-types/people";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { resolveProfileMemoryPath } from "../profile-memory.js";
@@ -75,7 +75,7 @@ async function serialize(
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
-  const [accountsByPerson, names, sendStates] = await Promise.all([
+  const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
       deps,
       persons.map((person) => person.channelMappings),
@@ -85,6 +85,7 @@ async function serialize(
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
     readSendStates(deps, refs),
+    memoryProfilePaths(persons),
   ]);
   const activity = await readActivity(personMessageStores(deps), accountsByPerson);
 
@@ -103,28 +104,46 @@ async function serialize(
         latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
       };
     }),
-    memoryPath: memoryPathOf(person),
+    memoryPath: memoryPaths[i],
     ...activity.perPerson[i],
   }));
 }
 
+/** Where every memory profile lives, as the memory file browser addresses it.
+ *  `memory/relationship/BONDS.md` states the rule. */
+const RELATIONSHIP_DIR = "memory/relationship";
+
 /**
- * The memory profile written about a person, or null when none is.
+ * The profile written about each of these people, in the order given — the path
+ * where one exists, null where none does.
  *
- * Two ways a person's profile is addressed and one answer: the path stored on
- * the row where something wrote one — the guardian's, at onboarding — and
- * otherwise the convention every other profile is written under,
- * `memory/relationship/<id>.md` (`memory/relationship/BONDS.md` states it).
+ * One read of the relationship directory answers the whole listing, so this
+ * costs the same whether it is given one person or every one of them, like the
+ * reads above it.
  *
- * Answered only when the file is there. Creating a person writes no profile,
- * and the agent writes one when it has something to remember, so a path served
- * for a file nobody wrote is a link to nothing. That check is a stat of the
- * local profile dir — the one thing here that runs per person, and the reason
- * it is a stat rather than a read.
+ * A profile is named either way it can be: by the path stored on the row, which
+ * is how the guardian's is addressed, and otherwise by the person's id. Both
+ * name a file in this one directory — a stored path pointing anywhere else is
+ * not honored, because the dashboard opens what this answers under the memory
+ * root and a path from outside it would be a link the file browser cannot
+ * resolve.
+ *
+ * Answered only for a file that is there. Creating a person writes no profile —
+ * the agent writes one when it has something to remember — so a path served for
+ * a file nobody wrote is a link to nothing.
  */
-function memoryPathOf(person: PersonRow): string | null {
-  const path = person.profilePath || `memory/relationship/${person.id}.md`;
-  return existsSync(resolveProfileMemoryPath(path)) ? path : null;
+async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(string | null)[]> {
+  const written = new Set(
+    await readdir(resolveProfileMemoryPath(RELATIONSHIP_DIR)).catch(() => []),
+  );
+
+  return persons.map((person) => {
+    const stored = person.profilePath?.startsWith(`${RELATIONSHIP_DIR}/`)
+      ? person.profilePath.slice(RELATIONSHIP_DIR.length + 1)
+      : null;
+    const fileName = stored ?? `${person.id}.md`;
+    return written.has(fileName) ? `${RELATIONSHIP_DIR}/${fileName}` : null;
+  });
 }
 
 /**

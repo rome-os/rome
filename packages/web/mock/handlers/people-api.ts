@@ -88,6 +88,15 @@ function sendState(channel: string): AccountSendState {
 
 type PersonFixture = (typeof persons)[number];
 
+/**
+ * Who a memory profile has been written about — this store's stand-in for the
+ * relationship directory core reads to answer `memoryPath`.
+ *
+ * Not everyone, because nothing writes a profile when a person is created: both
+ * states the dossier's menu has to handle are on the fixtures.
+ */
+const MEMORY_PROFILES = new Set(["ray-oster", "mira-chen", "nadia-petrova"]);
+
 function personResource(person: PersonFixture): PersonResource {
   const entries = personTimeline(person.id) ?? [];
   return {
@@ -108,11 +117,7 @@ function personResource(person: PersonFixture): PersonResource {
     // history GET /api/people/:id/messages pages.
     messageCount: entries.length,
     latest: latestDynamic(entries),
-    // The convention core answers with for a profile that exists
-    // (`memory/relationship/<id>.md`). Every fixture has one: the mock serves
-    // no memory tree to check against, so the honest choice is the one that
-    // leaves the roster's link on screen to exercise.
-    memoryPath: `memory/relationship/${person.id}.md`,
+    memoryPath: MEMORY_PROFILES.has(person.id) ? `memory/relationship/${person.id}.md` : null,
   };
 }
 
