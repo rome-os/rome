@@ -123,10 +123,11 @@ const RELATIONSHIP_DIR = "memory/relationship";
  *
  * A profile is named either way it can be: by the path stored on the row, which
  * is how the guardian's is addressed, and otherwise by the person's id. Both
- * name a file in this one directory — a stored path pointing anywhere else is
- * not honored, because the dashboard opens what this answers under the memory
- * root and a path from outside it would be a link the file browser cannot
- * resolve.
+ * name a file in this one directory, and this one directory is all that is
+ * read, so a stored path pointing anywhere else is not looked for. Chasing one
+ * would put a check per person back; and a stored path outside `memory/`
+ * resolves against the project root, which is not somewhere the dashboard can
+ * open, since it opens what this answers under the memory root.
  *
  * Answered only for a file that is there. Creating a person writes no profile —
  * the agent writes one when it has something to remember — so a path served for
