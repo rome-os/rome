@@ -37,17 +37,12 @@ import type {
   SyncStatus,
 } from "@/lib/sync-api";
 import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
-import type {
-  BrowserFile,
-  HistoryEntry,
-  ResolveResult,
-  SearchResult,
-} from "@/components/file-browser/store/types";
-import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connections } from "./connections-store";
+import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
+import { memoryFileHandlers } from "./memory-files";
 import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
@@ -903,75 +898,30 @@ const sentinelLog = [
   },
 ];
 
-// Projects file-browser fixture. The tree endpoint returns the children of the
-// requested path (root when no `path` param), so directories carry their
-// children inline and the handler slices into this structure.
-const projectsTree: FileBrowserTreeNode[] = [
-  {
-    name: "demo-app",
-    path: "projects/demo-app",
-    type: "directory",
-    children: [
-      {
-        name: "src",
-        path: "projects/demo-app/src",
-        type: "directory",
-        children: [{ name: "index.ts", path: "projects/demo-app/src/index.ts", type: "file" }],
-      },
-      { name: "README.md", path: "projects/demo-app/README.md", type: "file" },
-      { name: "notes.txt", path: "projects/demo-app/notes.txt", type: "file" },
-    ],
-  },
-  {
-    name: "research",
-    path: "projects/research",
-    type: "directory",
-    children: [{ name: "papers.md", path: "projects/research/papers.md", type: "file" }],
-  },
-  { name: "todo.md", path: "projects/todo.md", type: "file" },
+// Projects file-browser fixture. `./file-browser.ts` serves it — the same
+// factory the memory dir goes through, since both are the same routes over a
+// different root.
+const mockBody = (path: string) =>
+  `# ${path.split("/").pop()}\n\nMock file content for the dashboard mock mode.\n`;
+
+const projectsTree: MockFsNode[] = [
+  dir("projects/demo-app", [
+    dir("projects/demo-app/src", [
+      file("projects/demo-app/src/index.ts", mockBody("projects/demo-app/src/index.ts")),
+    ]),
+    file("projects/demo-app/README.md", mockBody("projects/demo-app/README.md")),
+    file("projects/demo-app/notes.txt", mockBody("projects/demo-app/notes.txt")),
+  ]),
+  dir("projects/research", [
+    file("projects/research/papers.md", mockBody("projects/research/papers.md")),
+  ]),
+  file("projects/todo.md", mockBody("projects/todo.md")),
 ];
 
-function findTreeNode(nodes: FileBrowserTreeNode[], path: string): FileBrowserTreeNode | undefined {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    const match = node.children ? findTreeNode(node.children, path) : undefined;
-    if (match) return match;
-  }
-  return undefined;
-}
-
-function collectFiles(nodes: FileBrowserTreeNode[]): FileBrowserTreeNode[] {
-  return nodes.flatMap((node) =>
-    node.type === "file" ? [node] : collectFiles(node.children ?? []),
-  );
-}
-
-/**
- * The fixture nests every level inline, but the real /tree honors `depth` —
- * the store loads the root at depth 2 and each expanded folder at depth 1, so
- * serving the full subtree would make lazy-per-level loading untestable here.
- * A directory at the depth limit comes back with no `children` key at all,
- * which is what the store reads as "not loaded yet".
- */
-function trimToDepth(nodes: FileBrowserTreeNode[], depth: number): FileBrowserTreeNode[] {
-  return nodes.map((node) => {
-    if (node.type !== "directory") return node;
-    if (depth <= 1) {
-      const { children: _children, ...withoutChildren } = node;
-      return withoutChildren;
-    }
-    return { ...node, children: trimToDepth(node.children ?? [], depth - 1) };
-  });
-}
-
-const mockFile = (node: FileBrowserTreeNode): BrowserFile => ({
-  assetUrl: null,
-  content: `# ${node.name}\n\nMock file content for the dashboard mock mode.\n`,
-  editable: true,
-  kind: "text",
-  mimeType: "text/plain",
-  path: node.path,
-  size: 64,
+const projectFileHandlers = fileBrowserHandlers({
+  apiBasePath: "/api/projects",
+  logicalRoot: "projects",
+  tree: projectsTree,
 });
 
 /**
@@ -1167,6 +1117,10 @@ export const handlers = [
     const created: ProjectOption = { name: body.name, path: body.name };
     return HttpResponse.json(created);
   }),
+  // The Memory page's folder panel leads with this read, so an unhandled
+  // status leaves the landing view spinning on the dev proxy. Unlinked, which
+  // is the state a fresh instance is in and the one that offers Connect.
+  http.get("/api/sync/status", () => HttpResponse.json({ state: "unlinked" } satisfies SyncStatus)),
   http.get("/api/sync/sources", () => HttpResponse.json({ sources: syncSources })),
   http.get("/api/sync/groups", () => HttpResponse.json({ groups: syncGroups })),
   // The write half of the connect flow: picking an existing repo POSTs
@@ -1221,63 +1175,6 @@ export const handlers = [
     return HttpResponse.json(settings);
   }),
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
-  http.get("/api/projects/tree", ({ request }) => {
-    const params = new URL(request.url).searchParams;
-    const path = params.get("path");
-    const requestedDepth = Number(params.get("depth"));
-    const depth = Number.isFinite(requestedDepth) && requestedDepth > 0 ? requestedDepth : 1;
-    const nodes =
-      !path || path === "projects"
-        ? projectsTree
-        : (findTreeNode(projectsTree, path)?.children ?? []);
-    return HttpResponse.json(trimToDepth(nodes, depth));
-  }),
-  http.get("/api/projects/file", ({ request }) => {
-    const path = new URL(request.url).searchParams.get("path") ?? "";
-    const node = findTreeNode(projectsTree, path);
-    if (!node || node.type !== "file") {
-      return HttpResponse.json({ error: "not found" }, { status: 404 });
-    }
-    return HttpResponse.json(mockFile(node));
-  }),
-  // useUrlSelectionSync resolves the URL's path on load, so without this a
-  // deep link to a file 404s before anything renders.
-  http.get("/api/projects/resolve", ({ request }) => {
-    const path = new URL(request.url).searchParams.get("path") ?? "";
-    const node = findTreeNode(projectsTree, path);
-    if (!node) return HttpResponse.json({ type: "missing", path } satisfies ResolveResult);
-    if (node.type === "directory") {
-      return HttpResponse.json({ type: "directory", path: node.path } satisfies ResolveResult);
-    }
-    const { assetUrl, editable, kind, mimeType, size } = mockFile(node);
-    return HttpResponse.json({
-      type: "file",
-      path: node.path,
-      assetUrl,
-      editable,
-      kind,
-      mimeType,
-      size,
-    } satisfies ResolveResult);
-  }),
-  http.get("/api/projects/search", ({ request }) => {
-    const query = new URL(request.url).searchParams.get("q")?.toLowerCase() ?? "";
-    const results: SearchResult[] = query
-      ? collectFiles(projectsTree)
-          .filter((node) => node.path.toLowerCase().includes(query))
-          .map((node) => ({ content: mockFile(node).content ?? "", file: node.path, line: 1 }))
-      : [];
-    return HttpResponse.json(results);
-  }),
-  // The fixture tree has no git behind it, so history is legitimately empty.
-  http.get("/api/projects/history", () => HttpResponse.json([] as HistoryEntry[])),
-  // Keep the file-browser watch EventSource connected without emitting events.
-  http.get("/api/projects/events", () => {
-    const stream = new ReadableStream({ start() {} });
-    return new HttpResponse(stream, {
-      headers: { "Content-Type": "text/event-stream" },
-    });
-  }),
   http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
   http.get("/api/connections", () => HttpResponse.json(connections)),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
@@ -1349,4 +1246,8 @@ export const handlers = [
   ...routineHandlers,
   ...settingsHandlers,
   ...appKeysHandlers,
+  // The two file-browser surfaces, each an in-memory filesystem: the projects
+  // dir and the memory dir a person's dossier links into.
+  ...projectFileHandlers,
+  ...memoryFileHandlers,
 ];
