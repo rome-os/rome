@@ -148,11 +148,18 @@ export function extractClaudeLoginCode(raw: string): string {
 
 /**
  * Format a validated Claude OAuth code as terminal input for the Ink TUI.
- * Control characters are rejected during validation, so writing the sanitized
- * text plus carriage return is deterministic and cannot accidentally include
- * bracketed-paste sentinel bytes in the submitted code.
+ *
+ * The code rides inside a bracketed-paste envelope (`ESC[200~` … `ESC[201~`)
+ * followed by a carriage return. CLI 2.1.251's Ink "Paste code here" prompt
+ * treats a single burst of many characters as a paste and folds a trailing
+ * `\r` in that same burst into the pasted text instead of submitting — so a
+ * bare `${code}\r` write hangs for realistic (~130-char) codes while short
+ * ones happen to submit. The `ESC[201~` terminator ends the paste explicitly,
+ * so the following `\r` reads as a clean submit keypress regardless of length.
+ * Validation rejects control characters, so the code can never contain ESC and
+ * thus cannot forge the paste sentinels.
  */
 export function formatClaudeLoginCodeInput(raw: string): string {
   const code = extractClaudeLoginCode(raw);
-  return `${code}\r`;
+  return `\x1b[200~${code}\x1b[201~\r`;
 }
