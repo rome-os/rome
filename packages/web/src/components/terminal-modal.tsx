@@ -61,10 +61,17 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
   // One auth-status probe; flips authComplete when the desired state is reached.
   // Reused by the poll and by the PTY-exit handler — the process can exit the
   // instant login persists, before the next poll tick, so we re-check on exit.
+  //
+  // Re-probes via POST /ai-tools/refresh rather than reading GET /ai-tools/status.
+  // The cached status only refreshes when the PTY process exits or on the hourly
+  // timer, but `claude /login` on CLI 2.1.251 does not exit after a successful
+  // login (it drops into the interactive session), so a cached read would keep
+  // the dialog spinning on a login that already succeeded. The refresh runs the
+  // live `claude auth status` probe and returns the same provider-keyed shape.
   const checkAuthOnce = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await fetch("/api/ai-tools/status", { signal });
+        const res = await fetch("/api/ai-tools/refresh", { method: "POST", signal });
         const data = await res.json();
         const toolStatus = data[providerKey] as AIToolStatus | undefined;
         if (toolStatus?.loggedIn === true) setAuthComplete(true);
