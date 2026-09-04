@@ -261,6 +261,42 @@ describe("ChatTimelineRail", () => {
     expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
   });
 
+  it("repositions the show control when the track resizes while hidden", () => {
+    let fire: (() => void) | null = null;
+    const RealRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private readonly callback: () => void;
+
+      constructor(callback: () => void) {
+        this.callback = callback;
+        fire = callback;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {
+        if (fire === this.callback) fire = null;
+      }
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const { container } = renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+      expect(screen.getByRole("button", { name: "Hide timeline" }).style.top).toBe("214px");
+
+      fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
+      const track = container.querySelector<HTMLElement>("[data-timeline-track]");
+      expect(track).not.toBeNull();
+      Object.defineProperty(track, "clientHeight", { value: 200, configurable: true });
+
+      act(() => {
+        fire?.();
+        rs.advanceTimersByTime(200);
+      });
+      expect(screen.getByRole("button", { name: "Show timeline" }).style.top).toBe("64px");
+    } finally {
+      globalThis.ResizeObserver = RealRO;
+    }
+  });
+
   it("keeps watching while hidden with nothing to show", () => {
     // A hidden rail that measured nothing — too narrow, too short — must stay
     // subscribed, or becoming eligible later leaves no Show control until the

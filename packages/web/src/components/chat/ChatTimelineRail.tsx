@@ -75,8 +75,8 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     }
     let timer = 0;
 
-    /** Lays the question markers out, and reports whether there are any. */
-    const measure = (): boolean => {
+    /** Lays the question markers out. */
+    const measure = () => {
       const track = trackRef.current;
       // A zero-height track means the rail is CSS-hidden below its breakpoint,
       // where the sweep below can only ever produce nothing. Checking it first
@@ -91,7 +91,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
         })
       ) {
         setNodes((prev) => (prev.length === 0 ? prev : EMPTY));
-        return false;
+        return;
       }
       const next = layoutTimelineNodes(
         questions.map((question) => question.messageId),
@@ -101,7 +101,6 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
         },
       );
       setNodes((prev) => (sameNodes(prev, next) ? prev : next));
-      return next.length > 0;
     };
 
     const schedule = () => {
@@ -112,17 +111,11 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     // Always measure once, even while hidden: the node count is what decides
     // whether the show control renders at all, and skipping this would strand a
     // reader who hid the rail and then reloaded with no way to bring it back.
-    const anyNodes = measure();
-    // With markers to keep, a hidden column has nothing left to stay in sync with,
-    // and a streaming reply would otherwise drive a layout flush plus a
-    // re-render every debounce tick for something not on screen. Unhiding
-    // re-runs this effect, so the markers are measured fresh when they return.
-    //
-    // With NO markers the observer has to stay: the rail may still become eligible
-    // — a wider viewport, a transcript that grows past two screens — and the
-    // show control has to appear when it does rather than waiting for the next
-    // message or a reload.
-    if (hidden && anyNodes) return () => window.clearTimeout(timer);
+    measure();
+    // The observer stays active while markers are hidden. The show control is
+    // positioned from the first node, so a resized track must update that node
+    // to keep the control reachable. It also lets an ineligible transcript grow
+    // into a timeline without waiting for another message or a reload.
 
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
