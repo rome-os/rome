@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rome build && mkdir -p dist/web/assets && cp src/web/assets/rome-logo-2.mp4 dist/web/assets/rome-logo-2.mp4",
+    "build": "rome build",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
   },

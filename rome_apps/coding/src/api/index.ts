@@ -5,7 +5,7 @@ import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome
 // Mocks ship alongside the compiled API module: `dist/api/index.js` and
 // `dist/mocks/`. Resolve against import.meta.url so it works wherever the app
 // is installed.
-const MOCKS_DIR = new URL("../mocks/", import.meta.url);
+const MOCKS_DIR = new URL(/* rspackIgnore: true */ "../mocks/", import.meta.url);
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/i;
 

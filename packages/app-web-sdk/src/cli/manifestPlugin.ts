@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Chunk, Compilation, Compiler, RspackPluginInstance } from "@rspack/core";
+import type { Rspack } from "@rslib/core";
 
 export interface ManifestPluginOptions {
   displayName: string;
@@ -8,10 +8,10 @@ export interface ManifestPluginOptions {
 
 const PLUGIN_NAME = "RomeAppManifestPlugin";
 
-export class RomeAppManifestPlugin implements RspackPluginInstance {
+export class RomeAppManifestPlugin implements Rspack.RspackPluginInstance {
   constructor(private readonly options: ManifestPluginOptions) {}
 
-  apply(compiler: Compiler): void {
+  apply(compiler: Rspack.Compiler): void {
     const { webpack } = compiler;
     const { sources } = webpack;
 
@@ -62,13 +62,17 @@ export class RomeAppManifestPlugin implements RspackPluginInstance {
   }
 }
 
-function findEntryChunk(compilation: Compilation): Chunk | null {
-  for (const chunk of compilation.chunks) {
-    if (chunk.canBeInitial()) {
-      return chunk;
-    }
-  }
-  return null;
+function findEntryChunk(compilation: Rspack.Compilation): Rspack.Chunk | null {
+  // Runtime chunks also satisfy canBeInitial(), and cached builds can change
+  // compilation.chunks iteration order. Match the group's entry chunk so
+  // manifest.entry cannot select a runtime file.
+  return (
+    [...compilation.chunks].find((chunk) =>
+      [...chunk.groupsIterable].some(
+        (group) => group.isInitial() && group.getEntrypointChunk() === chunk,
+      ),
+    ) ?? null
+  );
 }
 
 function pickJsFile(files: ReadonlySet<string>): string | null {
@@ -80,13 +84,13 @@ function pickJsFile(files: ReadonlySet<string>): string | null {
   return null;
 }
 
-function collectStyles(compilation: Compilation): string[] {
+function collectStyles(compilation: Rspack.Compilation): string[] {
   return Object.keys(compilation.assets)
     .filter((name) => name.endsWith(".css"))
     .sort();
 }
 
-function hashAssets(compilation: Compilation): string {
+function hashAssets(compilation: Rspack.Compilation): string {
   const hash = createHash("sha256");
   const names = Object.keys(compilation.assets).sort();
   for (const name of names) {

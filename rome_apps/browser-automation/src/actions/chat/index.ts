@@ -9,12 +9,18 @@ import {
 } from "@rome-os/app-runtime/browser";
 import { acquireChatGPTClipboardLock } from "./clipboard_lock.js";
 
-const CHAT_SCRIPT_URL = new URL("./scraping_scripts/chat_action.js", import.meta.url);
-const CHECK_RESPONSE_COMPLETE_SCRIPT_URL = new URL(
-  "./scraping_scripts/check_response_complete.js",
+const CHAT_SCRIPT_URL = new URL(
+  /* rspackIgnore: true */ "./scraping_scripts/chat_action.js",
   import.meta.url,
 );
-const COPY_RESPONSE_SCRIPT_URL = new URL("./scraping_scripts/copy_response.js", import.meta.url);
+const CHECK_RESPONSE_COMPLETE_SCRIPT_URL = new URL(
+  /* rspackIgnore: true */ "./scraping_scripts/check_response_complete.js",
+  import.meta.url,
+);
+const COPY_RESPONSE_SCRIPT_URL = new URL(
+  /* rspackIgnore: true */ "./scraping_scripts/copy_response.js",
+  import.meta.url,
+);
 const execFile = promisify(execFileCallback);
 const CLIPBOARD_POST_COPY_CONFIRMED_DELAY_MS = 100;
 const CLIPBOARD_SETTLE_DELAY_MS = 350;

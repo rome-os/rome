@@ -15,8 +15,14 @@ import {
   openDiscoveredPageSession,
 } from "@rome-os/app-runtime/browser";
 
-const IMAGE_GENERATION_SCRIPT_URL = new URL("./scraping_scripts/image_action.js", import.meta.url);
-const IMAGE_DOWNLOAD_SCRIPT_URL = new URL("./scraping_scripts/image_download.js", import.meta.url);
+const IMAGE_GENERATION_SCRIPT_URL = new URL(
+  /* rspackIgnore: true */ "./scraping_scripts/image_action.js",
+  import.meta.url,
+);
+const IMAGE_DOWNLOAD_SCRIPT_URL = new URL(
+  /* rspackIgnore: true */ "./scraping_scripts/image_download.js",
+  import.meta.url,
+);
 const DEFAULT_PAGE_URL = "https://chatgpt.com/";
 const THREADS_PROJECTS_ROOT = "/home/user";
 const PAGE_READY_TIMEOUT_MS = 20_000;

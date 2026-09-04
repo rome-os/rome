@@ -42,7 +42,7 @@
   },
   "dependencies": {
     "@rsbuild/plugin-react": "^2.0.0",
-    "@rslib/core": "^0.21.3",
+    "@rslib/core": "^1.0.0",
     "@tailwindcss/postcss": "^4.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -56,7 +56,6 @@
     "yaml": "^2.8.0"
   },
   "devDependencies": {
-    "@rspack/core": "^2.0.0",
     "@types/node": "^25.2.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

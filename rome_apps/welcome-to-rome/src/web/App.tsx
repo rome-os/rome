@@ -20,8 +20,9 @@ import "@/scout-suggestions";
 import "@/completion-card";
 
 // The animated Rome brand mark. Resolved relative to this module so it works
-// from the app's asset base at runtime; the build script copies it into
-// dist/web/assets/ and it's tracked via Git LFS (.gitattributes `*.mp4`).
+// from the app's asset base at runtime; Rslib emits it to
+// `dist/web/static/media/rome-logo-2.mp4`, and it's tracked via Git LFS
+// (.gitattributes `*.mp4`).
 const ROME_LOGO_VIDEO = new URL("./assets/rome-logo-2.mp4", import.meta.url).href;
 const FALLBACK_AGENT_NAME = "Rome";
 
