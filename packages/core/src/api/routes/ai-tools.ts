@@ -80,6 +80,17 @@ export function aiToolsRoutes(
     }
   });
 
+  // Auth-only Claude re-probe for the login dialog's completion poll — avoids
+  // the full refresh's unrelated Codex and usage probes so a slow one can never
+  // stall login detection.
+  app.post("/ai-tools/claude/auth-check", async (c) => {
+    try {
+      return c.json(await deps.aiToolState.refreshClaudeAuth());
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Auth check failed" }, 500);
+    }
+  });
+
   app.get("/ai-tools/anthropic-compatible-providers", async (c) => {
     const [credentials, revoked] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(deps.settingsRepo),

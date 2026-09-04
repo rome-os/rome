@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe("TerminalModal Claude login completion", () => {
-  it("detects a completed login by re-probing POST /ai-tools/refresh, not the cached status", async () => {
+  it("detects a completed login by re-probing the Claude auth-only endpoint, not cached status", async () => {
     rs.useFakeTimers();
     (globalThis as unknown as { WebSocket: typeof MockWebSocket }).WebSocket = MockWebSocket;
 
@@ -45,7 +45,7 @@ describe("TerminalModal Claude login completion", () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
       calls.push({ url, method: init?.method ?? "GET" });
-      if (url === "/api/ai-tools/refresh") {
+      if (url === "/api/ai-tools/claude/auth-check") {
         return Response.json({ claude: { loggedIn: true }, codex: { loggedIn: false } });
       }
       throw new Error(`unexpected request: ${url}`);
@@ -64,11 +64,12 @@ describe("TerminalModal Claude login completion", () => {
       await rs.advanceTimersByTimeAsync(2000);
     });
 
-    const refreshCalls = calls.filter((c) => c.url === "/api/ai-tools/refresh");
-    expect(refreshCalls.length).toBeGreaterThan(0);
-    expect(refreshCalls.every((c) => c.method === "POST")).toBe(true);
-    // The cached status endpoint must not be the completion signal.
+    const probeCalls = calls.filter((c) => c.url === "/api/ai-tools/claude/auth-check");
+    expect(probeCalls.length).toBeGreaterThan(0);
+    expect(probeCalls.every((c) => c.method === "POST")).toBe(true);
+    // Neither the cached status nor the broad refresh is the completion signal.
     expect(calls.some((c) => c.url === "/api/ai-tools/status")).toBe(false);
+    expect(calls.some((c) => c.url === "/api/ai-tools/refresh")).toBe(false);
 
     // Success lands, then the dialog closes itself after the success beat.
     await act(async () => {

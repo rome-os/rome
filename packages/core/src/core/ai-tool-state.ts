@@ -32,6 +32,13 @@ export interface AIToolStateValue {
 export interface AIToolState {
   get(): AIToolStateValue;
   refresh(provider?: AIToolProviderId): Promise<AIToolStateValue>;
+  /**
+   * Re-probe only Claude's auth status (not usage, not Codex) and return the
+   * updated state. The login dialog polls this to detect a completed sign-in:
+   * the full {@link refresh} awaits both providers' status and usage probes, so
+   * an unrelated slow Codex request could otherwise stall login detection.
+   */
+  refreshClaudeAuth(): Promise<AIToolStateValue>;
   markAuthRevoked(provider: AIToolProviderId): Promise<void>;
   markQuotaExhausted(provider: AIToolProviderId): void;
   close(): void;
@@ -145,6 +152,10 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
   // provider-scoped promise lets full refreshes and targeted refreshes share
   // exactly the work they overlap on.
   const refreshesInFlight = new Map<AIToolProviderId, Promise<void>>();
+  // Single-flight for the auth-only Claude probe (the login-dialog poll). Kept
+  // separate from refreshesInFlight so it never satisfies a full refresh that
+  // also needs usage.
+  let claudeAuthInFlight: Promise<void> | null = null;
   const refreshProviderLocked = (provider: AIToolProviderId): Promise<void> => {
     const existing = refreshesInFlight.get(provider);
     if (existing) return existing;
@@ -168,6 +179,17 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       } else {
         await Promise.all([refreshProviderLocked("openai"), refreshProviderLocked("anthropic")]);
       }
+      return state.get();
+    },
+    async refreshClaudeAuth() {
+      if (!claudeAuthInFlight) {
+        claudeAuthInFlight = (async () => {
+          applyStatus(value.claude, await probes.claudeStatus());
+        })().finally(() => {
+          claudeAuthInFlight = null;
+        });
+      }
+      await claudeAuthInFlight;
       return state.get();
     },
     async markAuthRevoked(provider) {

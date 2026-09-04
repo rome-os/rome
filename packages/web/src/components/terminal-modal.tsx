@@ -62,16 +62,18 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
   // Reused by the poll and by the PTY-exit handler — the process can exit the
   // instant login persists, before the next poll tick, so we re-check on exit.
   //
-  // Re-probes via POST /ai-tools/refresh rather than reading GET /ai-tools/status.
-  // The cached status only refreshes when the PTY process exits or on the hourly
-  // timer, but `claude /login` on CLI 2.1.251 does not exit after a successful
-  // login (it drops into the interactive session), so a cached read would keep
-  // the dialog spinning on a login that already succeeded. The refresh runs the
-  // live `claude auth status` probe and returns the same provider-keyed shape.
+  // Re-probes via POST /ai-tools/claude/auth-check rather than reading GET
+  // /ai-tools/status. The cached status only refreshes when the PTY process
+  // exits or on the hourly timer, but `claude /login` on CLI 2.1.251 does not
+  // exit after a successful login (it drops into the interactive session), so a
+  // cached read would keep the dialog spinning on a login that already
+  // succeeded. This endpoint runs only the live Claude auth probe — not usage or
+  // Codex — so an unrelated slow probe can never stall login detection. It
+  // returns the same provider-keyed shape as the status endpoint.
   const checkAuthOnce = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await fetch("/api/ai-tools/refresh", { method: "POST", signal });
+        const res = await fetch("/api/ai-tools/claude/auth-check", { method: "POST", signal });
         const data = await res.json();
         const toolStatus = data[providerKey] as AIToolStatus | undefined;
         if (toolStatus?.loggedIn === true) setAuthComplete(true);
@@ -82,14 +84,22 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
     [providerKey],
   );
 
-  // Poll auth status while the session is live.
+  // Poll auth status while the session is live. Each tick is scheduled only
+  // after the previous probe settles, so a slow probe cannot pile requests up.
   useEffect(() => {
     if (status !== "connected") return;
     const controller = new AbortController();
-    const interval = setInterval(() => checkAuthOnce(controller.signal), POLL_INTERVAL_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    const tick = async () => {
+      await checkAuthOnce(controller.signal);
+      if (!cancelled) timer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+    timer = setTimeout(tick, POLL_INTERVAL_MS);
     return () => {
+      cancelled = true;
       controller.abort();
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
     };
   }, [status, checkAuthOnce]);
 

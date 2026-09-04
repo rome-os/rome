@@ -53,6 +53,28 @@ describe("AIToolState", () => {
     });
   });
 
+  it("refreshClaudeAuth re-probes only Claude auth, not Codex or usage", async () => {
+    const codexStatus = rs.fn(async () => ({ loggedIn: true, authMode: "chatgpt" as const }));
+    const claudeUsage = rs.fn(async () => null);
+    let claudeLoggedIn = false;
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus,
+        claudeUsage,
+        claudeStatus: async () => ({ loggedIn: claudeLoggedIn, authMethod: "claude.ai" }),
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    claudeLoggedIn = true;
+    const result = await state.refreshClaudeAuth();
+
+    expect(result.claude.loggedIn).toBe(true);
+    expect(codexStatus).not.toHaveBeenCalled();
+    expect(claudeUsage).not.toHaveBeenCalled();
+  });
+
   it("allows Sol and Luna for API-key authentication", async () => {
     const state = createAIToolState({
       probes: probes({
