@@ -1688,15 +1688,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               480px on this column, so a gate keyed to it would show the rail at
               widths where the transcript has no gutter left. */}
           <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
-            {/* The right inset opens the timeline rail's lane. Without it the
+            {/* The left inset opens the timeline rail's lane. Without it the
                 transcript's own `max-w-5xl` body reaches the container edge
-                once the container drops under 1024px, and the dots would land
+                once the container drops under 1024px, and the markers would land
                 on the bubbles. Padding sits inside the scroller's border box,
                 so the scrollbar does not move — only the content shifts. The
                 query MUST match ChatTimelineRail's visibility gate. */}
             <div
               ref={attachScroller}
-              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pr-8"
+              className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
             >
               <MessageList
                 rows={rows}
