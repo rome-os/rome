@@ -89,16 +89,16 @@ const en = {
     },
   ],
   introQuestion: {
-    id: "helpFirst",
-    question: "What would you love help with first?",
+    id: "weekLooksLike",
+    question: "Which of these sounds most like your week?",
     type: "single",
     freeText: true,
     options: [
-      "Email & messages",
-      "Research & summaries",
-      "Writing & content",
-      "Scheduling & reminders",
-      "Building little tools",
+      "Hunting through email for one detail",
+      "Twelve tabs open, none of them read",
+      "Staring at an empty document",
+      "Trying to remember what I promised whom",
+      "Copying the same numbers between two places",
     ],
   },
   scouts: {

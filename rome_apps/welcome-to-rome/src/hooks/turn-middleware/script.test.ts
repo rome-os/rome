@@ -129,7 +129,7 @@ describe("runTurn — connect an AI", () => {
     expect(reply).toMatchObject({ kind: "ask" });
     if (reply.kind === "ask") {
       expect(reply.questions).toHaveLength(1);
-      expect(reply.questions[0]).toMatchObject({ id: "helpFirst" });
+      expect(reply.questions[0]).toMatchObject({ id: "weekLooksLike" });
     }
     expect(getRow().node).toBe("await_question");
     expect(getRow().aiConnected).toBe(true);
@@ -160,7 +160,9 @@ describe("runTurn — the one question", () => {
     const { fx, getRow } = makeEffects("await_question", { aiConnected: false });
 
     const reply = await runTurn(
-      resolution({ answers: [{ questionId: "helpFirst", value: "Research & summaries" }] }),
+      resolution({
+        answers: [{ questionId: "weekLooksLike", value: "Twelve tabs open, none of them read" }],
+      }),
       fx,
     );
 
@@ -170,7 +172,9 @@ describe("runTurn — the one question", () => {
       expect.arrayContaining([expect.objectContaining({ title: "Mood diary" })]),
     );
     // The raw answer stays for a later fold.
-    expect(getRow().introRawInput).toBe("Wants help with first: Research & summaries");
+    expect(getRow().introRawInput).toBe(
+      "Where their week gets stuck: Twelve tabs open, none of them read",
+    );
     expect(getRow().node).toBe("await_idea");
   });
 
@@ -183,13 +187,15 @@ describe("runTurn — the one question", () => {
     );
 
     const reply = await runTurn(
-      resolution({ answers: [{ questionId: "helpFirst", value: "Research & summaries" }] }),
+      resolution({
+        answers: [{ questionId: "weekLooksLike", value: "Twelve tabs open, none of them read" }],
+      }),
       fx,
     );
 
     expect(fx.summon).toHaveBeenCalledWith(
       "welcome-memory",
-      expect.stringContaining("Research & summaries"),
+      expect.stringContaining("Twelve tabs open, none of them read"),
     );
     // A research basis offers scouts before the brainstorm.
     expect(reply).toMatchObject({ componentId: "scout-suggestions" });
@@ -205,7 +211,7 @@ describe("runTurn — the one question", () => {
     expect(reply.kind).toBe("ask");
     if (reply.kind === "ask") {
       expect(reply.lead).toBe("只问一个问题，然后我们就开始做点东西：");
-      expect(reply.questions[0]).toMatchObject({ question: "最想先获得哪方面的帮助？" });
+      expect(reply.questions[0]).toMatchObject({ question: "下面哪个最像你的一周？" });
     }
   });
 

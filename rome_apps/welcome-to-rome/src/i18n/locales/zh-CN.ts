@@ -83,11 +83,17 @@ const zhCN = {
     },
   ],
   introQuestion: {
-    id: "helpFirst",
-    question: "最想先获得哪方面的帮助？",
+    id: "weekLooksLike",
+    question: "下面哪个最像你的一周？",
     type: "single",
     freeText: true,
-    options: ["邮件与消息", "调研与摘要", "写作与内容", "日程与提醒", "构建小工具"],
+    options: [
+      "在邮件里翻找一条信息",
+      "开了十几个标签页，一个都没看完",
+      "对着空白文档发呆",
+      "想不起来答应过谁什么事",
+      "在两个地方之间反复复制同样的数字",
+    ],
   },
   scouts: {
     templates: [

@@ -98,10 +98,13 @@ function memoryPrompt(source: string, locale: WelcomeLocale): string {
   ].join("\n");
 }
 
-/** Render the answer into a readable line for the memory agent. A blank
- *  answer yields an empty string. */
-function formatAnswers(answers: Record<string, string>): string {
-  return answers.helpFirst ? `Wants help with first: ${answers.helpFirst}` : "";
+/** Render the answer into a readable line for the memory agent. The key comes
+ *  from the same locale entry that built the card, so renaming the question
+ *  cannot desync the read from the write. A blank answer yields an empty
+ *  string. */
+function formatAnswers(answers: Record<string, string>, locale: WelcomeLocale): string {
+  const value = answers[introQuestionFor(locale).id]?.trim();
+  return value ? `Where their week gets stuck: ${value}` : "";
 }
 
 function ideasBrief(basis: string, locale: WelcomeLocale): string {
@@ -246,7 +249,7 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       if (!answers) {
         return introQuestion(language);
       }
-      const source = formatAnswers(answers);
+      const source = formatAnswers(answers, locale);
       if (source) {
         fx.progress.patch({ introRawInput: source });
         if (p.aiConnected) await foldMemory(fx, source, language);
