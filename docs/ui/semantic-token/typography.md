@@ -21,7 +21,7 @@ Each role names what the text is, never a size or a look. The roster covers a he
 - `text-display` — Used for the one hero moment on a screen, such as the home greeting. Not used for a second element on the same screen.
 - `text-title` — Used for the heading a page or dialog carries once, at the top. Not used for a section inside one.
 - `text-section` — Used for the heading of a section, card, or panel inside a surface. Not used for a single control's label.
-- `text-body` — Used for prose someone reads as content: chat messages, paragraphs, text typed into a field. Not used for controls or labels. A field on the 28px control step is the single exception and reads `text-ui`; see Constraints.
+- `text-body` — Used for prose someone reads as content: chat messages, paragraphs, text typed into a field. Not used for controls or labels. A field on the 28px control step is the single exception and reads `text-ui`. Constraints covers why.
 - `text-ui` — Used for controls: sidebar rows, menu items, buttons, tabs, their labels, and both rows of a compact callout such as an alert. Not used for prose.
 - `text-badge` — Used for text inside a compact labeled container: chips, tags, badges, status pills, and counters. Not used for metadata that annotates other content, which stays `text-aux`.
 - `text-aux` — Used for metadata that annotates other content: timestamps, uncontained counts, group headers, and captions. Not used for compact labeled containers. A column of times or counts adds `tabular-nums`.
