@@ -53,6 +53,34 @@ describe("AIToolState", () => {
     });
   });
 
+  it("does not let a stale auth-only probe overwrite a newer Claude revocation", async () => {
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    const state = createAIToolState({
+      probes: probes({
+        // The in-flight probe carries a pre-revocation "logged in" answer.
+        claudeStatus: async () => {
+          await statusGate;
+          return { loggedIn: true, authMethod: "claude.ai" };
+        },
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const authProbe = state.refreshClaudeAuth();
+    // Revocation is the newer truth; it must wait for the in-flight status writer.
+    const revoke = state.markAuthRevoked("anthropic");
+
+    releaseStatus();
+    await Promise.all([authProbe, revoke]);
+
+    expect(state.get().claude.loggedIn).toBe(false);
+    expect(state.get().claude.needsReauth).toBe(true);
+  });
+
   it("refreshClaudeAuth re-probes only Claude auth, not Codex or usage", async () => {
     const codexStatus = rs.fn(async () => ({ loggedIn: true, authMode: "chatgpt" as const }));
     const claudeUsage = rs.fn(async () => null);

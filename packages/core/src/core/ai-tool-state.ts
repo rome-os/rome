@@ -118,13 +118,29 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     claude: { quotaExhausted: false },
   };
 
+  // Single-flight for the Claude auth-status probe, shared by the full Anthropic
+  // refresh and the auth-only login poll so their writes to `value.claude` are
+  // one ordered writer, and `markAuthRevoked` can drain them as a unit. Usage
+  // stays independent (only the full refresh reads it).
+  let claudeStatusInFlight: Promise<void> | null = null;
+  const refreshClaudeStatusLocked = (): Promise<void> => {
+    if (!claudeStatusInFlight) {
+      claudeStatusInFlight = (async () => {
+        applyStatus(value.claude, await probes.claudeStatus());
+      })().finally(() => {
+        claudeStatusInFlight = null;
+      });
+    }
+    return claudeStatusInFlight;
+  };
+
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
-      const [status, usage] = await Promise.allSettled([
-        probes.claudeStatus(),
+      // Status rides the shared single-flight; usage runs alongside it.
+      const [, usage] = await Promise.allSettled([
+        refreshClaudeStatusLocked(),
         probes.claudeUsage(),
       ]);
-      if (status.status === "fulfilled") applyStatus(value.claude, status.value);
       if (claudeUsesApiKey(value.claude)) {
         // Do not leak a stale Claude OAuth usage cache into API-key auth.
         value.claude.quotaExhausted = false;
@@ -152,10 +168,6 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
   // provider-scoped promise lets full refreshes and targeted refreshes share
   // exactly the work they overlap on.
   const refreshesInFlight = new Map<AIToolProviderId, Promise<void>>();
-  // Single-flight for the auth-only Claude probe (the login-dialog poll). Kept
-  // separate from refreshesInFlight so it never satisfies a full refresh that
-  // also needs usage.
-  let claudeAuthInFlight: Promise<void> | null = null;
   const refreshProviderLocked = (provider: AIToolProviderId): Promise<void> => {
     const existing = refreshesInFlight.get(provider);
     if (existing) return existing;
@@ -182,21 +194,17 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       return state.get();
     },
     async refreshClaudeAuth() {
-      if (!claudeAuthInFlight) {
-        claudeAuthInFlight = (async () => {
-          applyStatus(value.claude, await probes.claudeStatus());
-        })().finally(() => {
-          claudeAuthInFlight = null;
-        });
-      }
-      await claudeAuthInFlight;
+      await refreshClaudeStatusLocked();
       return state.get();
     },
     async markAuthRevoked(provider) {
       // A status probe that started before the provider rejected its credential
-      // may still hold the old "logged in" answer. Let that work drain first,
-      // then make the runtime failure the newest authoritative observation.
-      await refreshesInFlight.get(provider);
+      // may still hold the old "logged in" answer. Let every such writer drain
+      // first — both the full refresh and the shared Claude-status probe (the
+      // login poll) — then make the runtime failure the newest observation.
+      const draining: Array<Promise<void> | undefined> = [refreshesInFlight.get(provider)];
+      if (provider === "anthropic") draining.push(claudeStatusInFlight ?? undefined);
+      await Promise.all(draining);
       const target = provider === "openai" ? value.codex : value.claude;
       target.loggedIn = false;
       target.needsReauth = true;
