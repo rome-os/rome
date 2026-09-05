@@ -201,6 +201,14 @@ export interface DynamicToolSpec {
   deferLoading?: boolean;
 }
 
+/** Remove fields accepted only by thread/start before resume/fork requests. */
+export function toThreadConfigurationOverrides(
+  config: ThreadStartParams,
+): ThreadConfigurationOverrides {
+  const { dynamicTools: _dynamicTools, historyMode: _historyMode, ...overrides } = config;
+  return overrides;
+}
+
 export interface DynamicToolCallParams {
   threadId: string;
   turnId: string;
@@ -277,6 +285,7 @@ export const Method = {
   threadResume: "thread/resume",
   threadFork: "thread/fork",
   threadRevert: "thread/revert",
+  threadTurnsList: "thread/turns/list",
   threadUnsubscribe: "thread/unsubscribe",
   turnStart: "turn/start",
   turnSteer: "turn/steer",

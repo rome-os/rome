@@ -55,10 +55,17 @@ rs.mock("./codex/app-server-client.js", () => ({
       request: async (method: string, params: unknown) => {
         const result = await requestMock(method, params);
         if (method === "thread/start" && !(result as { thread?: unknown } | undefined)?.thread) {
-          return { thread: { id: captured.lastStartedThreadId ?? "thr-1" } };
+          return {
+            thread: {
+              id: captured.lastStartedThreadId ?? "thr-1",
+              historyMode: (params as { historyMode?: unknown }).historyMode ?? null,
+            },
+          };
         }
         if (method === "thread/resume" && !(result as { thread?: unknown } | undefined)?.thread) {
-          return { thread: { id: (params as { threadId: string }).threadId } };
+          return {
+            thread: { id: (params as { threadId: string }).threadId, historyMode: "paginated" },
+          };
         }
         return result;
       },
@@ -582,6 +589,49 @@ describe("CodexAppServerProvider", () => {
     );
     expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
     expect(fork.providerThreadId).toBe("continuable-fork-thread");
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("uses a native fork when a resumed source still has legacy history", async () => {
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/resume") {
+        const threadId = (requestParams as { threadId: string }).threadId;
+        return {
+          thread: {
+            id: threadId,
+            historyMode: threadId === "legacy-source" ? "legacy" : "paginated",
+          },
+        };
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "legacy-child", historyMode: "paginated" } };
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({
+        sessionId: "source-session",
+        isNewSession: false,
+        providerThreadId: "legacy-source",
+      }),
+    );
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({ threadId: "legacy-source" }),
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
+    expect(fork.providerThreadId).toBe("legacy-child");
 
     await forkSession.close();
     await source.close();

@@ -46,12 +46,12 @@ import {
   Notify,
   isAgentMessageItem,
   isReasoningItem,
+  toThreadConfigurationOverrides,
   type ItemCompletedNotification,
   type ItemStartedNotification,
   type AgentMessageDeltaNotification,
   type MessagePhase,
   type ReasoningEffort,
-  type ThreadConfigurationOverrides,
   type ThreadForkParams,
   type ThreadItem,
   type ThreadRevertParams,
@@ -124,12 +124,6 @@ function buildThreadConfig(
     historyMode: "paginated",
     dynamicTools: romeTools.definitions.length > 0 ? [...romeTools.definitions] : null,
   };
-}
-
-/** Strip thread/start-only fields before calling thread/fork. */
-function buildThreadForkOverrides(config: ThreadStartParams): ThreadConfigurationOverrides {
-  const { dynamicTools: _dynamicTools, historyMode: _historyMode, ...overrides } = config;
-  return overrides;
 }
 
 /** commentary → "commentary"; final_answer → "final"; null/absent → undefined
@@ -732,11 +726,12 @@ export class CodexAppServerProvider implements ModelProvider {
 
     const threadConfig = buildThreadConfig(params, modelName, romeTools);
 
-    threadId = await this.appServerManager.openThread(
+    const openedThread = await this.appServerManager.openThread(
       threadConfig,
       binding,
       params.isNewSession === false ? params.providerThreadId : undefined,
     );
+    threadId = openedThread.threadId;
     session.providerThreadId = threadId;
 
     const sourceRuntime: CodexTurnRuntime = {
@@ -1035,7 +1030,10 @@ export class CodexAppServerProvider implements ModelProvider {
           // persisted must take the native path instead, whatever it costs in
           // uncached prefix. Every other fork keeps the cheap path.
           const borrowSourceThread =
-            mode === "ephemeral" && compatibility.eligible && targetIsCurrentHead;
+            mode === "ephemeral" &&
+            compatibility.eligible &&
+            targetIsCurrentHead &&
+            openedThread.historyMode === "paginated";
           log.info("codex fork strategy selected", {
             strategy: borrowSourceThread ? "borrow_source_thread" : "native_thread_fork",
             configurationMode: forkParams.configurationMode,
@@ -1044,6 +1042,7 @@ export class CodexAppServerProvider implements ModelProvider {
             sameModel: compatibility.sameModel,
             sameSystemPrompt: compatibility.sameSystemPrompt,
             sameWorkingDir: compatibility.sameWorkingDir,
+            sourceHistoryMode: openedThread.historyMode,
           });
 
           if (borrowSourceThread) {
@@ -1111,7 +1110,7 @@ export class CodexAppServerProvider implements ModelProvider {
             const nativeForkParams: ThreadForkParams = {
               threadId: source,
               ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
-              ...buildThreadForkOverrides(forkThreadConfig),
+              ...toThreadConfigurationOverrides(forkThreadConfig),
               ephemeral: false,
             };
             return await this.appServerManager.requestForThread<
