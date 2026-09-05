@@ -29,6 +29,19 @@ describe("control typography roles", () => {
     expect(screen.getByRole("button", { name: "Close" }).classList).toContain("text-ui");
   });
 
+  // The 28px step is the roster's one field exception: it sits in a compact row
+  // beside a Button and a SelectTrigger already on UI, so it reads UI too. The
+  // negative half matters as much as the positive — the role lives in the base
+  // class and is displaced by tailwind-merge, not replaced at the source, so a
+  // regression shows up as both roles surviving rather than as the wrong one.
+  it("uses UI for a text field on the 28px step", () => {
+    render(<Input aria-label="Filter" size="sm" />);
+
+    const classes = screen.getByRole("textbox", { name: "Filter" }).classList;
+    expect(classes).toContain("text-ui");
+    expect(classes).not.toContain("text-body");
+  });
+
   it("uses Body for text fields at every viewport width", () => {
     render(
       <>
