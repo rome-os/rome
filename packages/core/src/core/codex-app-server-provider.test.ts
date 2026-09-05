@@ -904,8 +904,8 @@ describe("CodexAppServerProvider", () => {
     await forkSession.sendUserInput({ text: "feedback" });
     const msgs = await collected;
 
-    // Retried once, then gave up.
-    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
+    // Revert is not idempotent, so a failed request is not retried.
+    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(1);
     // The fork never observes success while its turn is still in the source.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({

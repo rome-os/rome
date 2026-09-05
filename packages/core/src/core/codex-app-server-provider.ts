@@ -1058,35 +1058,32 @@ export class CodexAppServerProvider implements ModelProvider {
               revertTurn: async (threadIdToRevert, beforeTurnId) => {
                 // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain
-                // turn error. An error response means the revert was not
-                // applied (stdio JSON-RPC; a response is only lost when the
-                // process died, and then the retry rejects locally without
-                // re-sending), so one retry is idempotent at the same boundary.
-                let lastMessage = "unknown error";
-                for (let attempt = 1; attempt <= 2; attempt++) {
-                  try {
-                    const revertParams: ThreadRevertParams = {
-                      threadId: threadIdToRevert,
-                      beforeTurnId,
-                    };
-                    await this.appServerManager.requestForThread(
-                      threadIdToRevert,
-                      Method.threadRevert,
-                      revertParams,
-                    );
-                    return;
-                  } catch (err) {
-                    lastMessage = err instanceof Error ? err.message : String(err);
-                    log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
-                  }
+                // turn error. Do not retry: thread/revert is boundary-based,
+                // not idempotent (the boundary turn disappears on success),
+                // so a lost response leaves the source state uncertain.
+                const revertParams: ThreadRevertParams = {
+                  threadId: threadIdToRevert,
+                  beforeTurnId,
+                };
+                try {
+                  await this.appServerManager.requestForThread(
+                    threadIdToRevert,
+                    Method.threadRevert,
+                    revertParams,
+                  );
+                  return;
+                } catch (err) {
+                  const lastMessage = err instanceof Error ? err.message : String(err);
+                  log.warn("codex exact-fork revert failed", { error: lastMessage });
+                  // The fork's turn is now permanently part of the source
+                  // thread, or its state is uncertain after a transport loss.
+                  // Poison the session so nothing resumes from potentially
+                  // contaminated history, and surface the failure on the
+                  // source events stream (out-of-turn, like Notify.error).
+                  contaminatedReason = `codex exact-fork revert failed, source thread may retain the fork turn: ${lastMessage}`;
+                  if (!closed) sink.push({ type: "error", error: contaminatedReason });
+                  throw new Error(contaminatedReason);
                 }
-                // The fork's turn is now permanently part of the source
-                // thread. Poison the session so nothing resumes from the
-                // contaminated history, and surface the failure on the source
-                // events stream (out-of-turn, like Notify.error).
-                contaminatedReason = `codex exact-fork revert failed, source thread retains the fork turn: ${lastMessage}`;
-                if (!closed) sink.push({ type: "error", error: contaminatedReason });
-                throw new Error(contaminatedReason);
               },
               interrupt: async (reason) => await interruptOwnerTurn(forkParams.sessionId, reason),
             });
