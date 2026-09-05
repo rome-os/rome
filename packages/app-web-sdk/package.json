@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-web-sdk",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Web runtime and CLI SDK for Rome apps",
   "repository": {
     "type": "git",
