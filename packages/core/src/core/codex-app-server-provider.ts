@@ -46,12 +46,13 @@ import {
   Notify,
   isAgentMessageItem,
   isReasoningItem,
-  toThreadConfigurationOverrides,
   type ItemCompletedNotification,
   type ItemStartedNotification,
   type AgentMessageDeltaNotification,
+  type DynamicToolSpec,
   type MessagePhase,
   type ReasoningEffort,
+  type ThreadConfigurationOverrides,
   type ThreadForkParams,
   type ThreadItem,
   type ThreadRevertParams,
@@ -79,7 +80,11 @@ import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-r
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
 import type { CodexTurnRuntime } from "./codex/turn-runtime.js";
-import { createRomeDynamicTools, type RomeDynamicTools } from "./codex/rome-dynamic-tools.js";
+import {
+  alignRomeDynamicToolsToInheritedCatalog,
+  createRomeDynamicTools,
+  type RomeDynamicTools,
+} from "./codex/rome-dynamic-tools.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -102,11 +107,10 @@ function normalizeEffort(effort: ModelReasoningEffort | undefined): ReasoningEff
   return DEFAULT_EFFORT;
 }
 
-function buildThreadConfig(
+function buildThreadConfigurationOverrides(
   params: ModelSessionForkOpenParams,
   model: string,
-  romeTools: RomeDynamicTools,
-): ThreadStartParams {
+): ThreadConfigurationOverrides {
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
@@ -121,6 +125,16 @@ function buildThreadConfig(
     approvalPolicy: "never",
     baseInstructions: params.systemPrompt,
     config,
+  };
+}
+
+function buildThreadConfig(
+  params: ModelSessionForkOpenParams,
+  model: string,
+  romeTools: RomeDynamicTools,
+): ThreadStartParams {
+  return {
+    ...buildThreadConfigurationOverrides(params, model),
     historyMode: "paginated",
     dynamicTools: romeTools.definitions.length > 0 ? [...romeTools.definitions] : null,
   };
@@ -207,7 +221,7 @@ function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
-    cache_write_input_tokens: u.cacheWriteInputTokens,
+    cache_write_input_tokens: u.cacheWriteInputTokens ?? 0,
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -219,7 +233,7 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
-    left.cacheWriteInputTokens === right.cacheWriteInputTokens &&
+    (left.cacheWriteInputTokens ?? 0) === (right.cacheWriteInputTokens ?? 0) &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
@@ -232,7 +246,13 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
  * turn instead of replacing the prior value with the newest one.
  */
 function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
-  const last = update.last;
+  // Compatibility notifications from older local app-server stubs predate
+  // this 0.153.4 field. Normalize them before arithmetic so a missing value
+  // cannot poison the turn total with NaN.
+  const last: TokenUsageBreakdown = {
+    ...update.last,
+    cacheWriteInputTokens: update.last.cacheWriteInputTokens ?? 0,
+  };
   const usage = turn.usage;
   turn.usage = usage
     ? {
@@ -381,6 +401,13 @@ export class CodexAppServerProvider implements ModelProvider {
   }
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
+    return await this.openSessionWithInheritedDynamicTools(params);
+  }
+
+  private async openSessionWithInheritedDynamicTools(
+    params: ModelSessionParams,
+    inheritedDynamicToolDefinitions?: readonly DynamicToolSpec[],
+  ): Promise<ModelSession> {
     const modelName = stripLegacyReasoningSuffix(params.model);
     const outputValidator = params.outputSchema
       ? compileOutputSchema(params.outputSchema)
@@ -390,7 +417,13 @@ export class CodexAppServerProvider implements ModelProvider {
     // app-server dynamic tools. The provider-visible catalog is thread-scoped;
     // execution is selected from the active turn runtime so a borrowed exact
     // fork can reuse the source thread with fork callbacks.
-    const romeTools = createRomeDynamicTools(params);
+    const configuredRomeTools = createRomeDynamicTools(params);
+    const romeTools = inheritedDynamicToolDefinitions
+      ? alignRomeDynamicToolsToInheritedCatalog(
+          configuredRomeTools,
+          inheritedDynamicToolDefinitions,
+        )
+      : configuredRomeTools;
 
     const sink = new AgentMessageSink();
     // Image-generation trace. The app-server delivers it as `imageGeneration`
@@ -1099,18 +1132,16 @@ export class CodexAppServerProvider implements ModelProvider {
           // not-yet-reverted turn into the child. Contamination is
           // re-checked inside the lane because a queued snapshot would
           // otherwise run immediately after the failed revert that set it.
-          const forkRomeTools = createRomeDynamicTools(openParams);
-          const forkThreadConfig = buildThreadConfig(
+          const forkThreadConfiguration = buildThreadConfigurationOverrides(
             openParams,
             stripLegacyReasoningSuffix(openParams.model),
-            forkRomeTools,
           );
           const forkRes = await turnCoordinator.run(async () => {
             if (contaminatedReason) throw new Error(contaminatedReason);
             const nativeForkParams: ThreadForkParams = {
               threadId: source,
               ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
-              ...toThreadConfigurationOverrides(forkThreadConfig),
+              ...forkThreadConfiguration,
               ephemeral: false,
             };
             return await this.appServerManager.requestForThread<
@@ -1119,18 +1150,21 @@ export class CodexAppServerProvider implements ModelProvider {
           });
           forkedId = forkRes?.thread?.id;
           if (!forkedId) throw new Error("codex thread/fork did not return a thread id");
-          return await this.openSession({
-            ...openParams,
-            sessionId: forkParams.sessionId,
-            isNewSession: false,
-            providerThreadId: forkedId,
-            fork: {
-              sourceSessionId: params.sessionId,
-              sourceProviderThreadId: source,
-              mode,
-              sourceCheckpoint: forkParams.sourceCheckpoint,
+          return await this.openSessionWithInheritedDynamicTools(
+            {
+              ...openParams,
+              sessionId: forkParams.sessionId,
+              isNewSession: false,
+              providerThreadId: forkedId,
+              fork: {
+                sourceSessionId: params.sessionId,
+                sourceProviderThreadId: source,
+                mode,
+                sourceCheckpoint: forkParams.sourceCheckpoint,
+              },
             },
-          });
+            romeTools.definitions,
+          );
         },
       };
     };

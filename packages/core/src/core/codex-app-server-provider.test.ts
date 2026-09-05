@@ -511,6 +511,74 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
+  it("fails closed when an isolated native fork calls a tool inherited from its source", async () => {
+    const sourceExecuteSubagent = rs.fn(async () => "source result");
+    let dynamicResponse: unknown;
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/start") {
+        return { thread: { id: "source-thread", historyMode: "paginated" } };
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "isolated-child", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        const payload = requestParams as { threadId: string };
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: payload.threadId,
+          turn: { id: "isolated-turn" },
+        });
+        dynamicResponse = await captured.onServerRequest?.("item/tool/call", {
+          threadId: payload.threadId,
+          turnId: "isolated-turn",
+          callId: "call-source-tool",
+          namespace: null,
+          tool: "source_researcher",
+          arguments: { prompt: "inspect" },
+        });
+        n("turn/completed", {
+          threadId: payload.threadId,
+          turn: { id: "isolated-turn", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({
+        sessionId: "source-session",
+        subagentTools: [
+          {
+            name: "source_researcher",
+            description: "Research for the source",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+        executeSubagent: sourceExecuteSubagent,
+      }),
+    );
+    const fork = await source.fork({ sessionId: "isolated-session", mode: "ephemeral" });
+    const forkSession = await fork.open(buildForkOpenParams());
+    const collected = collectUntilTerminal(forkSession);
+    await forkSession.sendUserInput({ text: "try the inherited tool" });
+    await collected;
+
+    expect(dynamicResponse).toEqual({
+      contentItems: [
+        {
+          type: "inputText",
+          text: "Dynamic tool is disabled in this fork: source_researcher",
+        },
+      ],
+      success: false,
+    });
+    expect(sourceExecuteSubagent).not.toHaveBeenCalled();
+
+    await forkSession.close();
+    await source.close();
+  });
+
   it("materializes an exact fork at the selected historical provider turn", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -1245,6 +1313,46 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "thr-1", effort: "high" }),
     );
+    await session.close();
+  });
+
+  it("treats a missing cache-write field in compatibility usage notifications as zero", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-legacy-usage" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const legacyUsage = usage();
+        delete (legacyUsage.last as Partial<typeof legacyUsage.last>).cacheWriteInputTokens;
+        delete (legacyUsage.total as Partial<typeof legacyUsage.total>).cacheWriteInputTokens;
+        n("turn/started", {
+          threadId: "thr-legacy-usage",
+          turn: { id: "turn-legacy-usage" },
+        });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-legacy-usage",
+          turnId: "turn-legacy-usage",
+          usage: legacyUsage,
+        });
+        n("turn/completed", {
+          threadId: "thr-legacy-usage",
+          turn: { id: "turn-legacy-usage", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "legacy usage" });
+
+    expect((await collected).find((message) => message.type === "result")).toMatchObject({
+      accounting: {
+        usage: { cacheWriteTokens: 0 },
+        rawUsage: { cache_write_tokens: 0 },
+      },
+    });
     await session.close();
   });
 
