@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { BackendTurnRunnerProxy, NotifyServiceProxy, TalkRouterProxy } from "./service-proxies.js";
+import {
+  BackendTurnRunnerProxy,
+  ChildSessionsProxy,
+  NotifyServiceProxy,
+  TalkRouterProxy,
+} from "./service-proxies.js";
+import { actionExecutionContext } from "./context.js";
 import {
   setWorkerRpcInProcessDispatcher,
   WorkerRpcDisconnectError,
@@ -225,5 +231,190 @@ describe("NotifyServiceProxy", () => {
     await expect(new NotifyServiceProxy().send()).rejects.toThrow(
       /not running in a Node\.js child process/,
     );
+  });
+});
+
+describe("ChildSessionsProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  it("stamps the calling agent turn onto the wire", async () => {
+    // The RPC server dispatches outside the action context, so main can only
+    // learn which turn asked from what the proxy puts in the params.
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return {
+        sessionId: "child-1",
+        turnId: "child-turn-1",
+        agentName: "coder",
+        parentSessionId: "rome-session-1",
+      };
+    });
+
+    const started = await actionExecutionContext.run(
+      {
+        executionId: "exec-1",
+        rootExecutionId: "exec-1",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () => new ChildSessionsProxy().startDetached({ agentName: "coder", prompt: "go" }),
+    );
+
+    expect(started.sessionId).toBe("child-1");
+    expect(calls).toEqual([
+      {
+        method: "childSessions.startDetached",
+        params: {
+          agentName: "coder",
+          prompt: "go",
+          resumeSessionId: undefined,
+          workingDir: undefined,
+          parent: {
+            parentSessionId: "rome-session-1",
+            parentTurnId: "parent-turn-1",
+            parentAgentName: "main",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("refuses to start a child outside an agent turn", async () => {
+    process.send = undefined;
+    const dispatch = rs.fn(async () => ({}));
+    setWorkerRpcInProcessDispatcher(dispatch);
+
+    await expect(
+      actionExecutionContext.run(
+        { executionId: "exec-1", rootExecutionId: "exec-1", initiator: "routine" },
+        () => new ChildSessionsProxy().startDetached({ agentName: "coder", prompt: "go" }),
+      ),
+    ).rejects.toThrow(/agent-session caller/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("stamps the calling agent onto a status read", async () => {
+    // A child answers only to the agent that owns it, so a read main cannot
+    // attribute belongs to nobody.
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return null;
+    });
+
+    await expect(
+      actionExecutionContext.run(
+        {
+          executionId: "exec-1",
+          rootExecutionId: "exec-1",
+          initiator: "agent:engineer",
+          romeSessionId: "tick-2",
+          turnId: "tick-2-turn",
+          agentName: "engineer:engineer",
+        },
+        () => new ChildSessionsProxy().getStatus({ sessionId: "child-1", transcriptTail: 3 }),
+      ),
+    ).resolves.toBeNull();
+    expect(calls).toEqual([
+      {
+        method: "childSessions.getStatus",
+        params: {
+          sessionId: "child-1",
+          transcriptTail: 3,
+          caller: { romeSessionId: "tick-2", agentName: "engineer:engineer" },
+        },
+      },
+    ]);
+  });
+
+  it("stamps the calling agent onto a stop", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return { stopped: true, status: "running" };
+    });
+
+    await actionExecutionContext.run(
+      {
+        executionId: "exec-1",
+        rootExecutionId: "exec-1",
+        initiator: "agent:engineer",
+        romeSessionId: "tick-2",
+        turnId: "tick-2-turn",
+        agentName: "engineer:engineer",
+      },
+      () => new ChildSessionsProxy().stop({ sessionId: "child-1" }),
+    );
+
+    expect(calls).toEqual([
+      {
+        method: "childSessions.stop",
+        params: {
+          sessionId: "child-1",
+          caller: { romeSessionId: "tick-2", agentName: "engineer:engineer" },
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    ["a status read", (proxy: ChildSessionsProxy) => proxy.getStatus({ sessionId: "child-1" })],
+    ["a stop", (proxy: ChildSessionsProxy) => proxy.stop({ sessionId: "child-1" })],
+  ])("refuses %s outside an agent turn", async (_label, call) => {
+    process.send = undefined;
+    const dispatch = rs.fn(async () => null);
+    setWorkerRpcInProcessDispatcher(dispatch);
+
+    await expect(
+      actionExecutionContext.run(
+        { executionId: "exec-1", rootExecutionId: "exec-1", initiator: "routine" },
+        () => call(new ChildSessionsProxy()),
+      ),
+    ).rejects.toThrow(/agent-session caller/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("carries an explicit workingDir onto the wire", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return {
+        sessionId: "child-1",
+        turnId: "child-turn-1",
+        agentName: "coder",
+        parentSessionId: "rome-session-1",
+      };
+    });
+
+    await actionExecutionContext.run(
+      {
+        executionId: "exec-1",
+        rootExecutionId: "exec-1",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () =>
+        new ChildSessionsProxy().startDetached({
+          agentName: "coder",
+          prompt: "go",
+          workingDir: "/srv/clones/rome",
+        }),
+    );
+
+    expect(calls[0]!.params).toMatchObject({ workingDir: "/srv/clones/rome" });
   });
 });

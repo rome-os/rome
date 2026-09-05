@@ -1,0 +1,10 @@
+name: daily_report
+type: custom
+description: >-
+  Summarize what the Engineer bot did — pull requests ready to merge, stuck
+  issues, running coding sessions, and what landed — and send it to the
+  guardian. Registered as a daily routine by engineer:setup.
+complexity: moderate
+speed: slow
+reliability: medium
+sideEffects: write

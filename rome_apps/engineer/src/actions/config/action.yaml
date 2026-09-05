@@ -1,0 +1,11 @@
+name: config
+type: custom
+description: >-
+  Read the Engineer bot's current configuration — the repository, the task
+  label, the clone path, and the caps — as engineer:setup recorded it. Call this
+  before asking the guardian which repository to work on: when it answers
+  configured, the repository is already chosen.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

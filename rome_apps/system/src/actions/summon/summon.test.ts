@@ -322,6 +322,17 @@ describe("summon", () => {
     expect(payload).toMatchObject({ kind: "generic", title: "Hand off to “designer”" });
   });
 
+  it("previews a detached summon as a background run", () => {
+    const tool = createSummonAction(actionConfig, summonDeps(createMockRunner()));
+    const payload = tool.preview!({ agentName: "coder", prompt: "Land it.", detached: true });
+
+    expect(payload).toEqual({
+      kind: "generic",
+      title: "Run agent “coder” in the background",
+      summary: "Land it.",
+    });
+  });
+
   it("canonicalizes interactive handoff references before returning the directive", async () => {
     const resolveArtifactReference = rs.fn(({ kind }: { kind: "agent" | "action" }) =>
       kind === "agent" ? "workflow-studio:designer" : "workflow-studio:validate-design",
@@ -367,6 +378,217 @@ describe("summon", () => {
       kind: "action",
       value: "workflow-studio:validate-design",
     });
+  });
+
+  it("hands a detached summon to the host without iterating the agent", async () => {
+    const runner = {
+      async *run() {
+        throw new Error("the blocking path must not run for a detached summon");
+      },
+    } as unknown as AgentRunner;
+    const startDetached = rs.fn(async () => ({
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      agentName: "coder",
+      parentSessionId: "rome-session-1",
+    }));
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(runner),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    const result = await actionExecutionContext.run(
+      {
+        executionId: "exec-detached",
+        rootExecutionId: "exec-detached",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () => tool.execute({ agentName: "coder", prompt: "land the migration", detached: true }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: {
+        mode: "detached",
+        sessionId: "child-1",
+        turnId: "child-turn-1",
+        agentName: "coder",
+      },
+    });
+    expect(startDetached).toHaveBeenCalledWith({
+      agentName: "coder",
+      prompt: "land the migration",
+      resumeSessionId: undefined,
+      workingDir: undefined,
+    });
+  });
+
+  it("forwards `sessionId` as the child to resume", async () => {
+    const startDetached = rs.fn(async () => ({
+      sessionId: "child-1",
+      turnId: "child-turn-2",
+      agentName: "coder",
+      parentSessionId: "rome-session-1",
+    }));
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner()),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    await actionExecutionContext.run(
+      {
+        executionId: "exec-detached",
+        rootExecutionId: "exec-detached",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () =>
+        tool.execute({
+          agentName: "coder",
+          prompt: "keep going",
+          sessionId: "child-1",
+          detached: true,
+        }),
+    );
+
+    expect(startDetached).toHaveBeenCalledWith({
+      agentName: "coder",
+      prompt: "keep going",
+      resumeSessionId: "child-1",
+      workingDir: undefined,
+    });
+  });
+
+  it("forwards an explicit workingDir for the child to run in", async () => {
+    const startDetached = rs.fn(async () => ({
+      sessionId: "child-1",
+      turnId: "child-turn-1",
+      agentName: "coder",
+      parentSessionId: "rome-session-1",
+    }));
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner()),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    await actionExecutionContext.run(
+      {
+        executionId: "exec-detached",
+        rootExecutionId: "exec-detached",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () =>
+        tool.execute({
+          agentName: "coder",
+          prompt: "land the migration",
+          detached: true,
+          workingDir: "/srv/clones/rome",
+        }),
+    );
+
+    expect(startDetached).toHaveBeenCalledWith({
+      agentName: "coder",
+      prompt: "land the migration",
+      resumeSessionId: undefined,
+      workingDir: "/srv/clones/rome",
+    });
+  });
+
+  it("refuses a workingDir on a blocking summon rather than ignoring it", async () => {
+    // Silently running somewhere else is worse than refusing: the caller named
+    // a directory and would have no way to notice it was dropped.
+    const runner = {
+      async *run() {
+        throw new Error("the blocking path must not run");
+      },
+    } as unknown as AgentRunner;
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+
+    const result = (await tool.execute({
+      agentName: "coder",
+      prompt: "go",
+      workingDir: "/srv/clones/rome",
+    })) as ActionResult;
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/only with `detached: true`/);
+  });
+
+  it("surfaces a host refusal as an error result rather than a throw", async () => {
+    // A manager routine polls on a schedule: it has to read the reason and move
+    // on, not lose the turn to an exception.
+    const startDetached = rs.fn(async () => {
+      throw new Error("child is still running");
+    });
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner()),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    const result = await actionExecutionContext.run(
+      {
+        executionId: "exec-detached",
+        rootExecutionId: "exec-detached",
+        initiator: "agent:main",
+        romeSessionId: "rome-session-1",
+        turnId: "parent-turn-1",
+        agentName: "main",
+      },
+      () =>
+        tool.execute({
+          agentName: "coder",
+          prompt: "keep going",
+          sessionId: "child-1",
+          detached: true,
+        }),
+    );
+
+    expect(result).toEqual({ status: "error", error: "child is still running" });
+  });
+
+  it("refuses a detached summon that no agent turn made", async () => {
+    const startDetached = rs.fn();
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner()),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    const result = (await actionExecutionContext.run(
+      { executionId: "exec-routine", rootExecutionId: "exec-routine", initiator: "routine" },
+      () => tool.execute({ agentName: "coder", prompt: "go", detached: true }),
+    )) as ActionResult;
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/agent-session caller/);
+    expect(startDetached).not.toHaveBeenCalled();
+  });
+
+  it("refuses to be both detached and interactive", async () => {
+    const startDetached = rs.fn();
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner()),
+      childSessions: { startDetached, getStatus: rs.fn(), stop: rs.fn() },
+    });
+
+    const result = (await tool.execute({
+      agentName: "coder",
+      prompt: "go",
+      detached: true,
+      interactive: true,
+      appId: "workflow-studio",
+    })) as ActionResult;
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/cannot be both/);
+    expect(startDetached).not.toHaveBeenCalled();
   });
 
   it("rejects input missing a required field without invoking the agent", async () => {

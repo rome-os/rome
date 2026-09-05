@@ -1,0 +1,11 @@
+name: setup
+type: custom
+description: >-
+  Point the Engineer bot at a GitHub repository. Clones it under the projects
+  root, checks that gh is authenticated, creates the task and status labels, and
+  registers the recurring tick and daily-report routines that drive the bot.
+  Call this when the guardian names a repository to work on.
+complexity: moderate
+speed: moderate
+reliability: high
+sideEffects: write

@@ -49,8 +49,20 @@ export interface StartSubagentContext {
   parentChannelThreadKey: string;
   childManager: AgentSessionManager;
   workingDir: string;
+  /** Project a fresh child session is attributed to. Defaults to the parent
+   * session's project. A detached caller sets it when it picked the child's
+   * working directory itself, so the child is filed under the directory it
+   * actually works in rather than under a parent that has no project. */
+  childProjectPath?: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  /** Run the child free of the parent turn: skip the active-subagent registry,
+   * whose entries are keyed by (parentSessionId, parentTurnId, parentToolUseId)
+   * and cleared when the parent turn resolves its tool call. A detached child
+   * has no such tool call, so a registered entry would never be cleared. The
+   * caller owns the child's lifetime instead, including passing a
+   * `childManager` that outlives the parent session. */
+  detached?: boolean;
 }
 
 export interface SubagentExecutionService {
@@ -94,7 +106,14 @@ export function createSubagentExecutionService(deps: {
             `Subagent session "${input.resumeSessionId}" belongs to a different Parent session`,
           );
         }
-        if ((stored.projectPath ?? null) !== (parentSession?.projectPath ?? null)) {
+        // A detached child's project is the working directory its caller chose,
+        // which need not be the parent session's project — a manager agent on a
+        // routine has no project of its own. The detached service checks the
+        // working directory against the child's own row instead.
+        if (
+          !context.detached &&
+          (stored.projectPath ?? null) !== (parentSession?.projectPath ?? null)
+        ) {
           throw new Error(
             `Subagent session "${input.resumeSessionId}" belongs to a different project`,
           );
@@ -130,7 +149,7 @@ export function createSubagentExecutionService(deps: {
           name: `${name}: ${parentSession?.name ?? context.parentAgentName}`,
           agentName: isCoreMainAgentId(name) ? null : name,
           projectName: parentSession?.projectName,
-          projectPath: parentSession?.projectPath,
+          projectPath: context.childProjectPath ?? parentSession?.projectPath,
           sourceChannel: parentSession?.sourceChannel,
           sourceThreadId: parentSession?.sourceThreadId,
           sourceThreadName: parentSession?.sourceThreadName,
@@ -210,21 +229,23 @@ export function createSubagentExecutionService(deps: {
         completion,
         interrupt,
       };
-      const parentRef: ParentSubagentRef = {
-        sessionId: context.parentSessionId,
-        turnId: context.parentTurnId,
-        toolUseId: context.parentToolUseId,
-      };
-      try {
-        deps.activeRegistry.register(
-          parentRef,
-          { sessionId: child.sessionId, turnId: handle.turnId },
-          execution,
-        );
-      } catch (err) {
-        stream.finish();
-        await child.interrupt("subagent registration failed").catch(() => undefined);
-        throw err;
+      if (!context.detached) {
+        const parentRef: ParentSubagentRef = {
+          sessionId: context.parentSessionId,
+          turnId: context.parentTurnId,
+          toolUseId: context.parentToolUseId,
+        };
+        try {
+          deps.activeRegistry.register(
+            parentRef,
+            { sessionId: child.sessionId, turnId: handle.turnId },
+            execution,
+          );
+        } catch (err) {
+          stream.finish();
+          await child.interrupt("subagent registration failed").catch(() => undefined);
+          throw err;
+        }
       }
 
       const recorder = new AgentTraceRecorder({

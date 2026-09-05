@@ -15,6 +15,7 @@
 // keeping that stringly-typed seam in one typed place instead of scattered
 // across action bodies.
 
+import { getCurrentActionContext } from "@rome-os/app-runtime";
 import {
   getWorkerRpc,
   WorkerRpcDisconnectError,
@@ -37,6 +38,12 @@ import type {
   AppLifecycleCreateParams,
   BackendTurnParams,
   BackendTurnRunner,
+  ChildSessionCaller,
+  ChildSessions,
+  ChildSessionStatusReport,
+  ChildSessionStopResult,
+  DetachedChildStarted,
+  StartDetachedChildInput,
   ConversationId,
   ConversationRef,
   ConversationSettingsControl,
@@ -286,6 +293,74 @@ export class BackendTurnRunnerProxy implements BackendTurnRunner {
       timeoutMs: BACKEND_TURN_RPC_TIMEOUT_MS,
     });
   }
+}
+
+/** Worker-side stand-in for the main-process owner of detached child agent
+ * sessions. `summon` (detached), `summon_status`, and `summon_stop` run in a
+ * worker, but the child runs under a session manager that exists only in main.
+ *
+ * Every method stamps the calling agent identity onto the wire itself. It has
+ * to: the RPC server exits the action context before dispatching, so main
+ * cannot recover which agent turn asked. A detached child with no parent is
+ * unreachable from any later turn, and a child answers only to the agent that
+ * owns it, so an unstamped read would belong to nobody. */
+export class ChildSessionsProxy implements ChildSessions {
+  async startDetached(input: StartDetachedChildInput): Promise<DetachedChildStarted> {
+    const parent = input.parent ?? parentFromActionContext();
+    return await getWorkerRpc().call<DetachedChildStarted>("childSessions.startDetached", {
+      agentName: input.agentName,
+      prompt: input.prompt,
+      resumeSessionId: input.resumeSessionId,
+      workingDir: input.workingDir,
+      parent,
+    });
+  }
+
+  async getStatus(input: {
+    sessionId: string;
+    transcriptTail?: number;
+    caller?: ChildSessionCaller;
+  }): Promise<ChildSessionStatusReport | null> {
+    return await getWorkerRpc().call<ChildSessionStatusReport | null>("childSessions.getStatus", {
+      sessionId: input.sessionId,
+      transcriptTail: input.transcriptTail,
+      caller: input.caller ?? callerFromActionContext(),
+    });
+  }
+
+  async stop(input: {
+    sessionId: string;
+    caller?: ChildSessionCaller;
+  }): Promise<ChildSessionStopResult | null> {
+    return await getWorkerRpc().call<ChildSessionStopResult | null>("childSessions.stop", {
+      sessionId: input.sessionId,
+      caller: input.caller ?? callerFromActionContext(),
+    });
+  }
+}
+
+function parentFromActionContext(): NonNullable<StartDetachedChildInput["parent"]> {
+  const ctx = getCurrentActionContext();
+  if (!ctx?.romeSessionId || !ctx.turnId) {
+    throw new Error(
+      "a detached child needs an agent-session caller: this action was not invoked from an agent turn",
+    );
+  }
+  return {
+    parentSessionId: ctx.romeSessionId,
+    parentTurnId: ctx.turnId,
+    parentAgentName: ctx.agentName ?? "main",
+  };
+}
+
+function callerFromActionContext(): ChildSessionCaller {
+  const ctx = getCurrentActionContext();
+  if (!ctx?.romeSessionId) {
+    throw new Error(
+      "reading a detached child needs an agent-session caller: a child answers only to the agent that owns it, and this action was not invoked from an agent turn",
+    );
+  }
+  return { romeSessionId: ctx.romeSessionId, agentName: ctx.agentName ?? "main" };
 }
 
 /** Worker-side stand-in for the main-process `NotifyClient`. The

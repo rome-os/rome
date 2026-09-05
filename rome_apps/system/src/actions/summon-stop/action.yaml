@@ -1,0 +1,8 @@
+name: summon_stop
+type: system
+description: Ask a running child agent session started by a detached summon to stop
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+requiresApproval: false

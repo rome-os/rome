@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import type {
   BackendTurnRunner,
+  ChildSessions,
   ConversationId,
   ConversationRef,
   ConversationSettingsControl,
@@ -15,6 +16,7 @@ import type {
   ResetConversationSettingsInput,
   ListConversationSettingsInput,
 } from "@rome-os/app-runtime";
+import { MAX_CHILD_TRANSCRIPT_TAIL } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
 import type { RoutineEngine } from "../routines/engine.js";
@@ -129,6 +131,46 @@ const EventsSearchCatalogParams = z.object({
   limit: z.number().int().positive().max(50).default(10),
 });
 
+// Required on the wire, unlike the SDK types: the RPC server dispatches outside
+// the caller's action context, so main cannot recover who asked and the
+// worker-side proxy must have carried it. A detached child that arrives with no
+// parent is unreachable from every later turn, and a read with no caller
+// belongs to no agent, so neither has a safe default.
+const ChildSessionsCaller = z.object({
+  romeSessionId: z.string().min(1),
+  agentName: z.string().min(1),
+});
+
+const ChildSessionsStartDetachedParams = z.object({
+  agentName: z.string().min(1),
+  prompt: z.string().min(1),
+  resumeSessionId: z.string().min(1).optional(),
+  workingDir: z.string().min(1).optional(),
+  parent: z.object({
+    parentSessionId: z.string().min(1),
+    parentTurnId: z.string().min(1),
+    parentAgentName: z.string().min(1),
+  }),
+});
+
+const ChildSessionsGetStatusParams = z.object({
+  sessionId: z.string().min(1),
+  // Clamped rather than refused, matching the ceiling main applies: an ask for
+  // more transcript than exists is not a caller error.
+  transcriptTail: z
+    .number()
+    .int()
+    .min(0)
+    .transform((tail) => Math.min(tail, MAX_CHILD_TRANSCRIPT_TAIL))
+    .optional(),
+  caller: ChildSessionsCaller,
+});
+
+const ChildSessionsStopParams = z.object({
+  sessionId: z.string().min(1),
+  caller: ChildSessionsCaller,
+});
+
 const SessionContinueParams = z.object({
   agentName: z.string().min(1),
   sessionId: z.string().min(1),
@@ -210,6 +252,11 @@ export interface WorkerRpcServices {
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
+  /** Main-process owner of detached child agent sessions. The child runs under
+   * a process-lifetime session manager that exists only here, so `summon`
+   * (detached), `summon_status`, and `summon_stop` forward every call over
+   * `childSessions.*`. */
+  childSessions: ChildSessions;
 }
 
 export class WorkerRpcServer {
@@ -324,6 +371,18 @@ export class WorkerRpcServer {
         return await this.services.systemUpgrade.checkAndOffer();
       case "session.continue":
         return await this.handleSessionContinue(params);
+      case "childSessions.startDetached":
+        return await this.services.childSessions.startDetached(
+          parseParams(method, ChildSessionsStartDetachedParams, params),
+        );
+      case "childSessions.getStatus":
+        return await this.services.childSessions.getStatus(
+          parseParams(method, ChildSessionsGetStatusParams, params),
+        );
+      case "childSessions.stop":
+        return await this.services.childSessions.stop(
+          parseParams(method, ChildSessionsStopParams, params),
+        );
       case "notify.send": {
         // The sender reads token/origin from main-process state; the only wire
         // param is the optional body. Preserve the no-body call shape

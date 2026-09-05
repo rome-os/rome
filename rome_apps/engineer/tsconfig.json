@@ -1,0 +1,5 @@
+{
+  "extends": "@rome-os/app-runtime/tsconfig.app.json",
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

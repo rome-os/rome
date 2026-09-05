@@ -82,6 +82,24 @@ The owning app is the app that owns the agent attached to the session. Core agen
 
 - **Apps invoked in a run** — an app whose action ran inside a turn appears in the trace but is not the owner. Only the agent's owning app is.
 
+## Detached subagent sessions
+
+A detached subagent session is a child session started by a caller that does not wait for it. The caller gets the child's session and turn ids and its own turn ends, while the child keeps running. This is how an agent on a schedule hands a long job to another agent without holding its own run open for it.
+
+**Contracts:**
+
+- A detached child belongs to an agent, not to the session that started it. Any later session of that same agent may read its status, give it another prompt, and stop it. Every other caller reads the child as absent, so a caller cannot learn that another agent's child exists.
+- A resume keeps the child's original parent. The session that resumes a child does not become its parent, and the lineage the first run recorded stays put.
+- The child outlives the caller's session but not the process. A detached child is not recovered after a restart, and a turn that was running when the process exited reads back as interrupted.
+- The caller chooses the directory the child works in. It defaults to the caller's project directory, and a resume keeps the directory the child already works in.
+- Rome caps how many detached children run at once, per calling session and across the process. Past a cap, starting another is refused rather than queued.
+- Stopping a detached child is a request, like [Stop](#agent-run) on any other run. The child ends shortly afterwards and reports as interrupted, keeping the reply and trace it had produced.
+
+**Not to be confused with:**
+
+- **Subagent session** — an ordinary subagent blocks the turn that summoned it and reports back into that turn. A detached child reports to nobody until someone reads it.
+- **[Forked turn](#forked-turns)** — a fork branches from a session's context. A detached child starts its own conversation.
+
 ## Forked turns
 
 A forked turn is a side conversation branched from a live session's full context: the fork sees everything the source conversation has seen, but nothing it does can mutate the source.

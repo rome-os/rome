@@ -1,0 +1,10 @@
+name: tick
+type: custom
+description: >-
+  One reconciliation pass over the configured repository — runs the Engineer
+  agent, which starts and steers child coding sessions for every open labeled
+  issue and pull request. Registered as a recurring routine by engineer:setup.
+complexity: complex
+speed: slow
+reliability: medium
+sideEffects: write

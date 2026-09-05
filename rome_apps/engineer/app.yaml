@@ -1,0 +1,21 @@
+formatVersion: 2
+id: engineer
+name: Engineer
+icon: assets/icon.svg
+version: 0.1.0
+description: >-
+  Engineering manager bot. Files the guardian's chat tasks as labeled GitHub
+  issues, then on a schedule starts and steers child coding sessions until each
+  issue is a pull request with green checks and every review comment answered.
+  It never writes code and never merges.
+appRoot: dist
+includeSource: true
+
+agents:
+  - agents/engineer.yaml
+
+actions:
+  - actions/config
+  - actions/setup
+  - actions/tick
+  - actions/daily-report

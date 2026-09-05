@@ -1,0 +1,8 @@
+name: summon_status
+type: system
+description: Read the status, final reply, and recent transcript of a child agent session started by a detached summon
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only
+requiresApproval: false

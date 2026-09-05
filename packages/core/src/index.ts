@@ -19,7 +19,7 @@ import { getConfiguredInstanceOrigin } from "./lib/rome-cloud-origin.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { ChatStopHandler, ConversationRef } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -128,11 +128,13 @@ import { SkillCatalog } from "./core/skill-catalog.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
+import { createDetachedSubagentService } from "./core/detached-subagent-service.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import {
+  ensureDefaultAgentWorkingDir,
   ensureProfileDevAppsDirInitialized,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
@@ -639,27 +641,46 @@ async function main() {
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
-  const agentSessionManager = createAgentSessionManager(
-    {
-      agentLoader,
-      appCatalog,
-      sessionManager,
-      promptBuilder,
-      actionRegistry,
-      modelResolver,
-      actionEngine,
-      capabilityDiscovery,
-      skillCatalog,
-      lifecycleDispatcher,
-      webchatRepo,
-      subagentExecutionService,
-      activeSubagentRegistry,
-      turnMiddleware: turnMiddlewareChain,
-      resolveProviderSessionReset: async (ref) =>
-        (await conversationSettings.get(ref)).effective.session.reset,
-    },
-    { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
-  );
+  const agentSessionDeps = {
+    agentLoader,
+    appCatalog,
+    sessionManager,
+    promptBuilder,
+    actionRegistry,
+    modelResolver,
+    actionEngine,
+    capabilityDiscovery,
+    skillCatalog,
+    lifecycleDispatcher,
+    webchatRepo,
+    subagentExecutionService,
+    activeSubagentRegistry,
+    turnStreams: agentTurnStreamRegistry,
+    turnMiddleware: turnMiddlewareChain,
+    resolveProviderSessionReset: async (ref: ConversationRef) =>
+      (await conversationSettings.get(ref)).effective.session.reset,
+  };
+  const agentSessionManager = createAgentSessionManager(agentSessionDeps, {
+    keepAliveAcrossTurns: true,
+    idleTtlMs: 15_000,
+  });
+  // Home for detached children, which outlive the turn that started them. The
+  // parent's own `AgentSessionImpl.childManager` is shut down when the parent
+  // session closes, so a detached child needs a manager that lives as long as
+  // the process. Eviction only sweeps quiescent sessions, so the short idle TTL
+  // never cuts a running child short.
+  const detachedChildManager = createAgentSessionManager(agentSessionDeps, {
+    keepAliveAcrossTurns: true,
+    idleTtlMs: 15_000,
+    isSubagent: true,
+  });
+  const detachedSubagentService = createDetachedSubagentService({
+    webchatRepo,
+    subagents: subagentExecutionService,
+    turnStreams: agentTurnStreamRegistry,
+    detachedManager: detachedChildManager,
+    resolveDefaultWorkingDir: ensureDefaultAgentWorkingDir,
+  });
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const agentSessionBridge = new AgentSessionBridge(
@@ -776,6 +797,9 @@ async function main() {
     // The `resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
+    // Detached `summon` + `summon_status` reach the real service here; the
+    // worker gets a ChildSessionsProxy.
+    childSessions: detachedSubagentService,
     // Real push sender in main; the worker gets a NotifyServiceProxy.
     notify: notifyClient,
     // Image generation capability: provider-neutral registry the generate_image
@@ -1121,6 +1145,7 @@ async function main() {
         .some((action) => action.config.name === actionName);
     },
     backendTurnRunner,
+    childSessions: detachedSubagentService,
     notify: notifyClient,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
@@ -1540,6 +1565,9 @@ async function main() {
 
     await actionEngine.stopWorkerWarmPool();
     shutdownLog.info("action worker warm pool stopped");
+
+    await detachedSubagentService.shutdown();
+    shutdownLog.info("detached child sessions closed");
 
     if (shutdownFeatureFlags) {
       await shutdownFeatureFlags();

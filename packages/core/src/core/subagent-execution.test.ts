@@ -253,4 +253,185 @@ describe("SubagentExecutionService", () => {
       ),
     ).rejects.toThrow(/Parent Rome session.*was not found/);
   });
+
+  it("files a detached Child like any other but leaves the active registry empty", async () => {
+    const child = fakeChildSession("child-detached", ["detached-turn"]);
+    const childManager = {
+      acquire: rs.fn(async () => child.session),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const registry = createActiveSubagentRegistry();
+    const turnStreams = createAgentTurnStreamRegistry();
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: registry,
+      turnStreams,
+    });
+
+    const execution = await service.startSubagent(
+      "researcher",
+      { prompt: "run long" },
+      {
+        parentSessionId: "parent-1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "detached:uuid-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "detached:parent-1",
+        childManager,
+        workingDir: "/tmp/project-a",
+        detached: true,
+      },
+    );
+
+    expect(
+      registry.getLinkByParent({
+        sessionId: "parent-1",
+        turnId: "parent-turn-1",
+        toolUseId: "detached:uuid-1",
+      }),
+    ).toBeUndefined();
+    expect(turnStreams.listBySession("child-detached").map((stream) => stream.turnId)).toEqual([
+      "detached-turn",
+    ]);
+    await expect(repo.getSession("child-detached")).resolves.toMatchObject({
+      type: "subagent",
+      parentSessionId: "parent-1",
+      parentTurnId: "parent-turn-1",
+    });
+
+    child.releases[0].resolve();
+    await expect(execution.completion).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("files a detached Child under the directory its caller picked", async () => {
+    // A manager agent on a routine has no project of its own, so the child's
+    // project cannot be inherited — and a later resume reads the directory back
+    // off the child's own row.
+    const child = fakeChildSession("child-dir", ["dir-turn"]);
+    const childManager = {
+      acquire: rs.fn(async () => child.session),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    await repo.ensureRomeSession({ id: "tick-1", type: "action", name: "tick", agentName: null });
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+
+    await service.startSubagent(
+      "researcher",
+      { prompt: "go" },
+      {
+        parentSessionId: "tick-1",
+        parentAgentSessionId: "tick-1",
+        parentTurnId: "tick-1-turn",
+        parentToolUseId: "detached:uuid-dir",
+        parentAgentName: "engineer",
+        parentChannelThreadKey: "detached:tick-1",
+        childManager,
+        workingDir: "/srv/clones/rome",
+        childProjectPath: "/srv/clones/rome",
+        detached: true,
+      },
+    );
+
+    await expect(repo.getSession("child-dir")).resolves.toMatchObject({
+      projectPath: "/srv/clones/rome",
+    });
+    child.releases[0].resolve();
+  });
+
+  it("resumes a detached Child whose project differs from its Parent's", async () => {
+    // The blocking path refuses that mismatch because a Child inherits its
+    // Parent's project. A detached Child's project is the directory its caller
+    // named, and its Parent may have none.
+    await repo.ensureRomeSession({ id: "tick-1", type: "action", name: "tick", agentName: null });
+    await repo.ensureRomeSession({
+      id: "child-elsewhere",
+      type: "subagent",
+      name: "researcher: tick",
+      agentName: "researcher",
+      projectPath: "/srv/clones/rome",
+      parentSessionId: "tick-1",
+      parentTurnId: "tick-1-turn",
+    });
+    const resumed = fakeChildSession("child-elsewhere", ["resumed-turn"]);
+    const childManager = {
+      acquire: rs.fn(),
+      acquireBySessionId: rs.fn(async () => resumed.session),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+
+    const execution = await service.startSubagent(
+      "researcher",
+      { prompt: "keep going", resumeSessionId: "child-elsewhere" },
+      {
+        parentSessionId: "tick-1",
+        parentAgentSessionId: "tick-2",
+        parentTurnId: "tick-2-turn",
+        parentToolUseId: "detached:uuid-resume",
+        parentAgentName: "engineer",
+        parentChannelThreadKey: "detached:tick-1",
+        childManager,
+        workingDir: "/srv/clones/rome",
+        detached: true,
+      },
+    );
+
+    expect(execution).toMatchObject({ sessionId: "child-elsewhere", turnId: "resumed-turn" });
+    resumed.releases[0].resolve();
+    await execution.completion;
+  });
+
+  it("starts two detached Children under one Parent turn", async () => {
+    // The active registry rejects a second child on the same
+    // (parentSessionId, parentTurnId, parentToolUseId), and a manager routine
+    // fans several jobs out of a single turn. Skipping the registry is what
+    // makes that legal.
+    const first = fakeChildSession("child-a", ["turn-a"]);
+    const second = fakeChildSession("child-b", ["turn-b"]);
+    const children = [first.session, second.session];
+    const childManager = {
+      acquire: rs.fn(async () => children.shift()!),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+    const context = {
+      parentSessionId: "parent-1",
+      parentAgentSessionId: "parent-runtime-1",
+      parentTurnId: "parent-turn-1",
+      parentToolUseId: "detached:same",
+      parentAgentName: "main",
+      parentChannelThreadKey: "detached:parent-1",
+      childManager,
+      workingDir: "/tmp/project-a",
+      detached: true,
+    };
+
+    const a = await service.startSubagent("researcher", { prompt: "one" }, context);
+    const b = await service.startSubagent("researcher", { prompt: "two" }, context);
+
+    expect([a.sessionId, b.sessionId]).toEqual(["child-a", "child-b"]);
+    first.releases[0].resolve();
+    second.releases[0].resolve();
+    await Promise.all([a.completion, b.completion]);
+  });
 });

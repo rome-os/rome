@@ -73,6 +73,11 @@ function makeServer(
       getListing: ReturnType<typeof rs.fn>;
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
+    childSessions?: {
+      startDetached: ReturnType<typeof rs.fn>;
+      getStatus: ReturnType<typeof rs.fn>;
+      stop: ReturnType<typeof rs.fn>;
+    };
     notify?: { send: ReturnType<typeof rs.fn> };
     talkRouter?: { list: ReturnType<typeof rs.fn> };
   } = {},
@@ -104,6 +109,11 @@ function makeServer(
     hasAction: () => false,
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
+    childSessions: overrides.childSessions ?? {
+      startDetached: rs.fn(),
+      getStatus: rs.fn(),
+      stop: rs.fn(),
+    },
     notify: overrides.notify ?? { send: rs.fn() },
     talkRouter: overrides.talkRouter,
   } as unknown as WorkerRpcServices;
@@ -115,6 +125,7 @@ function makeServer(
     appManager,
     appStore,
     routineEngine,
+    childSessions: services.childSessions,
   };
 }
 
@@ -781,5 +792,140 @@ describe("notify.send dispatch", () => {
       release();
       kill.mockRestore();
     }
+  });
+});
+
+describe("childSessions dispatch", () => {
+  const started = {
+    sessionId: "child-1",
+    turnId: "child-turn-1",
+    agentName: "coder",
+    parentSessionId: "parent-1",
+  };
+  const parent = {
+    parentSessionId: "parent-1",
+    parentTurnId: "parent-turn-1",
+    parentAgentName: "main",
+  };
+  const caller = { romeSessionId: "tick-2", agentName: "engineer:engineer" };
+
+  function serverWithChildSessions() {
+    const childSessions = {
+      startDetached: rs.fn(async () => started),
+      getStatus: rs.fn(async () => null),
+      stop: rs.fn(async () => ({ stopped: true, status: "running" })),
+    };
+    const { server } = makeServer({ childSessions });
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    return { fake, childSessions };
+  }
+
+  it("forwards a detached start with its parent identity", async () => {
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.startDetached", {
+      agentName: "coder",
+      prompt: "land the migration",
+      resumeSessionId: "child-1",
+      workingDir: "/srv/clones/rome",
+      parent,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual(started);
+    expect(childSessions.startDetached).toHaveBeenCalledWith({
+      agentName: "coder",
+      prompt: "land the migration",
+      resumeSessionId: "child-1",
+      workingDir: "/srv/clones/rome",
+      parent,
+    });
+  });
+
+  it.each([
+    ["no parent", { agentName: "coder", prompt: "go" }],
+    ["a partial parent", { agentName: "coder", prompt: "go", parent: { parentSessionId: "p" } }],
+    ["an empty prompt", { agentName: "coder", prompt: "", parent }],
+    ["no agent", { prompt: "go", parent }],
+  ])("rejects a start with %s", async (_label, params) => {
+    // A detached child that arrives without a parent is unreachable from every
+    // later turn, so the wire contract refuses it rather than filing an orphan.
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.startDetached", params);
+
+    expect(response.error).toMatch(/invalid params/);
+    expect(childSessions.startDetached).not.toHaveBeenCalled();
+  });
+
+  it("forwards a status read and passes a missing session through as null", async () => {
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.getStatus", {
+      sessionId: "child-1",
+      transcriptTail: 5,
+      caller,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeNull();
+    expect(childSessions.getStatus).toHaveBeenCalledWith({
+      sessionId: "child-1",
+      transcriptTail: 5,
+      caller,
+    });
+  });
+
+  it("clamps an over-large transcript tail instead of refusing it", async () => {
+    // Asking for more transcript than exists is not a caller error, and main
+    // applies the same ceiling.
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.getStatus", {
+      sessionId: "child-1",
+      transcriptTail: 9999,
+      caller,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(childSessions.getStatus).toHaveBeenCalledWith({
+      sessionId: "child-1",
+      transcriptTail: 50,
+      caller,
+    });
+  });
+
+  it.each([
+    ["a fractional tail", { sessionId: "child-1", transcriptTail: 1.5, caller }],
+    ["a negative tail", { sessionId: "child-1", transcriptTail: -1, caller }],
+    ["an empty session id", { sessionId: "", caller }],
+    ["no caller", { sessionId: "child-1" }],
+  ])("rejects a status read with %s", async (_label, params) => {
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.getStatus", params);
+
+    expect(response.error).toMatch(/invalid params/);
+    expect(childSessions.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("forwards a stop with its caller identity", async () => {
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.stop", { sessionId: "child-1", caller });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({ stopped: true, status: "running" });
+    expect(childSessions.stop).toHaveBeenCalledWith({ sessionId: "child-1", caller });
+  });
+
+  it("rejects a stop that names no caller", async () => {
+    const { fake, childSessions } = serverWithChildSessions();
+
+    const response = await rpc(fake, "childSessions.stop", { sessionId: "child-1" });
+
+    expect(response.error).toMatch(/invalid params/);
+    expect(childSessions.stop).not.toHaveBeenCalled();
   });
 });

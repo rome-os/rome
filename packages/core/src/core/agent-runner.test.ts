@@ -1546,6 +1546,7 @@ describe("AgentRunner", () => {
       skillCatalog: new SkillCatalog(),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       activeSubagentRegistry,
+      turnStreams,
       subagentExecutionService: createSubagentExecutionService({
         webchatRepo: new WebChatRepository(testDb.db),
         activeRegistry: activeSubagentRegistry,
@@ -2147,6 +2148,33 @@ describe("AgentRunner", () => {
         // resumed into whichever provider happens to resolve now.
         isNewSession: true,
       });
+
+      await manager.shutdown();
+    });
+
+    it("refuses to resume a session that already has a turn running", async () => {
+      // Two managers hold separate session maps, so resuming by id mid-turn
+      // would put a second AgentSessionImpl on the same provider thread. A
+      // detached child is exactly that case: it runs under its own manager.
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-live",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-live",
+        status: "active",
+      });
+      const modelResolver = createTestModelResolver({ providers: [new MockModelProvider()] });
+      const deps = managerDeps(modelResolver);
+      const manager = createAgentSessionManager(deps, { keepAliveAcrossTurns: true });
+      deps.turnStreams.register({
+        sessionId: "sess-live",
+        turnId: "turn-live",
+        agentName: "test-main",
+      });
+
+      await expect(manager.acquireBySessionId!("sess-live", "test-main")).rejects.toThrow(
+        /has a turn running/,
+      );
 
       await manager.shutdown();
     });

@@ -86,6 +86,7 @@ import {
 } from "@opentelemetry/api";
 import { isTerminalBlock } from "./agent-message.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
+import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   ExecuteSubagentInput,
   SubagentExecution,
@@ -359,6 +360,9 @@ interface ManagerDeps {
   webchatRepo?: WebChatRepository;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
+  /** Process-wide record of turns that are running right now. Read by
+   * `acquireBySessionId` to refuse resuming a session that already has one. */
+  turnStreams?: AgentTurnStreamRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
   turnMiddleware?: TurnMiddlewareChain;
@@ -617,6 +621,15 @@ export function createAgentSessionManager(
     const row = await deps.sessionManager.findResumableSessionById(sessionId, agentName);
     if (!row) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
+    }
+    // Two managers hold separate session maps, so resuming by id while a turn
+    // is running would hand out a second AgentSessionImpl over the same
+    // provider thread — two writers, one history. The turn registry is shared
+    // across managers, which makes it the one place that sees both.
+    if (deps.turnStreams && deps.turnStreams.listBySession(sessionId).length > 0) {
+      throw new Error(
+        `Agent session "${sessionId}" has a turn running and cannot be resumed until it ends`,
+      );
     }
     return acquire(
       { agentName, channelThreadKey: row.channelThreadKey },
@@ -995,6 +1008,7 @@ async function openSession(
             channelContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
             sessionId: refs.sessionId,
+            romeSessionId: refs.getRomeSessionId(),
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             turnId: refs.getTurnId(),

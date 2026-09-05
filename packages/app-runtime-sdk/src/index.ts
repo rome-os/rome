@@ -1588,6 +1588,12 @@ export interface CurrentActionContext {
   callerAppId?: string;
   channelContext?: ThreadContext;
   sessionId?: string;
+  /** Durable Rome session id of the agent session that called this action.
+   * Present only for agent-initiated calls; a routine, hook, or app-initiated
+   * call has no agent session and leaves it undefined. Unlike `sessionId`
+   * (the runtime AgentSession handle) this is the id sessions are persisted
+   * and parented by. */
+  romeSessionId?: string;
   turnId?: string;
   agentName?: string;
   channelThreadKey?: string;
@@ -2364,6 +2370,129 @@ export interface BackendTurnParams {
  * per-channel delivery branch lives inside the implementation, not at callers. */
 export interface BackendTurnRunner {
   runAndDeliver(params: BackendTurnParams): Promise<void>;
+}
+
+/** Lifecycle of one child agent session as a later, unrelated turn can observe
+ * it. `running` means a live turn stream exists right now. `interrupted` also
+ * covers a child whose turn was cut short by a restart — a detached child does
+ * not survive one. `unknown` means the session exists but has run no turn. */
+export type ChildSessionStatus = "running" | "completed" | "failed" | "interrupted" | "unknown";
+
+/** Ceiling on `transcriptTail`. A larger ask is clamped to this, never
+ * refused. */
+export const MAX_CHILD_TRANSCRIPT_TAIL = 50;
+
+/** Which agent session a detached child is parented to. The runtime seam fills
+ * this from the calling agent turn (a worker-side proxy reads the ambient
+ * action context and puts it on the wire, since the RPC server dispatches
+ * outside that context); an action leaves it unset. */
+export interface DetachedChildParent {
+  parentSessionId: string;
+  parentTurnId: string;
+  parentAgentName: string;
+}
+
+/** Who is asking to read or stop a child. Filled by the same runtime seam as
+ * {@link DetachedChildParent}, and for the same reason; an action leaves it
+ * unset. A child answers only to the agent that owns it, so a call that
+ * carries no identity and runs outside an agent turn is refused. */
+export interface ChildSessionCaller {
+  romeSessionId: string;
+  agentName: string;
+}
+
+export interface StartDetachedChildInput {
+  agentName: string;
+  prompt: string;
+  /** Continue this child session with a new prompt instead of minting one.
+   * Rejected while that child still has a live turn, and rejected when the
+   * child belongs to another agent. */
+  resumeSessionId?: string;
+  /** Absolute directory the child works in. Defaults to the caller's project
+   * directory, and to the default agent working directory when the caller has
+   * none. On a resume it defaults to the directory the child already works in,
+   * and naming a different one is refused. */
+  workingDir?: string;
+  parent?: DetachedChildParent;
+}
+
+export interface DetachedChildStarted {
+  sessionId: string;
+  turnId: string;
+  agentName: string;
+  /** The child's lineage parent, which a resume keeps: the session that first
+   * started this child, not necessarily the one that resumed it. */
+  parentSessionId: string;
+}
+
+export interface ChildSessionTranscriptEntry {
+  role: "user" | "assistant";
+  turnId: string | null;
+  text: string;
+  createdAt: string;
+}
+
+export interface ChildSessionStatusReport {
+  sessionId: string;
+  agentName: string | null;
+  parentSessionId: string | null;
+  status: ChildSessionStatus;
+  /** Turn the status was read off: the live turn while `running`, else the
+   * newest recorded turn. Null when the session has run none. */
+  turnId: string | null;
+  startedAt: string;
+  updatedAt: string;
+  /** The child's final reply for `turnId`, once it has one. */
+  reply: string | null;
+  error: string | null;
+  /** Oldest-first, present only when the caller asked for a tail. */
+  transcript?: ChildSessionTranscriptEntry[];
+}
+
+export interface ChildSessionStopResult {
+  /** True when a live turn was found and asked to stop. Stopping is a request:
+   * the child ends shortly afterwards and reads back as `interrupted`. */
+  stopped: boolean;
+  /** The child's status when the stop was asked for. */
+  status: ChildSessionStatus;
+}
+
+/** Starts child agent sessions that outlive the turn that started them, and
+ * reads, resumes, and stops them afterwards. The real implementation lives in
+ * the main process (it owns the session manager the child runs under); a
+ * worker-side action receives a proxy that forwards every call over WorkerRPC.
+ *
+ * A child belongs to an agent, not to the session that started it: any session
+ * of the same agent may read, resume, or stop it, and no other caller can
+ * observe that it exists. That is what lets a manager agent on a schedule —
+ * a fresh session every run — pick up the children its previous run started.
+ *
+ * A detached child is not recoverable across a restart — a turn that was
+ * running when the process died reads back as `interrupted`. */
+export interface ChildSessions {
+  /** Resolves as soon as the child's first turn has an id, never waiting for
+   * the turn to finish. Throws when the caller is not an agent turn, when the
+   * caller is itself a child session, when a live-child cap is reached, when
+   * `workingDir` is not absolute, or when `resumeSessionId` names a child that
+   * is still running, belongs to another agent, or works elsewhere. */
+  startDetached(input: StartDetachedChildInput): Promise<DetachedChildStarted>;
+  /** Null when the caller's agent owns no child with this id — whether the
+   * session is absent, is not a child session, or belongs to another agent.
+   * `transcriptTail` is clamped to {@link MAX_CHILD_TRANSCRIPT_TAIL}; 0 or
+   * absent omits the transcript. */
+  getStatus(input: {
+    sessionId: string;
+    transcriptTail?: number;
+    caller?: ChildSessionCaller;
+  }): Promise<ChildSessionStatusReport | null>;
+  /** Asks a running child to stop and returns once the request is in, not once
+   * the child has ended. Null on the same ownership terms as `getStatus`.
+   * Idempotent: stopping a child that is not running reports its status and
+   * changes nothing. */
+  stop(input: {
+    sessionId: string;
+    caller?: ChildSessionCaller;
+  }): Promise<ChildSessionStopResult | null>;
 }
 
 /** App lifecycle authority (create / install / uninstall / enable). Results are
