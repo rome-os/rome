@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/rome-os/rome/compare/ui-v0.2.4...ui-v0.2.5) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ui:** drop the clipped focus edge on the Command input row ([#235](https://github.com/rome-os/rome/issues/235)) ([781dac3](https://github.com/rome-os/rome/commit/781dac3d69b1db1dc03898c47822bec85718f8b3))
+
 ## [0.2.4](https://github.com/rome-os/rome/compare/ui-v0.2.3...ui-v0.2.4) (2026-09-03)
 
 
