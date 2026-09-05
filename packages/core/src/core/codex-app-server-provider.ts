@@ -237,13 +237,18 @@ function notificationTokenUsage(
   return notification.tokenUsage ?? notification.usage;
 }
 
+/** Compatibility for older local stubs/binaries that predate the field. */
+function cacheWriteTokens(u: TokenUsageBreakdown): number {
+  return u.cacheWriteInputTokens ?? 0;
+}
+
 /** App-server token usage (camelCase) → the snake_case shape buildOpenAiAccounting reads. */
 function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   if (!u) return undefined;
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
-    cache_write_input_tokens: u.cacheWriteInputTokens ?? 0,
+    cache_write_input_tokens: cacheWriteTokens(u),
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -255,10 +260,15 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
-    (left.cacheWriteInputTokens ?? 0) === (right.cacheWriteInputTokens ?? 0) &&
+    cacheWriteTokens(left) === cacheWriteTokens(right) &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
+}
+
+function isMissingRevertBoundary(error: unknown, beforeTurnId: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("turn not found") && message.includes(beforeTurnId);
 }
 
 /**
@@ -273,7 +283,7 @@ function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
   // cannot poison the turn total with NaN.
   const last: TokenUsageBreakdown = {
     ...update.last,
-    cacheWriteInputTokens: update.last.cacheWriteInputTokens ?? 0,
+    cacheWriteInputTokens: cacheWriteTokens(update.last),
   };
   const usage = turn.usage;
   turn.usage = usage
@@ -449,13 +459,21 @@ export class CodexAppServerProvider implements ModelProvider {
           inheritedFork.dynamicToolDefinitions,
         )
       : configuredRomeTools;
-    if (inheritedFork?.isolated) {
-      const disabledToolNames = inheritedFork.dynamicToolDefinitions
+    if (inheritedFork) {
+      const inheritedToolNames = new Set(
+        inheritedFork.dynamicToolDefinitions.map((definition) => definition.name),
+      );
+      const disabledInheritedToolNames = [...inheritedToolNames].filter(
+        (name) => !configuredRomeTools.hasTool(name),
+      );
+      const droppedConfiguredToolNames = configuredRomeTools.definitions
         .map((definition) => definition.name)
-        .filter((name) => !configuredRomeTools.hasTool(name));
-      if (disabledToolNames.length > 0) {
-        log.warn("codex isolated fork inherited disabled dynamic tools", {
-          toolNames: disabledToolNames,
+        .filter((name) => !inheritedToolNames.has(name));
+      if (disabledInheritedToolNames.length > 0 || droppedConfiguredToolNames.length > 0) {
+        log.warn("codex native fork dynamic tool catalogs differ", {
+          isolated: inheritedFork.isolated,
+          disabledInheritedToolNames,
+          droppedConfiguredToolNames,
         });
       }
     }
@@ -1146,6 +1164,17 @@ export class CodexAppServerProvider implements ModelProvider {
                     );
                     return;
                   } catch (err) {
+                    if (isMissingRevertBoundary(err, beforeTurnId)) {
+                      // The borrowed turn was never persisted, or an earlier
+                      // request already removed this exact boundary. Upstream
+                      // reloads the paginated runtime before returning this
+                      // error, so the source history is clean in either case.
+                      log.info("codex exact-fork revert boundary already absent", {
+                        attempt,
+                        beforeTurnId,
+                      });
+                      return;
+                    }
                     lastMessage = err instanceof Error ? err.message : String(err);
                     log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
                   }

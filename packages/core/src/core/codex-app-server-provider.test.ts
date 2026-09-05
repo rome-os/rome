@@ -787,6 +787,54 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
+  it("accepts an already-absent exact-fork revert boundary as clean", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "source-thread", turn: { id: "missing-fork-turn" } });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "fork answer", phase: "final_answer" },
+          threadId: "source-thread",
+          turnId: "missing-fork-turn",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "source-thread",
+          turn: { id: "missing-fork-turn", status: "completed" },
+        });
+      }
+      if (method === "thread/revert") {
+        throw new Error("turn not found: missing-fork-turn");
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({ sessionId: "source-session", isNewSession: true }),
+    );
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+    const collected = collectUntilTerminal(forkSession);
+    await forkSession.sendUserInput({ text: "feedback" });
+
+    expect((await collected).find((message) => message.type === "result")).toMatchObject({
+      content: "fork answer",
+    });
+    expect(requestMock.mock.calls.filter((call) => call[0] === "thread/revert")).toHaveLength(1);
+    await expect(source.fork({ sessionId: "next-fork", mode: "ephemeral" })).resolves.toBeDefined();
+
+    await forkSession.close();
+    await source.close();
+  });
+
   it("routes dynamic subagent calls in a borrowed exact fork to the fork executor", async () => {
     const sourceExecuteSubagent = rs.fn(async () => "source result");
     const forkExecuteSubagent = rs.fn(async () => ({
