@@ -49,9 +49,13 @@ import {
   type ItemCompletedNotification,
   type ItemStartedNotification,
   type AgentMessageDeltaNotification,
+  type DynamicToolSpec,
   type MessagePhase,
   type ReasoningEffort,
+  type ThreadConfigurationOverrides,
+  type ThreadForkParams,
   type ThreadItem,
+  type ThreadRevertParams,
   type ThreadStartParams,
   type TokenUsageBreakdown,
   type ThreadTokenUsage,
@@ -76,7 +80,11 @@ import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-r
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
 import type { CodexTurnRuntime } from "./codex/turn-runtime.js";
-import { createRomeDynamicTools, type RomeDynamicTools } from "./codex/rome-dynamic-tools.js";
+import {
+  alignRomeDynamicToolsToInheritedCatalog,
+  createRomeDynamicTools,
+  type RomeDynamicTools,
+} from "./codex/rome-dynamic-tools.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -99,11 +107,10 @@ function normalizeEffort(effort: ModelReasoningEffort | undefined): ReasoningEff
   return DEFAULT_EFFORT;
 }
 
-function buildThreadConfig(
+function buildThreadConfigurationOverrides(
   params: ModelSessionForkOpenParams,
   model: string,
-  romeTools: RomeDynamicTools,
-): ThreadStartParams {
+): ThreadConfigurationOverrides {
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
@@ -116,10 +123,42 @@ function buildThreadConfig(
     cwd: params.workingDir ?? null,
     sandbox: "danger-full-access",
     approvalPolicy: "never",
-    skipGitRepoCheck: true,
     baseInstructions: params.systemPrompt,
     config,
+  };
+}
+
+function buildThreadConfig(
+  params: ModelSessionForkOpenParams,
+  model: string,
+  romeTools: RomeDynamicTools,
+): ThreadStartParams {
+  return {
+    ...buildThreadConfigurationOverrides(params, model),
+    historyMode: "paginated",
     dynamicTools: romeTools.definitions.length > 0 ? [...romeTools.definitions] : null,
+  };
+}
+
+const ISOLATED_FORK_INSTRUCTION = `<rome_isolated_fork>
+This is an isolated side-channel turn. Do not invoke any tool, even if provider metadata lists tools inherited from the source thread. Answer only from the inherited conversation and the user prompt.
+</rome_isolated_fork>`;
+
+/**
+ * Codex 0.153.4 cannot replace a source thread's dynamic-tool catalog during
+ * thread/fork. Make that provider limitation an explicit, read-only degrade:
+ * the model is instructed not to call inherited tools and the runtime rejects
+ * them, while the fork remains usable for recap/title side-channel turns.
+ */
+function constrainIsolatedFork(
+  overrides: ThreadConfigurationOverrides,
+): ThreadConfigurationOverrides {
+  return {
+    ...overrides,
+    sandbox: "read-only",
+    baseInstructions: [overrides.baseInstructions, ISOLATED_FORK_INSTRUCTION]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join("\n\n"),
   };
 }
 
@@ -198,12 +237,18 @@ function notificationTokenUsage(
   return notification.tokenUsage ?? notification.usage;
 }
 
+/** Compatibility for older local stubs/binaries that predate the field. */
+function cacheWriteTokens(u: TokenUsageBreakdown): number {
+  return u.cacheWriteInputTokens ?? 0;
+}
+
 /** App-server token usage (camelCase) → the snake_case shape buildOpenAiAccounting reads. */
 function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   if (!u) return undefined;
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
+    cache_write_input_tokens: cacheWriteTokens(u),
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -215,9 +260,15 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
+    cacheWriteTokens(left) === cacheWriteTokens(right) &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
+}
+
+function isMissingRevertBoundary(error: unknown, beforeTurnId: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("turn not found") && message.includes(beforeTurnId);
 }
 
 /**
@@ -227,13 +278,20 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
  * turn instead of replacing the prior value with the newest one.
  */
 function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
-  const last = update.last;
+  // Compatibility notifications from older local app-server stubs predate
+  // this 0.153.4 field. Normalize them before arithmetic so a missing value
+  // cannot poison the turn total with NaN.
+  const last: TokenUsageBreakdown = {
+    ...update.last,
+    cacheWriteInputTokens: cacheWriteTokens(update.last),
+  };
   const usage = turn.usage;
   turn.usage = usage
     ? {
         totalTokens: usage.totalTokens + last.totalTokens,
         inputTokens: usage.inputTokens + last.inputTokens,
         cachedInputTokens: usage.cachedInputTokens + last.cachedInputTokens,
+        cacheWriteInputTokens: usage.cacheWriteInputTokens + last.cacheWriteInputTokens,
         outputTokens: usage.outputTokens + last.outputTokens,
         reasoningOutputTokens: usage.reasoningOutputTokens + last.reasoningOutputTokens,
       }
@@ -375,6 +433,16 @@ export class CodexAppServerProvider implements ModelProvider {
   }
 
   async openSession(params: ModelSessionParams): Promise<ModelSession> {
+    return await this.openSessionWithInheritedDynamicTools(params);
+  }
+
+  private async openSessionWithInheritedDynamicTools(
+    params: ModelSessionParams,
+    inheritedFork?: {
+      dynamicToolDefinitions: readonly DynamicToolSpec[];
+      isolated: boolean;
+    },
+  ): Promise<ModelSession> {
     const modelName = stripLegacyReasoningSuffix(params.model);
     const outputValidator = params.outputSchema
       ? compileOutputSchema(params.outputSchema)
@@ -384,7 +452,31 @@ export class CodexAppServerProvider implements ModelProvider {
     // app-server dynamic tools. The provider-visible catalog is thread-scoped;
     // execution is selected from the active turn runtime so a borrowed exact
     // fork can reuse the source thread with fork callbacks.
-    const romeTools = createRomeDynamicTools(params);
+    const configuredRomeTools = createRomeDynamicTools(params);
+    const romeTools = inheritedFork
+      ? alignRomeDynamicToolsToInheritedCatalog(
+          configuredRomeTools,
+          inheritedFork.dynamicToolDefinitions,
+        )
+      : configuredRomeTools;
+    if (inheritedFork) {
+      const inheritedToolNames = new Set(
+        inheritedFork.dynamicToolDefinitions.map((definition) => definition.name),
+      );
+      const disabledInheritedToolNames = [...inheritedToolNames].filter(
+        (name) => !configuredRomeTools.hasTool(name),
+      );
+      const droppedConfiguredToolNames = configuredRomeTools.definitions
+        .map((definition) => definition.name)
+        .filter((name) => !inheritedToolNames.has(name));
+      if (disabledInheritedToolNames.length > 0 || droppedConfiguredToolNames.length > 0) {
+        log.warn("codex native fork dynamic tool catalogs differ", {
+          isolated: inheritedFork.isolated,
+          disabledInheritedToolNames,
+          droppedConfiguredToolNames,
+        });
+      }
+    }
 
     const sink = new AgentMessageSink();
     // Image-generation trace. The app-server delivers it as `imageGeneration`
@@ -718,13 +810,15 @@ export class CodexAppServerProvider implements ModelProvider {
       },
     };
 
-    const threadConfig = buildThreadConfig(params, modelName, romeTools);
+    let threadConfig = buildThreadConfig(params, modelName, romeTools);
+    if (inheritedFork?.isolated) threadConfig = constrainIsolatedFork(threadConfig);
 
-    threadId = await this.appServerManager.openThread(
+    const openedThread = await this.appServerManager.openThread(
       threadConfig,
       binding,
       params.isNewSession === false ? params.providerThreadId : undefined,
     );
+    threadId = openedThread.threadId;
     session.providerThreadId = threadId;
 
     const sourceRuntime: CodexTurnRuntime = {
@@ -1016,14 +1110,17 @@ export class CodexAppServerProvider implements ModelProvider {
           const targetIsCurrentHead =
             forkParams.sourceCheckpoint === undefined ||
             forkParams.sourceCheckpoint === lastCompletedTurnCheckpoint;
-          // Borrowing runs the turn inside the source thread and rolls it back
+          // Borrowing runs the turn inside the source thread and reverts it
           // (a temporary workaround for openai/codex#24704 — see
           // codex/borrowed-exact-fork.ts). That leaves nothing to resume and
           // reports the source's own thread id, so a fork that asked to be
           // persisted must take the native path instead, whatever it costs in
           // uncached prefix. Every other fork keeps the cheap path.
           const borrowSourceThread =
-            mode === "ephemeral" && compatibility.eligible && targetIsCurrentHead;
+            mode === "ephemeral" &&
+            compatibility.eligible &&
+            targetIsCurrentHead &&
+            openedThread.historyMode === "paginated";
           log.info("codex fork strategy selected", {
             strategy: borrowSourceThread ? "borrow_source_thread" : "native_thread_fork",
             configurationMode: forkParams.configurationMode,
@@ -1032,6 +1129,7 @@ export class CodexAppServerProvider implements ModelProvider {
             sameModel: compatibility.sameModel,
             sameSystemPrompt: compatibility.sameSystemPrompt,
             sameWorkingDir: compatibility.sameWorkingDir,
+            sourceHistoryMode: openedThread.historyMode,
           });
 
           if (borrowSourceThread) {
@@ -1043,35 +1141,50 @@ export class CodexAppServerProvider implements ModelProvider {
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),
-              rollbackTurn: async (threadIdToRollback) => {
-                // Rollback is the only thing keeping the borrowed turn out of
+              revertTurn: async (threadIdToRevert, beforeTurnId) => {
+                // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain
-                // turn error. An error response means the rollback was not
-                // applied (stdio JSON-RPC; a response is only lost when the
-                // process died, and then the retry rejects locally without
-                // re-sending), so one retry cannot double-rollback.
+                // turn error. The turn-id boundary prevents a retry from
+                // removing an earlier source turn: after a successful first
+                // request the boundary is gone and a second request fails
+                // closed. Retry once so pre-mutation shutdown/drain failures
+                // can recover; if both attempts fail, source state is still
+                // uncertain and the session must be poisoned.
+                const revertParams: ThreadRevertParams = {
+                  threadId: threadIdToRevert,
+                  beforeTurnId,
+                };
                 let lastMessage = "unknown error";
                 for (let attempt = 1; attempt <= 2; attempt++) {
                   try {
                     await this.appServerManager.requestForThread(
-                      threadIdToRollback,
-                      Method.threadRollback,
-                      {
-                        threadId: threadIdToRollback,
-                        numTurns: 1,
-                      },
+                      threadIdToRevert,
+                      Method.threadRevert,
+                      revertParams,
                     );
                     return;
                   } catch (err) {
+                    if (isMissingRevertBoundary(err, beforeTurnId)) {
+                      // The borrowed turn was never persisted, or an earlier
+                      // request already removed this exact boundary. Upstream
+                      // reloads the paginated runtime before returning this
+                      // error, so the source history is clean in either case.
+                      log.info("codex exact-fork revert boundary already absent", {
+                        attempt,
+                        beforeTurnId,
+                      });
+                      return;
+                    }
                     lastMessage = err instanceof Error ? err.message : String(err);
-                    log.warn("codex exact-fork rollback failed", { attempt, error: lastMessage });
+                    log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
                   }
                 }
-                // The fork's turn is now permanently part of the source
-                // thread. Poison the session so nothing resumes from the
-                // contaminated history, and surface the failure on the source
-                // events stream (out-of-turn, like Notify.error).
-                contaminatedReason = `codex exact-fork rollback failed, source thread retains the fork turn: ${lastMessage}`;
+                // The fork's turn may now be part of the source thread, or a
+                // response may have been lost after a successful mutation.
+                // Poison the session so nothing resumes from uncertain
+                // history, and surface the failure on the source events
+                // stream (out-of-turn, like Notify.error).
+                contaminatedReason = `codex exact-fork revert failed, source thread state is uncertain: ${lastMessage}`;
                 if (!closed) sink.push({ type: "error", error: contaminatedReason });
                 throw new Error(contaminatedReason);
               },
@@ -1087,40 +1200,50 @@ export class CodexAppServerProvider implements ModelProvider {
           //
           // The snapshot goes through the turn lane: a borrowed exact fork may
           // be mid-turn, and a thread/fork issued then would copy its
-          // not-yet-rolled-back turn into the child. Contamination is
+          // not-yet-reverted turn into the child. Contamination is
           // re-checked inside the lane because a queued snapshot would
-          // otherwise run immediately after the failed rollback that set it.
-          const forkRomeTools = createRomeDynamicTools(openParams);
-          const forkThreadConfig = buildThreadConfig(
+          // otherwise run immediately after the failed revert that set it.
+          const isolatedNativeFork = forkParams.configurationMode !== "exact";
+          let forkThreadConfiguration = buildThreadConfigurationOverrides(
             openParams,
             stripLegacyReasoningSuffix(openParams.model),
-            forkRomeTools,
           );
+          if (isolatedNativeFork) {
+            forkThreadConfiguration = constrainIsolatedFork(forkThreadConfiguration);
+          }
           const forkRes = await turnCoordinator.run(async () => {
             if (contaminatedReason) throw new Error(contaminatedReason);
-            return await this.appServerManager.requestForThread<
-              { thread?: { id?: string } } | undefined
-            >(source, Method.threadFork, {
+            const nativeForkParams: ThreadForkParams = {
               threadId: source,
               ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
-              ...forkThreadConfig,
+              ...forkThreadConfiguration,
               ephemeral: false,
-            });
+              excludeTurns: true,
+            };
+            return await this.appServerManager.requestForThread<
+              { thread?: { id?: string } } | undefined
+            >(source, Method.threadFork, nativeForkParams);
           });
           forkedId = forkRes?.thread?.id;
           if (!forkedId) throw new Error("codex thread/fork did not return a thread id");
-          return await this.openSession({
-            ...openParams,
-            sessionId: forkParams.sessionId,
-            isNewSession: false,
-            providerThreadId: forkedId,
-            fork: {
-              sourceSessionId: params.sessionId,
-              sourceProviderThreadId: source,
-              mode,
-              sourceCheckpoint: forkParams.sourceCheckpoint,
+          return await this.openSessionWithInheritedDynamicTools(
+            {
+              ...openParams,
+              sessionId: forkParams.sessionId,
+              isNewSession: false,
+              providerThreadId: forkedId,
+              fork: {
+                sourceSessionId: params.sessionId,
+                sourceProviderThreadId: source,
+                mode,
+                sourceCheckpoint: forkParams.sourceCheckpoint,
+              },
             },
-          });
+            {
+              dynamicToolDefinitions: romeTools.definitions,
+              isolated: isolatedNativeFork,
+            },
+          );
         },
       };
     };

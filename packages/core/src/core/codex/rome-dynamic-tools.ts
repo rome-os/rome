@@ -57,6 +57,35 @@ export function createRomeDynamicTools(params: ModelSessionForkOpenParams): Rome
   return createRomeDynamicToolsFromServer(createRomeMcpServerForSession(params));
 }
 
+/**
+ * `thread/fork` inherits the source thread's dynamic-tool definitions and the
+ * current app-server protocol has no fork/resume field that can replace them.
+ * Keep the child binding's advertised catalog identical to that inherited
+ * catalog, while still enforcing the fork's Rome-side runtime permissions.
+ *
+ * An isolated fork therefore rejects an inherited source-only tool explicitly
+ * instead of letting the manager report it as unknown (or accidentally routing
+ * it through the source session's callbacks).
+ */
+export function alignRomeDynamicToolsToInheritedCatalog(
+  runtimeTools: RomeDynamicTools,
+  inheritedDefinitions: readonly DynamicToolSpec[],
+): RomeDynamicTools {
+  const definitions = [...inheritedDefinitions];
+  const inheritedNames = new Set(definitions.map((definition) => definition.name));
+  return {
+    definitions,
+    hasTool: (name) => inheritedNames.has(name),
+    async callTool(name, input, context) {
+      if (!inheritedNames.has(name)) return errorResult(`Unknown dynamic tool: ${name}`);
+      if (!runtimeTools.hasTool(name)) {
+        return errorResult(`Dynamic tool is disabled in this fork: ${name}`);
+      }
+      return await runtimeTools.callTool(name, input, context);
+    },
+  };
+}
+
 export function createRomeDynamicToolsFromServer(server: RomeMcpServer): RomeDynamicTools {
   const groupByName = new Map<string, RomeMcpGroup>();
   const definitions: DynamicToolSpec[] = [];

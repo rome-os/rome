@@ -29,9 +29,18 @@ class FakeConnection implements CodexAppServerConnection {
 
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
-    if (method === "thread/start") return { thread: { id: this.nextThreadId() } };
+    if (method === "thread/start") {
+      return {
+        thread: {
+          id: this.nextThreadId(),
+          historyMode: (params as ThreadStartParams).historyMode ?? "legacy",
+        },
+      };
+    }
     if (method === "thread/resume") {
-      return { thread: { id: (params as { threadId: string }).threadId } };
+      return {
+        thread: { id: (params as { threadId: string }).threadId, historyMode: "paginated" },
+      };
     }
     if (method === "thread/unsubscribe") return { status: "unsubscribed" };
     return {};
@@ -50,6 +59,7 @@ function config(toolName: string): ThreadStartParams {
   return {
     model: "gpt-5.4-mini",
     cwd: "/workspace",
+    historyMode: "paginated",
     dynamicTools: [
       {
         type: "function",
@@ -99,11 +109,13 @@ describe("CodexAppServerManager", () => {
     const alpha = binding("alpha");
     const beta = binding("beta");
 
-    const [threadA, threadB] = await Promise.all([
+    const [openedA, openedB] = await Promise.all([
       manager.openThread(config("rome_alpha"), alpha),
       manager.openThread(config("rome_beta"), beta),
       manager.warmup(),
     ]).then(([a, b]) => [a, b]);
+    const threadA = openedA.threadId;
+    const threadB = openedB.threadId;
 
     expect(clients).toHaveLength(1);
     expect(clients[0].started).toBe(1);
@@ -111,6 +123,8 @@ describe("CodexAppServerManager", () => {
       1,
     );
     expect(threadA).not.toBe(threadB);
+    expect(openedA.historyMode).toBe("paginated");
+    expect(openedB.historyMode).toBe("paginated");
 
     clients[0].options.onNotification("item/agentMessage/delta", {
       threadId: threadA,
@@ -227,7 +241,8 @@ describe("CodexAppServerManager", () => {
     const callbacks = binding("source");
     const globalExit = rs.fn();
     manager.onExit(globalExit);
-    const threadId = await manager.openThread(config("rome_source"), callbacks);
+    const opened = await manager.openThread(config("rome_source"), callbacks);
+    const threadId = opened.threadId;
 
     clients[0].options.onExit?.(137);
     expect(callbacks.exits).toHaveLength(1);
@@ -242,10 +257,9 @@ describe("CodexAppServerManager", () => {
       "thread/resume",
       "turn/start",
     ]);
-    expect(clients[1].requests[1].params).toMatchObject({
-      threadId,
-      dynamicTools: [expect.objectContaining({ name: "rome_source" })],
-    });
+    expect(clients[1].requests[1].params).toMatchObject({ threadId, excludeTurns: true });
+    expect(clients[1].requests[1].params).not.toHaveProperty("dynamicTools");
+    expect(clients[1].requests[1].params).not.toHaveProperty("historyMode");
     manager.close();
   });
 
