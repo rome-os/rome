@@ -2,7 +2,7 @@
 //
 // These shapes are transcribed from the authoritative TypeScript bindings the
 // installed codex binary emits via `codex app-server generate-ts` (v2 surface,
-// codex-cli 0.130.0). We vendor only what the CodexAppServerProvider consumes
+// codex-cli 0.153.4). We vendor only what the CodexAppServerProvider consumes
 // rather than depend on a generated package — the binary has no published TS
 // SDK for app-server. Keep field names exact: they are the wire contract.
 //
@@ -156,11 +156,25 @@ export interface InitializeParams {
   capabilities?: Record<string, unknown> | null;
 }
 
-export type AskForApproval = "untrusted" | "on-failure" | "on-request" | "never";
+export type AskForApproval =
+  | "untrusted"
+  | "on-request"
+  | {
+      granular: {
+        sandbox_approval: boolean;
+        rules: boolean;
+        skill_approval: boolean;
+        request_permissions: boolean;
+        mcp_elicitations: boolean;
+      };
+    }
+  | "never";
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = string;
+export type ThreadHistoryMode = "legacy" | "paginated";
 
-export interface ThreadStartParams {
+/** Configuration overrides shared by thread/start, thread/resume, and thread/fork. */
+export interface ThreadConfigurationOverrides {
   model?: string | null;
   cwd?: string | null;
   approvalPolicy?: AskForApproval | null;
@@ -170,7 +184,11 @@ export interface ThreadStartParams {
   config?: Record<string, unknown> | null;
   /** The system prompt. */
   baseInstructions?: string | null;
-  skipGitRepoCheck?: boolean | null;
+}
+
+export interface ThreadStartParams extends ThreadConfigurationOverrides {
+  /** Persisted history contract for the new thread. */
+  historyMode?: ThreadHistoryMode | null;
   dynamicTools?: DynamicToolSpec[] | null;
 }
 
@@ -198,25 +216,26 @@ export interface DynamicToolCallResponse {
   success: boolean;
 }
 
-export interface ThreadResumeParams extends ThreadStartParams {
+export interface ThreadResumeParams extends ThreadConfigurationOverrides {
   threadId: string;
 }
 
-export interface ThreadForkParams extends ThreadStartParams {
+export interface ThreadForkParams extends ThreadConfigurationOverrides {
   threadId: string;
   /** Include this provider turn as the fork's final inherited turn. */
-  lastTurnId?: string;
+  lastTurnId?: string | null;
+  /** Exclude this provider turn and every later turn from the fork. */
+  beforeTurnId?: string | null;
   ephemeral?: boolean;
 }
 
-export interface ThreadRollbackParams {
+export interface ThreadRevertParams {
   threadId: string;
   /**
-   * Number of turns to remove from the end of the thread. Must be >= 1.
-   * Deprecated upstream, but still the only app-server primitive that can
-   * restore a borrowed exact-fork thread on Codex 0.144.x.
+   * Replace a paginated thread's durable history with the prefix before this
+   * turn, excluding it and every later turn. Local file changes are untouched.
    */
-  numTurns: number;
+  beforeTurnId: string;
 }
 
 export type UserInput =
@@ -256,7 +275,7 @@ export const Method = {
   threadStart: "thread/start",
   threadResume: "thread/resume",
   threadFork: "thread/fork",
-  threadRollback: "thread/rollback",
+  threadRevert: "thread/revert",
   threadUnsubscribe: "thread/unsubscribe",
   turnStart: "turn/start",
   turnSteer: "turn/steer",

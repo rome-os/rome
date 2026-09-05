@@ -51,7 +51,10 @@ import {
   type AgentMessageDeltaNotification,
   type MessagePhase,
   type ReasoningEffort,
+  type ThreadConfigurationOverrides,
+  type ThreadForkParams,
   type ThreadItem,
+  type ThreadRevertParams,
   type ThreadStartParams,
   type TokenUsageBreakdown,
   type ThreadTokenUsage,
@@ -116,11 +119,17 @@ function buildThreadConfig(
     cwd: params.workingDir ?? null,
     sandbox: "danger-full-access",
     approvalPolicy: "never",
-    skipGitRepoCheck: true,
     baseInstructions: params.systemPrompt,
     config,
+    historyMode: "paginated",
     dynamicTools: romeTools.definitions.length > 0 ? [...romeTools.definitions] : null,
   };
+}
+
+/** Strip thread/start-only fields before calling thread/fork. */
+function buildThreadForkOverrides(config: ThreadStartParams): ThreadConfigurationOverrides {
+  const { dynamicTools: _dynamicTools, historyMode: _historyMode, ...overrides } = config;
+  return overrides;
 }
 
 /** commentary → "commentary"; final_answer → "final"; null/absent → undefined
@@ -1016,7 +1025,7 @@ export class CodexAppServerProvider implements ModelProvider {
           const targetIsCurrentHead =
             forkParams.sourceCheckpoint === undefined ||
             forkParams.sourceCheckpoint === lastCompletedTurnCheckpoint;
-          // Borrowing runs the turn inside the source thread and rolls it back
+          // Borrowing runs the turn inside the source thread and reverts it
           // (a temporary workaround for openai/codex#24704 — see
           // codex/borrowed-exact-fork.ts). That leaves nothing to resume and
           // reports the source's own thread id, so a fork that asked to be
@@ -1043,35 +1052,36 @@ export class CodexAppServerProvider implements ModelProvider {
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),
-              rollbackTurn: async (threadIdToRollback) => {
-                // Rollback is the only thing keeping the borrowed turn out of
+              revertTurn: async (threadIdToRevert, beforeTurnId) => {
+                // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain
-                // turn error. An error response means the rollback was not
+                // turn error. An error response means the revert was not
                 // applied (stdio JSON-RPC; a response is only lost when the
                 // process died, and then the retry rejects locally without
-                // re-sending), so one retry cannot double-rollback.
+                // re-sending), so one retry is idempotent at the same boundary.
                 let lastMessage = "unknown error";
                 for (let attempt = 1; attempt <= 2; attempt++) {
                   try {
+                    const revertParams: ThreadRevertParams = {
+                      threadId: threadIdToRevert,
+                      beforeTurnId,
+                    };
                     await this.appServerManager.requestForThread(
-                      threadIdToRollback,
-                      Method.threadRollback,
-                      {
-                        threadId: threadIdToRollback,
-                        numTurns: 1,
-                      },
+                      threadIdToRevert,
+                      Method.threadRevert,
+                      revertParams,
                     );
                     return;
                   } catch (err) {
                     lastMessage = err instanceof Error ? err.message : String(err);
-                    log.warn("codex exact-fork rollback failed", { attempt, error: lastMessage });
+                    log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
                   }
                 }
                 // The fork's turn is now permanently part of the source
                 // thread. Poison the session so nothing resumes from the
                 // contaminated history, and surface the failure on the source
                 // events stream (out-of-turn, like Notify.error).
-                contaminatedReason = `codex exact-fork rollback failed, source thread retains the fork turn: ${lastMessage}`;
+                contaminatedReason = `codex exact-fork revert failed, source thread retains the fork turn: ${lastMessage}`;
                 if (!closed) sink.push({ type: "error", error: contaminatedReason });
                 throw new Error(contaminatedReason);
               },
@@ -1087,9 +1097,9 @@ export class CodexAppServerProvider implements ModelProvider {
           //
           // The snapshot goes through the turn lane: a borrowed exact fork may
           // be mid-turn, and a thread/fork issued then would copy its
-          // not-yet-rolled-back turn into the child. Contamination is
+          // not-yet-reverted turn into the child. Contamination is
           // re-checked inside the lane because a queued snapshot would
-          // otherwise run immediately after the failed rollback that set it.
+          // otherwise run immediately after the failed revert that set it.
           const forkRomeTools = createRomeDynamicTools(openParams);
           const forkThreadConfig = buildThreadConfig(
             openParams,
@@ -1098,14 +1108,15 @@ export class CodexAppServerProvider implements ModelProvider {
           );
           const forkRes = await turnCoordinator.run(async () => {
             if (contaminatedReason) throw new Error(contaminatedReason);
-            return await this.appServerManager.requestForThread<
-              { thread?: { id?: string } } | undefined
-            >(source, Method.threadFork, {
+            const nativeForkParams: ThreadForkParams = {
               threadId: source,
               ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
-              ...forkThreadConfig,
+              ...buildThreadForkOverrides(forkThreadConfig),
               ephemeral: false,
-            });
+            };
+            return await this.appServerManager.requestForThread<
+              { thread?: { id?: string } } | undefined
+            >(source, Method.threadFork, nativeForkParams);
           });
           forkedId = forkRes?.thread?.id;
           if (!forkedId) throw new Error("codex thread/fork did not return a thread id");

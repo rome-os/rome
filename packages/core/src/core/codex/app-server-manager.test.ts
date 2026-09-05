@@ -50,6 +50,7 @@ function config(toolName: string): ThreadStartParams {
   return {
     model: "gpt-5.4-mini",
     cwd: "/workspace",
+    historyMode: "paginated",
     dynamicTools: [
       {
         type: "function",
@@ -242,10 +243,9 @@ describe("CodexAppServerManager", () => {
       "thread/resume",
       "turn/start",
     ]);
-    expect(clients[1].requests[1].params).toMatchObject({
-      threadId,
-      dynamicTools: [expect.objectContaining({ name: "rome_source" })],
-    });
+    expect(clients[1].requests[1].params).toMatchObject({ threadId });
+    expect(clients[1].requests[1].params).not.toHaveProperty("dynamicTools");
+    expect(clients[1].requests[1].params).not.toHaveProperty("historyMode");
     manager.close();
   });
 

@@ -249,7 +249,9 @@ describe("CodexAppServerProvider", () => {
       sandbox: "danger-full-access",
       approvalPolicy: "never",
       baseInstructions: "system",
+      historyMode: "paginated",
     });
+    expect(startCall![1]).not.toHaveProperty("skipGitRepoCheck");
     expect((startCall![1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",
     );
@@ -477,9 +479,11 @@ describe("CodexAppServerProvider", () => {
         approvalPolicy: "never",
         baseInstructions: "system",
         ephemeral: false,
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
       }),
     );
+    const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
+    expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(forkCall?.[1]).not.toHaveProperty("historyMode");
     expect(source.providerThreadId).toBe("source-thread");
     expect(fork).toMatchObject({
       sessionId: "fork-session",
@@ -531,10 +535,12 @@ describe("CodexAppServerProvider", () => {
         baseInstructions: "system",
         ephemeral: false,
         lastTurnId: "provider-turn-t2",
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
       }),
     );
-    expect(requestMock).not.toHaveBeenCalledWith("thread/rollback", expect.anything());
+    const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
+    expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(forkCall?.[1]).not.toHaveProperty("historyMode");
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
     expect(fork.providerThreadId).toBe("historical-fork-thread");
 
     await forkSession.close();
@@ -558,7 +564,7 @@ describe("CodexAppServerProvider", () => {
     );
     // Same model, prompt and cwd, branching at the current head: exactly the
     // shape that borrows today. A "thread" fork has to decline that, because a
-    // borrowed turn is rolled back out of the source and leaves nothing to
+    // borrowed turn is reverted out of the source and leaves nothing to
     // resume — and reports the source's own thread id.
     const fork = await source.fork({
       sessionId: "fork-session",
@@ -571,14 +577,14 @@ describe("CodexAppServerProvider", () => {
       "thread/fork",
       expect.objectContaining({ threadId: "source-thread", ephemeral: false }),
     );
-    expect(requestMock).not.toHaveBeenCalledWith("thread/rollback", expect.anything());
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
     expect(fork.providerThreadId).toBe("continuable-fork-thread");
 
     await forkSession.close();
     await source.close();
   });
 
-  it("runs a same-model exact fork on the source thread and rolls it back", async () => {
+  it("runs a same-model exact fork on the source thread and reverts it", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -624,9 +630,9 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "source-thread" }),
     );
-    expect(requestMock).toHaveBeenCalledWith("thread/rollback", {
+    expect(requestMock).toHaveBeenCalledWith("thread/revert", {
       threadId: "source-thread",
-      numTurns: 1,
+      beforeTurnId: "hidden-fork-turn",
     });
     expect(fork.providerThreadId).toBe("source-thread");
     expect(source.providerThreadId).toBe("source-thread");
@@ -809,13 +815,10 @@ describe("CodexAppServerProvider", () => {
     });
     expect(startMock).toHaveBeenCalledTimes(2);
     expect(requestMock.mock.calls.filter((call) => call[0] === "initialize")).toHaveLength(2);
-    expect(requestMock).toHaveBeenCalledWith(
-      "thread/resume",
-      expect.objectContaining({
-        threadId: "thread-restart",
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
-      }),
-    );
+    const resumeCall = requestMock.mock.calls.find((call) => call[0] === "thread/resume");
+    expect(resumeCall?.[1]).toMatchObject({ threadId: "thread-restart" });
+    expect(resumeCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(resumeCall?.[1]).not.toHaveProperty("historyMode");
     await session.close();
   });
 
@@ -833,7 +836,7 @@ describe("CodexAppServerProvider", () => {
       }
       // The real client rejects post-exit requests immediately instead of
       // leaving them pending (see AppServerClient.request).
-      if (method === "thread/rollback") throw new Error("codex app-server exited");
+      if (method === "thread/revert") throw new Error("codex app-server exited");
       return {};
     });
 
@@ -860,7 +863,7 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
-  it("poisons the source session when exact-fork rollback fails", async () => {
+  it("poisons the source session when exact-fork revert fails", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -879,7 +882,7 @@ describe("CodexAppServerProvider", () => {
           turn: { id: "fork-turn", status: "completed" },
         });
       }
-      if (method === "thread/rollback") throw new Error("rollback rejected");
+      if (method === "thread/revert") throw new Error("revert rejected");
       return {};
     });
 
@@ -899,22 +902,20 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     // Retried once, then gave up.
-    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/rollback")).toHaveLength(2);
+    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
     // The fork never observes success while its turn is still in the source.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
-      error: expect.stringContaining("rollback failed"),
+      error: expect.stringContaining("revert failed"),
     });
     // The source stream carries the contamination error…
     await expect(sourceEvents.next()).resolves.toMatchObject({
-      value: { type: "error", error: expect.stringContaining("rollback failed") },
+      value: { type: "error", error: expect.stringContaining("revert failed") },
     });
     // …and nothing may resume from the contaminated thread.
-    await expect(source.sendUserInput({ text: "next real turn" })).rejects.toThrow(
-      /rollback failed/,
-    );
+    await expect(source.sendUserInput({ text: "next real turn" })).rejects.toThrow(/revert failed/);
     await expect(source.fork({ sessionId: "fork-2", mode: "ephemeral" })).rejects.toThrow(
-      /rollback failed/,
+      /revert failed/,
     );
     expect(requestMock.mock.calls.filter((c) => c[0] === "turn/start")).toHaveLength(1);
 
@@ -925,7 +926,7 @@ describe("CodexAppServerProvider", () => {
   it("serializes a native thread/fork behind an in-flight borrowed exact-fork turn", async () => {
     // Deliver turn/completed manually so the borrowed turn stays mid-flight
     // while a native fork tries to snapshot the source thread. Snapshotting
-    // then would copy the not-yet-rolled-back borrowed turn into the child.
+    // then would copy the not-yet-reverted borrowed turn into the child.
     let finishBorrowedTurn!: () => void;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -980,17 +981,17 @@ describe("CodexAppServerProvider", () => {
     const nativeSession = await nativeOpen;
     await exactCollected;
 
-    // The snapshot only ran after the borrowed turn was rolled back.
+    // The snapshot only ran after the borrowed turn was reverted.
     const methods = requestMock.mock.calls.map((c) => c[0]);
-    expect(methods.indexOf("thread/rollback")).toBeGreaterThanOrEqual(0);
-    expect(methods.indexOf("thread/fork")).toBeGreaterThan(methods.indexOf("thread/rollback"));
+    expect(methods.indexOf("thread/revert")).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf("thread/fork")).toBeGreaterThan(methods.indexOf("thread/revert"));
 
     await nativeSession.close();
     await exactSession.close();
     await source.close();
   });
 
-  it("refuses a native fork snapshot opened after a failed exact-fork rollback", async () => {
+  it("refuses a native fork snapshot opened after a failed exact-fork revert", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -1003,7 +1004,7 @@ describe("CodexAppServerProvider", () => {
           turn: { id: "fork-turn", status: "completed" },
         });
       }
-      if (method === "thread/rollback") throw new Error("rollback rejected");
+      if (method === "thread/revert") throw new Error("revert rejected");
       return {};
     });
 
@@ -1028,7 +1029,7 @@ describe("CodexAppServerProvider", () => {
     // …but open() re-checks inside the lane: the borrowed turn is now a
     // permanent part of the source history, so no child may snapshot it.
     await expect(nativeFork.open(buildForkOpenParams({ model: "gpt-5.4-mini" }))).rejects.toThrow(
-      /rollback failed/,
+      /revert failed/,
     );
     expect(requestMock).not.toHaveBeenCalledWith("thread/fork", expect.anything());
 

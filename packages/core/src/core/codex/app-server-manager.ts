@@ -6,6 +6,7 @@ import {
   ServerRequestMethod,
   type DynamicToolCallParams,
   type DynamicToolCallResponse,
+  type ThreadResumeParams,
   type ThreadStartParams,
 } from "./app-server-protocol.js";
 
@@ -65,6 +66,12 @@ function threadIdFromResponse(result: unknown, method: string): string {
 function threadIdFromParams(params: unknown): string | null {
   const threadId = (params as { threadId?: unknown } | undefined)?.threadId;
   return typeof threadId === "string" && threadId ? threadId : null;
+}
+
+/** Strip thread/start-only fields before calling the narrower resume method. */
+function buildThreadResumeParams(threadId: string, config: ThreadStartParams): ThreadResumeParams {
+  const { dynamicTools: _dynamicTools, historyMode: _historyMode, ...overrides } = config;
+  return { threadId, ...overrides };
 }
 
 export class CodexAppServerManager {
@@ -133,10 +140,10 @@ export class CodexAppServerManager {
     const connection = await this.ensureConnection();
     const method = resumeThreadId ? Method.threadResume : Method.threadStart;
     const startedAt = Date.now();
-    const result = await connection.client.request(method, {
-      ...(resumeThreadId ? { threadId: resumeThreadId } : {}),
-      ...config,
-    });
+    const result = await connection.client.request(
+      method,
+      resumeThreadId ? buildThreadResumeParams(resumeThreadId, config) : config,
+    );
     const threadId = threadIdFromResponse(result, method);
     if (resumeThreadId && threadId !== resumeThreadId) {
       throw new Error(
@@ -215,10 +222,10 @@ export class CodexAppServerManager {
     if (!binding.resumePromise) {
       binding.resumePromise = (async () => {
         const startedAt = Date.now();
-        const result = await connection.client.request(Method.threadResume, {
-          threadId,
-          ...binding.config,
-        });
+        const result = await connection.client.request(
+          Method.threadResume,
+          buildThreadResumeParams(threadId, binding.config),
+        );
         const resumedThreadId = threadIdFromResponse(result, Method.threadResume);
         if (resumedThreadId !== threadId) {
           throw new Error(
