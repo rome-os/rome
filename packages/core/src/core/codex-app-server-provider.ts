@@ -140,6 +140,28 @@ function buildThreadConfig(
   };
 }
 
+const ISOLATED_FORK_INSTRUCTION = `<rome_isolated_fork>
+This is an isolated side-channel turn. Do not invoke any tool, even if provider metadata lists tools inherited from the source thread. Answer only from the inherited conversation and the user prompt.
+</rome_isolated_fork>`;
+
+/**
+ * Codex 0.153.4 cannot replace a source thread's dynamic-tool catalog during
+ * thread/fork. Make that provider limitation an explicit, read-only degrade:
+ * the model is instructed not to call inherited tools and the runtime rejects
+ * them, while the fork remains usable for recap/title side-channel turns.
+ */
+function constrainIsolatedFork(
+  overrides: ThreadConfigurationOverrides,
+): ThreadConfigurationOverrides {
+  return {
+    ...overrides,
+    sandbox: "read-only",
+    baseInstructions: [overrides.baseInstructions, ISOLATED_FORK_INSTRUCTION]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join("\n\n"),
+  };
+}
+
 /** commentary → "commentary"; final_answer → "final"; null/absent → undefined
  *  (legacy model / phase unknown → not promoted by the UI). */
 function mapPhase(phase: MessagePhase | null | undefined): "commentary" | "final" | undefined {
@@ -406,7 +428,10 @@ export class CodexAppServerProvider implements ModelProvider {
 
   private async openSessionWithInheritedDynamicTools(
     params: ModelSessionParams,
-    inheritedDynamicToolDefinitions?: readonly DynamicToolSpec[],
+    inheritedFork?: {
+      dynamicToolDefinitions: readonly DynamicToolSpec[];
+      isolated: boolean;
+    },
   ): Promise<ModelSession> {
     const modelName = stripLegacyReasoningSuffix(params.model);
     const outputValidator = params.outputSchema
@@ -418,12 +443,22 @@ export class CodexAppServerProvider implements ModelProvider {
     // execution is selected from the active turn runtime so a borrowed exact
     // fork can reuse the source thread with fork callbacks.
     const configuredRomeTools = createRomeDynamicTools(params);
-    const romeTools = inheritedDynamicToolDefinitions
+    const romeTools = inheritedFork
       ? alignRomeDynamicToolsToInheritedCatalog(
           configuredRomeTools,
-          inheritedDynamicToolDefinitions,
+          inheritedFork.dynamicToolDefinitions,
         )
       : configuredRomeTools;
+    if (inheritedFork?.isolated) {
+      const disabledToolNames = inheritedFork.dynamicToolDefinitions
+        .map((definition) => definition.name)
+        .filter((name) => !configuredRomeTools.hasTool(name));
+      if (disabledToolNames.length > 0) {
+        log.warn("codex isolated fork inherited disabled dynamic tools", {
+          toolNames: disabledToolNames,
+        });
+      }
+    }
 
     const sink = new AgentMessageSink();
     // Image-generation trace. The app-server delivers it as `imageGeneration`
@@ -757,7 +792,8 @@ export class CodexAppServerProvider implements ModelProvider {
       },
     };
 
-    const threadConfig = buildThreadConfig(params, modelName, romeTools);
+    let threadConfig = buildThreadConfig(params, modelName, romeTools);
+    if (inheritedFork?.isolated) threadConfig = constrainIsolatedFork(threadConfig);
 
     const openedThread = await this.appServerManager.openThread(
       threadConfig,
@@ -1090,32 +1126,38 @@ export class CodexAppServerProvider implements ModelProvider {
               revertTurn: async (threadIdToRevert, beforeTurnId) => {
                 // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain
-                // turn error. Do not retry: thread/revert is boundary-based,
-                // not idempotent (the boundary turn disappears on success),
-                // so a lost response leaves the source state uncertain.
+                // turn error. The turn-id boundary prevents a retry from
+                // removing an earlier source turn: after a successful first
+                // request the boundary is gone and a second request fails
+                // closed. Retry once so pre-mutation shutdown/drain failures
+                // can recover; if both attempts fail, source state is still
+                // uncertain and the session must be poisoned.
                 const revertParams: ThreadRevertParams = {
                   threadId: threadIdToRevert,
                   beforeTurnId,
                 };
-                try {
-                  await this.appServerManager.requestForThread(
-                    threadIdToRevert,
-                    Method.threadRevert,
-                    revertParams,
-                  );
-                  return;
-                } catch (err) {
-                  const lastMessage = err instanceof Error ? err.message : String(err);
-                  log.warn("codex exact-fork revert failed", { error: lastMessage });
-                  // The fork's turn is now permanently part of the source
-                  // thread, or its state is uncertain after a transport loss.
-                  // Poison the session so nothing resumes from potentially
-                  // contaminated history, and surface the failure on the
-                  // source events stream (out-of-turn, like Notify.error).
-                  contaminatedReason = `codex exact-fork revert failed, source thread may retain the fork turn: ${lastMessage}`;
-                  if (!closed) sink.push({ type: "error", error: contaminatedReason });
-                  throw new Error(contaminatedReason);
+                let lastMessage = "unknown error";
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                  try {
+                    await this.appServerManager.requestForThread(
+                      threadIdToRevert,
+                      Method.threadRevert,
+                      revertParams,
+                    );
+                    return;
+                  } catch (err) {
+                    lastMessage = err instanceof Error ? err.message : String(err);
+                    log.warn("codex exact-fork revert failed", { attempt, error: lastMessage });
+                  }
                 }
+                // The fork's turn may now be part of the source thread, or a
+                // response may have been lost after a successful mutation.
+                // Poison the session so nothing resumes from uncertain
+                // history, and surface the failure on the source events
+                // stream (out-of-turn, like Notify.error).
+                contaminatedReason = `codex exact-fork revert failed, source thread state is uncertain: ${lastMessage}`;
+                if (!closed) sink.push({ type: "error", error: contaminatedReason });
+                throw new Error(contaminatedReason);
               },
               interrupt: async (reason) => await interruptOwnerTurn(forkParams.sessionId, reason),
             });
@@ -1132,10 +1174,14 @@ export class CodexAppServerProvider implements ModelProvider {
           // not-yet-reverted turn into the child. Contamination is
           // re-checked inside the lane because a queued snapshot would
           // otherwise run immediately after the failed revert that set it.
-          const forkThreadConfiguration = buildThreadConfigurationOverrides(
+          const isolatedNativeFork = forkParams.configurationMode !== "exact";
+          let forkThreadConfiguration = buildThreadConfigurationOverrides(
             openParams,
             stripLegacyReasoningSuffix(openParams.model),
           );
+          if (isolatedNativeFork) {
+            forkThreadConfiguration = constrainIsolatedFork(forkThreadConfiguration);
+          }
           const forkRes = await turnCoordinator.run(async () => {
             if (contaminatedReason) throw new Error(contaminatedReason);
             const nativeForkParams: ThreadForkParams = {
@@ -1143,6 +1189,7 @@ export class CodexAppServerProvider implements ModelProvider {
               ...(forkParams.sourceCheckpoint ? { lastTurnId: forkParams.sourceCheckpoint } : {}),
               ...forkThreadConfiguration,
               ephemeral: false,
+              excludeTurns: true,
             };
             return await this.appServerManager.requestForThread<
               { thread?: { id?: string } } | undefined
@@ -1163,7 +1210,10 @@ export class CodexAppServerProvider implements ModelProvider {
                 sourceCheckpoint: forkParams.sourceCheckpoint,
               },
             },
-            romeTools.definitions,
+            {
+              dynamicToolDefinitions: romeTools.definitions,
+              isolated: isolatedNativeFork,
+            },
           );
         },
       };

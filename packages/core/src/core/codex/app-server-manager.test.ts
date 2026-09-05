@@ -257,7 +257,7 @@ describe("CodexAppServerManager", () => {
       "thread/resume",
       "turn/start",
     ]);
-    expect(clients[1].requests[1].params).toMatchObject({ threadId });
+    expect(clients[1].requests[1].params).toMatchObject({ threadId, excludeTurns: true });
     expect(clients[1].requests[1].params).not.toHaveProperty("dynamicTools");
     expect(clients[1].requests[1].params).not.toHaveProperty("historyMode");
     manager.close();

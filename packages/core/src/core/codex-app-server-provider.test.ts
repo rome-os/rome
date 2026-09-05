@@ -485,10 +485,11 @@ describe("CodexAppServerProvider", () => {
         threadId: "source-thread",
         model: "gpt-5.4",
         cwd: null,
-        sandbox: "danger-full-access",
+        sandbox: "read-only",
         approvalPolicy: "never",
-        baseInstructions: "system",
+        baseInstructions: expect.stringContaining("<rome_isolated_fork>"),
         ephemeral: false,
+        excludeTurns: true,
       }),
     );
     const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
@@ -573,6 +574,21 @@ describe("CodexAppServerProvider", () => {
       ],
       success: false,
     });
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({
+        sandbox: "read-only",
+        baseInstructions: expect.stringContaining("Do not invoke any tool"),
+      }),
+    );
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/resume",
+      expect.objectContaining({
+        threadId: "isolated-child",
+        sandbox: "read-only",
+        baseInstructions: expect.stringContaining("Do not invoke any tool"),
+      }),
+    );
     expect(sourceExecuteSubagent).not.toHaveBeenCalled();
 
     await forkSession.close();
@@ -705,7 +721,8 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
-  it("runs a same-model exact fork on the source thread and reverts it", async () => {
+  it("retries a same-model exact fork revert at its stable turn boundary", async () => {
+    let revertAttempts = 0;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -728,6 +745,9 @@ describe("CodexAppServerProvider", () => {
           threadId: "source-thread",
           turn: { id: "hidden-fork-turn", status: "completed" },
         });
+      }
+      if (method === "thread/revert" && ++revertAttempts === 1) {
+        throw new Error("pre-mutation shutdown timeout");
       }
       return {};
     });
@@ -755,6 +775,7 @@ describe("CodexAppServerProvider", () => {
       threadId: "source-thread",
       beforeTurnId: "hidden-fork-turn",
     });
+    expect(revertAttempts).toBe(2);
     expect(fork.providerThreadId).toBe("source-thread");
     expect(source.providerThreadId).toBe("source-thread");
     expect(msgs.find((m) => m.type === "result")).toMatchObject({
@@ -1022,8 +1043,9 @@ describe("CodexAppServerProvider", () => {
     await forkSession.sendUserInput({ text: "feedback" });
     const msgs = await collected;
 
-    // Revert is not idempotent, so a failed request is not retried.
-    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(1);
+    // The stable turn-id boundary makes one retry safe: it can never remove an
+    // earlier source turn if the first request already applied the revert.
+    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
     // The fork never observes success while its turn is still in the source.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({

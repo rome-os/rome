@@ -84,7 +84,11 @@ function threadIdFromParams(params: unknown): string | null {
 }
 
 function buildThreadResumeParams(threadId: string, config: ThreadStartParams): ThreadResumeParams {
-  return { threadId, ...toThreadConfigurationOverrides(config) };
+  return {
+    threadId,
+    ...toThreadConfigurationOverrides(config),
+    excludeTurns: true,
+  };
 }
 
 export class CodexAppServerManager {

@@ -227,6 +227,8 @@ export interface DynamicToolCallResponse {
 
 export interface ThreadResumeParams extends ThreadConfigurationOverrides {
   threadId: string;
+  /** Skip deprecated full-history hydration; Rome pages history separately. */
+  excludeTurns?: boolean;
 }
 
 export interface ThreadForkParams extends ThreadConfigurationOverrides {
@@ -236,6 +238,8 @@ export interface ThreadForkParams extends ThreadConfigurationOverrides {
   /** Exclude this provider turn and every later turn from the fork. */
   beforeTurnId?: string | null;
   ephemeral?: boolean;
+  /** Skip deprecated full-history hydration; Rome does not consume returned turns. */
+  excludeTurns?: boolean;
 }
 
 export interface ThreadRevertParams {

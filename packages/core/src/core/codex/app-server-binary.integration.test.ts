@@ -69,8 +69,14 @@ describe("bundled Codex app-server", () => {
       ].join("\n"),
     );
 
-    let resolveTurnCompleted!: (params: { threadId: string; turn: { id: string } }) => void;
-    const turnCompleted = new Promise<{ threadId: string; turn: { id: string } }>((resolve) => {
+    let resolveTurnCompleted!: (params: {
+      threadId: string;
+      turn: { id: string; status: string };
+    }) => void;
+    const turnCompleted = new Promise<{
+      threadId: string;
+      turn: { id: string; status: string };
+    }>((resolve) => {
       resolveTurnCompleted = resolve;
     });
     const client = new AppServerClient({
@@ -82,7 +88,9 @@ describe("bundled Codex app-server", () => {
       },
       onNotification: (method, params) => {
         if (method === "turn/completed") {
-          resolveTurnCompleted(params as { threadId: string; turn: { id: string } });
+          resolveTurnCompleted(
+            params as { threadId: string; turn: { id: string; status: string } },
+          );
         }
       },
       onServerRequest: () => ({}),
@@ -125,7 +133,7 @@ describe("bundled Codex app-server", () => {
       })) as { turn: { id: string } };
       await expect(turnCompleted).resolves.toMatchObject({
         threadId: started.thread.id,
-        turn: { id: turnStarted.turn.id },
+        turn: { id: turnStarted.turn.id, status: "completed" },
       });
 
       const beforeRevert = (await client.request(Method.threadTurnsList, {
@@ -151,5 +159,5 @@ describe("bundled Codex app-server", () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       await rm(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     }
-  });
+  }, 30_000);
 });
