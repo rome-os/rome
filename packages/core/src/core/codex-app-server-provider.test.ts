@@ -101,6 +101,7 @@ function usage(
     totalTokens: number;
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteInputTokens: number;
     outputTokens: number;
     reasoningOutputTokens: number;
   }> = {},
@@ -108,6 +109,7 @@ function usage(
     totalTokens: number;
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteInputTokens: number;
     outputTokens: number;
     reasoningOutputTokens: number;
   }> = {},
@@ -116,6 +118,7 @@ function usage(
     totalTokens: 10,
     inputTokens: 6,
     cachedInputTokens: 1,
+    cacheWriteInputTokens: 0,
     outputTokens: 4,
     reasoningOutputTokens: 0,
     ...overrides,
@@ -1182,6 +1185,7 @@ describe("CodexAppServerProvider", () => {
           uncached_input_tokens: 5,
           output_tokens: 4,
           cached_tokens: 1,
+          cache_write_tokens: 0,
           reasoning_tokens: 0,
         },
       },
@@ -1418,6 +1422,7 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
@@ -1432,25 +1437,28 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
           // `total` is cumulative for the whole Codex thread, while `last` is
           // only the latest API request. Two updates make this Rome turn's
-          // delta 400k input / 360k cached / 2k output tokens. Each request is
-          // below the long-context pricing threshold even though their
-          // aggregate is above it.
+          // delta 400k input / 340k cache-read / 20k cache-write / 2k output
+          // tokens. Each request is below the long-context pricing threshold
+          // even though their aggregate is above it.
           const firstRequestUsage = usage(
             {
               totalTokens: 201_000,
               inputTokens: 200_000,
-              cachedInputTokens: 180_000,
+              cachedInputTokens: 170_000,
+              cacheWriteInputTokens: 10_000,
               outputTokens: 1_000,
             },
             {
               totalTokens: 201_110,
               inputTokens: 200_100,
-              cachedInputTokens: 180_090,
+              cachedInputTokens: 170_090,
+              cacheWriteInputTokens: 10_005,
               outputTokens: 1_010,
             },
           );
@@ -1469,6 +1477,7 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
@@ -1484,13 +1493,15 @@ describe("CodexAppServerProvider", () => {
               {
                 totalTokens: 201_000,
                 inputTokens: 200_000,
-                cachedInputTokens: 180_000,
+                cachedInputTokens: 170_000,
+                cacheWriteInputTokens: 10_000,
                 outputTokens: 1_000,
               },
               {
                 totalTokens: 402_110,
                 inputTokens: 400_100,
-                cachedInputTokens: 360_090,
+                cachedInputTokens: 340_090,
+                cacheWriteInputTokens: 20_005,
                 outputTokens: 2_010,
               },
             ),
@@ -1523,7 +1534,12 @@ describe("CodexAppServerProvider", () => {
     const firstResult = (await firstCollected).find((m) => m.type === "result");
     expect(firstResult).toMatchObject({
       accounting: {
-        usage: { inputTokens: 10, cacheReadTokens: 90, outputTokens: 10 },
+        usage: {
+          inputTokens: 5,
+          cacheReadTokens: 90,
+          cacheWriteTokens: 5,
+          outputTokens: 10,
+        },
       },
     });
 
@@ -1532,12 +1548,17 @@ describe("CodexAppServerProvider", () => {
     const secondResult = (await secondCollected).find((m) => m.type === "result");
     expect(secondResult).toMatchObject({
       accounting: {
-        usage: { inputTokens: 40_000, cacheReadTokens: 360_000, outputTokens: 2_000 },
+        usage: {
+          inputTokens: 40_000,
+          cacheReadTokens: 340_000,
+          cacheWriteTokens: 20_000,
+          outputTokens: 2_000,
+        },
       },
     });
     expect(
       (secondResult as { accounting?: { costUsd?: number } })?.accounting?.costUsd,
-    ).toBeCloseTo(0.44);
+    ).toBeCloseTo(0.555);
 
     await session.close();
   });

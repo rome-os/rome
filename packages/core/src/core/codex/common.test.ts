@@ -8,22 +8,24 @@ describe("buildOpenAiAccounting", () => {
       usage: {
         input_tokens: 1000,
         cached_input_tokens: 300,
+        cache_write_input_tokens: 200,
         output_tokens: 40,
         reasoning_output_tokens: 15,
       },
     });
 
     expect(accounting.usage).toEqual({
-      inputTokens: 700,
+      inputTokens: 500,
       outputTokens: 40,
       cacheReadTokens: 300,
-      cacheWriteTokens: 0,
+      cacheWriteTokens: 200,
     });
     expect(accounting.rawUsage).toEqual({
       input_tokens: 1000,
-      uncached_input_tokens: 700,
+      uncached_input_tokens: 500,
       output_tokens: 40,
       cached_tokens: 300,
+      cache_write_tokens: 200,
       reasoning_tokens: 15,
     });
   });
@@ -32,6 +34,7 @@ describe("buildOpenAiAccounting", () => {
     const usage: Usage = {
       input_tokens: 50,
       cached_input_tokens: 80,
+      cache_write_input_tokens: 10,
       output_tokens: 0,
       reasoning_output_tokens: 0,
     };

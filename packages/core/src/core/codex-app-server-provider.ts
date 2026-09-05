@@ -213,6 +213,7 @@ function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
+    cache_write_input_tokens: u.cacheWriteInputTokens,
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -224,6 +225,7 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
+    left.cacheWriteInputTokens === right.cacheWriteInputTokens &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
@@ -243,6 +245,7 @@ function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
         totalTokens: usage.totalTokens + last.totalTokens,
         inputTokens: usage.inputTokens + last.inputTokens,
         cachedInputTokens: usage.cachedInputTokens + last.cachedInputTokens,
+        cacheWriteInputTokens: usage.cacheWriteInputTokens + last.cacheWriteInputTokens,
         outputTokens: usage.outputTokens + last.outputTokens,
         reasoningOutputTokens: usage.reasoningOutputTokens + last.reasoningOutputTokens,
       }

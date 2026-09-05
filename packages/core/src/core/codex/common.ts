@@ -13,6 +13,7 @@ import {
 export type Usage = {
   input_tokens: number;
   cached_input_tokens: number;
+  cache_write_input_tokens: number;
   output_tokens: number;
   reasoning_output_tokens: number;
 };
@@ -54,7 +55,8 @@ interface BuildOpenAiAccountingArgs {
 function normalizeOpenAiUsage(usage: Usage | undefined) {
   const sdkInputTokens = usage?.input_tokens ?? 0;
   const cacheReadTokens = usage?.cached_input_tokens ?? 0;
-  const inputTokens = Math.max(0, sdkInputTokens - cacheReadTokens);
+  const cacheWriteTokens = usage?.cache_write_input_tokens ?? 0;
+  const inputTokens = Math.max(0, sdkInputTokens - cacheReadTokens - cacheWriteTokens);
   const outputTokens = usage?.output_tokens ?? 0;
   const reasoningTokens = usage?.reasoning_output_tokens ?? 0;
   return {
@@ -64,7 +66,7 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
       inputTokens,
       outputTokens,
       cacheReadTokens,
-      cacheWriteTokens: 0,
+      cacheWriteTokens,
     },
     rawUsage: usage
       ? {
@@ -72,6 +74,7 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
           uncached_input_tokens: inputTokens,
           output_tokens: outputTokens,
           cached_tokens: cacheReadTokens,
+          cache_write_tokens: cacheWriteTokens,
           reasoning_tokens: reasoningTokens,
         }
       : undefined,
