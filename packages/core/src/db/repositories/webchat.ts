@@ -2311,7 +2311,10 @@ export class WebChatRepository {
    * terminal error ahead of the owner's own `result` + `turn_end{completed}`,
    * so keying on the last terminal block keeps a child's failure from surfacing
    * as the parent turn's error. `reply` is the text of the turn's assistant
-   * transcript row; both are null when absent.
+   * transcript row; both are null when absent. A turn records one assistant
+   * transcript row (the recorder writes a single reply per turn), so `reply`
+   * takes the last such row by rowid — if that invariant ever breaks, earlier
+   * assistant text is dropped rather than concatenated.
    */
   async getLatestTurnOutcome(sessionId: string): Promise<{
     turnId: string;
@@ -2360,6 +2363,8 @@ export class WebChatRepository {
         )
         .orderBy(desc(romeAgentTraceBlocks.seq))
         .limit(1),
+      // The turn's assistant reply. One per turn by the recorder's contract;
+      // the last-by-rowid read is defensive against a hypothetical second row.
       this.db
         .select({ content: romeAgentMessages.content })
         .from(romeAgentMessages)
@@ -2397,7 +2402,12 @@ export class WebChatRepository {
    * inverted so the tail can be taken with a LIMIT and reversed back. rowid,
    * not createdAt, is the key because createdAt stores whole seconds and a
    * whole turn regularly lands inside one. This is a like-spirited but distinct
-   * ordering from getHistoryMessages, which groups by role rather than rowid. */
+   * ordering from getHistoryMessages, which groups by role rather than rowid.
+   *
+   * The LIMIT is applied over rows, not turns, so a `limit` that lands
+   * mid-turn splits it: the tail can begin with an assistant reply whose
+   * preceding user prompt fell outside the window. Callers that need whole
+   * turns should overshoot `limit` and trim on `turnId` themselves. */
   async getRecentTranscript(
     sessionId: string,
     limit: number,

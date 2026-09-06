@@ -1679,6 +1679,125 @@ describe("WebChatRepository", () => {
       await expect(repo.getRecentTranscript("child-tail", 0)).resolves.toEqual([]);
       await expect(repo.getRecentTranscript("child-tail", -1)).resolves.toEqual([]);
     });
+
+    it("reads a turn recorded across multiple trace-block batches", async () => {
+      // The recorder appends per event, not once per turn, so seq climbs across
+      // separate appendTraceBlocks calls and the terminal read must span them.
+      // Here a relayed subagent error (batch 2) precedes the owner's result
+      // (batch 3): keying on the last terminal block by seq must still pick the
+      // owner's result and leave the turn's error null.
+      await repo.createSession("child-batched", "Child");
+      const messageId = "trace:child-batched:turn-1";
+      rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      await repo.appendTraceBlocks({
+        messageId,
+        sessionId: "child-batched",
+        turnId: "turn-1",
+        startSeq: 0,
+        blocks: [{ type: "turn_start", turnId: "turn-1", userPrompt: "go" }],
+        transcriptMessages: [
+          {
+            id: "transcript:child-batched:turn-1:user",
+            sessionId: "child-batched",
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: "go" }]),
+            turnId: "turn-1",
+          },
+        ],
+      });
+      await repo.appendTraceBlocks({
+        messageId,
+        sessionId: "child-batched",
+        turnId: "turn-1",
+        startSeq: 1,
+        blocks: [{ type: "error", agent: "child", error: "subagent blew up" }],
+      });
+      await repo.appendTraceBlocks({
+        messageId,
+        sessionId: "child-batched",
+        turnId: "turn-1",
+        startSeq: 2,
+        blocks: [
+          { type: "result", agent: "main", content: "recovered answer" },
+          { type: "turn_end", turnId: "turn-1", status: "completed" },
+        ],
+        transcriptMessages: [
+          {
+            id: "transcript:child-batched:turn-1:assistant",
+            sessionId: "child-batched",
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "recovered answer" }]),
+            turnId: "turn-1",
+          },
+        ],
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-batched")).resolves.toEqual({
+        turnId: "turn-1",
+        turnEndStatus: "completed",
+        error: null,
+        reply: "recovered answer",
+      });
+    });
+
+    it("keeps each turn's rows together when turns interleave across batches", async () => {
+      // Both turns open before either replies, so the assistant row of the
+      // earlier turn is inserted after the user row of the later turn. The
+      // partition-by-turn ordering must still keep each turn's rows adjacent.
+      await repo.createSession("child-interleaved", "Child");
+      const openTurn = async (turnId: string, prompt: string) => {
+        await repo.appendTraceBlocks({
+          messageId: `trace:child-interleaved:${turnId}`,
+          sessionId: "child-interleaved",
+          turnId,
+          startSeq: 0,
+          blocks: [{ type: "turn_start", turnId, userPrompt: prompt }],
+          transcriptMessages: [
+            {
+              id: `transcript:child-interleaved:${turnId}:user`,
+              sessionId: "child-interleaved",
+              role: "user",
+              content: JSON.stringify([{ type: "text", content: prompt }]),
+              turnId,
+            },
+          ],
+        });
+      };
+      const closeTurn = async (turnId: string, reply: string) => {
+        await repo.appendTraceBlocks({
+          messageId: `trace:child-interleaved:${turnId}`,
+          sessionId: "child-interleaved",
+          turnId,
+          startSeq: 1,
+          blocks: [
+            { type: "result", content: reply },
+            { type: "turn_end", turnId, status: "completed" },
+          ],
+          transcriptMessages: [
+            {
+              id: `transcript:child-interleaved:${turnId}:assistant`,
+              sessionId: "child-interleaved",
+              role: "assistant",
+              content: JSON.stringify([{ type: "text", content: reply }]),
+              turnId,
+            },
+          ],
+        });
+      };
+
+      rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      await openTurn("turn-1", "one");
+      await openTurn("turn-2", "two");
+      await closeTurn("turn-1", "answer one");
+      await closeTurn("turn-2", "answer two");
+
+      await expect(repo.getRecentTranscript("child-interleaved", 4)).resolves.toEqual([
+        { role: "user", turnId: "turn-1", text: "one", createdAt: expect.any(Date) },
+        { role: "assistant", turnId: "turn-1", text: "answer one", createdAt: expect.any(Date) },
+        { role: "user", turnId: "turn-2", text: "two", createdAt: expect.any(Date) },
+        { role: "assistant", turnId: "turn-2", text: "answer two", createdAt: expect.any(Date) },
+      ]);
+    });
   });
 
   it("groups messages by turnId so concurrent turns render in turn order", async () => {
