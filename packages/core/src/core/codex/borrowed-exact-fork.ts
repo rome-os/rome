@@ -1,6 +1,6 @@
 // Temporary adapter for https://github.com/openai/codex/issues/24704.
 //
-// Codex app-server 0.144.x rebuilds a native thread/fork under fresh response
+// Codex app-server rebuilds a native thread/fork under fresh response
 // continuation and prompt-cache lineage. The transcript is identical, but the
 // inherited suffix is billed as uncached. For a same-configuration exact fork,
 // Rome borrows the source thread for one serialized turn and rolls that turn
@@ -8,7 +8,7 @@
 //
 // Once app-server preserves cache lineage natively, delete this module and the
 // provider branch that calls it. The remaining workaround seams are deliberately
-// easy to find: CodexTurnRuntime.beforeTerminal and Method.threadRollback.
+// easy to find: CodexTurnRuntime.beforeTerminal and Method.threadRevert.
 
 import type {
   ModelSession,
@@ -71,7 +71,7 @@ export interface CreateBorrowedExactForkSessionArgs {
   openParams: ModelSessionForkOpenParams;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
   runTurn(input: ModelUserInput, runtime: CodexTurnRuntime): Promise<void>;
-  rollbackTurn(threadId: string): Promise<void>;
+  revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
 }
 
@@ -105,9 +105,9 @@ export async function createBorrowedExactForkSession(
     imageTracker,
     romeTools,
     isClosed: () => closed,
-    // Rollback happens before the result/error event, so consumers can never
+    // Revert happens before the result/error event, so consumers can never
     // observe success while the source conversation still contains the turn.
-    beforeTerminal: async ({ threadId }) => await args.rollbackTurn(threadId),
+    beforeTerminal: async ({ threadId, turnId }) => await args.revertTurn(threadId, turnId),
   };
 
   return {

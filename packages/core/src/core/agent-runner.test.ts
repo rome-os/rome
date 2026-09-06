@@ -786,7 +786,7 @@ describe("AgentRunner", () => {
 
     it("stays one-shot when the fork borrowed the source's thread", async () => {
       // Codex's borrowed exact fork reports the SOURCE thread id: it runs the
-      // turn in the parent conversation and rolls it back out. Persisting that
+      // turn in the parent conversation and reverts it out. Persisting that
       // would append every follow-up to the parent chat.
       const messages = await runForkAgainstLiveSession(
         () =>

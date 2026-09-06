@@ -55,10 +55,17 @@ rs.mock("./codex/app-server-client.js", () => ({
       request: async (method: string, params: unknown) => {
         const result = await requestMock(method, params);
         if (method === "thread/start" && !(result as { thread?: unknown } | undefined)?.thread) {
-          return { thread: { id: captured.lastStartedThreadId ?? "thr-1" } };
+          return {
+            thread: {
+              id: captured.lastStartedThreadId ?? "thr-1",
+              historyMode: (params as { historyMode?: unknown }).historyMode ?? null,
+            },
+          };
         }
         if (method === "thread/resume" && !(result as { thread?: unknown } | undefined)?.thread) {
-          return { thread: { id: (params as { threadId: string }).threadId } };
+          return {
+            thread: { id: (params as { threadId: string }).threadId, historyMode: "paginated" },
+          };
         }
         return result;
       },
@@ -101,6 +108,7 @@ function usage(
     totalTokens: number;
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteInputTokens: number;
     outputTokens: number;
     reasoningOutputTokens: number;
   }> = {},
@@ -108,6 +116,7 @@ function usage(
     totalTokens: number;
     inputTokens: number;
     cachedInputTokens: number;
+    cacheWriteInputTokens: number;
     outputTokens: number;
     reasoningOutputTokens: number;
   }> = {},
@@ -116,6 +125,7 @@ function usage(
     totalTokens: 10,
     inputTokens: 6,
     cachedInputTokens: 1,
+    cacheWriteInputTokens: 0,
     outputTokens: 4,
     reasoningOutputTokens: 0,
     ...overrides,
@@ -249,7 +259,9 @@ describe("CodexAppServerProvider", () => {
       sandbox: "danger-full-access",
       approvalPolicy: "never",
       baseInstructions: "system",
+      historyMode: "paginated",
     });
+    expect(startCall![1]).not.toHaveProperty("skipGitRepoCheck");
     expect((startCall![1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",
     );
@@ -473,13 +485,16 @@ describe("CodexAppServerProvider", () => {
         threadId: "source-thread",
         model: "gpt-5.4",
         cwd: null,
-        sandbox: "danger-full-access",
+        sandbox: "read-only",
         approvalPolicy: "never",
-        baseInstructions: "system",
+        baseInstructions: expect.stringContaining("<rome_isolated_fork>"),
         ephemeral: false,
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
+        excludeTurns: true,
       }),
     );
+    const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
+    expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(forkCall?.[1]).not.toHaveProperty("historyMode");
     expect(source.providerThreadId).toBe("source-thread");
     expect(fork).toMatchObject({
       sessionId: "fork-session",
@@ -492,6 +507,89 @@ describe("CodexAppServerProvider", () => {
       "thread/resume",
       expect.objectContaining({ threadId: "fork-thread" }),
     );
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("fails closed when an isolated native fork calls a tool inherited from its source", async () => {
+    const sourceExecuteSubagent = rs.fn(async () => "source result");
+    let dynamicResponse: unknown;
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/start") {
+        return { thread: { id: "source-thread", historyMode: "paginated" } };
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "isolated-child", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        const payload = requestParams as { threadId: string };
+        const n = captured.onNotification!;
+        n("turn/started", {
+          threadId: payload.threadId,
+          turn: { id: "isolated-turn" },
+        });
+        dynamicResponse = await captured.onServerRequest?.("item/tool/call", {
+          threadId: payload.threadId,
+          turnId: "isolated-turn",
+          callId: "call-source-tool",
+          namespace: null,
+          tool: "source_researcher",
+          arguments: { prompt: "inspect" },
+        });
+        n("turn/completed", {
+          threadId: payload.threadId,
+          turn: { id: "isolated-turn", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({
+        sessionId: "source-session",
+        subagentTools: [
+          {
+            name: "source_researcher",
+            description: "Research for the source",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+        executeSubagent: sourceExecuteSubagent,
+      }),
+    );
+    const fork = await source.fork({ sessionId: "isolated-session", mode: "ephemeral" });
+    const forkSession = await fork.open(buildForkOpenParams());
+    const collected = collectUntilTerminal(forkSession);
+    await forkSession.sendUserInput({ text: "try the inherited tool" });
+    await collected;
+
+    expect(dynamicResponse).toEqual({
+      contentItems: [
+        {
+          type: "inputText",
+          text: "Dynamic tool is disabled in this fork: source_researcher",
+        },
+      ],
+      success: false,
+    });
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({
+        sandbox: "read-only",
+        baseInstructions: expect.stringContaining("Do not invoke any tool"),
+      }),
+    );
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/resume",
+      expect.objectContaining({
+        threadId: "isolated-child",
+        sandbox: "read-only",
+        baseInstructions: expect.stringContaining("Do not invoke any tool"),
+      }),
+    );
+    expect(sourceExecuteSubagent).not.toHaveBeenCalled();
 
     await forkSession.close();
     await source.close();
@@ -531,10 +629,12 @@ describe("CodexAppServerProvider", () => {
         baseInstructions: "system",
         ephemeral: false,
         lastTurnId: "provider-turn-t2",
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
       }),
     );
-    expect(requestMock).not.toHaveBeenCalledWith("thread/rollback", expect.anything());
+    const forkCall = requestMock.mock.calls.find((call) => call[0] === "thread/fork");
+    expect(forkCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(forkCall?.[1]).not.toHaveProperty("historyMode");
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
     expect(fork.providerThreadId).toBe("historical-fork-thread");
 
     await forkSession.close();
@@ -558,7 +658,7 @@ describe("CodexAppServerProvider", () => {
     );
     // Same model, prompt and cwd, branching at the current head: exactly the
     // shape that borrows today. A "thread" fork has to decline that, because a
-    // borrowed turn is rolled back out of the source and leaves nothing to
+    // borrowed turn is reverted out of the source and leaves nothing to
     // resume — and reports the source's own thread id.
     const fork = await source.fork({
       sessionId: "fork-session",
@@ -571,14 +671,58 @@ describe("CodexAppServerProvider", () => {
       "thread/fork",
       expect.objectContaining({ threadId: "source-thread", ephemeral: false }),
     );
-    expect(requestMock).not.toHaveBeenCalledWith("thread/rollback", expect.anything());
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
     expect(fork.providerThreadId).toBe("continuable-fork-thread");
 
     await forkSession.close();
     await source.close();
   });
 
-  it("runs a same-model exact fork on the source thread and rolls it back", async () => {
+  it("uses a native fork when a resumed source still has legacy history", async () => {
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/resume") {
+        const threadId = (requestParams as { threadId: string }).threadId;
+        return {
+          thread: {
+            id: threadId,
+            historyMode: threadId === "legacy-source" ? "legacy" : "paginated",
+          },
+        };
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "legacy-child", historyMode: "paginated" } };
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({
+        sessionId: "source-session",
+        isNewSession: false,
+        providerThreadId: "legacy-source",
+      }),
+    );
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({ threadId: "legacy-source" }),
+    );
+    expect(requestMock).not.toHaveBeenCalledWith("thread/revert", expect.anything());
+    expect(fork.providerThreadId).toBe("legacy-child");
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("retries a same-model exact fork revert at its stable turn boundary", async () => {
+    let revertAttempts = 0;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -602,6 +746,9 @@ describe("CodexAppServerProvider", () => {
           turn: { id: "hidden-fork-turn", status: "completed" },
         });
       }
+      if (method === "thread/revert" && ++revertAttempts === 1) {
+        throw new Error("pre-mutation shutdown timeout");
+      }
       return {};
     });
 
@@ -624,16 +771,65 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "source-thread" }),
     );
-    expect(requestMock).toHaveBeenCalledWith("thread/rollback", {
+    expect(requestMock).toHaveBeenCalledWith("thread/revert", {
       threadId: "source-thread",
-      numTurns: 1,
+      beforeTurnId: "hidden-fork-turn",
     });
+    expect(revertAttempts).toBe(2);
     expect(fork.providerThreadId).toBe("source-thread");
     expect(source.providerThreadId).toBe("source-thread");
     expect(msgs.find((m) => m.type === "result")).toMatchObject({
       content: "fork answer",
       accounting: { usage: { inputTokens: 10, cacheReadTokens: 90 } },
     });
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("accepts an already-absent exact-fork revert boundary as clean", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "source-thread", turn: { id: "missing-fork-turn" } });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "fork answer", phase: "final_answer" },
+          threadId: "source-thread",
+          turnId: "missing-fork-turn",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "source-thread",
+          turn: { id: "missing-fork-turn", status: "completed" },
+        });
+      }
+      if (method === "thread/revert") {
+        throw new Error("turn not found: missing-fork-turn");
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({ sessionId: "source-session", isNewSession: true }),
+    );
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+    const collected = collectUntilTerminal(forkSession);
+    await forkSession.sendUserInput({ text: "feedback" });
+
+    expect((await collected).find((message) => message.type === "result")).toMatchObject({
+      content: "fork answer",
+    });
+    expect(requestMock.mock.calls.filter((call) => call[0] === "thread/revert")).toHaveLength(1);
+    await expect(source.fork({ sessionId: "next-fork", mode: "ephemeral" })).resolves.toBeDefined();
 
     await forkSession.close();
     await source.close();
@@ -809,13 +1005,10 @@ describe("CodexAppServerProvider", () => {
     });
     expect(startMock).toHaveBeenCalledTimes(2);
     expect(requestMock.mock.calls.filter((call) => call[0] === "initialize")).toHaveLength(2);
-    expect(requestMock).toHaveBeenCalledWith(
-      "thread/resume",
-      expect.objectContaining({
-        threadId: "thread-restart",
-        dynamicTools: expect.arrayContaining([expect.objectContaining({ name: "execute_action" })]),
-      }),
-    );
+    const resumeCall = requestMock.mock.calls.find((call) => call[0] === "thread/resume");
+    expect(resumeCall?.[1]).toMatchObject({ threadId: "thread-restart" });
+    expect(resumeCall?.[1]).not.toHaveProperty("dynamicTools");
+    expect(resumeCall?.[1]).not.toHaveProperty("historyMode");
     await session.close();
   });
 
@@ -833,7 +1026,7 @@ describe("CodexAppServerProvider", () => {
       }
       // The real client rejects post-exit requests immediately instead of
       // leaving them pending (see AppServerClient.request).
-      if (method === "thread/rollback") throw new Error("codex app-server exited");
+      if (method === "thread/revert") throw new Error("codex app-server exited");
       return {};
     });
 
@@ -860,7 +1053,7 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
-  it("poisons the source session when exact-fork rollback fails", async () => {
+  it("poisons the source session when exact-fork revert fails", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -879,7 +1072,7 @@ describe("CodexAppServerProvider", () => {
           turn: { id: "fork-turn", status: "completed" },
         });
       }
-      if (method === "thread/rollback") throw new Error("rollback rejected");
+      if (method === "thread/revert") throw new Error("revert rejected");
       return {};
     });
 
@@ -898,23 +1091,22 @@ describe("CodexAppServerProvider", () => {
     await forkSession.sendUserInput({ text: "feedback" });
     const msgs = await collected;
 
-    // Retried once, then gave up.
-    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/rollback")).toHaveLength(2);
+    // The stable turn-id boundary makes one retry safe: it can never remove an
+    // earlier source turn if the first request already applied the revert.
+    expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
     // The fork never observes success while its turn is still in the source.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
-      error: expect.stringContaining("rollback failed"),
+      error: expect.stringContaining("revert failed"),
     });
     // The source stream carries the contamination error…
     await expect(sourceEvents.next()).resolves.toMatchObject({
-      value: { type: "error", error: expect.stringContaining("rollback failed") },
+      value: { type: "error", error: expect.stringContaining("revert failed") },
     });
     // …and nothing may resume from the contaminated thread.
-    await expect(source.sendUserInput({ text: "next real turn" })).rejects.toThrow(
-      /rollback failed/,
-    );
+    await expect(source.sendUserInput({ text: "next real turn" })).rejects.toThrow(/revert failed/);
     await expect(source.fork({ sessionId: "fork-2", mode: "ephemeral" })).rejects.toThrow(
-      /rollback failed/,
+      /revert failed/,
     );
     expect(requestMock.mock.calls.filter((c) => c[0] === "turn/start")).toHaveLength(1);
 
@@ -925,7 +1117,7 @@ describe("CodexAppServerProvider", () => {
   it("serializes a native thread/fork behind an in-flight borrowed exact-fork turn", async () => {
     // Deliver turn/completed manually so the borrowed turn stays mid-flight
     // while a native fork tries to snapshot the source thread. Snapshotting
-    // then would copy the not-yet-rolled-back borrowed turn into the child.
+    // then would copy the not-yet-reverted borrowed turn into the child.
     let finishBorrowedTurn!: () => void;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -980,17 +1172,17 @@ describe("CodexAppServerProvider", () => {
     const nativeSession = await nativeOpen;
     await exactCollected;
 
-    // The snapshot only ran after the borrowed turn was rolled back.
+    // The snapshot only ran after the borrowed turn was reverted.
     const methods = requestMock.mock.calls.map((c) => c[0]);
-    expect(methods.indexOf("thread/rollback")).toBeGreaterThanOrEqual(0);
-    expect(methods.indexOf("thread/fork")).toBeGreaterThan(methods.indexOf("thread/rollback"));
+    expect(methods.indexOf("thread/revert")).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf("thread/fork")).toBeGreaterThan(methods.indexOf("thread/revert"));
 
     await nativeSession.close();
     await exactSession.close();
     await source.close();
   });
 
-  it("refuses a native fork snapshot opened after a failed exact-fork rollback", async () => {
+  it("refuses a native fork snapshot opened after a failed exact-fork revert", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
         captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
@@ -1003,7 +1195,7 @@ describe("CodexAppServerProvider", () => {
           turn: { id: "fork-turn", status: "completed" },
         });
       }
-      if (method === "thread/rollback") throw new Error("rollback rejected");
+      if (method === "thread/revert") throw new Error("revert rejected");
       return {};
     });
 
@@ -1028,7 +1220,7 @@ describe("CodexAppServerProvider", () => {
     // …but open() re-checks inside the lane: the borrowed turn is now a
     // permanent part of the source history, so no child may snapshot it.
     await expect(nativeFork.open(buildForkOpenParams({ model: "gpt-5.4-mini" }))).rejects.toThrow(
-      /rollback failed/,
+      /revert failed/,
     );
     expect(requestMock).not.toHaveBeenCalledWith("thread/fork", expect.anything());
 
@@ -1181,6 +1373,7 @@ describe("CodexAppServerProvider", () => {
           uncached_input_tokens: 5,
           output_tokens: 4,
           cached_tokens: 1,
+          cache_write_tokens: 0,
           reasoning_tokens: 0,
         },
       },
@@ -1190,6 +1383,46 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "thr-1", effort: "high" }),
     );
+    await session.close();
+  });
+
+  it("treats a missing cache-write field in compatibility usage notifications as zero", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-legacy-usage" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const legacyUsage = usage();
+        delete (legacyUsage.last as Partial<typeof legacyUsage.last>).cacheWriteInputTokens;
+        delete (legacyUsage.total as Partial<typeof legacyUsage.total>).cacheWriteInputTokens;
+        n("turn/started", {
+          threadId: "thr-legacy-usage",
+          turn: { id: "turn-legacy-usage" },
+        });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-legacy-usage",
+          turnId: "turn-legacy-usage",
+          usage: legacyUsage,
+        });
+        n("turn/completed", {
+          threadId: "thr-legacy-usage",
+          turn: { id: "turn-legacy-usage", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "legacy usage" });
+
+    expect((await collected).find((message) => message.type === "result")).toMatchObject({
+      accounting: {
+        usage: { cacheWriteTokens: 0 },
+        rawUsage: { cache_write_tokens: 0 },
+      },
+    });
     await session.close();
   });
 
@@ -1417,6 +1650,7 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
@@ -1431,25 +1665,28 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
           // `total` is cumulative for the whole Codex thread, while `last` is
           // only the latest API request. Two updates make this Rome turn's
-          // delta 400k input / 360k cached / 2k output tokens. Each request is
-          // below the long-context pricing threshold even though their
-          // aggregate is above it.
+          // delta 400k input / 340k cache-read / 20k cache-write / 2k output
+          // tokens. Each request is below the long-context pricing threshold
+          // even though their aggregate is above it.
           const firstRequestUsage = usage(
             {
               totalTokens: 201_000,
               inputTokens: 200_000,
-              cachedInputTokens: 180_000,
+              cachedInputTokens: 170_000,
+              cacheWriteInputTokens: 10_000,
               outputTokens: 1_000,
             },
             {
               totalTokens: 201_110,
               inputTokens: 200_100,
-              cachedInputTokens: 180_090,
+              cachedInputTokens: 170_090,
+              cacheWriteInputTokens: 10_005,
               outputTokens: 1_010,
             },
           );
@@ -1468,6 +1705,7 @@ describe("CodexAppServerProvider", () => {
               totalTokens: 110,
               inputTokens: 100,
               cachedInputTokens: 90,
+              cacheWriteInputTokens: 5,
               outputTokens: 10,
             }),
           });
@@ -1483,13 +1721,15 @@ describe("CodexAppServerProvider", () => {
               {
                 totalTokens: 201_000,
                 inputTokens: 200_000,
-                cachedInputTokens: 180_000,
+                cachedInputTokens: 170_000,
+                cacheWriteInputTokens: 10_000,
                 outputTokens: 1_000,
               },
               {
                 totalTokens: 402_110,
                 inputTokens: 400_100,
-                cachedInputTokens: 360_090,
+                cachedInputTokens: 340_090,
+                cacheWriteInputTokens: 20_005,
                 outputTokens: 2_010,
               },
             ),
@@ -1522,7 +1762,12 @@ describe("CodexAppServerProvider", () => {
     const firstResult = (await firstCollected).find((m) => m.type === "result");
     expect(firstResult).toMatchObject({
       accounting: {
-        usage: { inputTokens: 10, cacheReadTokens: 90, outputTokens: 10 },
+        usage: {
+          inputTokens: 5,
+          cacheReadTokens: 90,
+          cacheWriteTokens: 5,
+          outputTokens: 10,
+        },
       },
     });
 
@@ -1531,12 +1776,17 @@ describe("CodexAppServerProvider", () => {
     const secondResult = (await secondCollected).find((m) => m.type === "result");
     expect(secondResult).toMatchObject({
       accounting: {
-        usage: { inputTokens: 40_000, cacheReadTokens: 360_000, outputTokens: 2_000 },
+        usage: {
+          inputTokens: 40_000,
+          cacheReadTokens: 340_000,
+          cacheWriteTokens: 20_000,
+          outputTokens: 2_000,
+        },
       },
     });
     expect(
       (secondResult as { accounting?: { costUsd?: number } })?.accounting?.costUsd,
-    ).toBeCloseTo(0.44);
+    ).toBeCloseTo(0.555);
 
     await session.close();
   });

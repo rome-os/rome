@@ -173,9 +173,13 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     );
   };
 
-  /** Throws when the model is entitlement-gated (Sol/Luna) and access is lost. */
+  /**
+   * Throws when the model is entitlement-gated and access is lost. Astra ships
+   * to the same paid plans as Sol, so it rides the Sol entitlement.
+   */
   const requireModelAccess = (model: string, codex: AIToolStateValue["codex"]): void => {
     const denied =
+      (model === "gpt-6-astra" && !codex.solAccess) ||
       (model === "gpt-5.6-sol" && !codex.solAccess) ||
       (model === "gpt-5.6-luna" && !codex.lunaAccess);
     if (!denied) return;

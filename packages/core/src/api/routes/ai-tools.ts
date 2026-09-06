@@ -74,7 +74,15 @@ export function aiToolsRoutes(
 
   app.post("/ai-tools/refresh", async (c) => {
     try {
-      return c.json(await deps.aiToolState.refresh());
+      // Optional `provider` scopes the refresh to one tool. The login dialog
+      // polls `?provider=anthropic` so an unrelated slow Codex probe can never
+      // stall Claude login detection; no provider refreshes everything (the
+      // manual Refresh button). `refresh(provider)` is already ordered against
+      // revocation via the shared per-provider in-flight lock.
+      const providerParam = c.req.query("provider");
+      const provider =
+        providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
+      return c.json(await deps.aiToolState.refresh(provider));
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);
     }

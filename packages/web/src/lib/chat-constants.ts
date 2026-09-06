@@ -12,6 +12,7 @@ export const LARGE_MODEL_OPTIONS = [
   { id: "claude-sonnet", labelKey: "modelSelector.options.sonnet" },
   { id: "claude-haiku", labelKey: "modelSelector.options.haiku" },
   { id: "claude-fable", labelKey: "modelSelector.options.fable" },
+  { id: "gpt-6-astra", labelKey: "modelSelector.options.gpt6Astra" },
   { id: "gpt-5-6-sol", labelKey: "modelSelector.options.gpt56Sol" },
   { id: "gpt-5-6-terra", labelKey: "modelSelector.options.gpt56Terra" },
   { id: "gpt-5-6-luna", labelKey: "modelSelector.options.gpt56Luna" },
