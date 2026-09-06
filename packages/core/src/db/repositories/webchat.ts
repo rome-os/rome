@@ -25,7 +25,7 @@ import {
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
+import type { TurnEndBlock, TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
@@ -242,42 +242,18 @@ function escapeSqlLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `${SQL_LIKE_ESCAPE}${character}`);
 }
 
-/**
- * Flattens a stored message's JSON block array into the transcript text a
- * guardian actually sees: `text` block contents joined, whitespace collapsed.
- * Non-text blocks (tool calls, attachments, …) never contribute, so JSON keys
- * and tool payloads can't produce phantom search hits.
- */
-function extractTranscriptText(content: string): string {
+/** The `text` block contents of a stored message's JSON block array, in order.
+ * Empty array when the content does not parse or holds no text part. Non-text
+ * blocks (tool calls, attachments, …) never contribute, so JSON keys and tool
+ * payloads can't leak into a caller's view. */
+function collectTextParts(content: string): string[] {
   let blocks: unknown;
   try {
     blocks = JSON.parse(content);
   } catch {
-    return "";
+    return [];
   }
-  if (!Array.isArray(blocks)) return "";
-  const texts: string[] = [];
-  for (const block of blocks) {
-    if (!block || typeof block !== "object") continue;
-    const type = (block as { type?: unknown }).type;
-    const text = (block as { content?: unknown }).content;
-    if (type === "text" && typeof text === "string" && text.trim()) texts.push(text);
-  }
-  return texts.join("\n").replace(/\s+/g, " ").trim();
-}
-
-/** The text a stored message row reads as: its `text` parts joined by newline,
- * whitespace untouched. Empty string when the row holds no text part or does
- * not parse. Unlike extractTranscriptText this preserves the original layout,
- * so a caller can hand the result back verbatim. */
-function messagePartsToText(content: string): string {
-  let blocks: unknown;
-  try {
-    blocks = JSON.parse(content);
-  } catch {
-    return "";
-  }
-  if (!Array.isArray(blocks)) return "";
+  if (!Array.isArray(blocks)) return [];
   const texts: string[] = [];
   for (const block of blocks) {
     if (!block || typeof block !== "object") continue;
@@ -285,7 +261,25 @@ function messagePartsToText(content: string): string {
     const text = (block as { content?: unknown }).content;
     if (typeof text === "string") texts.push(text);
   }
-  return texts.join("\n");
+  return texts;
+}
+
+/**
+ * Flattens a stored message's JSON block array into the transcript text a
+ * guardian actually sees: `text` block contents joined, whitespace collapsed.
+ * Non-text blocks (tool calls, attachments, …) never contribute, so JSON keys
+ * and tool payloads can't produce phantom search hits.
+ */
+function extractTranscriptText(content: string): string {
+  return collectTextParts(content).join("\n").replace(/\s+/g, " ").trim();
+}
+
+/** The text a stored message row reads as: its `text` parts joined by newline,
+ * whitespace untouched. Empty string when the row holds no text part or does
+ * not parse. Unlike extractTranscriptText this preserves the original layout,
+ * so a caller can hand the result back verbatim. */
+function messagePartsToText(content: string): string {
+  return collectTextParts(content).join("\n");
 }
 
 /** Reads one string field off a stored JSON trace block. Null when the block
@@ -300,6 +294,18 @@ function readJsonStringField(content: string | undefined, field: string): string
   } catch {
     return null;
   }
+}
+
+const TURN_END_STATUSES: readonly TurnEndBlock["status"][] = ["completed", "error", "interrupted"];
+
+/** The `status` of a stored `turn_end` block, narrowed to the wire union. Null
+ * when the block is absent, unparseable, or carries a status outside the union
+ * (a future writer's value the caller cannot interpret). */
+function readTurnEndStatus(content: string | undefined): TurnEndBlock["status"] | null {
+  const raw = readJsonStringField(content, "status");
+  return raw !== null && (TURN_END_STATUSES as readonly string[]).includes(raw)
+    ? (raw as TurnEndBlock["status"])
+    : null;
 }
 
 /**
@@ -2294,15 +2300,22 @@ export class WebChatRepository {
   /**
    * The session's newest recorded turn and how it ended, or null when the
    * session has recorded none. Newest means last written, not largest
-   * createdAt: createdAt stores whole seconds, so back-to-back turns tie. `turnEndStatus` is `'completed' | 'error' |
-   * 'interrupted'` when the turn wrote its closing bracket, and null when it
-   * never did — a turn cut short by a process exit leaves it null forever.
-   * `error` carries the text of the turn's last terminal error block, `reply`
-   * the text of its assistant transcript row; both are null when absent.
+   * createdAt: createdAt stores whole seconds, so back-to-back turns tie.
+   * `turnEndStatus` is `'completed' | 'error' | 'interrupted'` when the turn
+   * wrote its closing bracket, and null when it never did — a turn cut short by
+   * a process exit leaves it null forever.
+   *
+   * `error` is the text of the turn's own terminal error, populated only when
+   * the turn's last terminal block (`result` or `error`) is an `error` and the
+   * turn closed with status `'error'`. A trace can hold a relayed subagent's
+   * terminal error ahead of the owner's own `result` + `turn_end{completed}`,
+   * so keying on the last terminal block keeps a child's failure from surfacing
+   * as the parent turn's error. `reply` is the text of the turn's assistant
+   * transcript row; both are null when absent.
    */
   async getLatestTurnOutcome(sessionId: string): Promise<{
     turnId: string;
-    turnEndStatus: string | null;
+    turnEndStatus: TurnEndBlock["status"] | null;
     error: string | null;
     reply: string | null;
   } | null> {
@@ -2321,7 +2334,7 @@ export class WebChatRepository {
     const trace = traceRows[0];
     if (!trace?.turnId) return null;
 
-    const [turnEndRows, errorRows, replyRows] = await Promise.all([
+    const [turnEndRows, terminalRows, replyRows] = await Promise.all([
       this.db
         .select({ content: romeAgentTraceBlocks.content })
         .from(romeAgentTraceBlocks)
@@ -2333,13 +2346,16 @@ export class WebChatRepository {
         )
         .orderBy(desc(romeAgentTraceBlocks.seq))
         .limit(1),
+      // The turn's last terminal block. Filtering on `result`/`error` matches
+      // the idx_rome_agent_trace_blocks_terminal_message partial index, and the
+      // owner's terminal always follows any relayed subagent one.
       this.db
         .select({ content: romeAgentTraceBlocks.content })
         .from(romeAgentTraceBlocks)
         .where(
           and(
             eq(romeAgentTraceBlocks.messageId, trace.id),
-            sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') = 'error'`,
+            sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') IN ('result', 'error')`,
           ),
         )
         .orderBy(desc(romeAgentTraceBlocks.seq))
@@ -2358,10 +2374,17 @@ export class WebChatRepository {
         .limit(1),
     ]);
 
+    const turnEndStatus = readTurnEndStatus(turnEndRows[0]?.content);
+    const terminalContent = terminalRows[0]?.content;
+    const error =
+      turnEndStatus === "error" && readJsonStringField(terminalContent, "type") === "error"
+        ? readJsonStringField(terminalContent, "error")
+        : null;
+
     return {
       turnId: trace.turnId,
-      turnEndStatus: readJsonStringField(turnEndRows[0]?.content, "status"),
-      error: readJsonStringField(errorRows[0]?.content, "error"),
+      turnEndStatus,
+      error,
       reply: replyRows[0] ? messagePartsToText(replyRows[0].content) : null,
     };
   }
@@ -2369,14 +2392,18 @@ export class WebChatRepository {
   /** The session's last `limit` visible chat rows (user prompts + assistant
    * replies, no trace), oldest-first. Empty for `limit <= 0`.
    *
-   * Ordering mirrors getHistoryMessages, inverted so the tail can be taken with
-   * a LIMIT: turns sort by their earliest row, and rows sort within a turn by
-   * insertion. It keys on rowid rather than createdAt because createdAt stores
-   * whole seconds, and a whole turn regularly lands inside one. */
+   * Ordering relies on insertion order (rowid) reproducing the user→assistant
+   * sequence within a turn, then groups turns by their earliest row. It is
+   * inverted so the tail can be taken with a LIMIT and reversed back. rowid,
+   * not createdAt, is the key because createdAt stores whole seconds and a
+   * whole turn regularly lands inside one. This is a like-spirited but distinct
+   * ordering from getHistoryMessages, which groups by role rather than rowid. */
   async getRecentTranscript(
     sessionId: string,
     limit: number,
-  ): Promise<Array<{ role: string; turnId: string | null; text: string; createdAt: Date }>> {
+  ): Promise<
+    Array<{ role: "user" | "assistant"; turnId: string | null; text: string; createdAt: Date }>
+  > {
     if (limit <= 0) return [];
     const rows = await this.db
       .select({
@@ -2398,7 +2425,8 @@ export class WebChatRepository {
       )
       .limit(limit);
     return rows.reverse().map((row) => ({
-      role: row.role,
+      // The WHERE clause admits only these two roles.
+      role: row.role as "user" | "assistant",
       turnId: row.turnId,
       text: messagePartsToText(row.content),
       createdAt: row.createdAt,

@@ -1591,6 +1591,49 @@ describe("WebChatRepository", () => {
       });
     });
 
+    it("ignores a relayed subagent error when the owner's turn completed", async () => {
+      // A trace can hold a child's terminal error ahead of the owner's own
+      // result + turn_end{completed}. The turn's error must stay null: the
+      // failure belongs to the subagent, not this turn.
+      await repo.createSession("child-relayed", "Child");
+      rs.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+      await repo.appendTraceBlocks({
+        messageId: "trace:child-relayed:turn-1",
+        sessionId: "child-relayed",
+        turnId: "turn-1",
+        startSeq: 0,
+        blocks: [
+          { type: "turn_start", turnId: "turn-1", userPrompt: "go" },
+          { type: "error", agent: "child", error: "subagent blew up" },
+          { type: "result", agent: "main", content: "recovered answer" },
+          { type: "turn_end", turnId: "turn-1", status: "completed" },
+        ],
+        transcriptMessages: [
+          {
+            id: "transcript:child-relayed:turn-1:user",
+            sessionId: "child-relayed",
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: "go" }]),
+            turnId: "turn-1",
+          },
+          {
+            id: "transcript:child-relayed:turn-1:assistant",
+            sessionId: "child-relayed",
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "recovered answer" }]),
+            turnId: "turn-1",
+          },
+        ],
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-relayed")).resolves.toEqual({
+        turnId: "turn-1",
+        turnEndStatus: "completed",
+        error: null,
+        reply: "recovered answer",
+      });
+    });
+
     it("leaves turnEndStatus null for a turn that never closed", async () => {
       await repo.createSession("child-cut", "Child");
       await recordTurn("child-cut", "turn-1", {
