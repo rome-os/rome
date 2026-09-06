@@ -266,6 +266,42 @@ function extractTranscriptText(content: string): string {
   return texts.join("\n").replace(/\s+/g, " ").trim();
 }
 
+/** The text a stored message row reads as: its `text` parts joined by newline,
+ * whitespace untouched. Empty string when the row holds no text part or does
+ * not parse. Unlike extractTranscriptText this preserves the original layout,
+ * so a caller can hand the result back verbatim. */
+function messagePartsToText(content: string): string {
+  let blocks: unknown;
+  try {
+    blocks = JSON.parse(content);
+  } catch {
+    return "";
+  }
+  if (!Array.isArray(blocks)) return "";
+  const texts: string[] = [];
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    if ((block as { type?: unknown }).type !== "text") continue;
+    const text = (block as { content?: unknown }).content;
+    if (typeof text === "string") texts.push(text);
+  }
+  return texts.join("\n");
+}
+
+/** Reads one string field off a stored JSON trace block. Null when the block
+ * does not parse or the field is absent or not a string. */
+function readJsonStringField(content: string | undefined, field: string): string | null {
+  if (content === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object") return null;
+    const value = (parsed as Record<string, unknown>)[field];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Confirms every lowercased `term` occurs in `text` (case-insensitive) and
  * returns a single-line snippet cut around the earliest hit, ellipsized on
@@ -2253,6 +2289,120 @@ export class WebChatRepository {
       id: stub.id,
       content: mergeTraceContent(stub.content, await this.getTraceBlockContents(stub.id)),
     };
+  }
+
+  /**
+   * The session's newest recorded turn and how it ended, or null when the
+   * session has recorded none. Newest means last written, not largest
+   * createdAt: createdAt stores whole seconds, so back-to-back turns tie. `turnEndStatus` is `'completed' | 'error' |
+   * 'interrupted'` when the turn wrote its closing bracket, and null when it
+   * never did — a turn cut short by a process exit leaves it null forever.
+   * `error` carries the text of the turn's last terminal error block, `reply`
+   * the text of its assistant transcript row; both are null when absent.
+   */
+  async getLatestTurnOutcome(sessionId: string): Promise<{
+    turnId: string;
+    turnEndStatus: string | null;
+    error: string | null;
+    reply: string | null;
+  } | null> {
+    const traceRows = await this.db
+      .select({ id: romeAgentMessages.id, turnId: romeAgentMessages.turnId })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          eq(romeAgentMessages.role, "trace"),
+          isNotNull(romeAgentMessages.turnId),
+        ),
+      )
+      .orderBy(sql`rowid DESC`)
+      .limit(1);
+    const trace = traceRows[0];
+    if (!trace?.turnId) return null;
+
+    const [turnEndRows, errorRows, replyRows] = await Promise.all([
+      this.db
+        .select({ content: romeAgentTraceBlocks.content })
+        .from(romeAgentTraceBlocks)
+        .where(
+          and(
+            eq(romeAgentTraceBlocks.messageId, trace.id),
+            sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') = 'turn_end'`,
+          ),
+        )
+        .orderBy(desc(romeAgentTraceBlocks.seq))
+        .limit(1),
+      this.db
+        .select({ content: romeAgentTraceBlocks.content })
+        .from(romeAgentTraceBlocks)
+        .where(
+          and(
+            eq(romeAgentTraceBlocks.messageId, trace.id),
+            sql`json_extract(${romeAgentTraceBlocks.content}, '$.type') = 'error'`,
+          ),
+        )
+        .orderBy(desc(romeAgentTraceBlocks.seq))
+        .limit(1),
+      this.db
+        .select({ content: romeAgentMessages.content })
+        .from(romeAgentMessages)
+        .where(
+          and(
+            eq(romeAgentMessages.sessionId, sessionId),
+            eq(romeAgentMessages.turnId, trace.turnId),
+            eq(romeAgentMessages.role, "assistant"),
+          ),
+        )
+        .orderBy(sql`rowid DESC`)
+        .limit(1),
+    ]);
+
+    return {
+      turnId: trace.turnId,
+      turnEndStatus: readJsonStringField(turnEndRows[0]?.content, "status"),
+      error: readJsonStringField(errorRows[0]?.content, "error"),
+      reply: replyRows[0] ? messagePartsToText(replyRows[0].content) : null,
+    };
+  }
+
+  /** The session's last `limit` visible chat rows (user prompts + assistant
+   * replies, no trace), oldest-first. Empty for `limit <= 0`.
+   *
+   * Ordering mirrors getHistoryMessages, inverted so the tail can be taken with
+   * a LIMIT: turns sort by their earliest row, and rows sort within a turn by
+   * insertion. It keys on rowid rather than createdAt because createdAt stores
+   * whole seconds, and a whole turn regularly lands inside one. */
+  async getRecentTranscript(
+    sessionId: string,
+    limit: number,
+  ): Promise<Array<{ role: string; turnId: string | null; text: string; createdAt: Date }>> {
+    if (limit <= 0) return [];
+    const rows = await this.db
+      .select({
+        role: romeAgentMessages.role,
+        turnId: romeAgentMessages.turnId,
+        content: romeAgentMessages.content,
+        createdAt: romeAgentMessages.createdAt,
+      })
+      .from(romeAgentMessages)
+      .where(
+        and(
+          eq(romeAgentMessages.sessionId, sessionId),
+          inArray(romeAgentMessages.role, ["user", "assistant"]),
+        ),
+      )
+      .orderBy(
+        sql`MIN(rowid) OVER (PARTITION BY COALESCE(${romeAgentMessages.turnId}, ${romeAgentMessages.id})) DESC`,
+        sql`rowid DESC`,
+      )
+      .limit(limit);
+    return rows.reverse().map((row) => ({
+      role: row.role,
+      turnId: row.turnId,
+      text: messagePartsToText(row.content),
+      createdAt: row.createdAt,
+    }));
   }
 
   async getMessageContent(id: string) {
