@@ -654,6 +654,7 @@ async function main() {
       webchatRepo,
       subagentExecutionService,
       activeSubagentRegistry,
+      turnStreams: agentTurnStreamRegistry,
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
         (await conversationSettings.get(ref)).effective.session.reset,
