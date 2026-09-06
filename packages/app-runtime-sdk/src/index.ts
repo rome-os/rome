@@ -1592,9 +1592,10 @@ export interface CurrentActionContext {
    * Present only for agent-initiated calls; a routine, hook, or app-initiated
    * call has no agent session and leaves it undefined. This is the id sessions
    * are persisted and parented by, as opposed to `sessionId` (the runtime
-   * AgentSession handle). The two usually differ, but can coincide: a turn
-   * started without an explicit rome session id falls back to `sessionId`, so
-   * a consumer must not assume they are always distinct.
+   * AgentSession handle). They differ for top-level channel/webchat turns
+   * (thread conversation id vs. runtime handle) and coincide for subagent and
+   * forked sessions, whose rome session id is the agent session id itself; a
+   * consumer must not assume they are distinct.
    *
    * Distinct from `channelContext.romeSessionId`, which is the thread's stable
    * conversation id: this identifies the calling *agent session*. The two

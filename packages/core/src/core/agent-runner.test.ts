@@ -2688,6 +2688,93 @@ describe("AgentRunner", () => {
       ]);
     });
 
+    it("passes the turn's bound romeSessionId from openSession into action execution", async () => {
+      // Guards the origin hop: openSession builds executeAction as
+      // actionEngine.run({ romeSessionId: refs.getRomeSessionId(), ... }). The
+      // engine/store/SDK tests would all stay green if a TurnExecRefs refactor
+      // dropped that argument, leaving every agent call with romeSessionId
+      // undefined — this is the one test that fails when the id stops
+      // originating.
+      const observed: Array<{ sessionId?: string; romeSessionId?: string }> = [];
+      // "demo_action" is on test-main's allow-list, so it passes
+      // findPermittedAction and runs through the real makeExecuteAction hop.
+      actionRegistry.register({
+        config: {
+          name: "demo_action",
+          type: "system",
+          description: "Capture the rome session id from the action context",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "read-only",
+        },
+        inputSchema: {},
+        execute: async () => {
+          const store = actionExecutionContext.getStore();
+          observed.push({ sessionId: store?.sessionId, romeSessionId: store?.romeSessionId });
+          return { status: "ok" };
+        },
+      });
+
+      const runImpl = async function* (
+        params: import("./agent-runner.js").ModelRunParams,
+      ): AsyncIterable<AgentMessage> {
+        yield {
+          type: "tool_use",
+          id: `tu-${params.prompt}`,
+          tool: "demo_action",
+          input: {},
+        };
+        await params.executeAction("demo_action", {});
+        yield {
+          type: "tool_result",
+          toolUseId: `tu-${params.prompt}`,
+          tool: "demo_action",
+          output: { ok: true },
+        };
+        yield { type: "result", content: `done ${params.prompt}` };
+      };
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-rome-session-origin",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", runImpl),
+      };
+      const runner = createRunner(provider);
+
+      // A turn bound to an explicit durable rome session id (a resolved
+      // conversation, as the channel adapters supply): the action context must
+      // carry that exact id — proving openSession passed refs.getRomeSessionId()
+      // — and it must be distinct from the ephemeral runtime handle, so a
+      // dropped origin argument (undefined) or a mix-up with sessionId both
+      // fail here.
+      const webchatRepo = new WebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelConversation({
+        channel: "discord",
+        threadId: "rome-session-origin",
+        agentName: "main",
+      });
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "explicit",
+          channelThreadKey: "discord:rome-session-origin",
+          romeSessionId: conversation.id,
+          threadContext: {
+            channel: "discord",
+            threadId: "rome-session-origin",
+            channelUserId: "guardian",
+            threadType: "group",
+          },
+        }),
+      );
+
+      expect(observed).toHaveLength(1);
+      const [explicit] = observed;
+      expect(explicit?.romeSessionId).toBe(conversation.id);
+      expect(explicit?.romeSessionId).not.toBe(explicit?.sessionId);
+    });
+
     it("does not dispatch finished lifecycle events for turns that never started", async () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
