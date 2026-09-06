@@ -88,6 +88,7 @@ describe("callAction", () => {
           channelContext: store?.channelContext,
           sharedContext: store?.sharedContext,
           sessionId: store?.sessionId,
+          romeSessionId: store?.romeSessionId,
           agentName: store?.agentName,
           channelThreadKey: store?.channelThreadKey,
         };
@@ -117,6 +118,7 @@ describe("callAction", () => {
           flags: { dryRun: true },
         },
         sessionId: "sess-42",
+        romeSessionId: "rome-sess-42",
         agentName: "main",
         channelThreadKey: "telegram:t-1",
       },
@@ -130,6 +132,7 @@ describe("callAction", () => {
         flags: { dryRun: true },
       },
       sessionId: "sess-42",
+      romeSessionId: "rome-sess-42",
       agentName: "main",
       channelThreadKey: "telegram:t-1",
     });
@@ -154,6 +157,7 @@ describe("callAction", () => {
           tenantId: "tenant-alpha",
         },
         sessionId: "sess-7",
+        romeSessionId: "rome-sess-7",
         agentName: "main",
         channelThreadKey: "webchat:thread-1",
       },
@@ -177,6 +181,7 @@ describe("callAction", () => {
             tenantId: "tenant-alpha",
           },
           sessionId: "sess-7",
+          romeSessionId: "rome-sess-7",
           agentName: "main",
           channelThreadKey: "webchat:thread-1",
         });

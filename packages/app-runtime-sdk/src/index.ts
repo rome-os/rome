@@ -1594,7 +1594,14 @@ export interface CurrentActionContext {
    * are persisted and parented by, as opposed to `sessionId` (the runtime
    * AgentSession handle). The two usually differ, but can coincide: a turn
    * started without an explicit rome session id falls back to `sessionId`, so
-   * a consumer must not assume they are always distinct. */
+   * a consumer must not assume they are always distinct.
+   *
+   * Distinct from `channelContext.romeSessionId`, which is the thread's stable
+   * conversation id: this identifies the calling *agent session*. The two
+   * coincide for an ordinary top-level agent turn but diverge for a subagent
+   * or child session, whose agent session differs from the thread conversation
+   * it runs under. Use this field to parent work by the caller; use
+   * `channelContext.romeSessionId` to key the thread. */
   romeSessionId?: string;
   turnId?: string;
   agentName?: string;

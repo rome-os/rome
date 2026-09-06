@@ -1317,6 +1317,7 @@ describe("ActionEngine", () => {
             channelUserId: "u-1",
           },
           sessionId: "sess-7",
+          romeSessionId: "rome-sess-7",
           agentName: "main",
           channelThreadKey: "webchat:t-1",
         },
@@ -1334,6 +1335,7 @@ describe("ActionEngine", () => {
         rootArgs: { launch: true },
         channelContext: { channel: "webchat", threadId: "t-1", channelUserId: "u-1" },
         sessionId: "sess-7",
+        romeSessionId: "rome-sess-7",
         agentName: "main",
         channelThreadKey: "webchat:t-1",
       });
