@@ -28,6 +28,7 @@ import { SessionManager } from "../../core/session-manager.js";
 import { PromptBuilder } from "../../core/prompt-builder.js";
 import { createModelResolver } from "../../core/model-resolver.js";
 import { createAgentSessionManager } from "../../core/agent-session.js";
+import { createAgentTurnStreamRegistry } from "../../core/agent-turn-stream-registry.js";
 import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
 import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
@@ -257,6 +258,7 @@ async function buildHarness(
 
   const sessionManager = new SessionManager(repos.sessions);
   const promptBuilder = new PromptBuilder();
+  const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -270,6 +272,8 @@ async function buildHarness(
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(),
       lifecycleDispatcher: createAgentLifecycleDispatcher(),
+      // Match production wiring so resume-by-id paths hit the live-turn guard.
+      turnStreams: agentTurnStreamRegistry,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );

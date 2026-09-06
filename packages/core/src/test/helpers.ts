@@ -549,6 +549,10 @@ export async function buildTestDeps(
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
     subagentExecutionService,
     activeSubagentRegistry,
+    // Match production wiring so resume-by-id paths (approvals, defer/timer
+    // continuations, subagent resume) exercise the live-turn guard rather than
+    // running with it disabled.
+    turnStreams: agentTurnStreamRegistry,
   });
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({

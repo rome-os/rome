@@ -360,8 +360,22 @@ interface ManagerDeps {
   webchatRepo?: WebChatRepository;
   subagentExecutionService?: SubagentExecutionService;
   activeSubagentRegistry?: ActiveSubagentRegistry;
-  /** Process-wide record of turns that are running right now. Read by
-   * `acquireBySessionId` to refuse resuming a session that already has one. */
+  /**
+   * Process-wide record of turns that are running right now. Read by
+   * `acquireBySessionId` to refuse resuming a session that already has one.
+   *
+   * Advisory, not authoritative. This registry was built as best-effort
+   * observability: producers catch-and-log if `register` throws, and some
+   * turn owners (`AgentRunner.run`, in-main webchat) never register at all.
+   * The resume guard rides on it as a cheap backstop for the cross-manager
+   * collision in #246 — it narrows the window, it does not close it. It reads
+   * "a turn is live", not "an impl is live", so two managers can each hold an
+   * idle keep-alive impl for one session and both later start a turn; and the
+   * check is not atomic with the acquire that follows. A hard guarantee needs
+   * a process-wide live-impl claim keyed by provider thread (openSession /
+   * onClosed), which is deliberately out of scope here — see the note on the
+   * guard in `acquireBySessionId`.
+   */
   turnStreams?: AgentTurnStreamRegistry;
   /** Turn-middleware onion. Optional — when absent, every turn runs the
    *  model terminal directly (behavior identical to a chain of size 0). */
@@ -632,6 +646,14 @@ export function createAgentSessionManager(
     // own in-flight turn. So skip the refusal for a turn owned here, and let the
     // process-wide registry — the one place that sees another manager's turn —
     // guard the cross-manager case.
+    //
+    // This guard is advisory (see the `turnStreams` note on ManagerDeps). The
+    // registry is best-effort: `register` can be skipped or swallowed, and this
+    // check is not atomic with the `acquire` below, so a cross-manager
+    // registration can still land in the gap. It also gates on a live *turn*,
+    // not a live *impl*, so it does not stop two managers from each parking an
+    // idle keep-alive impl on one session. It narrows the #246 window rather
+    // than closing it; the airtight fix is a live-impl claim, left to follow-up.
     const ownKey = canonicalizeKey({ agentName, channelThreadKey: row.channelThreadKey });
     const own = sessions.get(keyOf(ownKey));
     const ownedHere = own !== undefined && own.status !== "closed" && own.sessionId === sessionId;
