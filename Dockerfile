@@ -201,7 +201,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       BROWSER_PACKAGE="chromium"; \
       BROWSER_BINARY="/usr/bin/chromium"; \
     fi && \
-    apt-get install -y --no-install-recommends tini git gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 xvfb x11vnc novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
+    apt-get install -y --no-install-recommends tini git gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 tigervnc-standalone-server novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
 # Install AI tool CLIs globally (early for better layer caching).

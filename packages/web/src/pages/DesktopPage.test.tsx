@@ -20,6 +20,7 @@ describe("DesktopPage", () => {
     expect(iframe.getAttribute("src")).toBe(
       "/desktop-vnc.html?resize=scale&path=desktop-proxy/websockify",
     );
+    expect(iframe.getAttribute("allow")).toBe("clipboard-read; clipboard-write");
 
     const setProperty = rs.fn();
     applyDesktopSafeAreaBottom(

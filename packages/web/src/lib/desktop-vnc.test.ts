@@ -1,36 +1,62 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import {
-  buildPasteKeySequence,
   computeFitTransform,
   computeGestureTransform,
   createDeferredPasteController,
+  createMetaToControlController,
+  createRemoteClipboardPasteController,
+  isApplePlatform,
   isPasteShortcut,
 } from "../../public/js/desktop-vnc.js";
 
-describe("buildPasteKeySequence", () => {
-  it("normalizes Windows newlines into Enter key presses", () => {
-    expect(buildPasteKeySequence("hello\r\nworld")).toEqual([
-      { keysym: 0x68 },
-      { keysym: 0x65 },
-      { keysym: 0x6c },
-      { keysym: 0x6c },
-      { keysym: 0x6f },
-      { keysym: 0xff0d, code: "Enter" },
-      { keysym: 0x77 },
-      { keysym: 0x6f },
-      { keysym: 0x72 },
-      { keysym: 0x6c },
-      { keysym: 0x64 },
+describe("createRemoteClipboardPasteController", () => {
+  it.each([
+    "left\tright",
+    "line1\nline2",
+    "输入测试🌱☀️",
+  ])("keeps %j intact in the clipboard and sends remote Ctrl+V after Provide", (text) => {
+    let onProvide = () => {};
+    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
+    const controller = createRemoteClipboardPasteController({
+      rfb,
+      observeClipboardProvide(callback) {
+        onProvide = callback;
+      },
+      setTimer: rs.fn().mockReturnValue(1),
+      clearTimer: rs.fn(),
+    });
+
+    controller.paste(text);
+    expect(rfb.clipboardPasteFrom).toHaveBeenCalledWith(text);
+    expect(rfb.sendKey).not.toHaveBeenCalled();
+
+    onProvide();
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0x76, "KeyV", true],
+      [0x76, "KeyV", false],
+      [0xffe3, "ControlLeft", false],
     ]);
   });
 
-  it("maps tabs and Unicode text to remote keysyms", () => {
-    expect(buildPasteKeySequence("A\t中🙂")).toEqual([
-      { keysym: 0x41 },
-      { keysym: 0xff09, code: "Tab" },
-      { keysym: 0x01004e2d },
-      { keysym: 0x0101f642 },
-    ]);
+  it("serializes touch keyboard chunks until each clipboard Provide completes", () => {
+    let onProvide = () => {};
+    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
+    const controller = createRemoteClipboardPasteController({
+      rfb,
+      observeClipboardProvide(callback) {
+        onProvide = callback;
+      },
+      setTimer: rs.fn().mockReturnValue(1),
+      clearTimer: rs.fn(),
+    });
+
+    controller.paste("中");
+    controller.paste("☀️");
+    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"]]);
+
+    onProvide();
+    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"], ["☀️"]]);
   });
 });
 
@@ -94,6 +120,51 @@ describe("createDeferredPasteController", () => {
 
     expect(onPasteText).not.toHaveBeenCalled();
     expect(onPasteError).toHaveBeenCalledWith("Local clipboard is empty.");
+  });
+
+  it("drops a pending paste when the modifier release is lost outside the iframe", async () => {
+    const onPasteText = rs.fn();
+    const controller = createDeferredPasteController({
+      readClipboardText: rs.fn().mockResolvedValue("STALE_PASTE"),
+      onPasteText,
+      onPasteError: rs.fn(),
+    });
+
+    controller.handleKeyDown(createKeyEvent({ key: "v", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "v", ctrlKey: true }));
+    await flushPromises();
+    controller.cancel();
+
+    controller.handleKeyDown(createKeyEvent({ key: "Control", ctrlKey: true }));
+    controller.handleKeyDown(createKeyEvent({ key: "a", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "a", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "Control", ctrlKey: false }));
+    await flushPromises();
+
+    expect(onPasteText).not.toHaveBeenCalled();
+  });
+});
+
+describe("createMetaToControlController", () => {
+  it("maps a macOS Meta key hold to one remote Control key hold", () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+    const keyDown = createKeyEvent({ key: "Meta", code: "MetaLeft", metaKey: true });
+    const keyUp = createKeyEvent({ key: "Meta", code: "MetaLeft" });
+
+    expect(controller.handleKeyDown(keyDown)).toBe(true);
+    expect(controller.handleKeyDown(keyDown)).toBe(true);
+    expect(controller.handleKeyUp(keyUp)).toBe(true);
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("recognizes Apple browser platform names", () => {
+    expect(isApplePlatform("MacIntel")).toBe(true);
+    expect(isApplePlatform("iPhone")).toBe(true);
+    expect(isApplePlatform("Linux x86_64")).toBe(false);
   });
 });
 
@@ -177,6 +248,7 @@ describe("computeGestureTransform", () => {
 function createKeyEvent(overrides = {}) {
   return {
     key: "",
+    code: "",
     ctrlKey: false,
     metaKey: false,
     altKey: false,

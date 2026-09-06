@@ -13,18 +13,35 @@ set -euo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 DISPLAY_NUM="${DISPLAY#:}"
 SCREEN_SIZE="${ROME_SCREEN_SIZE:-1280x800x24}"
+SCREEN_GEOMETRY="${SCREEN_SIZE%x*}"
+SCREEN_DEPTH="${SCREEN_SIZE##*x}"
 VNC_PORT="${ROME_VNC_PORT:-5900}"
 NOVNC_PORT="${ROME_NOVNC_PORT:-6080}"
 
-echo "Starting Xvfb on ${DISPLAY} ..."
-Xvfb "$DISPLAY" -screen 0 "$SCREEN_SIZE" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 &
+echo "Starting TigerVNC on ${DISPLAY}, RFB :${VNC_PORT} ..."
+Xtigervnc "$DISPLAY" \
+  -geometry "$SCREEN_GEOMETRY" \
+  -depth "$SCREEN_DEPTH" \
+  -SecurityTypes None \
+  -localhost no \
+  -rfbport "$VNC_PORT" \
+  -AlwaysShared \
+  -AcceptCutText \
+  -SendCutText \
+  -ac >/tmp/xtigervnc.log 2>&1 &
+tigervnc_pid=$!
 
 retries=0
 while [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]; do
+  if ! kill -0 "$tigervnc_pid" 2>/dev/null; then
+    echo "Error: TigerVNC exited before creating display ${DISPLAY}." >&2
+    tail -n 50 /tmp/xtigervnc.log >&2 || true
+    exit 1
+  fi
   retries=$((retries + 1))
   if [ "$retries" -gt 60 ]; then
-    echo "Error: Xvfb did not create display ${DISPLAY} within 30 seconds." >&2
-    tail -n 50 /tmp/xvfb.log >&2 || true
+    echo "Error: TigerVNC did not create display ${DISPLAY} within 30 seconds." >&2
+    tail -n 50 /tmp/xtigervnc.log >&2 || true
     exit 1
   fi
   sleep 0.5
@@ -32,9 +49,6 @@ done
 
 echo "Starting Openbox ..."
 openbox >/tmp/openbox.log 2>&1 &
-
-echo "Starting x11vnc on :${VNC_PORT} ..."
-x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -nopw -xkb >/tmp/x11vnc.log 2>&1 &
 
 echo "Starting noVNC on :${NOVNC_PORT} ..."
 websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &

@@ -1,8 +1,3 @@
-const SPECIAL_KEYS = {
-  enter: { keysym: 0xff0d, code: "Enter" },
-  tab: { keysym: 0xff09, code: "Tab" },
-};
-
 const PASTE_MODIFIER_KEYS = {
   control: [
     { keysym: 0xffe3, code: "ControlLeft" },
@@ -18,54 +13,71 @@ const PASTE_MODIFIER_KEYS = {
   ],
 };
 
-function toRemoteKeysym(character) {
-  const codePoint = character.codePointAt(0);
-  if (codePoint === undefined) {
-    return null;
-  }
-
-  if (codePoint <= 0xff) {
-    return codePoint;
-  }
-
-  return 0x01000000 | codePoint;
+export function sendRemotePasteShortcut(rfb) {
+  rfb.sendKey(0xffe3, "ControlLeft", true);
+  rfb.sendKey(0x76, "KeyV", true);
+  rfb.sendKey(0x76, "KeyV", false);
+  rfb.sendKey(0xffe3, "ControlLeft", false);
 }
 
-export function buildPasteKeySequence(text) {
-  const normalizedText = text.replace(/\r\n?/g, "\n");
-  const sequence = [];
+export function createRemoteClipboardPasteController({
+  rfb,
+  observeClipboardProvide,
+  fallbackDelay = 1_000,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  const queue = [];
+  let activeText = null;
+  let fallbackTimer = null;
+  let destroyed = false;
 
-  for (const character of normalizedText) {
-    if (character === "\n") {
-      sequence.push(SPECIAL_KEYS.enter);
-      continue;
+  function startNextPaste() {
+    if (destroyed || activeText !== null || queue.length === 0) {
+      return;
     }
 
-    if (character === "\t") {
-      sequence.push(SPECIAL_KEYS.tab);
-      continue;
-    }
-
-    const keysym = toRemoteKeysym(character);
-    if (keysym === null) {
-      continue;
-    }
-
-    sequence.push({ keysym });
+    activeText = queue.shift();
+    fallbackTimer = setTimer(completePaste, fallbackDelay);
+    rfb.clipboardPasteFrom(activeText);
   }
 
-  return sequence;
-}
-
-export function sendTextToRemote(rfb, text) {
-  for (const { keysym, code } of buildPasteKeySequence(text)) {
-    if (code) {
-      rfb.sendKey(keysym, code);
-      continue;
+  function completePaste() {
+    if (destroyed || activeText === null) {
+      return;
     }
 
-    rfb.sendKey(keysym);
+    if (fallbackTimer !== null) {
+      clearTimer(fallbackTimer);
+      fallbackTimer = null;
+    }
+    activeText = null;
+    sendRemotePasteShortcut(rfb);
+    startNextPaste();
   }
+
+  const stopObserving = observeClipboardProvide?.(completePaste) ?? (() => {});
+
+  return {
+    paste(text) {
+      if (!text || destroyed) {
+        return;
+      }
+      queue.push(text);
+      startNextPaste();
+    },
+
+    destroy() {
+      destroyed = true;
+      queue.length = 0;
+      activeText = null;
+      if (fallbackTimer !== null) {
+        clearTimer(fallbackTimer);
+        fallbackTimer = null;
+      }
+      stopObserving();
+    },
+  };
 }
 
 export function isPasteShortcut(event) {
@@ -84,6 +96,7 @@ function isPasteReleaseEvent(event) {
 
 export function createDeferredPasteController({ readClipboardText, onPasteText, onPasteError }) {
   let pendingPaste = null;
+  let focusGeneration = 0;
 
   async function flushPendingPaste() {
     if (pendingPaste === null) {
@@ -91,10 +104,14 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
     }
 
     const { textPromise, modifiers } = pendingPaste;
+    const generation = focusGeneration;
     pendingPaste = null;
 
     try {
       const text = await textPromise;
+      if (generation !== focusGeneration) {
+        return;
+      }
       if (!text) {
         onPasteError("Local clipboard is empty.");
         return;
@@ -107,6 +124,11 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
   }
 
   return {
+    cancel() {
+      focusGeneration += 1;
+      pendingPaste = null;
+    },
+
     handleKeyDown(event) {
       if (!isPasteShortcut(event)) {
         return false;
@@ -140,6 +162,61 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
       void flushPendingPaste();
       return true;
     },
+  };
+}
+
+export function isApplePlatform(platform) {
+  return /Mac|iPhone|iPad|iPod/i.test(platform);
+}
+
+export function createMetaToControlController(rfb, enabled) {
+  const pressedMetaKeys = new Set();
+
+  function intercept(event) {
+    if (!enabled || String(event.key).toLowerCase() !== "meta") {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+
+  function release() {
+    if (pressedMetaKeys.size === 0) {
+      return;
+    }
+    pressedMetaKeys.clear();
+    rfb.sendKey(0xffe3, "ControlLeft", false);
+  }
+
+  return {
+    handleKeyDown(event) {
+      if (!intercept(event)) {
+        return false;
+      }
+      const code = event.code || "MetaLeft";
+      if (pressedMetaKeys.has(code)) {
+        return true;
+      }
+      if (pressedMetaKeys.size === 0) {
+        rfb.sendKey(0xffe3, "ControlLeft", true);
+      }
+      pressedMetaKeys.add(code);
+      return true;
+    },
+
+    handleKeyUp(event) {
+      if (!intercept(event)) {
+        return false;
+      }
+      pressedMetaKeys.delete(event.code || "MetaLeft");
+      if (pressedMetaKeys.size === 0) {
+        rfb.sendKey(0xffe3, "ControlLeft", false);
+      }
+      return true;
+    },
+
+    release,
   };
 }
 
@@ -337,16 +414,7 @@ const KEYSYM_BACKSPACE = 0xff08;
 const KEYSYM_ENTER = 0xff0d;
 const KEYSYM_TAB = 0xff09;
 
-function characterToKeysym(character) {
-  if (character === "\n") return { keysym: KEYSYM_ENTER, code: "Enter" };
-  if (character === "\t") return { keysym: KEYSYM_TAB, code: "Tab" };
-  const codePoint = character.codePointAt(0);
-  if (codePoint === undefined) return null;
-  const keysym = codePoint <= 0xff ? codePoint : 0x01000000 | codePoint;
-  return { keysym, code: undefined };
-}
-
-function setupKeyboardToolbar(rfb, screen) {
+function setupKeyboardToolbar(rfb, screen, pasteText) {
   const toggle = document.getElementById("kb-toggle");
   const input = document.getElementById("keyboard-input");
   if (!toggle || !input) return;
@@ -370,8 +438,8 @@ function setupKeyboardToolbar(rfb, screen) {
     }
   });
 
-  // Soft keyboards on iOS/Android often suppress keydown events. Translate
-  // input changes into keysyms so typing still reaches the remote.
+  // Soft keyboards on iOS/Android often suppress keydown events. Send their
+  // committed text through the UTF-8 clipboard path used by regular paste.
   input.addEventListener("input", () => {
     const next = input.value;
     const oldLen = [...lastValue].length;
@@ -382,15 +450,7 @@ function setupKeyboardToolbar(rfb, screen) {
       }
     } else if (newLen > oldLen) {
       const added = [...next].slice(oldLen).join("");
-      for (const character of added) {
-        const mapped = characterToKeysym(character);
-        if (!mapped) continue;
-        if (mapped.code) {
-          rfb.sendKey(mapped.keysym, mapped.code);
-        } else {
-          rfb.sendKey(mapped.keysym);
-        }
-      }
+      pasteText(added);
     }
     lastValue = next;
     if (next.length > 64) {
@@ -452,6 +512,37 @@ export async function initDesktopVnc() {
 
   const rfb = new RFB(screen, wsUrl);
 
+  function observeClipboardProvide(callback) {
+    const messages = RFB.messages;
+    const socket = rfb._sock;
+    const originalProvide = messages?.extendedClipboardProvide;
+    if (!messages || !socket || typeof originalProvide !== "function") {
+      return () => {};
+    }
+
+    function observedProvide(targetSocket, ...args) {
+      const result = originalProvide.call(this, targetSocket, ...args);
+      if (targetSocket === socket) {
+        callback();
+      }
+      return result;
+    }
+
+    messages.extendedClipboardProvide = observedProvide;
+    return () => {
+      if (messages.extendedClipboardProvide === observedProvide) {
+        messages.extendedClipboardProvide = originalProvide;
+      }
+    };
+  }
+
+  const remoteClipboardPaste = createRemoteClipboardPasteController({
+    rfb,
+    observeClipboardProvide,
+  });
+  const platform = navigator.userAgentData?.platform ?? navigator.platform ?? "";
+  const metaToControl = createMetaToControlController(rfb, isApplePlatform(platform));
+
   function focusRemote() {
     screen.focus();
     rfb.focus();
@@ -467,7 +558,7 @@ export async function initDesktopVnc() {
   }
 
   function releasePasteModifiers(modifiers) {
-    if (modifiers?.ctrlKey) {
+    if (modifiers?.ctrlKey || modifiers?.metaKey) {
       for (const key of PASTE_MODIFIER_KEYS.control) {
         rfb.sendKey(key.keysym, key.code, false);
       }
@@ -483,8 +574,7 @@ export async function initDesktopVnc() {
   function pasteTextToRemote(text, modifiers) {
     focusRemote();
     releasePasteModifiers(modifiers);
-    rfb.clipboardPasteFrom(text);
-    sendTextToRemote(rfb, text);
+    remoteClipboardPaste.paste(text);
   }
 
   const deferredPaste = createDeferredPasteController({
@@ -538,7 +628,7 @@ export async function initDesktopVnc() {
     const refit = () => touchViewport?.fitToFrame();
     rfb.addEventListener("desktopname", refit);
     window.addEventListener("resize", refit);
-    setupKeyboardToolbar(rfb, screen);
+    setupKeyboardToolbar(rfb, screen, (text) => remoteClipboardPaste.paste(text));
   }
 
   rfb.addEventListener("clipboard", async (event) => {
@@ -559,7 +649,10 @@ export async function initDesktopVnc() {
         return;
       }
 
-      deferredPaste.handleKeyDown(event);
+      if (deferredPaste.handleKeyDown(event)) {
+        return;
+      }
+      metaToControl.handleKeyDown(event);
     },
     { capture: true },
   );
@@ -567,12 +660,22 @@ export async function initDesktopVnc() {
     "keyup",
     (event) => {
       deferredPaste.handleKeyUp(event);
+      metaToControl.handleKeyUp(event);
     },
     { capture: true },
   );
 
   window.addEventListener("pointerdown", () => {
     focusRemote();
+  });
+  window.addEventListener("blur", () => {
+    deferredPaste.cancel();
+    metaToControl.release();
+  });
+  window.addEventListener("pagehide", () => {
+    deferredPaste.cancel();
+    metaToControl.release();
+    remoteClipboardPaste.destroy();
   });
 
   focusRemote();

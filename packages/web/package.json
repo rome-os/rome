@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "rsbuild preview",
     "test": "../../scripts/test-env.sh rstest --silent passed-only",
+    "test:desktop-vnc": "playwright test --config playwright.desktop-vnc.config.ts",
+    "test:desktop-vnc:docker": "playwright test --config playwright.desktop-vnc.docker.config.ts",
     "test:layout": "playwright test"
   },
   "dependencies": {
