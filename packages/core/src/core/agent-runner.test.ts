@@ -2178,6 +2178,83 @@ describe("AgentRunner", () => {
 
       await manager.shutdown();
     });
+
+    it("resumes a session whose live turn this manager owns (reuse, not refuse)", async () => {
+      // The guard must not fire for a session's own in-flight turn: a
+      // continuation (resume_session/defer/timer) or approval re-enters through
+      // the same manager, and acquire reuses that impl and FIFO-queues the new
+      // turn behind the running one. Refusing here would have broken those paths.
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-own",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-own",
+        status: "active",
+      });
+      // A provider whose turn parks until the session closes, so the impl stays
+      // genuinely mid-turn (status "running", turn mutex held) during the resume.
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-parking-session",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => createClosableModelSession(params),
+      };
+      const modelResolver = createTestModelResolver({ providers: [provider] });
+      const deps = managerDeps(modelResolver);
+      const manager = createAgentSessionManager(deps, { keepAliveAcrossTurns: true });
+
+      const live = await manager.acquireBySessionId!("sess-own", "test-main");
+      const turn = live.sendTurn({ prompt: "park" });
+      // Let the turn take the mutex and enter "running" before the resume.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Mirror production: the bridge registers the live turn on turn_start.
+      deps.turnStreams.register({
+        sessionId: live.sessionId,
+        turnId: turn.turnId,
+        agentName: "test-main",
+      });
+
+      const again = await manager.acquireBySessionId!("sess-own", "test-main");
+      expect(again).toBe(live);
+
+      await manager.shutdown();
+      await collectMessages(turn.events);
+    });
+
+    it("refuses a cross-manager resume while another manager runs the session's turn", async () => {
+      // The #246 scenario: a detached child runs under its own manager but shares
+      // the process-wide turn registry with the parent. The child holds the id,
+      // the parent's turn is live — the child must refuse rather than open a
+      // second AgentSessionImpl over the same provider thread.
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-shared",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-shared",
+        status: "active",
+      });
+      const modelResolver = createTestModelResolver({ providers: [new MockModelProvider()] });
+      const parentDeps = managerDeps(modelResolver);
+      const parentManager = createAgentSessionManager(parentDeps, { keepAliveAcrossTurns: true });
+      const childManager = createAgentSessionManager(
+        { ...managerDeps(modelResolver), turnStreams: parentDeps.turnStreams },
+        { keepAliveAcrossTurns: true, isSubagent: true },
+      );
+
+      const parentSession = await parentManager.acquireBySessionId!("sess-shared", "test-main");
+      parentDeps.turnStreams.register({
+        sessionId: parentSession.sessionId,
+        turnId: "turn-shared",
+        agentName: "test-main",
+      });
+
+      await expect(childManager.acquireBySessionId!("sess-shared", "test-main")).rejects.toThrow(
+        /has a turn running/,
+      );
+
+      await parentManager.shutdown();
+      await childManager.shutdown();
+    });
   });
 
   describe("message yielding", () => {

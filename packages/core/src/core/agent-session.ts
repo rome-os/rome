@@ -622,11 +622,20 @@ export function createAgentSessionManager(
     if (!row) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
-    // Two managers hold separate session maps, so resuming by id while a turn
-    // is running would hand out a second AgentSessionImpl over the same
-    // provider thread — two writers, one history. The turn registry is shared
-    // across managers, which makes it the one place that sees both.
-    if (deps.turnStreams && deps.turnStreams.listBySession(sessionId).length > 0) {
+    // Resuming by id while a turn is running would hand out a second
+    // AgentSessionImpl over the same provider thread — two writers, one history.
+    // But only when the turn runs under a *different* manager. When this
+    // manager already owns the session for that id, `acquire` below reuses that
+    // impl and FIFO-queues the new turn behind the running one on its turn
+    // mutex; refusing here would break the session's own continuations
+    // (resume_session/defer/timer) and approvals, which re-enter through their
+    // own in-flight turn. So skip the refusal for a turn owned here, and let the
+    // process-wide registry — the one place that sees another manager's turn —
+    // guard the cross-manager case.
+    const ownKey = canonicalizeKey({ agentName, channelThreadKey: row.channelThreadKey });
+    const own = sessions.get(keyOf(ownKey));
+    const ownedHere = own !== undefined && own.status !== "closed" && own.sessionId === sessionId;
+    if (!ownedHere && deps.turnStreams && deps.turnStreams.listBySession(sessionId).length > 0) {
       throw new Error(
         `Agent session "${sessionId}" has a turn running and cannot be resumed until it ends`,
       );
