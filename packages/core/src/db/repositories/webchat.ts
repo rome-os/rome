@@ -2299,22 +2299,28 @@ export class WebChatRepository {
 
   /**
    * The session's newest recorded turn and how it ended, or null when the
-   * session has recorded none. Newest means last written, not largest
-   * createdAt: createdAt stores whole seconds, so back-to-back turns tie.
+   * session has recorded none. "Newest" is the last turn to start — the
+   * highest-rowid `trace` row, whose stub is written at turn start — not the
+   * largest createdAt, which stores whole seconds and ties back-to-back turns.
+   * For the sequential detached-child sessions this serves, the last turn to
+   * start is also the last to finish; under interleaved turns it would return
+   * the last-started, not the last-completed, turn.
+   *
    * `turnEndStatus` is `'completed' | 'error' | 'interrupted'` when the turn
    * wrote its closing bracket, and null when it never did — a turn cut short by
    * a process exit leaves it null forever.
    *
-   * `error` is the text of the turn's own terminal error, populated only when
-   * the turn's last terminal block (`result` or `error`) is an `error` and the
-   * turn closed with status `'error'`. A trace can hold a relayed subagent's
-   * terminal error ahead of the owner's own `result` + `turn_end{completed}`,
-   * so keying on the last terminal block keeps a child's failure from surfacing
-   * as the parent turn's error. `reply` is the text of the turn's assistant
-   * transcript row; both are null when absent. A turn records one assistant
-   * transcript row (the recorder writes a single reply per turn), so `reply`
-   * takes the last such row by rowid — if that invariant ever breaks, earlier
-   * assistant text is dropped rather than concatenated.
+   * `error` and `reply` both read from the turn's last terminal block (`result`
+   * or `error`): `error` is the block's error text when it is an `error` and
+   * the turn closed with status `'error'`, and `reply` is the block's result
+   * text when it is a `result`; each is null otherwise. A trace can hold a
+   * relayed subagent's terminal error ahead of the owner's own `result` +
+   * `turn_end{completed}`, so keying on the last terminal block keeps a child's
+   * failure from surfacing as the parent turn's error. Reading `reply` from the
+   * terminal block, not an assistant chat row, sidesteps the commentary and
+   * turn-recap rows a webchat session can insert on the same turnId — a
+   * last-by-rowid chat read would return commentary, or a recap's empty text,
+   * in place of the real answer.
    */
   async getLatestTurnOutcome(sessionId: string): Promise<{
     turnId: string;
@@ -2337,7 +2343,7 @@ export class WebChatRepository {
     const trace = traceRows[0];
     if (!trace?.turnId) return null;
 
-    const [turnEndRows, terminalRows, replyRows] = await Promise.all([
+    const [turnEndRows, terminalRows] = await Promise.all([
       this.db
         .select({ content: romeAgentTraceBlocks.content })
         .from(romeAgentTraceBlocks)
@@ -2349,8 +2355,9 @@ export class WebChatRepository {
         )
         .orderBy(desc(romeAgentTraceBlocks.seq))
         .limit(1),
-      // The turn's last terminal block. Filtering on `result`/`error` matches
-      // the idx_rome_agent_trace_blocks_terminal_message partial index, and the
+      // The turn's last terminal block, source of both `error` and `reply`.
+      // Filtering on `result`/`error` matches the
+      // idx_rome_agent_trace_blocks_terminal_message partial index, and the
       // owner's terminal always follows any relayed subagent one.
       this.db
         .select({ content: romeAgentTraceBlocks.content })
@@ -2363,39 +2370,30 @@ export class WebChatRepository {
         )
         .orderBy(desc(romeAgentTraceBlocks.seq))
         .limit(1),
-      // The turn's assistant reply. One per turn by the recorder's contract;
-      // the last-by-rowid read is defensive against a hypothetical second row.
-      this.db
-        .select({ content: romeAgentMessages.content })
-        .from(romeAgentMessages)
-        .where(
-          and(
-            eq(romeAgentMessages.sessionId, sessionId),
-            eq(romeAgentMessages.turnId, trace.turnId),
-            eq(romeAgentMessages.role, "assistant"),
-          ),
-        )
-        .orderBy(sql`rowid DESC`)
-        .limit(1),
     ]);
 
     const turnEndStatus = readTurnEndStatus(turnEndRows[0]?.content);
     const terminalContent = terminalRows[0]?.content;
+    const terminalType = readJsonStringField(terminalContent, "type");
     const error =
-      turnEndStatus === "error" && readJsonStringField(terminalContent, "type") === "error"
+      turnEndStatus === "error" && terminalType === "error"
         ? readJsonStringField(terminalContent, "error")
         : null;
+    const reply =
+      terminalType === "result" ? readJsonStringField(terminalContent, "content") : null;
 
     return {
       turnId: trace.turnId,
       turnEndStatus,
       error,
-      reply: replyRows[0] ? messagePartsToText(replyRows[0].content) : null,
+      reply,
     };
   }
 
   /** The session's last `limit` visible chat rows (user prompts + assistant
-   * replies, no trace), oldest-first. Empty for `limit <= 0`.
+   * replies, no trace), oldest-first. Empty for a non-positive or non-integer
+   * `limit` — a fractional or NaN value would otherwise reach SQLite's `LIMIT`,
+   * which throws on a value it can't losslessly narrow to an integer.
    *
    * Ordering relies on insertion order (rowid) reproducing the user→assistant
    * sequence within a turn, then groups turns by their earliest row. It is
@@ -2414,7 +2412,7 @@ export class WebChatRepository {
   ): Promise<
     Array<{ role: "user" | "assistant"; turnId: string | null; text: string; createdAt: Date }>
   > {
-    if (limit <= 0) return [];
+    if (!Number.isInteger(limit) || limit <= 0) return [];
     const rows = await this.db
       .select({
         role: romeAgentMessages.role,

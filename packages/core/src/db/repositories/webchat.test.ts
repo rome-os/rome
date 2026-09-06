@@ -1562,11 +1562,14 @@ describe("WebChatRepository", () => {
         error: "model refused",
       });
 
+      // turn-2's last terminal block is the error, so `reply` is null even
+      // though a result block preceded it — outcome reads the terminal block,
+      // not the assistant chat row that getRecentTranscript still surfaces.
       await expect(repo.getLatestTurnOutcome("child-fast")).resolves.toEqual({
         turnId: "turn-2",
         turnEndStatus: "error",
         error: "model refused",
-        reply: "second answer",
+        reply: null,
       });
       await expect(repo.getRecentTranscript("child-fast", 2)).resolves.toEqual([
         { role: "user", turnId: "turn-2", text: "second", createdAt: expect.any(Date) },
@@ -1634,6 +1637,35 @@ describe("WebChatRepository", () => {
       });
     });
 
+    it("reads the terminal result, not a later commentary or recap chat row", async () => {
+      // A webchat session appends extra role='assistant' rows on the same
+      // turnId after the reply: in-turn commentary, and a turn recap whose part
+      // carries no text. A last-by-rowid chat read would return the commentary,
+      // or the recap's empty text; the terminal-block read must return neither.
+      await repo.createSession("child-recap", "Child");
+      await recordTurn("child-recap", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "go",
+        reply: "the real answer",
+        turnEnd: "completed",
+      });
+      await repo.addBackendMessage("child-recap", "turn-1", [
+        { type: "text", content: "just some commentary" },
+      ]);
+      await repo.addTurnRecapMessage({
+        sessionId: "child-recap",
+        turnId: "turn-1",
+        content: "recap summary",
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-recap")).resolves.toEqual({
+        turnId: "turn-1",
+        turnEndStatus: "completed",
+        error: null,
+        reply: "the real answer",
+      });
+    });
+
     it("leaves turnEndStatus null for a turn that never closed", async () => {
       await repo.createSession("child-cut", "Child");
       await recordTurn("child-cut", "turn-1", {
@@ -1678,6 +1710,10 @@ describe("WebChatRepository", () => {
       await expect(repo.getRecentTranscript("child-tail", 100)).resolves.toHaveLength(4);
       await expect(repo.getRecentTranscript("child-tail", 0)).resolves.toEqual([]);
       await expect(repo.getRecentTranscript("child-tail", -1)).resolves.toEqual([]);
+      // A fractional or NaN limit would reach SQLite's LIMIT and throw; the
+      // guard turns both into an empty result instead.
+      await expect(repo.getRecentTranscript("child-tail", 2.5)).resolves.toEqual([]);
+      await expect(repo.getRecentTranscript("child-tail", Number.NaN)).resolves.toEqual([]);
     });
 
     it("reads a turn recorded across multiple trace-block batches", async () => {
