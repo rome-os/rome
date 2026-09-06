@@ -139,6 +139,10 @@ export interface ActionRunContext {
   divergenceMode?: "fallthrough" | "strict";
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
+  /** Durable Rome session id of the calling agent session, when one called.
+   * Distinct from `sessionId` (the runtime AgentSession handle): this is the
+   * id a child session is parented by. */
+  romeSessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
   /** Allocated by AgentSession.sendTurn; stamped on `action:*` spans so the
@@ -435,6 +439,7 @@ export class ActionEngine {
         sharedContext: runContext?.sharedContext,
         hookInvocationContext: runContext?.hookInvocationContext,
         sessionId: runContext?.sessionId,
+        romeSessionId: runContext?.romeSessionId,
         agentName: runContext?.agentName,
         channelThreadKey: runContext?.channelThreadKey,
         turnId: runContext?.turnId,
@@ -761,6 +766,7 @@ export class ActionEngine {
       channelContext: context?.channelContext ?? parentStore?.channelContext,
       sharedContext: mergeSharedContext(parentStore?.sharedContext, context?.sharedContext),
       sessionId: context?.sessionId ?? parentStore?.sessionId,
+      romeSessionId: context?.romeSessionId ?? parentStore?.romeSessionId,
       turnId: context?.turnId ?? parentStore?.turnId,
       agentName: context?.agentName ?? parentStore?.agentName,
       channelThreadKey: context?.channelThreadKey ?? parentStore?.channelThreadKey,
@@ -925,6 +931,7 @@ export class ActionEngine {
       channelContext: invocation.context?.channelContext,
       sharedContext: invocation.context?.sharedContext,
       sessionId: invocation.context?.sessionId,
+      romeSessionId: invocation.context?.romeSessionId,
       turnId: invocation.context?.turnId,
       agentName: invocation.context?.agentName,
       channelThreadKey: invocation.context?.channelThreadKey,

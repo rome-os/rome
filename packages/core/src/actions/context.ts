@@ -26,6 +26,9 @@ export interface ActionExecutionStore {
   channelContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
+  /** Durable Rome session id of the calling agent session. Undefined for
+   * routine / hook / app-initiated chains, which have no agent session. */
+  romeSessionId?: string;
   turnId?: string;
   agentName?: string;
   channelThreadKey?: string;
@@ -49,6 +52,7 @@ setCurrentActionContextResolver(() => {
     callerAppId: store.callerAppId,
     channelContext: store.channelContext,
     sessionId: store.sessionId,
+    romeSessionId: store.romeSessionId,
     turnId: store.turnId,
     agentName: store.agentName,
     channelThreadKey: store.channelThreadKey,

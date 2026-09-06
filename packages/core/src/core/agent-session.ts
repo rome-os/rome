@@ -995,6 +995,7 @@ async function openSession(
             channelContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
             sessionId: refs.sessionId,
+            romeSessionId: refs.getRomeSessionId(),
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             turnId: refs.getTurnId(),
