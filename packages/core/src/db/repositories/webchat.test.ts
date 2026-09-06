@@ -1468,6 +1468,176 @@ describe("WebChatRepository", () => {
     });
   });
 
+  describe("detached child status reads", () => {
+    // Mirrors what AgentTraceRecorder writes for one child turn: a user row, a
+    // trace whose blocks bracket the turn, and (when the turn produced one) an
+    // assistant row.
+    async function recordTurn(
+      sessionId: string,
+      turnId: string,
+      options: {
+        at: string;
+        prompt: string;
+        reply?: string;
+        turnEnd?: "completed" | "error" | "interrupted";
+        error?: string;
+      },
+    ) {
+      rs.setSystemTime(new Date(options.at));
+      const blocks: unknown[] = [{ type: "turn_start", turnId, userPrompt: options.prompt }];
+      if (options.reply !== undefined) blocks.push({ type: "result", content: options.reply });
+      if (options.error !== undefined) blocks.push({ type: "error", error: options.error });
+      if (options.turnEnd) blocks.push({ type: "turn_end", turnId, status: options.turnEnd });
+      await repo.appendTraceBlocks({
+        messageId: `trace:${sessionId}:${turnId}`,
+        sessionId,
+        turnId,
+        startSeq: 0,
+        blocks,
+        transcriptMessages: [
+          {
+            id: `transcript:${sessionId}:${turnId}:user`,
+            sessionId,
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: options.prompt }]),
+            turnId,
+          },
+          ...(options.reply !== undefined
+            ? [
+                {
+                  id: `transcript:${sessionId}:${turnId}:assistant`,
+                  sessionId,
+                  role: "assistant" as const,
+                  content: JSON.stringify([{ type: "text", content: options.reply }]),
+                  turnId,
+                },
+              ]
+            : []),
+        ],
+      });
+    }
+
+    beforeEach(() => {
+      rs.useFakeTimers();
+    });
+
+    it("reports the newest turn's outcome, not the first one's", async () => {
+      await repo.createSession("child-many", "Child");
+      await recordTurn("child-many", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "first",
+        reply: "first answer",
+        turnEnd: "completed",
+      });
+      await recordTurn("child-many", "turn-2", {
+        at: "2030-01-01T01:00:00.000Z",
+        prompt: "second",
+        reply: "second answer",
+        turnEnd: "completed",
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-many")).resolves.toEqual({
+        turnId: "turn-2",
+        turnEndStatus: "completed",
+        error: null,
+        reply: "second answer",
+      });
+    });
+
+    it("reports the last-written turn when two land in the same second", async () => {
+      // createdAt stores whole seconds, so back-to-back turns tie on it. The
+      // ids are uuids, which makes an id tiebreak a coin flip.
+      await repo.createSession("child-fast", "Child");
+      await recordTurn("child-fast", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "first",
+        reply: "first answer",
+        turnEnd: "completed",
+      });
+      await recordTurn("child-fast", "turn-2", {
+        at: "2030-01-01T00:00:00.900Z",
+        prompt: "second",
+        reply: "second answer",
+        turnEnd: "error",
+        error: "model refused",
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-fast")).resolves.toEqual({
+        turnId: "turn-2",
+        turnEndStatus: "error",
+        error: "model refused",
+        reply: "second answer",
+      });
+      await expect(repo.getRecentTranscript("child-fast", 2)).resolves.toEqual([
+        { role: "user", turnId: "turn-2", text: "second", createdAt: expect.any(Date) },
+        { role: "assistant", turnId: "turn-2", text: "second answer", createdAt: expect.any(Date) },
+      ]);
+    });
+
+    it("carries the terminal error text of a failed turn", async () => {
+      await repo.createSession("child-failed", "Child");
+      await recordTurn("child-failed", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "go",
+        turnEnd: "error",
+        error: "model refused",
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-failed")).resolves.toEqual({
+        turnId: "turn-1",
+        turnEndStatus: "error",
+        error: "model refused",
+        reply: null,
+      });
+    });
+
+    it("leaves turnEndStatus null for a turn that never closed", async () => {
+      await repo.createSession("child-cut", "Child");
+      await recordTurn("child-cut", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "go",
+      });
+
+      await expect(repo.getLatestTurnOutcome("child-cut")).resolves.toEqual({
+        turnId: "turn-1",
+        turnEndStatus: null,
+        error: null,
+        reply: null,
+      });
+    });
+
+    it("returns null for a session that has recorded no turn", async () => {
+      await repo.createSession("child-empty", "Child");
+      await expect(repo.getLatestTurnOutcome("child-empty")).resolves.toBeNull();
+      await expect(repo.getLatestTurnOutcome("no-such-session")).resolves.toBeNull();
+    });
+
+    it("returns the last N chat rows oldest-first and never a trace row", async () => {
+      await repo.createSession("child-tail", "Child");
+      await recordTurn("child-tail", "turn-1", {
+        at: "2030-01-01T00:00:00.000Z",
+        prompt: "one",
+        reply: "answer one",
+        turnEnd: "completed",
+      });
+      await recordTurn("child-tail", "turn-2", {
+        at: "2030-01-01T01:00:00.000Z",
+        prompt: "two",
+        reply: "answer two",
+        turnEnd: "completed",
+      });
+
+      await expect(repo.getRecentTranscript("child-tail", 3)).resolves.toEqual([
+        { role: "assistant", turnId: "turn-1", text: "answer one", createdAt: expect.any(Date) },
+        { role: "user", turnId: "turn-2", text: "two", createdAt: expect.any(Date) },
+        { role: "assistant", turnId: "turn-2", text: "answer two", createdAt: expect.any(Date) },
+      ]);
+      await expect(repo.getRecentTranscript("child-tail", 100)).resolves.toHaveLength(4);
+      await expect(repo.getRecentTranscript("child-tail", 0)).resolves.toEqual([]);
+      await expect(repo.getRecentTranscript("child-tail", -1)).resolves.toEqual([]);
+    });
+  });
+
   it("groups messages by turnId so concurrent turns render in turn order", async () => {
     // Reproduces the user-A / user-B / reply-A / reply-B insertion pattern
     // that happens when two POSTs race on the same session. With turnId
