@@ -1590,9 +1590,11 @@ export interface CurrentActionContext {
   sessionId?: string;
   /** Durable Rome session id of the agent session that called this action.
    * Present only for agent-initiated calls; a routine, hook, or app-initiated
-   * call has no agent session and leaves it undefined. Unlike `sessionId`
-   * (the runtime AgentSession handle) this is the id sessions are persisted
-   * and parented by. */
+   * call has no agent session and leaves it undefined. This is the id sessions
+   * are persisted and parented by, as opposed to `sessionId` (the runtime
+   * AgentSession handle). The two usually differ, but can coincide: a turn
+   * started without an explicit rome session id falls back to `sessionId`, so
+   * a consumer must not assume they are always distinct. */
   romeSessionId?: string;
   turnId?: string;
   agentName?: string;

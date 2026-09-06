@@ -271,6 +271,7 @@ export function createRomeAppContext(
         channelContext: store?.channelContext,
         sharedContext: store?.sharedContext,
         sessionId: store?.sessionId,
+        romeSessionId: store?.romeSessionId,
         agentName: store?.agentName,
         channelThreadKey: store?.channelThreadKey,
       });

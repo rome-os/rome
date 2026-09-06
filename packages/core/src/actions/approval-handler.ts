@@ -20,6 +20,7 @@ interface ApprovalPayload {
   channelContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
+  romeSessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
 }
@@ -169,6 +170,7 @@ export class ApprovalHandler {
           channelContext: payload.channelContext,
           sharedContext: payload.sharedContext,
           sessionId: payload.sessionId,
+          romeSessionId: payload.romeSessionId,
           agentName: payload.agentName,
           channelThreadKey: payload.channelThreadKey,
         };

@@ -384,6 +384,7 @@ describe("ActionEngine", () => {
       expect(store.channelContext).toBeUndefined();
       expect(store.sharedContext).toBeUndefined();
       expect(store.sessionId).toBeUndefined();
+      expect(store.romeSessionId).toBeUndefined();
       expect(store.agentName).toBeUndefined();
       expect(store.channelThreadKey).toBeUndefined();
     }, 30_000);
@@ -417,6 +418,7 @@ describe("ActionEngine", () => {
           tenantId: "tenant-alpha",
         },
         sessionId: "sess-99",
+        romeSessionId: "rome-sess-99",
         agentName: "main",
         channelThreadKey: "telegram:t-1",
       };
@@ -431,6 +433,7 @@ describe("ActionEngine", () => {
         channelContext: context.channelContext,
         sharedContext: context.sharedContext,
         sessionId: "sess-99",
+        romeSessionId: "rome-sess-99",
         agentName: "main",
         channelThreadKey: "telegram:t-1",
       });
@@ -1015,6 +1018,7 @@ describe("ActionEngine", () => {
           selectedProjectPath: "/tmp/projects/alpha",
         },
         sessionId: "sess-1",
+        romeSessionId: "rome-sess-1",
         agentName: "main",
       };
       const result = await rome.actionEngine.run("risky", { target: "prod" }, context);
@@ -1027,6 +1031,7 @@ describe("ActionEngine", () => {
         channelContext: context.channelContext,
         sharedContext: context.sharedContext,
         sessionId: "sess-1",
+        romeSessionId: "rome-sess-1",
         agentName: "main",
       });
     });

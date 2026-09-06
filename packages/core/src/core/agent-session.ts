@@ -1133,6 +1133,7 @@ async function openSession(
             const result = await deps.actionEngine.run("create_routine", createArgs, {
               initiator: `agent:${key.agentName}`,
               sessionId: refs.sessionId,
+              romeSessionId: refs.getRomeSessionId(),
               agentName: key.agentName,
               channelThreadKey: key.channelThreadKey,
               turnId: refs.getTurnId(),
@@ -1192,6 +1193,7 @@ async function openSession(
               {
                 initiator: "system:handback-validate",
                 sessionId: refs.sessionId,
+                romeSessionId: refs.getRomeSessionId(),
                 agentName: key.agentName,
                 channelThreadKey: key.channelThreadKey,
                 turnId: refs.getTurnId(),

@@ -1749,6 +1749,7 @@ export class ActionEngine {
         channelContext: context?.channelContext,
         sharedContext: context?.sharedContext,
         sessionId: context?.sessionId,
+        romeSessionId: context?.romeSessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
       },
