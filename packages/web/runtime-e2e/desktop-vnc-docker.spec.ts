@@ -153,6 +153,21 @@ test("types simple Chinese and emoji through the touch keyboard input path", asy
   await openStandaloneDesktop();
 });
 
+test("batches rapid touch keyboard composition updates", async () => {
+  await openStandaloneDesktop("touch=1&resize=scale&path=desktop-proxy/websockify");
+  await focusRemoteTarget("a");
+  await desktopFrame.locator("#kb-toggle").click();
+  await desktopFrame.locator("#keyboard-input").evaluate((input) => {
+    input.value = "春";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春" }));
+    input.value = "春夏";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "夏" }));
+  });
+
+  await expectRemoteState({ a: "春夏", b: "", focus: "a", submits: [] });
+  await openStandaloneDesktop();
+});
+
 test("copies remote ASCII into the browser clipboard", async () => {
   await copyRemoteSelection("COPY_ASCII_123");
 
@@ -201,27 +216,9 @@ test("continues accepting new Chinese and emoji after a long Unicode paste", asy
   await expectRemoteState({ a: payload, b: "", focus: "a", submits: [] });
 });
 
-test("preserves complex Unicode when only the RFB clipboard channel is used", async () => {
+test("preserves complex Unicode through the bundled RFB client", async () => {
   const payload = "剪贴板测试🌱☀️🍂❄️🐈‍⬛🐻‍❄️";
-  await focusRemoteTarget("a");
-  await page.keyboard.press("Shift");
-  await page.evaluate((text) => {
-    const activeRfb = (
-      window as typeof window & {
-        __romeActiveRfb?: { clipboardPasteFrom(value: string): void };
-      }
-    ).__romeActiveRfb;
-    if (!activeRfb) throw new Error("noVNC RFB instance was not captured");
-    activeRfb.clipboardPasteFrom(text);
-  }, payload);
-  await page.waitForTimeout(500);
-
-  await remotePasteShortcut();
-  await expect.poll(readRemoteState, { timeout: 3_000 }).toEqual(
-    expect.objectContaining({
-      events: expect.arrayContaining([expect.objectContaining({ type: "paste", target: "a" })]),
-    }),
-  );
+  await pasteThroughRome(payload, "a");
   await expectRemoteState({ a: payload, b: "", focus: "a", submits: [] });
 });
 
@@ -282,7 +279,6 @@ test("cancels a pending paste when focus leaves the desktop iframe", async () =>
     ></iframe>
   `);
   desktopFrame = await waitForDesktopFrame();
-  await installRfbCapture(desktopFrame);
 
   const canvas = desktopFrame.locator("#screen canvas");
   await expect(canvas).toBeVisible({ timeout: 15_000 });
@@ -310,7 +306,6 @@ test("cancels a pending paste when focus leaves the desktop iframe", async () =>
 async function openStandaloneDesktop(query = "resize=scale&path=desktop-proxy/websockify") {
   await page.goto(`${baseUrl}/desktop-vnc.html?${query}`);
   desktopFrame = page.mainFrame();
-  await installRfbCapture(desktopFrame);
   await expect(page.locator("#screen canvas")).toBeVisible({ timeout: 15_000 });
   await page.locator("#screen canvas").click();
   await remoteCdp("Page.bringToFront");
@@ -323,33 +318,6 @@ async function waitForDesktopFrame() {
   const frame = await iframe.elementHandle().then((element) => element?.contentFrame());
   if (!frame) throw new Error("desktop iframe did not load");
   return frame;
-}
-
-async function installRfbCapture(frame: Frame) {
-  await frame.evaluate(async () => {
-    const rfbModule = await window.eval("import('/desktop-proxy/core/rfb.js')");
-    const prototype = rfbModule.default.prototype;
-    if (prototype.__romeCaptureInstalled) return;
-    const clipboardPasteFrom = prototype.clipboardPasteFrom;
-    prototype.clipboardPasteFrom = function (this: unknown, text: string) {
-      (
-        window as typeof window & {
-          __romeActiveRfb?: unknown;
-        }
-      ).__romeActiveRfb = this;
-      return clipboardPasteFrom.call(this, text);
-    };
-    const sendKey = prototype.sendKey;
-    prototype.sendKey = function (this: unknown, ...args: unknown[]) {
-      (
-        window as typeof window & {
-          __romeActiveRfb?: unknown;
-        }
-      ).__romeActiveRfb = this;
-      return Reflect.apply(sendKey, this, args);
-    };
-    prototype.__romeCaptureInstalled = true;
-  });
 }
 
 async function pasteThroughRome(text: string, target: "a" | "b") {
@@ -390,45 +358,6 @@ async function expectRemoteEvent(expected: { type: string; target: string; key?:
 async function readRemoteState() {
   const value = await remoteEval(`JSON.stringify(window.probeState())`);
   return JSON.parse(String(value));
-}
-
-async function remotePasteShortcut() {
-  const events = [
-    {
-      type: "keyDown",
-      key: "Control",
-      code: "ControlLeft",
-      windowsVirtualKeyCode: 17,
-      modifiers: 2,
-    },
-    {
-      type: "keyDown",
-      key: "v",
-      code: "KeyV",
-      windowsVirtualKeyCode: 86,
-      nativeVirtualKeyCode: 86,
-      modifiers: 2,
-    },
-    {
-      type: "keyUp",
-      key: "v",
-      code: "KeyV",
-      windowsVirtualKeyCode: 86,
-      nativeVirtualKeyCode: 86,
-      modifiers: 2,
-    },
-    {
-      type: "keyUp",
-      key: "Control",
-      code: "ControlLeft",
-      windowsVirtualKeyCode: 17,
-      modifiers: 0,
-    },
-  ];
-
-  for (const event of events) {
-    await remoteCdp("Input.dispatchKeyEvent", event);
-  }
 }
 
 async function remoteEval(expression: string) {

@@ -2,63 +2,6 @@ import { expect, test, type BrowserContext, type Frame, type Page } from "@playw
 
 const baseUrl = "http://localhost:3200";
 
-const fakeRfbModule = `
-class FakeRFB extends EventTarget {
-  constructor(screen, wsUrl) {
-    super();
-    this.screen = screen;
-    this.viewOnly = false;
-    this.scaleViewport = false;
-    this.clipViewport = false;
-    this.dragViewport = false;
-    this.resizeSession = false;
-    this._sock = {};
-
-    const probe = {
-      wsUrl,
-      focusCount: 0,
-      clipboardPasteFrom: [],
-      sendKey: [],
-    };
-    window.__desktopVncProbe = probe;
-    window.__desktopVncRfb = this;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = 640;
-    canvas.height = 400;
-    canvas.style.width = "640px";
-    canvas.style.height = "400px";
-    screen.append(canvas);
-
-    queueMicrotask(() => this.dispatchEvent(new Event("connect")));
-  }
-
-  focus() {
-    window.__desktopVncProbe.focusCount += 1;
-    this.screen.focus();
-  }
-
-  clipboardPasteFrom(text) {
-    window.__desktopVncProbe.clipboardPasteFrom.push(text);
-    queueMicrotask(() => FakeRFB.messages.extendedClipboardProvide(this._sock, [1], [text]));
-  }
-
-  sendKey(keysym, code, down) {
-    window.__desktopVncProbe.sendKey.push({
-      keysym,
-      code: code ?? null,
-      down: down ?? null,
-    });
-  }
-}
-
-FakeRFB.messages = {
-  extendedClipboardProvide() {},
-};
-
-export default FakeRFB;
-`;
-
 interface KeyCall {
   keysym: number;
   code: string | null;
@@ -84,9 +27,6 @@ test.beforeEach(async ({ context, page }) => {
     }
     return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
   });
-  await page.route("**/desktop-proxy/core/rfb.js", (route) =>
-    route.fulfill({ contentType: "text/javascript", body: fakeRfbModule }),
-  );
 });
 
 test("mounts the desktop client inside the actual /desktop iframe", async ({ page }) => {
@@ -224,6 +164,23 @@ test("sends Chinese and emoji through the touch keyboard input path", async ({ p
         sendKey: expect.arrayContaining(remotePasteShortcutCalls),
       }),
     );
+});
+
+test("batches rapid touch keyboard composition updates", async ({ page }) => {
+  await page.goto("/desktop-vnc.html?touch=1&resize=scale&path=desktop-proxy/websockify");
+  const frame = page.mainFrame();
+  await waitForFakeRfb(frame);
+  await frame.locator("#kb-toggle").click();
+  await frame.locator("#keyboard-input").evaluate((input) => {
+    input.value = "春";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春" }));
+    input.value = "春夏";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "夏" }));
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(expect.objectContaining({ clipboardPasteFrom: ["春夏"] }));
 });
 
 test("writes a remote Unicode clipboard event into the browser clipboard", async ({ page }) => {

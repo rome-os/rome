@@ -7,30 +7,23 @@ import {
   createRemoteClipboardPasteController,
   isApplePlatform,
   isPasteShortcut,
-} from "../../public/js/desktop-vnc.js";
+} from "./desktop-vnc";
 
 describe("createRemoteClipboardPasteController", () => {
   it.each([
     "left\tright",
     "line1\nline2",
     "输入测试🌱☀️",
-  ])("keeps %j intact in the clipboard and sends remote Ctrl+V after Provide", (text) => {
-    let onProvide = () => {};
+  ])("keeps %j intact and pastes it through the public RFB API", (text) => {
     const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
     const controller = createRemoteClipboardPasteController({
       rfb,
-      observeClipboardProvide(callback) {
-        onProvide = callback;
-      },
       setTimer: rs.fn().mockReturnValue(1),
       clearTimer: rs.fn(),
     });
 
     controller.paste(text);
     expect(rfb.clipboardPasteFrom).toHaveBeenCalledWith(text);
-    expect(rfb.sendKey).not.toHaveBeenCalled();
-
-    onProvide();
     expect(rfb.sendKey.mock.calls).toEqual([
       [0xffe3, "ControlLeft", true],
       [0x76, "KeyV", true],
@@ -39,15 +32,15 @@ describe("createRemoteClipboardPasteController", () => {
     ]);
   });
 
-  it("serializes touch keyboard chunks until each clipboard Provide completes", () => {
-    let onProvide = () => {};
+  it("keeps the next clipboard value queued until the first paste settles", () => {
+    let settlePaste = () => {};
     const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
     const controller = createRemoteClipboardPasteController({
       rfb,
-      observeClipboardProvide(callback) {
-        onProvide = callback;
+      setTimer(callback) {
+        settlePaste = callback;
+        return 1;
       },
-      setTimer: rs.fn().mockReturnValue(1),
       clearTimer: rs.fn(),
     });
 
@@ -55,7 +48,7 @@ describe("createRemoteClipboardPasteController", () => {
     controller.paste("☀️");
     expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"]]);
 
-    onProvide();
+    settlePaste();
     expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"], ["☀️"]]);
   });
 });

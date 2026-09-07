@@ -1,3 +1,39 @@
+interface RemoteKeySender {
+  sendKey(keysym: number, code: string | null, down?: boolean): void;
+}
+
+interface DesktopRfb extends RemoteKeySender, EventTarget {
+  viewOnly: boolean;
+  scaleViewport: boolean;
+  clipViewport: boolean;
+  dragViewport: boolean;
+  resizeSession: boolean;
+  focus(options?: FocusOptions): void;
+  blur(): void;
+  disconnect(): void;
+  clipboardPasteFrom(text: string): void;
+}
+
+export type DesktopRfbConstructor = new (target: Element, url: string) => DesktopRfb;
+
+interface KeyboardEventLike {
+  key: string;
+  code: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+}
+
+interface PasteModifiers {
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+type TimerHandle = ReturnType<typeof setTimeout>;
+
 const PASTE_MODIFIER_KEYS = {
   control: [
     { keysym: 0xffe3, code: "ControlLeft" },
@@ -13,7 +49,7 @@ const PASTE_MODIFIER_KEYS = {
   ],
 };
 
-export function sendRemotePasteShortcut(rfb) {
+export function sendRemotePasteShortcut(rfb: RemoteKeySender): void {
   rfb.sendKey(0xffe3, "ControlLeft", true);
   rfb.sendKey(0x76, "KeyV", true);
   rfb.sendKey(0x76, "KeyV", false);
@@ -22,44 +58,39 @@ export function sendRemotePasteShortcut(rfb) {
 
 export function createRemoteClipboardPasteController({
   rfb,
-  observeClipboardProvide,
-  fallbackDelay = 1_000,
+  settleDelay = 100,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+}: {
+  rfb: Pick<DesktopRfb, "clipboardPasteFrom" | "sendKey">;
+  settleDelay?: number;
+  setTimer?: (handler: () => void, delay: number) => TimerHandle;
+  clearTimer?: (handle: TimerHandle) => void;
 }) {
-  const queue = [];
-  let activeText = null;
-  let fallbackTimer = null;
+  const queue: string[] = [];
+  let active = false;
+  let settleTimer: TimerHandle | null = null;
   let destroyed = false;
 
   function startNextPaste() {
-    if (destroyed || activeText !== null || queue.length === 0) {
+    if (destroyed || active || queue.length === 0) {
       return;
     }
 
-    activeText = queue.shift();
-    fallbackTimer = setTimer(completePaste, fallbackDelay);
-    rfb.clipboardPasteFrom(activeText);
-  }
-
-  function completePaste() {
-    if (destroyed || activeText === null) {
-      return;
-    }
-
-    if (fallbackTimer !== null) {
-      clearTimer(fallbackTimer);
-      fallbackTimer = null;
-    }
-    activeText = null;
+    const text = queue.shift();
+    if (text === undefined) return;
+    active = true;
+    rfb.clipboardPasteFrom(text);
     sendRemotePasteShortcut(rfb);
-    startNextPaste();
+    settleTimer = setTimer(() => {
+      settleTimer = null;
+      active = false;
+      startNextPaste();
+    }, settleDelay);
   }
-
-  const stopObserving = observeClipboardProvide?.(completePaste) ?? (() => {});
 
   return {
-    paste(text) {
+    paste(text: string) {
       if (!text || destroyed) {
         return;
       }
@@ -70,17 +101,16 @@ export function createRemoteClipboardPasteController({
     destroy() {
       destroyed = true;
       queue.length = 0;
-      activeText = null;
-      if (fallbackTimer !== null) {
-        clearTimer(fallbackTimer);
-        fallbackTimer = null;
+      active = false;
+      if (settleTimer !== null) {
+        clearTimer(settleTimer);
+        settleTimer = null;
       }
-      stopObserving();
     },
   };
 }
 
-export function isPasteShortcut(event) {
+export function isPasteShortcut(event: KeyboardEventLike): boolean {
   return (
     (event.ctrlKey || event.metaKey) &&
     !event.altKey &&
@@ -89,15 +119,27 @@ export function isPasteShortcut(event) {
   );
 }
 
-function isPasteReleaseEvent(event) {
+function isPasteReleaseEvent(event: KeyboardEventLike): boolean {
   const key = String(event.key).toLowerCase();
   return key === "v" || key === "meta" || key === "control";
 }
 
-export function createDeferredPasteController({ readClipboardText, onPasteText, onPasteError }) {
-  let pendingPaste = null;
+export function createDeferredPasteController({
+  readClipboardText,
+  onPasteText,
+  onPasteError,
+}: {
+  readClipboardText: () => Promise<string>;
+  onPasteText: (text: string, modifiers: PasteModifiers) => void;
+  onPasteError: (message: string) => void;
+}) {
+  let pendingPaste: {
+    textPromise: Promise<string>;
+    modifiers: PasteModifiers;
+    waitForModifierRelease: boolean;
+  } | null = null;
   let focusGeneration = 0;
-  const pressedModifierKeys = new Set();
+  const pressedModifierKeys = new Set<string>();
 
   async function flushPendingPaste() {
     if (pendingPaste === null) {
@@ -131,7 +173,7 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
       pressedModifierKeys.clear();
     },
 
-    handleKeyDown(event) {
+    handleKeyDown(event: KeyboardEventLike) {
       const key = String(event.key).toLowerCase();
       if (key === "meta" || key === "control") {
         pressedModifierKeys.add(event.code || key);
@@ -159,7 +201,7 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
       return true;
     },
 
-    handleKeyUp(event) {
+    handleKeyUp(event: KeyboardEventLike) {
       const key = String(event.key).toLowerCase();
       if (key === "meta" || key === "control") {
         pressedModifierKeys.delete(event.code || key);
@@ -182,13 +224,13 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
   };
 }
 
-export function isApplePlatform(platform) {
+export function isApplePlatform(platform: string): boolean {
   return /Mac|iPhone|iPad|iPod/i.test(platform);
 }
 
-export function createMetaToControlController(rfb, enabled) {
-  const pressedMetaKeys = new Set();
-  const implicitMetaChordKeys = new Set();
+export function createMetaToControlController(rfb: RemoteKeySender, enabled: boolean) {
+  const pressedMetaKeys = new Set<string>();
+  const implicitMetaChordKeys = new Set<string>();
 
   function pressRemoteControl() {
     if (pressedMetaKeys.size === 0 && implicitMetaChordKeys.size === 0) {
@@ -202,7 +244,7 @@ export function createMetaToControlController(rfb, enabled) {
     }
   }
 
-  function intercept(event) {
+  function intercept(event: KeyboardEventLike) {
     if (!enabled || String(event.key).toLowerCase() !== "meta") {
       return false;
     }
@@ -221,7 +263,7 @@ export function createMetaToControlController(rfb, enabled) {
   }
 
   return {
-    handleKeyDown(event) {
+    handleKeyDown(event: KeyboardEventLike) {
       if (!enabled) {
         return false;
       }
@@ -247,7 +289,7 @@ export function createMetaToControlController(rfb, enabled) {
       return true;
     },
 
-    handleKeyUp(event) {
+    handleKeyUp(event: KeyboardEventLike) {
       if (!enabled) {
         return false;
       }
@@ -277,7 +319,33 @@ export function isTouchDevice() {
   return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 }
 
-export function computeFitTransform({ frameWidth, frameHeight, contentWidth, contentHeight }) {
+interface Size {
+  width: number;
+  height: number;
+}
+
+interface ViewportTransform {
+  scale: number;
+  tx: number;
+  ty: number;
+}
+
+interface GestureState extends ViewportTransform {
+  center: { x: number; y: number };
+  distance: number;
+}
+
+export function computeFitTransform({
+  frameWidth,
+  frameHeight,
+  contentWidth,
+  contentHeight,
+}: {
+  frameWidth: number;
+  frameHeight: number;
+  contentWidth: number;
+  contentHeight: number;
+}): ViewportTransform {
   if (!frameWidth || !frameHeight || !contentWidth || !contentHeight) {
     return { scale: 1, tx: 0, ty: 0 };
   }
@@ -289,7 +357,15 @@ export function computeFitTransform({ frameWidth, frameHeight, contentWidth, con
   };
 }
 
-export function computeGestureTransform({ start, current, scaleBounds }) {
+export function computeGestureTransform({
+  start,
+  current,
+  scaleBounds,
+}: {
+  start: GestureState;
+  current: Pick<GestureState, "center" | "distance">;
+  scaleBounds: { min: number; max: number };
+}): ViewportTransform {
   const rawScale = start.scale * (current.distance / start.distance);
   const scale = Math.min(Math.max(rawScale, scaleBounds.min), scaleBounds.max);
   const k = scale / start.scale;
@@ -300,13 +376,13 @@ export function computeGestureTransform({ start, current, scaleBounds }) {
   };
 }
 
-function getRelativePoint(clientX, clientY, frameRect) {
+function getRelativePoint(clientX: number, clientY: number, frameRect: DOMRect) {
   return { x: clientX - frameRect.left, y: clientY - frameRect.top };
 }
 
-const SYNTHETIC_FLAG = "__romeSyntheticPointer";
+const syntheticPointerEvents = new WeakSet<Event>();
 
-function pointerSummary(pointers) {
+function pointerSummary(pointers: Map<number, { x: number; y: number }>) {
   const points = [...pointers.values()];
   if (points.length < 2) {
     return null;
@@ -324,9 +400,15 @@ export function createTouchViewport({
   getContentSize,
   cancelPointer,
   scaleBounds = { min: 0.25, max: 4 },
+}: {
+  frame: HTMLElement;
+  wrap: HTMLElement;
+  getContentSize: () => Size;
+  cancelPointer: (pointerId: number) => void;
+  scaleBounds?: { min: number; max: number };
 }) {
-  const pointers = new Map();
-  let gestureStart = null;
+  const pointers = new Map<number, { x: number; y: number }>();
+  let gestureStart: GestureState | null = null;
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -369,7 +451,7 @@ export function createTouchViewport({
     };
   }
 
-  function trackPointer(event) {
+  function trackPointer(event: PointerEvent) {
     if (event.pointerType !== "touch") {
       return false;
     }
@@ -378,13 +460,14 @@ export function createTouchViewport({
     return true;
   }
 
-  function handlePointerDown(event) {
-    if (event[SYNTHETIC_FLAG]) return;
+  function handlePointerDown(event: PointerEvent) {
+    if (syntheticPointerEvents.has(event)) return;
     if (!trackPointer(event)) return;
     if (pointers.size >= 2 && !gestureStart) {
       event.preventDefault();
       event.stopImmediatePropagation();
       const summary = pointerSummary(pointers);
+      if (!summary) return;
       gestureStart = {
         center: summary.center,
         distance: summary.distance,
@@ -403,8 +486,8 @@ export function createTouchViewport({
     }
   }
 
-  function handlePointerMove(event) {
-    if (event[SYNTHETIC_FLAG]) return;
+  function handlePointerMove(event: PointerEvent) {
+    if (syntheticPointerEvents.has(event)) return;
     if (!pointers.has(event.pointerId)) return;
     if (event.pointerType !== "touch") return;
     const frameRect = frame.getBoundingClientRect();
@@ -425,8 +508,8 @@ export function createTouchViewport({
     applyTransform();
   }
 
-  function handlePointerEnd(event) {
-    if (event[SYNTHETIC_FLAG]) return;
+  function handlePointerEnd(event: PointerEvent) {
+    if (syntheticPointerEvents.has(event)) return;
     if (!pointers.has(event.pointerId)) return;
     pointers.delete(event.pointerId);
     if (gestureStart) {
@@ -464,24 +547,73 @@ const KEYSYM_BACKSPACE = 0xff08;
 const KEYSYM_ENTER = 0xff0d;
 const KEYSYM_TAB = 0xff09;
 
-function setupKeyboardToolbar(rfb, screen, pasteText) {
+function setupKeyboardToolbar(
+  rfb: RemoteKeySender,
+  screen: HTMLElement,
+  pasteText: (text: string) => void,
+) {
   const toggle = document.getElementById("kb-toggle");
   const input = document.getElementById("keyboard-input");
-  if (!toggle || !input) return;
+  if (!toggle) return;
+  if (!(input instanceof HTMLInputElement)) return;
+  const keyboardInput = input;
 
   let lastValue = "";
+  let composing = false;
+  let inputTimer: TimerHandle | null = null;
+
+  function cancelInputTimer() {
+    if (inputTimer === null) return;
+    clearTimeout(inputTimer);
+    inputTimer = null;
+  }
+
+  function flushInput() {
+    cancelInputTimer();
+    const next = keyboardInput.value;
+    const oldCharacters = [...lastValue];
+    const newCharacters = [...next];
+    let commonPrefixLength = 0;
+    while (
+      commonPrefixLength < oldCharacters.length &&
+      commonPrefixLength < newCharacters.length &&
+      oldCharacters[commonPrefixLength] === newCharacters[commonPrefixLength]
+    ) {
+      commonPrefixLength += 1;
+    }
+
+    for (let index = commonPrefixLength; index < oldCharacters.length; index += 1) {
+      rfb.sendKey(KEYSYM_BACKSPACE, "Backspace");
+    }
+
+    const added = newCharacters.slice(commonPrefixLength).join("");
+    if (added) pasteText(added);
+    lastValue = next;
+
+    if (newCharacters.length > 64) {
+      keyboardInput.value = "";
+      lastValue = "";
+    }
+  }
+
+  function scheduleInput() {
+    cancelInputTimer();
+    inputTimer = setTimeout(flushInput, 50);
+  }
 
   function showKeyboard() {
-    input.value = "";
+    keyboardInput.value = "";
     lastValue = "";
-    input.removeAttribute("readonly");
-    input.focus({ preventScroll: true });
+    composing = false;
+    cancelInputTimer();
+    keyboardInput.removeAttribute("readonly");
+    keyboardInput.focus({ preventScroll: true });
   }
 
   toggle.addEventListener("click", (e) => {
     e.preventDefault();
-    if (document.activeElement === input) {
-      input.blur();
+    if (document.activeElement === keyboardInput) {
+      keyboardInput.blur();
       screen.focus();
     } else {
       showKeyboard();
@@ -490,41 +622,36 @@ function setupKeyboardToolbar(rfb, screen, pasteText) {
 
   // Soft keyboards on iOS/Android often suppress keydown events. Send their
   // committed text through the UTF-8 clipboard path used by regular paste.
-  input.addEventListener("input", () => {
-    const next = input.value;
-    const oldLen = [...lastValue].length;
-    const newLen = [...next].length;
-    if (newLen < oldLen) {
-      for (let i = 0; i < oldLen - newLen; i++) {
-        rfb.sendKey(KEYSYM_BACKSPACE, "Backspace");
-      }
-    } else if (newLen > oldLen) {
-      const added = [...next].slice(oldLen).join("");
-      pasteText(added);
-    }
-    lastValue = next;
-    if (next.length > 64) {
-      input.value = "";
-      lastValue = "";
-    }
+  keyboardInput.addEventListener("compositionstart", () => {
+    composing = true;
+    cancelInputTimer();
+  });
+  keyboardInput.addEventListener("compositionend", () => {
+    composing = false;
+    scheduleInput();
+  });
+  keyboardInput.addEventListener("input", () => {
+    if (!composing) scheduleInput();
   });
 
   // Hardware keyboards still fire keydown on the input — forward those too.
-  input.addEventListener("keydown", (e) => {
+  keyboardInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
+      flushInput();
       rfb.sendKey(KEYSYM_ENTER, "Enter");
-    } else if (e.key === "Backspace" && input.value === "") {
+    } else if (e.key === "Backspace" && keyboardInput.value === "") {
       e.preventDefault();
       rfb.sendKey(KEYSYM_BACKSPACE, "Backspace");
     } else if (e.key === "Tab") {
       e.preventDefault();
+      flushInput();
       rfb.sendKey(KEYSYM_TAB, "Tab");
     }
   });
 }
 
-function dispatchSyntheticPointerCancel(target, pointerId) {
+function dispatchSyntheticPointerCancel(target: Element | null, pointerId: number) {
   if (!target || typeof PointerEvent !== "function") return;
   try {
     const event = new PointerEvent("pointercancel", {
@@ -533,24 +660,26 @@ function dispatchSyntheticPointerCancel(target, pointerId) {
       cancelable: true,
       pointerType: "touch",
     });
-    Object.defineProperty(event, SYNTHETIC_FLAG, { value: true });
+    syntheticPointerEvents.add(event);
     target.dispatchEvent(event);
   } catch {}
 }
 
-export async function initDesktopVnc() {
-  const { default: RFB } = await import("/desktop-proxy/core/rfb.js");
+export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   const screen = document.getElementById("screen");
   const wrap = document.getElementById("screen-wrap");
   const frame = document.getElementById("viewport-frame");
 
-  if (
-    !(screen instanceof HTMLElement) ||
-    !(wrap instanceof HTMLElement) ||
-    !(frame instanceof HTMLElement)
-  ) {
+  if (!(screen instanceof HTMLElement)) {
     throw new Error("Desktop VNC UI is missing required elements.");
   }
+  if (!(wrap instanceof HTMLElement)) {
+    throw new Error("Desktop VNC UI is missing required elements.");
+  }
+  if (!(frame instanceof HTMLElement)) {
+    throw new Error("Desktop VNC UI is missing required elements.");
+  }
+  const screenElement = screen;
 
   const params = new URLSearchParams(window.location.search);
   const path = params.get("path") ?? "desktop-proxy/websockify";
@@ -560,54 +689,29 @@ export async function initDesktopVnc() {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const wsUrl = `${protocol}://${window.location.host}/${path}`;
 
-  const rfb = new RFB(screen, wsUrl);
-
-  function observeClipboardProvide(callback) {
-    const messages = RFB.messages;
-    const socket = rfb._sock;
-    const originalProvide = messages?.extendedClipboardProvide;
-    if (!messages || !socket || typeof originalProvide !== "function") {
-      return () => {};
-    }
-
-    function observedProvide(targetSocket, ...args) {
-      const result = originalProvide.call(this, targetSocket, ...args);
-      if (targetSocket === socket) {
-        callback();
-      }
-      return result;
-    }
-
-    messages.extendedClipboardProvide = observedProvide;
-    return () => {
-      if (messages.extendedClipboardProvide === observedProvide) {
-        messages.extendedClipboardProvide = originalProvide;
-      }
-    };
-  }
-
-  const remoteClipboardPaste = createRemoteClipboardPasteController({
-    rfb,
-    observeClipboardProvide,
-  });
-  const platform = navigator.userAgentData?.platform ?? navigator.platform ?? "";
+  const rfb = new RFB(screenElement, wsUrl);
+  const remoteClipboardPaste = createRemoteClipboardPasteController({ rfb });
+  const platform =
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+    navigator.platform ??
+    "";
   const metaToControl = createMetaToControlController(rfb, isApplePlatform(platform));
 
   function focusRemote() {
-    screen.focus();
+    screenElement.focus();
     rfb.focus();
   }
 
-  function remoteHasFocus(target) {
-    if (target instanceof Node && screen.contains(target)) {
+  function remoteHasFocus(target: EventTarget | null) {
+    if (target instanceof Node && screenElement.contains(target)) {
       return true;
     }
 
     const activeElement = document.activeElement;
-    return activeElement instanceof Node && screen.contains(activeElement);
+    return activeElement instanceof Node && screenElement.contains(activeElement);
   }
 
-  function releasePasteModifiers(modifiers) {
+  function releasePasteModifiers(modifiers: PasteModifiers) {
     if (modifiers?.ctrlKey || modifiers?.metaKey) {
       for (const key of PASTE_MODIFIER_KEYS.control) {
         rfb.sendKey(key.keysym, key.code, false);
@@ -621,7 +725,7 @@ export async function initDesktopVnc() {
     }
   }
 
-  function pasteTextToRemote(text, modifiers) {
+  function pasteTextToRemote(text: string, modifiers: PasteModifiers) {
     focusRemote();
     releasePasteModifiers(modifiers);
     remoteClipboardPaste.paste(text);
@@ -635,7 +739,7 @@ export async function initDesktopVnc() {
 
   rfb.viewOnly = false;
 
-  let touchViewport = null;
+  let touchViewport: ReturnType<typeof createTouchViewport> | null = null;
 
   if (touchMode) {
     frame.classList.add("touch-mode");
@@ -650,7 +754,7 @@ export async function initDesktopVnc() {
   }
 
   function getCanvas() {
-    return screen.querySelector("canvas");
+    return screenElement.querySelector("canvas");
   }
 
   function getCanvasSize() {
@@ -678,11 +782,11 @@ export async function initDesktopVnc() {
     const refit = () => touchViewport?.fitToFrame();
     rfb.addEventListener("desktopname", refit);
     window.addEventListener("resize", refit);
-    setupKeyboardToolbar(rfb, screen, (text) => remoteClipboardPaste.paste(text));
+    setupKeyboardToolbar(rfb, screenElement, (text) => remoteClipboardPaste.paste(text));
   }
 
   rfb.addEventListener("clipboard", async (event) => {
-    const text = event.detail.text ?? "";
+    const text = (event as CustomEvent<{ text?: string }>).detail.text ?? "";
     if (!text) {
       return;
     }
@@ -721,11 +825,14 @@ export async function initDesktopVnc() {
   window.addEventListener("blur", () => {
     deferredPaste.cancel();
     metaToControl.release();
+    rfb.blur();
   });
   window.addEventListener("pagehide", () => {
     deferredPaste.cancel();
     metaToControl.release();
     remoteClipboardPaste.destroy();
+    touchViewport?.destroy();
+    rfb.disconnect();
   });
 
   focusRemote();

@@ -15,7 +15,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "pnpm dev",
+    command: "pnpm build:kit && rsbuild dev --config desktop-vnc-e2e/rsbuild.config.ts",
     env: { WEB_PORT: "3200" },
     url: "http://localhost:3200",
     reuseExistingServer: !isCI,
