@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Frame, type Page } from "@playwright/test";
+import { expect, test, type Frame, type Page } from "@playwright/test";
 
 const baseUrl = "http://localhost:3200";
 
@@ -141,6 +141,29 @@ test("maps a macOS shortcut without standalone Meta events", async ({ page }) =>
     { keysym: 0xffe3, code: "ControlLeft", down: true },
     { keysym: 0xffe3, code: "ControlLeft", down: false },
   ]);
+});
+
+test("releases mapped Control when macOS omits the shortcut keyup", async ({ page }) => {
+  await emulateMacPlatform(page);
+  const { frame } = await openDesktopRoute(page);
+  await focusDesktop(frame);
+
+  await frame.locator("#screen").dispatchEvent("keydown", {
+    key: "a",
+    code: "KeyA",
+    metaKey: true,
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(
+      expect.objectContaining({
+        sendKey: [
+          { keysym: 0xffe3, code: "ControlLeft", down: true },
+          { keysym: 0xffe3, code: "ControlLeft", down: false },
+        ],
+      }),
+    );
 });
 
 test("sends Chinese and emoji through the touch keyboard input path", async ({ page }) => {

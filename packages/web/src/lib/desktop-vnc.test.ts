@@ -51,6 +51,31 @@ describe("createRemoteClipboardPasteController", () => {
     settlePaste();
     expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"], ["☀️"]]);
   });
+
+  it("drops queued clipboard values when focus leaves the desktop", () => {
+    const settlePastes: Array<() => void> = [];
+    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
+    const controller = createRemoteClipboardPasteController({
+      rfb,
+      setTimer(callback) {
+        settlePastes.push(callback);
+        return settlePastes.length;
+      },
+      clearTimer: rs.fn(),
+    });
+
+    controller.paste("春");
+    controller.paste("夏");
+    controller.cancel();
+    controller.paste("秋");
+    settlePastes[0]();
+    controller.paste("冬");
+
+    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["春"], ["秋"]]);
+
+    settlePastes[1]();
+    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["春"], ["秋"], ["冬"]]);
+  });
 });
 
 describe("isPasteShortcut", () => {
@@ -153,7 +178,7 @@ describe("createMetaToControlController", () => {
     ]);
   });
 
-  it("maps a macOS chord when the browser omits standalone Meta events", () => {
+  it("maps a macOS chord when the browser omits standalone Meta events", async () => {
     const rfb = { sendKey: rs.fn() };
     const controller = createMetaToControlController(rfb, true);
 
@@ -163,7 +188,22 @@ describe("createMetaToControlController", () => {
     expect(controller.handleKeyUp(createKeyEvent({ key: "a", code: "KeyA", metaKey: true }))).toBe(
       false,
     );
+    await flushPromises();
 
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("releases implicit Control after keydown when the browser omits keyup", async () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+
+    controller.handleKeyDown(createKeyEvent({ key: "a", code: "KeyA", metaKey: true }));
+    expect(rfb.sendKey.mock.calls).toEqual([[0xffe3, "ControlLeft", true]]);
+
+    await flushPromises();
     expect(rfb.sendKey.mock.calls).toEqual([
       [0xffe3, "ControlLeft", true],
       [0xffe3, "ControlLeft", false],

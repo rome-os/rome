@@ -13,8 +13,13 @@ set -euo pipefail
 export DISPLAY="${DISPLAY:-:99}"
 DISPLAY_NUM="${DISPLAY#:}"
 SCREEN_SIZE="${ROME_SCREEN_SIZE:-1280x800x24}"
-SCREEN_GEOMETRY="${SCREEN_SIZE%x*}"
-SCREEN_DEPTH="${SCREEN_SIZE##*x}"
+if [[ "$SCREEN_SIZE" =~ ^([0-9]+x[0-9]+)(x([0-9]+))?$ ]]; then
+  SCREEN_GEOMETRY="${BASH_REMATCH[1]}"
+  SCREEN_DEPTH="${BASH_REMATCH[3]:-24}"
+else
+  echo "Error: ROME_SCREEN_SIZE must use WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH." >&2
+  exit 1
+fi
 VNC_PORT="${ROME_VNC_PORT:-5900}"
 NOVNC_PORT="${ROME_NOVNC_PORT:-6080}"
 
@@ -23,7 +28,7 @@ Xtigervnc "$DISPLAY" \
   -geometry "$SCREEN_GEOMETRY" \
   -depth "$SCREEN_DEPTH" \
   -SecurityTypes None \
-  -localhost no \
+  -localhost yes \
   -rfbport "$VNC_PORT" \
   -AlwaysShared \
   -AcceptCutText \

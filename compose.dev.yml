@@ -270,7 +270,7 @@ services:
       start_period: 5s
 
   # Dev-only server browser sidecar: Chromium with CDP on :9222 (via the
-  # shared supervisor's socat forward) + Xvfb/x11vnc/noVNC desktop on :6080.
+  # shared supervisor's socat forward) + TigerVNC/noVNC desktop on :6080.
   # It JOINS the rome container's network namespace (network_mode below) so
   # the topology matches the production single container: the backend reaches
   # CDP/noVNC on 127.0.0.1 with zero config, and codex login's loopback OAuth

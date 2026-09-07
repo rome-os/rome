@@ -71,6 +71,7 @@ export function createRemoteClipboardPasteController({
   let active = false;
   let settleTimer: TimerHandle | null = null;
   let destroyed = false;
+  let generation = 0;
 
   function startNextPaste() {
     if (destroyed || active || queue.length === 0) {
@@ -82,11 +83,25 @@ export function createRemoteClipboardPasteController({
     active = true;
     rfb.clipboardPasteFrom(text);
     sendRemotePasteShortcut(rfb);
+    const pasteGeneration = generation;
     settleTimer = setTimer(() => {
+      if (destroyed || pasteGeneration !== generation) {
+        return;
+      }
       settleTimer = null;
       active = false;
       startNextPaste();
     }, settleDelay);
+  }
+
+  function cancel() {
+    generation += 1;
+    queue.length = 0;
+    active = false;
+    if (settleTimer !== null) {
+      clearTimer(settleTimer);
+      settleTimer = null;
+    }
   }
 
   return {
@@ -98,14 +113,11 @@ export function createRemoteClipboardPasteController({
       startNextPaste();
     },
 
+    cancel,
+
     destroy() {
       destroyed = true;
-      queue.length = 0;
-      active = false;
-      if (settleTimer !== null) {
-        clearTimer(settleTimer);
-        settleTimer = null;
-      }
+      cancel();
     },
   };
 }
@@ -274,6 +286,11 @@ export function createMetaToControlController(rfb: RemoteKeySender, enabled: boo
           if (!implicitMetaChordKeys.has(code)) {
             pressRemoteControl();
             implicitMetaChordKeys.add(code);
+            queueMicrotask(() => {
+              if (implicitMetaChordKeys.delete(code)) {
+                releaseRemoteControlIfIdle();
+              }
+            });
           }
         }
         return false;
@@ -295,10 +312,6 @@ export function createMetaToControlController(rfb: RemoteKeySender, enabled: boo
       }
 
       if (String(event.key).toLowerCase() !== "meta") {
-        const code = event.code || String(event.key);
-        if (implicitMetaChordKeys.delete(code)) {
-          releaseRemoteControlIfIdle();
-        }
         return false;
       }
 
@@ -610,6 +623,13 @@ function setupKeyboardToolbar(
     keyboardInput.focus({ preventScroll: true });
   }
 
+  function cancel() {
+    cancelInputTimer();
+    composing = false;
+    keyboardInput.value = "";
+    lastValue = "";
+  }
+
   toggle.addEventListener("click", (e) => {
     e.preventDefault();
     if (document.activeElement === keyboardInput) {
@@ -649,6 +669,8 @@ function setupKeyboardToolbar(
       rfb.sendKey(KEYSYM_TAB, "Tab");
     }
   });
+
+  return { cancel };
 }
 
 function dispatchSyntheticPointerCancel(target: Element | null, pointerId: number) {
@@ -740,6 +762,7 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   rfb.viewOnly = false;
 
   let touchViewport: ReturnType<typeof createTouchViewport> | null = null;
+  let keyboardToolbar: ReturnType<typeof setupKeyboardToolbar> | null = null;
 
   if (touchMode) {
     frame.classList.add("touch-mode");
@@ -782,7 +805,9 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     const refit = () => touchViewport?.fitToFrame();
     rfb.addEventListener("desktopname", refit);
     window.addEventListener("resize", refit);
-    setupKeyboardToolbar(rfb, screenElement, (text) => remoteClipboardPaste.paste(text));
+    keyboardToolbar = setupKeyboardToolbar(rfb, screenElement, (text) =>
+      remoteClipboardPaste.paste(text),
+    );
   }
 
   rfb.addEventListener("clipboard", async (event) => {
@@ -824,6 +849,8 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   });
   window.addEventListener("blur", () => {
     deferredPaste.cancel();
+    remoteClipboardPaste.cancel();
+    keyboardToolbar?.cancel();
     metaToControl.release();
     rfb.blur();
   });
@@ -831,6 +858,7 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     deferredPaste.cancel();
     metaToControl.release();
     remoteClipboardPaste.destroy();
+    keyboardToolbar?.cancel();
     touchViewport?.destroy();
     rfb.disconnect();
   });

@@ -251,6 +251,20 @@ test("maps a macOS shortcut when standalone Meta events are missing", async () =
   await expectRemoteState({ a: "x", b: "", focus: "a", submits: [] });
 });
 
+test("releases mapped Control when macOS omits the shortcut keyup", async () => {
+  await focusRemoteTarget("a");
+  await remoteEval(`a.value = "select-me"; a.focus(); a.setSelectionRange(9, 9);`);
+
+  await desktopFrame.locator("#screen canvas").dispatchEvent("keydown", {
+    key: "a",
+    code: "KeyA",
+    metaKey: true,
+  });
+  await page.keyboard.type("x");
+
+  await expectRemoteState({ a: "x", b: "", focus: "a", submits: [] });
+});
+
 test("pastes when standalone Meta events are missing", async () => {
   const payload = "春夏秋冬🌱☀️🍂❄️";
   await focusRemoteTarget("a");
