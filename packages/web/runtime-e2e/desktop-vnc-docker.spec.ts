@@ -237,6 +237,40 @@ test("maps macOS Command+A to remote select-all", async () => {
   await expectRemoteState({ a: "x", b: "", focus: "a", submits: [] });
 });
 
+test("maps a macOS shortcut when standalone Meta events are missing", async () => {
+  await focusRemoteTarget("a");
+  await remoteEval(`a.value = "select-me"; a.focus(); a.setSelectionRange(9, 9);`);
+
+  const canvas = desktopFrame.locator("#screen canvas");
+  for (const type of ["keydown", "keyup"]) {
+    await canvas.dispatchEvent(type, {
+      key: "a",
+      code: "KeyA",
+      metaKey: true,
+    });
+  }
+  await page.keyboard.type("x");
+
+  await expectRemoteState({ a: "x", b: "", focus: "a", submits: [] });
+});
+
+test("pastes when standalone Meta events are missing", async () => {
+  const payload = "春夏秋冬🌱☀️🍂❄️";
+  await focusRemoteTarget("a");
+  await page.evaluate((value) => navigator.clipboard.writeText(value), payload);
+
+  const canvas = desktopFrame.locator("#screen canvas");
+  for (const type of ["keydown", "keyup"]) {
+    await canvas.dispatchEvent(type, {
+      key: "v",
+      code: "KeyV",
+      metaKey: true,
+    });
+  }
+
+  await expectRemoteState({ a: payload, b: "", focus: "a", submits: [] });
+});
+
 test("cancels a pending paste when focus leaves the desktop iframe", async () => {
   await page.setContent(`
     <input id="outer-focus" aria-label="Outer focus target">

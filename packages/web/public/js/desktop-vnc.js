@@ -97,6 +97,7 @@ function isPasteReleaseEvent(event) {
 export function createDeferredPasteController({ readClipboardText, onPasteText, onPasteError }) {
   let pendingPaste = null;
   let focusGeneration = 0;
+  const pressedModifierKeys = new Set();
 
   async function flushPendingPaste() {
     if (pendingPaste === null) {
@@ -127,9 +128,16 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
     cancel() {
       focusGeneration += 1;
       pendingPaste = null;
+      pressedModifierKeys.clear();
     },
 
     handleKeyDown(event) {
+      const key = String(event.key).toLowerCase();
+      if (key === "meta" || key === "control") {
+        pressedModifierKeys.add(event.code || key);
+        return false;
+      }
+
       if (!isPasteShortcut(event)) {
         return false;
       }
@@ -144,6 +152,7 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
             ctrlKey: event.ctrlKey,
             metaKey: event.metaKey,
           },
+          waitForModifierRelease: pressedModifierKeys.size > 0,
         };
       }
 
@@ -151,11 +160,19 @@ export function createDeferredPasteController({ readClipboardText, onPasteText, 
     },
 
     handleKeyUp(event) {
+      const key = String(event.key).toLowerCase();
+      if (key === "meta" || key === "control") {
+        pressedModifierKeys.delete(event.code || key);
+      }
+
       if (pendingPaste === null || !isPasteReleaseEvent(event)) {
         return false;
       }
 
-      if (event.metaKey || event.ctrlKey) {
+      if (
+        (key !== "v" || pendingPaste.waitForModifierRelease) &&
+        (event.metaKey || event.ctrlKey)
+      ) {
         return true;
       }
 
@@ -171,6 +188,19 @@ export function isApplePlatform(platform) {
 
 export function createMetaToControlController(rfb, enabled) {
   const pressedMetaKeys = new Set();
+  const implicitMetaChordKeys = new Set();
+
+  function pressRemoteControl() {
+    if (pressedMetaKeys.size === 0 && implicitMetaChordKeys.size === 0) {
+      rfb.sendKey(0xffe3, "ControlLeft", true);
+    }
+  }
+
+  function releaseRemoteControlIfIdle() {
+    if (pressedMetaKeys.size === 0 && implicitMetaChordKeys.size === 0) {
+      rfb.sendKey(0xffe3, "ControlLeft", false);
+    }
+  }
 
   function intercept(event) {
     if (!enabled || String(event.key).toLowerCase() !== "meta") {
@@ -182,37 +212,57 @@ export function createMetaToControlController(rfb, enabled) {
   }
 
   function release() {
-    if (pressedMetaKeys.size === 0) {
+    if (pressedMetaKeys.size === 0 && implicitMetaChordKeys.size === 0) {
       return;
     }
     pressedMetaKeys.clear();
+    implicitMetaChordKeys.clear();
     rfb.sendKey(0xffe3, "ControlLeft", false);
   }
 
   return {
     handleKeyDown(event) {
-      if (!intercept(event)) {
+      if (!enabled) {
         return false;
       }
+
+      if (String(event.key).toLowerCase() !== "meta") {
+        if (event.metaKey && pressedMetaKeys.size === 0) {
+          const code = event.code || String(event.key);
+          if (!implicitMetaChordKeys.has(code)) {
+            pressRemoteControl();
+            implicitMetaChordKeys.add(code);
+          }
+        }
+        return false;
+      }
+
+      intercept(event);
       const code = event.code || "MetaLeft";
       if (pressedMetaKeys.has(code)) {
         return true;
       }
-      if (pressedMetaKeys.size === 0) {
-        rfb.sendKey(0xffe3, "ControlLeft", true);
-      }
+      pressRemoteControl();
       pressedMetaKeys.add(code);
       return true;
     },
 
     handleKeyUp(event) {
-      if (!intercept(event)) {
+      if (!enabled) {
         return false;
       }
-      pressedMetaKeys.delete(event.code || "MetaLeft");
-      if (pressedMetaKeys.size === 0) {
-        rfb.sendKey(0xffe3, "ControlLeft", false);
+
+      if (String(event.key).toLowerCase() !== "meta") {
+        const code = event.code || String(event.key);
+        if (implicitMetaChordKeys.delete(code)) {
+          releaseRemoteControlIfIdle();
+        }
+        return false;
       }
+
+      intercept(event);
+      pressedMetaKeys.delete(event.code || "MetaLeft");
+      releaseRemoteControlIfIdle();
       return true;
     },
 

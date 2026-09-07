@@ -145,6 +145,62 @@ test("keeps every code point in composed emoji paste calls", async ({ page }) =>
   expect(probe.sendKey).toEqual(expect.arrayContaining(remotePasteShortcutCalls));
 });
 
+test("handles a macOS paste chord without standalone Meta events", async ({ page }) => {
+  const { frame } = await openDesktopRoute(page);
+  const payload = "春夏秋冬🌱☀️🍂❄️";
+  await focusDesktop(frame);
+  await page.evaluate((value) => navigator.clipboard.writeText(value), payload);
+
+  await frame.locator("#screen").evaluate((screen) => {
+    screen.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "v",
+        code: "KeyV",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    screen.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        key: "v",
+        code: "KeyV",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(expect.objectContaining({ clipboardPasteFrom: [payload] }));
+});
+
+test("maps a macOS shortcut without standalone Meta events", async ({ page }) => {
+  const { frame } = await openDesktopRoute(page);
+  await focusDesktop(frame);
+
+  await frame.locator("#screen").evaluate((screen) => {
+    for (const type of ["keydown", "keyup"]) {
+      screen.dispatchEvent(
+        new KeyboardEvent(type, {
+          key: "a",
+          code: "KeyA",
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+  });
+
+  expect((await readProbe(frame)).sendKey).toEqual([
+    { keysym: 0xffe3, code: "ControlLeft", down: true },
+    { keysym: 0xffe3, code: "ControlLeft", down: false },
+  ]);
+});
+
 test("sends Chinese and emoji through the touch keyboard input path", async ({ page }) => {
   await page.goto("/desktop-vnc.html?touch=1&resize=scale&path=desktop-proxy/websockify");
   const frame = page.mainFrame();

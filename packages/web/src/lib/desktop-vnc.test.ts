@@ -71,7 +71,7 @@ describe("isPasteShortcut", () => {
 });
 
 describe("createDeferredPasteController", () => {
-  it("waits until modifiers are released before sending pasted text", async () => {
+  it("sends pasted text when the shortcut key is released", async () => {
     let resolveClipboardText = () => {};
     const readClipboardText = rs.fn(
       () =>
@@ -95,10 +95,6 @@ describe("createDeferredPasteController", () => {
 
     expect(controller.handleKeyUp(createKeyEvent({ key: "v", metaKey: true }))).toBe(true);
     resolveClipboardText();
-    await flushPromises();
-    expect(onPasteText).not.toHaveBeenCalled();
-
-    expect(controller.handleKeyUp(createKeyEvent({ key: "Meta", metaKey: false }))).toBe(true);
     await flushPromises();
     expect(onPasteText).toHaveBeenCalledWith("PA", { ctrlKey: false, metaKey: true });
     expect(onPasteError).not.toHaveBeenCalled();
@@ -130,6 +126,9 @@ describe("createDeferredPasteController", () => {
       onPasteError: rs.fn(),
     });
 
+    controller.handleKeyDown(
+      createKeyEvent({ key: "Control", code: "ControlLeft", ctrlKey: true }),
+    );
     controller.handleKeyDown(createKeyEvent({ key: "v", ctrlKey: true }));
     controller.handleKeyUp(createKeyEvent({ key: "v", ctrlKey: true }));
     await flushPromises();
@@ -155,6 +154,23 @@ describe("createMetaToControlController", () => {
     expect(controller.handleKeyDown(keyDown)).toBe(true);
     expect(controller.handleKeyDown(keyDown)).toBe(true);
     expect(controller.handleKeyUp(keyUp)).toBe(true);
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("maps a macOS chord when the browser omits standalone Meta events", () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+
+    expect(
+      controller.handleKeyDown(createKeyEvent({ key: "a", code: "KeyA", metaKey: true })),
+    ).toBe(false);
+    expect(controller.handleKeyUp(createKeyEvent({ key: "a", code: "KeyA", metaKey: true }))).toBe(
+      false,
+    );
+
     expect(rfb.sendKey.mock.calls).toEqual([
       [0xffe3, "ControlLeft", true],
       [0xffe3, "ControlLeft", false],
