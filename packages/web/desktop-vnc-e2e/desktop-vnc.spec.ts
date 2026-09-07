@@ -146,6 +146,7 @@ test("keeps every code point in composed emoji paste calls", async ({ page }) =>
 });
 
 test("handles a macOS paste chord without standalone Meta events", async ({ page }) => {
+  await emulateMacPlatform(page);
   const { frame } = await openDesktopRoute(page);
   const payload = "春夏秋冬🌱☀️🍂❄️";
   await focusDesktop(frame);
@@ -178,6 +179,7 @@ test("handles a macOS paste chord without standalone Meta events", async ({ page
 });
 
 test("maps a macOS shortcut without standalone Meta events", async ({ page }) => {
+  await emulateMacPlatform(page);
   const { frame } = await openDesktopRoute(page);
   await focusDesktop(frame);
 
@@ -279,6 +281,15 @@ async function openDesktopRoute(page: Page) {
   if (!frame) throw new Error("desktop iframe did not load");
   await waitForFakeRfb(frame);
   return { iframe, frame };
+}
+
+async function emulateMacPlatform(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperties(navigator, {
+      platform: { configurable: true, value: "MacIntel" },
+      userAgentData: { configurable: true, value: { platform: "macOS" } },
+    });
+  });
 }
 
 async function waitForFakeRfb(frame: Frame) {
