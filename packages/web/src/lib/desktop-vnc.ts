@@ -56,70 +56,12 @@ export function sendRemotePasteShortcut(rfb: RemoteKeySender): void {
   rfb.sendKey(0xffe3, "ControlLeft", false);
 }
 
-export function createRemoteClipboardPasteController({
-  rfb,
-  settleDelay = 100,
-  setTimer = setTimeout,
-  clearTimer = clearTimeout,
-}: {
-  rfb: Pick<DesktopRfb, "clipboardPasteFrom" | "sendKey">;
-  settleDelay?: number;
-  setTimer?: (handler: () => void, delay: number) => TimerHandle;
-  clearTimer?: (handle: TimerHandle) => void;
-}) {
-  const queue: string[] = [];
-  let active = false;
-  let settleTimer: TimerHandle | null = null;
-  let destroyed = false;
-  let generation = 0;
-
-  function startNextPaste() {
-    if (destroyed || active || queue.length === 0) {
-      return;
-    }
-
-    const text = queue.shift();
-    if (text === undefined) return;
-    active = true;
-    rfb.clipboardPasteFrom(text);
-    sendRemotePasteShortcut(rfb);
-    const pasteGeneration = generation;
-    settleTimer = setTimer(() => {
-      if (destroyed || pasteGeneration !== generation) {
-        return;
-      }
-      settleTimer = null;
-      active = false;
-      startNextPaste();
-    }, settleDelay);
+export function sendTextAsKeysyms(rfb: RemoteKeySender, text: string): void {
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) continue;
+    rfb.sendKey(codePoint <= 0xff ? codePoint : 0x01000000 | codePoint, null);
   }
-
-  function cancel() {
-    generation += 1;
-    queue.length = 0;
-    active = false;
-    if (settleTimer !== null) {
-      clearTimer(settleTimer);
-      settleTimer = null;
-    }
-  }
-
-  return {
-    paste(text: string) {
-      if (!text || destroyed) {
-        return;
-      }
-      queue.push(text);
-      startNextPaste();
-    },
-
-    cancel,
-
-    destroy() {
-      destroyed = true;
-      cancel();
-    },
-  };
 }
 
 export function isPasteShortcut(event: KeyboardEventLike): boolean {
@@ -560,11 +502,14 @@ const KEYSYM_BACKSPACE = 0xff08;
 const KEYSYM_ENTER = 0xff0d;
 const KEYSYM_TAB = 0xff09;
 
-function setupKeyboardToolbar(
-  rfb: RemoteKeySender,
-  screen: HTMLElement,
-  pasteText: (text: string) => void,
-) {
+function splitGraphemes(text: string): string[] {
+  if (typeof Intl.Segmenter !== "function") return [...text];
+  return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(
+    ({ segment }) => segment,
+  );
+}
+
+function setupKeyboardToolbar(rfb: RemoteKeySender, screen: HTMLElement) {
   const toggle = document.getElementById("kb-toggle");
   const input = document.getElementById("keyboard-input");
   if (!toggle) return;
@@ -584,8 +529,8 @@ function setupKeyboardToolbar(
   function flushInput() {
     cancelInputTimer();
     const next = keyboardInput.value;
-    const oldCharacters = [...lastValue];
-    const newCharacters = [...next];
+    const oldCharacters = splitGraphemes(lastValue);
+    const newCharacters = splitGraphemes(next);
     let commonPrefixLength = 0;
     while (
       commonPrefixLength < oldCharacters.length &&
@@ -600,7 +545,7 @@ function setupKeyboardToolbar(
     }
 
     const added = newCharacters.slice(commonPrefixLength).join("");
-    if (added) pasteText(added);
+    if (added) sendTextAsKeysyms(rfb, added);
     lastValue = next;
 
     if (newCharacters.length > 64) {
@@ -640,8 +585,8 @@ function setupKeyboardToolbar(
     }
   });
 
-  // Soft keyboards on iOS/Android often suppress keydown events. Send their
-  // committed text through the UTF-8 clipboard path used by regular paste.
+  // Soft keyboards on iOS/Android often suppress keydown events, so committed
+  // text has to be converted to Unicode keysyms before a control key is sent.
   keyboardInput.addEventListener("compositionstart", () => {
     composing = true;
     cancelInputTimer();
@@ -712,7 +657,6 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   const wsUrl = `${protocol}://${window.location.host}/${path}`;
 
   const rfb = new RFB(screenElement, wsUrl);
-  const remoteClipboardPaste = createRemoteClipboardPasteController({ rfb });
   const platform =
     (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ??
     navigator.platform ??
@@ -750,7 +694,8 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   function pasteTextToRemote(text: string, modifiers: PasteModifiers) {
     focusRemote();
     releasePasteModifiers(modifiers);
-    remoteClipboardPaste.paste(text);
+    rfb.clipboardPasteFrom(text);
+    sendRemotePasteShortcut(rfb);
   }
 
   const deferredPaste = createDeferredPasteController({
@@ -805,9 +750,7 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
     const refit = () => touchViewport?.fitToFrame();
     rfb.addEventListener("desktopname", refit);
     window.addEventListener("resize", refit);
-    keyboardToolbar = setupKeyboardToolbar(rfb, screenElement, (text) =>
-      remoteClipboardPaste.paste(text),
-    );
+    keyboardToolbar = setupKeyboardToolbar(rfb, screenElement);
   }
 
   rfb.addEventListener("clipboard", async (event) => {
@@ -849,7 +792,6 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   });
   window.addEventListener("blur", () => {
     deferredPaste.cancel();
-    remoteClipboardPaste.cancel();
     keyboardToolbar?.cancel();
     metaToControl.release();
     rfb.blur();
@@ -857,7 +799,6 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   window.addEventListener("pagehide", () => {
     deferredPaste.cancel();
     metaToControl.release();
-    remoteClipboardPaste.destroy();
     keyboardToolbar?.cancel();
     touchViewport?.destroy();
     rfb.disconnect();

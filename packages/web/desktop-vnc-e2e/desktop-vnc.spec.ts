@@ -183,8 +183,8 @@ test("sends Chinese and emoji through the touch keyboard input path", async ({ p
     .poll(() => readProbe(frame))
     .toEqual(
       expect.objectContaining({
-        clipboardPasteFrom: [payload],
-        sendKey: expect.arrayContaining(remotePasteShortcutCalls),
+        clipboardPasteFrom: [],
+        sendKey: [...payload].map((character) => keyCall(keysymFor(character))),
       }),
     );
 });
@@ -203,7 +203,90 @@ test("batches rapid touch keyboard composition updates", async ({ page }) => {
 
   await expect
     .poll(() => readProbe(frame))
-    .toEqual(expect.objectContaining({ clipboardPasteFrom: ["春夏"] }));
+    .toEqual(
+      expect.objectContaining({
+        clipboardPasteFrom: [],
+        sendKey: [..."春夏"].map((character) => keyCall(keysymFor(character))),
+      }),
+    );
+});
+
+test("keeps touch text before Enter without waiting for a clipboard timer", async ({ page }) => {
+  await page.goto("/desktop-vnc.html?touch=1&resize=scale&path=desktop-proxy/websockify");
+  const frame = page.mainFrame();
+  await waitForFakeRfb(frame);
+  await frame.locator("#kb-toggle").click();
+  await frame.locator("#keyboard-input").evaluate((input) => {
+    input.value = "春夏";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春夏" }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(
+      expect.objectContaining({
+        clipboardPasteFrom: [],
+        sendKey: [
+          ...[..."春夏"].map((character) => keyCall(keysymFor(character))),
+          keyCall(0xff0d, "Enter"),
+        ],
+      }),
+    );
+});
+
+test("keeps one touch grapheme deletion before Tab", async ({ page }) => {
+  await page.goto("/desktop-vnc.html?touch=1&resize=scale&path=desktop-proxy/websockify");
+  const frame = page.mainFrame();
+  await waitForFakeRfb(frame);
+  await frame.locator("#kb-toggle").click();
+  const input = frame.locator("#keyboard-input");
+  await input.evaluate((keyboardInput) => {
+    keyboardInput.value = "春🐈‍⬛";
+    keyboardInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春🐈‍⬛" }));
+  });
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(
+      expect.objectContaining({
+        sendKey: [..."春🐈‍⬛"].map((character) => keyCall(keysymFor(character))),
+      }),
+    );
+
+  await input.evaluate((keyboardInput) => {
+    keyboardInput.value = "春";
+    keyboardInput.dispatchEvent(
+      new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }),
+    );
+    keyboardInput.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        code: "Tab",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expect
+    .poll(() => readProbe(frame))
+    .toEqual(
+      expect.objectContaining({
+        clipboardPasteFrom: [],
+        sendKey: [
+          ...[..."春🐈‍⬛"].map((character) => keyCall(keysymFor(character))),
+          keyCall(0xff08, "Backspace"),
+          keyCall(0xff09, "Tab"),
+        ],
+      }),
+    );
 });
 
 test("writes a remote Unicode clipboard event into the browser clipboard", async ({ page }) => {
@@ -314,8 +397,8 @@ function keysymFor(character: string): number {
   return codePoint <= 0xff ? codePoint : 0x01000000 | codePoint;
 }
 
-function keyCall(keysym: number): KeyCall {
-  return { keysym, code: null, down: null };
+function keyCall(keysym: number, code: string | null = null): KeyCall {
+  return { keysym, code, down: null };
 }
 
 const remotePasteShortcutCalls: KeyCall[] = [

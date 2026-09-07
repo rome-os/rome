@@ -4,77 +4,24 @@ import {
   computeGestureTransform,
   createDeferredPasteController,
   createMetaToControlController,
-  createRemoteClipboardPasteController,
   isApplePlatform,
   isPasteShortcut,
+  sendTextAsKeysyms,
 } from "./desktop-vnc";
 
-describe("createRemoteClipboardPasteController", () => {
-  it.each([
-    "left\tright",
-    "line1\nline2",
-    "输入测试🌱☀️",
-  ])("keeps %j intact and pastes it through the public RFB API", (text) => {
-    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
-    const controller = createRemoteClipboardPasteController({
-      rfb,
-      setTimer: rs.fn().mockReturnValue(1),
-      clearTimer: rs.fn(),
-    });
+describe("sendTextAsKeysyms", () => {
+  it("sends ASCII, Chinese, and every emoji code point in order", () => {
+    const rfb = { sendKey: rs.fn() };
 
-    controller.paste(text);
-    expect(rfb.clipboardPasteFrom).toHaveBeenCalledWith(text);
-    expect(rfb.sendKey.mock.calls).toEqual([
-      [0xffe3, "ControlLeft", true],
-      [0x76, "KeyV", true],
-      [0x76, "KeyV", false],
-      [0xffe3, "ControlLeft", false],
-    ]);
-  });
+    sendTextAsKeysyms(rfb, "A春☀️🐈‍⬛");
 
-  it("keeps the next clipboard value queued until the first paste settles", () => {
-    let settlePaste = () => {};
-    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
-    const controller = createRemoteClipboardPasteController({
-      rfb,
-      setTimer(callback) {
-        settlePaste = callback;
-        return 1;
-      },
-      clearTimer: rs.fn(),
-    });
-
-    controller.paste("中");
-    controller.paste("☀️");
-    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"]]);
-
-    settlePaste();
-    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["中"], ["☀️"]]);
-  });
-
-  it("drops queued clipboard values when focus leaves the desktop", () => {
-    const settlePastes: Array<() => void> = [];
-    const rfb = { clipboardPasteFrom: rs.fn(), sendKey: rs.fn() };
-    const controller = createRemoteClipboardPasteController({
-      rfb,
-      setTimer(callback) {
-        settlePastes.push(callback);
-        return settlePastes.length;
-      },
-      clearTimer: rs.fn(),
-    });
-
-    controller.paste("春");
-    controller.paste("夏");
-    controller.cancel();
-    controller.paste("秋");
-    settlePastes[0]();
-    controller.paste("冬");
-
-    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["春"], ["秋"]]);
-
-    settlePastes[1]();
-    expect(rfb.clipboardPasteFrom.mock.calls).toEqual([["春"], ["秋"], ["冬"]]);
+    expect(rfb.sendKey.mock.calls).toEqual(
+      [..."A春☀️🐈‍⬛"].map((character) => {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined) throw new Error("character has no code point");
+        return [codePoint <= 0xff ? codePoint : 0x01000000 | codePoint, null];
+      }),
+    );
   });
 });
 

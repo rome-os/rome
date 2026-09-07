@@ -168,6 +168,82 @@ test("batches rapid touch keyboard composition updates", async () => {
   await openStandaloneDesktop();
 });
 
+test("keeps touch text before Enter without a clipboard handoff", async () => {
+  await openStandaloneDesktop("touch=1&resize=scale&path=desktop-proxy/websockify");
+  await focusRemoteTarget("b");
+  await desktopFrame.locator("#kb-toggle").click();
+  await desktopFrame.locator("#keyboard-input").evaluate((input) => {
+    input.value = "春夏";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春夏" }));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expectRemoteState({ a: "", b: "春夏", focus: "b", submits: ["春夏"] });
+  await openStandaloneDesktop();
+});
+
+test("keeps one touch grapheme deletion before Tab", async () => {
+  await openStandaloneDesktop("touch=1&resize=scale&path=desktop-proxy/websockify");
+  await focusRemoteTarget("a");
+  await desktopFrame.locator("#kb-toggle").click();
+  const input = desktopFrame.locator("#keyboard-input");
+  await input.evaluate((keyboardInput) => {
+    keyboardInput.value = "春🐈‍⬛";
+    keyboardInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: "春🐈‍⬛" }));
+  });
+  await expectRemoteState({ a: "春🐈‍⬛", b: "", focus: "a", submits: [] });
+
+  await input.evaluate((keyboardInput) => {
+    keyboardInput.value = "春";
+    keyboardInput.dispatchEvent(
+      new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }),
+    );
+    keyboardInput.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Tab",
+        code: "Tab",
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  await expectRemoteState({ a: "春", b: "", focus: "b", submits: [] });
+  await openStandaloneDesktop();
+});
+
+test("continues touch input after a long Unicode sequence", async () => {
+  await openStandaloneDesktop("touch=1&resize=scale&path=desktop-proxy/websockify");
+  await focusRemoteTarget("a");
+  await desktopFrame.locator("#kb-toggle").click();
+  const input = desktopFrame.locator("#keyboard-input");
+  await input.evaluate((keyboardInput, text) => {
+    keyboardInput.value = text;
+    keyboardInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+  }, longUnicodePayload);
+  await expectRemoteState({ a: longUnicodePayload, b: "", focus: "a", submits: [] });
+
+  const followUp = "春夏🌱☀️";
+  await input.evaluate((keyboardInput, text) => {
+    keyboardInput.value = text;
+    keyboardInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
+  }, followUp);
+  await expectRemoteState({
+    a: `${longUnicodePayload}${followUp}`,
+    b: "",
+    focus: "a",
+    submits: [],
+  });
+  await openStandaloneDesktop();
+});
+
 test("copies remote ASCII into the browser clipboard", async () => {
   await copyRemoteSelection("COPY_ASCII_123");
 
