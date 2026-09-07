@@ -1,36 +1,27 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import {
-  buildPasteKeySequence,
   computeFitTransform,
   computeGestureTransform,
   createDeferredPasteController,
+  createMetaToControlController,
+  isApplePlatform,
   isPasteShortcut,
-} from "../../public/js/desktop-vnc.js";
+  sendTextAsKeysyms,
+} from "./desktop-vnc";
 
-describe("buildPasteKeySequence", () => {
-  it("normalizes Windows newlines into Enter key presses", () => {
-    expect(buildPasteKeySequence("hello\r\nworld")).toEqual([
-      { keysym: 0x68 },
-      { keysym: 0x65 },
-      { keysym: 0x6c },
-      { keysym: 0x6c },
-      { keysym: 0x6f },
-      { keysym: 0xff0d, code: "Enter" },
-      { keysym: 0x77 },
-      { keysym: 0x6f },
-      { keysym: 0x72 },
-      { keysym: 0x6c },
-      { keysym: 0x64 },
-    ]);
-  });
+describe("sendTextAsKeysyms", () => {
+  it("sends ASCII, Chinese, and every emoji code point in order", () => {
+    const rfb = { sendKey: rs.fn() };
 
-  it("maps tabs and Unicode text to remote keysyms", () => {
-    expect(buildPasteKeySequence("A\t中🙂")).toEqual([
-      { keysym: 0x41 },
-      { keysym: 0xff09, code: "Tab" },
-      { keysym: 0x01004e2d },
-      { keysym: 0x0101f642 },
-    ]);
+    sendTextAsKeysyms(rfb, "A春☀️🐈‍⬛");
+
+    expect(rfb.sendKey.mock.calls).toEqual(
+      [..."A春☀️🐈‍⬛"].map((character) => {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined) throw new Error("character has no code point");
+        return [codePoint <= 0xff ? codePoint : 0x01000000 | codePoint, null];
+      }),
+    );
   });
 });
 
@@ -45,7 +36,7 @@ describe("isPasteShortcut", () => {
 });
 
 describe("createDeferredPasteController", () => {
-  it("waits until modifiers are released before sending pasted text", async () => {
+  it("sends pasted text when the shortcut key is released", async () => {
     let resolveClipboardText = () => {};
     const readClipboardText = rs.fn(
       () =>
@@ -70,10 +61,6 @@ describe("createDeferredPasteController", () => {
     expect(controller.handleKeyUp(createKeyEvent({ key: "v", metaKey: true }))).toBe(true);
     resolveClipboardText();
     await flushPromises();
-    expect(onPasteText).not.toHaveBeenCalled();
-
-    expect(controller.handleKeyUp(createKeyEvent({ key: "Meta", metaKey: false }))).toBe(true);
-    await flushPromises();
     expect(onPasteText).toHaveBeenCalledWith("PA", { ctrlKey: false, metaKey: true });
     expect(onPasteError).not.toHaveBeenCalled();
   });
@@ -94,6 +81,86 @@ describe("createDeferredPasteController", () => {
 
     expect(onPasteText).not.toHaveBeenCalled();
     expect(onPasteError).toHaveBeenCalledWith("Local clipboard is empty.");
+  });
+
+  it("drops a pending paste when the modifier release is lost outside the iframe", async () => {
+    const onPasteText = rs.fn();
+    const controller = createDeferredPasteController({
+      readClipboardText: rs.fn().mockResolvedValue("STALE_PASTE"),
+      onPasteText,
+      onPasteError: rs.fn(),
+    });
+
+    controller.handleKeyDown(
+      createKeyEvent({ key: "Control", code: "ControlLeft", ctrlKey: true }),
+    );
+    controller.handleKeyDown(createKeyEvent({ key: "v", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "v", ctrlKey: true }));
+    await flushPromises();
+    controller.cancel();
+
+    controller.handleKeyDown(createKeyEvent({ key: "Control", ctrlKey: true }));
+    controller.handleKeyDown(createKeyEvent({ key: "a", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "a", ctrlKey: true }));
+    controller.handleKeyUp(createKeyEvent({ key: "Control", ctrlKey: false }));
+    await flushPromises();
+
+    expect(onPasteText).not.toHaveBeenCalled();
+  });
+});
+
+describe("createMetaToControlController", () => {
+  it("maps a macOS Meta key hold to one remote Control key hold", () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+    const keyDown = createKeyEvent({ key: "Meta", code: "MetaLeft", metaKey: true });
+    const keyUp = createKeyEvent({ key: "Meta", code: "MetaLeft" });
+
+    expect(controller.handleKeyDown(keyDown)).toBe(true);
+    expect(controller.handleKeyDown(keyDown)).toBe(true);
+    expect(controller.handleKeyUp(keyUp)).toBe(true);
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("maps a macOS chord when the browser omits standalone Meta events", async () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+
+    expect(
+      controller.handleKeyDown(createKeyEvent({ key: "a", code: "KeyA", metaKey: true })),
+    ).toBe(false);
+    expect(controller.handleKeyUp(createKeyEvent({ key: "a", code: "KeyA", metaKey: true }))).toBe(
+      false,
+    );
+    await flushPromises();
+
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("releases implicit Control after keydown when the browser omits keyup", async () => {
+    const rfb = { sendKey: rs.fn() };
+    const controller = createMetaToControlController(rfb, true);
+
+    controller.handleKeyDown(createKeyEvent({ key: "a", code: "KeyA", metaKey: true }));
+    expect(rfb.sendKey.mock.calls).toEqual([[0xffe3, "ControlLeft", true]]);
+
+    await flushPromises();
+    expect(rfb.sendKey.mock.calls).toEqual([
+      [0xffe3, "ControlLeft", true],
+      [0xffe3, "ControlLeft", false],
+    ]);
+  });
+
+  it("recognizes Apple browser platform names", () => {
+    expect(isApplePlatform("MacIntel")).toBe(true);
+    expect(isApplePlatform("iPhone")).toBe(true);
+    expect(isApplePlatform("Linux x86_64")).toBe(false);
   });
 });
 
@@ -177,6 +244,7 @@ describe("computeGestureTransform", () => {
 function createKeyEvent(overrides = {}) {
   return {
     key: "",
+    code: "",
     ctrlKey: false,
     metaKey: false,
     altKey: false,
