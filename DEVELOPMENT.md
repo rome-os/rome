@@ -71,6 +71,17 @@ To run a command inside the worktree's Rome container:
 ./r bash              # interactive shell
 ```
 
+## Established patterns
+
+- Dashboard UI imports [`@/components/ui/*`](packages/web/src/components/ui/). Rome Apps import [`@rome-os/ui/<component>`](docs/ui-kit.md#every-component-gets-a-subpath-export).
+- Before adding a component or hook, search [shared UI](packages/ui/src/), [dashboard hooks](packages/web/src/hooks/), and the neighboring feature.
+- Use TanStack Query and [`fetchJson`](packages/web/src/lib/fetch-json.ts) for server state. After a successful write, [invalidate its query key](packages/web/src/hooks/use-apps.ts) to fetch server truth again.
+- Keep local state in React. Use Zustand only for complex, feature-scoped state such as the [file browser store](packages/web/src/components/file-browser/store/).
+- Use [`useSseEvent` or `useSseEvents`](packages/web/src/hooks/use-sse-events.ts) for SSE. Validate external data with Zod at the boundary.
+- Keep the backend flow: [Hono route](packages/core/src/api/index.ts) → injected [service or dependency](packages/core/src/api/deps.ts) → Drizzle [repository](packages/core/src/db/repositories/).
+- Validate [configuration with Zod](packages/core/src/config.ts). Log through [`createLogger(component)`](packages/core/src/logger.ts).
+- Use [DnD](packages/web/src/components/ui/sortable.tsx), [Motion](packages/web/src/pages/free/FreeGrid.tsx), [Monaco](packages/web/src/components/monaco-file-editor.tsx), and [Recharts](packages/web/src/pages/SessionsTrendChart.tsx) only when a feature needs them. They are not default abstractions.
+
 ## Test environment
 
 Package test scripts run through `scripts/test-env.sh`, which starts the test
