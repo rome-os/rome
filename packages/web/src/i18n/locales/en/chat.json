@@ -239,6 +239,15 @@
   "modelSelector": {
     "label": "Model",
     "saveFailed": "Failed to save model selection.",
+    "searchPlaceholder": "Search models",
+    "clearSearch": "Clear search",
+    "showAll": "Show all models",
+    "showLess": "Show fewer models",
+    "noMatches": "No models match “{{query}}”.",
+    "families": {
+      "claude": "Claude",
+      "gpt": "GPT"
+    },
     "options": {
       "auto": "Auto",
       "claudeOpus": "Opus",
