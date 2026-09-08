@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { RunOutcome, SessionsSort } from "@rome/api-types/sessions";
+import { TURN_END_STATUSES } from "@rome/api-types/trace-segments";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 
@@ -33,6 +34,12 @@ const modelName = sql<
 const turnEndBlockType = sql<string>`json_extract(${turnEndTraceBlocks.content}, '$.type')`;
 const turnEndBlockCondition = sql`${turnEndBlockType} = 'turn_end'`;
 const runStatus = sql<string | null>`json_extract(${turnEndTraceBlocks.content}, '$.status')`;
+/** The known turn-end statuses as a SQL value list, derived from the single
+ *  source in `@rome/api-types`. `unknown` is any `runStatus` outside this set. */
+const knownTurnStatusesSql = sql.join(
+  TURN_END_STATUSES.map((status) => sql`${status}`),
+  sql`, `,
+);
 const normalizedAgentName = sql<string>`coalesce(${romeSessions.agentName}, 'main')`;
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -200,7 +207,7 @@ function runPredicates(scope: SessionQueryStorageScope): SQL[] {
   if (scope.outcomes) {
     const outcomes = scope.outcomes.map((outcome): SQL => {
       if (outcome === "unknown") {
-        return sql`${runStatus} is null or ${runStatus} not in ('completed', 'interrupted', 'error')`;
+        return sql`${runStatus} is null or ${runStatus} not in (${knownTurnStatusesSql})`;
       }
       return eq(runStatus, outcome);
     });
@@ -260,7 +267,7 @@ export class SessionQueryRepository {
           .mapWith(Number)
           .as("error_count"),
         unknown:
-          sql<number>`sum(case when ${runStatus} is null or ${runStatus} not in ('completed', 'interrupted', 'error') then 1 else 0 end)`
+          sql<number>`sum(case when ${runStatus} is null or ${runStatus} not in (${knownTurnStatusesSql}) then 1 else 0 end)`
             .mapWith(Number)
             .as("unknown_count"),
       })
@@ -386,7 +393,7 @@ export class SessionQueryRepository {
           ),
         error: sql<number>`sum(case when ${runStatus} = 'error' then 1 else 0 end)`.mapWith(Number),
         unknown:
-          sql<number>`sum(case when ${runStatus} is null or ${runStatus} not in ('completed', 'interrupted', 'error') then 1 else 0 end)`.mapWith(
+          sql<number>`sum(case when ${runStatus} is null or ${runStatus} not in (${knownTurnStatusesSql}) then 1 else 0 end)`.mapWith(
             Number,
           ),
         modelProvider,

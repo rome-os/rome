@@ -42,13 +42,21 @@ export interface TurnStartBlock extends TraceBlockBase {
   userPrompt: string;
 }
 
+/** The closed set of `turn_end` outcomes. Single source of truth for the
+ *  status list; every consumer (trace summary, session query, webchat) reads
+ *  it from here rather than re-spelling the union. */
+export const TURN_END_STATUSES = ["completed", "error", "interrupted"] as const;
+
+/** A turn's authoritative outcome, carried on its `turn_end` block. */
+export type TurnEndStatus = (typeof TURN_END_STATUSES)[number];
+
 /** Follows the terminal result or error and closes its turn. */
 export interface TurnEndBlock extends TraceBlockBase {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
    *  it takes precedence over `error`. */
-  status: "completed" | "interrupted" | "error";
+  status: TurnEndStatus;
   /** Turn wall-clock measured by the AgentSession. Distinct from
    *  `accounting.durationMs` on the terminal block, which is the provider's
    *  self-reported per-call duration. */
@@ -208,6 +216,26 @@ export type TraceBlockDto =
   | ErrorBlock
   | StructuredOutputBlock
   | PlanUpdateBlock;
+
+/** A turn's terminal block: the `result` or `error` that a `turn_end` brackets. */
+export type TerminalTraceBlock = ResultBlock | ErrorBlock;
+
+/** The turn-outcome rule, applied in one place.
+ *
+ *  A turn's error text is reportable only when the turn closed with an `error`
+ *  status *and* its last terminal block is itself an `error`. `turn_end.status`
+ *  is authoritative for the outcome; the terminal block only supplies the
+ *  message. Anything else — a `completed`/`interrupted` turn, or an `error`
+ *  status whose last terminal is a `result` (e.g. a relayed subagent error
+ *  landing ahead of the owner's completed result) — reports no error.
+ *
+ *  @returns the terminal error message, or `null` when no error should show. */
+export function turnTerminalError(
+  lastTerminal: TerminalTraceBlock | null | undefined,
+  status: TurnEndStatus | undefined,
+): string | null {
+  return status === "error" && lastTerminal?.type === "error" ? lastTerminal.error : null;
+}
 
 export interface TraceRunSegment {
   kind: "run";

@@ -10,6 +10,7 @@ import type {
   TraceSnapshot,
   TraceSummary,
 } from "@rome/api-types/trace-segments";
+import { turnTerminalError } from "@rome/api-types/trace-segments";
 import { toTraceBlock, type TraceableAgentMessage } from "./helpers.js";
 import { isTerminalBlock } from "../core/agent-message.js";
 
@@ -209,10 +210,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         // interrupted turn doesn't leave `stoppedByUser` sticky for the turns
         // that follow it.
         stoppedByUser = block.status === "interrupted";
-        terminalError =
-          block.status === "error" && lastTerminal?.type === "error"
-            ? lastTerminal.error
-            : undefined;
+        terminalError = turnTerminalError(lastTerminal, block.status) ?? undefined;
         lastTerminal = undefined;
         return changed;
       }
