@@ -4,6 +4,7 @@ import type {
   SubagentStartBlock,
   ToolUseBlock,
   ToolResultBlock,
+  TerminalTraceBlock,
   TraceBlockDto,
   TraceRunSegment,
   TraceSegment,
@@ -121,7 +122,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   let latestPlan: TraceSummary["plan"];
   /** Most recent result/error block; the turn's own `turn_end` reads it to
    *  derive the summary (stop/error state). */
-  let lastTerminal: (TraceBlockDto & { type: "result" | "error" }) | undefined;
+  let lastTerminal: TerminalTraceBlock | undefined;
 
   const observeApp = (app: AppRefDto) => {
     if (!seenAppIds.has(app.id)) {

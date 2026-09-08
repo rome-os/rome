@@ -42,9 +42,14 @@ export interface TurnStartBlock extends TraceBlockBase {
   userPrompt: string;
 }
 
-/** The closed set of `turn_end` outcomes. Single source of truth for the
- *  status list; every consumer (trace summary, session query, webchat) reads
- *  it from here rather than re-spelling the union. */
+/** The closed set of `turn_end` outcomes, and the single source every consumer
+ *  at or below `@rome/api-types` derives from: `TurnEndStatus`,
+ *  `TurnEndBlock.status`, `RunOutcome`, the session-query status list, the
+ *  session-route `outcomeSchema`, and the webchat `turnStatus` validator. The
+ *  upstream `@rome-os/app-runtime` `TurnEndMessage.status` is still declared on
+ *  its own — `@rome/api-types` depends on app-runtime, not the reverse, so it
+ *  cannot import this without inverting the dependency; aligning it is tracked
+ *  in #274. */
 export const TURN_END_STATUSES = ["completed", "error", "interrupted"] as const;
 
 /** A turn's authoritative outcome, carried on its `turn_end` block. */
@@ -228,6 +233,11 @@ export type TerminalTraceBlock = ResultBlock | ErrorBlock;
  *  message. Anything else — a `completed`/`interrupted` turn, or an `error`
  *  status whose last terminal is a `result` (e.g. a relayed subagent error
  *  landing ahead of the owner's completed result) — reports no error.
+ *
+ *  Returns `null` (not `undefined`) on purpose: issue #254 specifies "null
+ *  otherwise", and the external webchat consumer models absence as `null`.
+ *  In-repo callers that prefer the optional-field style coerce with
+ *  `?? undefined`.
  *
  *  @returns the terminal error message, or `null` when no error should show. */
 export function turnTerminalError(

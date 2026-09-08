@@ -53,6 +53,7 @@ import { ShareBar } from "@/components/chat/ShareBar";
 import { WidgetPicker } from "@/pages/free/WidgetPicker";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells, type WidgetType } from "@/pages/free/use-free-cells";
+import { TURN_END_STATUSES } from "@rome/api-types/trace-segments";
 import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -164,7 +165,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
       )
       .optional(),
     totalDurationMs: z.number().optional(),
-    turnStatus: z.enum(["completed", "interrupted", "error"]).optional(),
+    turnStatus: z.enum(TURN_END_STATUSES).optional(),
     invocationCounts: z.record(z.string(), z.number()),
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),

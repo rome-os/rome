@@ -1,9 +1,11 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { TurnEndStatus } from "./trace-segments.js";
 
 export type SessionsRange = "24h" | "7d" | "30d" | "all";
 export type SessionsMetric = "runs" | "tokens" | "cost" | "errors";
 export type SessionsSort = "activity" | SessionsMetric;
-export type RunOutcome = "completed" | "interrupted" | "error" | "unknown";
+/** A run's turn-end status, plus `unknown` for runs with no/other status. */
+export type RunOutcome = TurnEndStatus | "unknown";
 export type SessionMetricsDimension = "app" | "type" | "source" | "agent" | "model" | "project";
 export type SessionMetricsInterval = "none" | "hour" | "day" | "week" | "auto";
 

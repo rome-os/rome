@@ -7,6 +7,7 @@ import type {
   SessionMetricsResponse,
   SessionQueryRequest,
 } from "@rome/api-types/sessions";
+import { TURN_END_STATUSES } from "@rome/api-types/trace-segments";
 
 export interface SessionQueries {
   querySessions(request: SessionQueryRequest): Promise<RomeSessionsPageResult>;
@@ -22,7 +23,7 @@ const sessionTypeSchema = z.enum([
   "fork",
   "subagent",
 ]);
-const outcomeSchema = z.enum(["completed", "interrupted", "error", "unknown"]);
+const outcomeSchema = z.enum([...TURN_END_STATUSES, "unknown"]);
 const metricSchema = z.enum(["runs", "tokens", "cost", "errors"]);
 const dimensionSchema = z.enum(["app", "type", "source", "agent", "model", "project"]);
 const intervalSchema = z.enum(["none", "hour", "day", "week", "auto"]);

@@ -8,6 +8,7 @@ import {
   type SubmitInputOptions,
 } from "./agent-input-queue.js";
 import { v4 as uuidv4 } from "uuid";
+import type { TurnEndStatus } from "@rome/api-types/trace-segments";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
@@ -2665,7 +2666,7 @@ class AgentSessionImpl implements AgentSession {
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
     let disposeForkResources: (() => Promise<void>) | undefined;
-    let status: "completed" | "interrupted" | "error" = "completed";
+    let status: TurnEndStatus = "completed";
     let terminalSeen = false;
     let outputSchemaSuspended = false;
     // Assigned inside the mutex below, after ensureModelSessionForTurn() may

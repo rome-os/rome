@@ -1,3 +1,5 @@
+// Exercises exports owned by `@rome/api-types`, which has no rstest setup of
+// its own; it is hosted here (core depends on api-types) rather than orphaned.
 import { describe, it, expect } from "@rstest/core";
 import {
   TURN_END_STATUSES,
