@@ -3,8 +3,8 @@ import {
   formatWhatsAppPhone,
   type LinkedAccount,
   type OutboxMessage,
-  type TimelineEntry,
 } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 
 // The shape of the person page's two views, with no React in it: which segments
 // the switcher offers, and what each one scopes.
@@ -85,9 +85,9 @@ export function segmentAccount(
  * refuses to make.
  */
 export function segmentEntries(
-  entries: readonly TimelineEntry[],
+  entries: readonly Message[],
   account: LinkedAccount | null,
-): TimelineEntry[] {
+): Message[] {
   return account ? entries.filter((entry) => entry.source === account.channel) : [...entries];
 }
 

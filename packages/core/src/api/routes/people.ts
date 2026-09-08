@@ -8,7 +8,6 @@ import {
   parseMergeRequest,
   parsePersonFilterLevel,
   parseSendMessageRequest,
-  parseTimelineCursor,
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
@@ -18,6 +17,7 @@ import {
   type PeopleList,
   type SendRefusal,
 } from "@rome/api-types/people";
+import { parseMessageCursor } from "@rome/api-types/message";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
 import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
@@ -238,7 +238,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
     const rawCursor = c.req.query("cursor");
-    const cursor = parseTimelineCursor(rawCursor);
+    const cursor = parseMessageCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return c.json({ error: "cursor is not a timeline cursor" }, 400);
     }

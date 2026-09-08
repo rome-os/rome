@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { defaultSendAccount, type LinkedAccount, type TimelineEntry } from "@rome/api-types/people";
+import { defaultSendAccount, type LinkedAccount } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import {
   ALL_ACCOUNTS,
   isDismissable,
@@ -91,7 +92,7 @@ describe("segmentAccount", () => {
 });
 
 describe("segmentEntries", () => {
-  const entries: TimelineEntry[] = [
+  const entries: Message[] = [
     { source: "whatsapp", timestamp: 20, body: "wa", direction: "inbound", ref: "a" },
     { source: "telegram", timestamp: 10, body: "tg", direction: "inbound", ref: "b" },
   ];

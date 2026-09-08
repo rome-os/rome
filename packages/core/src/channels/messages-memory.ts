@@ -2,11 +2,7 @@
 // proved against, and a store any test can state whole. The obligations it
 // meets are messages.ts's.
 
-import {
-  compareTimelineEntries,
-  isAfterTimelineCursor,
-  type TimelineEntry,
-} from "@rome/api-types/people";
+import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
 
 /** One message the store holds, at the address it arrived on and in the
@@ -28,7 +24,7 @@ export interface HeldMessage {
    * subtracting anything — which is the guarantee messages.ts states.
    */
   conversation?: string;
-  entry: TimelineEntry;
+  entry: Message;
 }
 
 /**
@@ -42,13 +38,13 @@ export interface HeldMessage {
  * address.
  */
 export function memoryMessages(held: readonly HeldMessage[]): Messages {
-  const ranked = (holds: (message: HeldMessage) => boolean): TimelineEntry[] =>
+  const ranked = (holds: (message: HeldMessage) => boolean): Message[] =>
     held
       .filter(holds)
       .map((message) => message.entry)
-      .sort(compareTimelineEntries);
+      .sort(compareMessages);
 
-  const full = (accounts: readonly MessageAccount[]): TimelineEntry[] => {
+  const full = (accounts: readonly MessageAccount[]): Message[] => {
     const scope = new Set(
       accounts.flatMap((account) =>
         account.addresses.map((address) => pair(account.channel, address)),
@@ -59,13 +55,9 @@ export function memoryMessages(held: readonly HeldMessage[]): Messages {
 
   /** One page off a ranking: what every read here answers, and the only place
    *  the cursor and the limit are applied. */
-  const page = (
-    entries: TimelineEntry[],
-    after: TimelineEntry | null,
-    limit: number,
-  ): TimelineEntry[] =>
+  const page = (entries: Message[], after: Message | null, limit: number): Message[] =>
     entries
-      .filter((entry) => after === null || isAfterTimelineCursor(entry, after))
+      .filter((entry) => after === null || isAfterMessageCursor(entry, after))
       .slice(0, Math.max(1, Math.floor(limit)));
 
   return {

@@ -5,8 +5,8 @@ import {
   defaultSendAccount,
   type LinkedAccount,
   type PersonResource,
-  type TimelineEntry,
 } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -180,12 +180,12 @@ function sameAccount(a: LinkedAccount, b: LinkedAccount): boolean {
 
 interface TimelineDay {
   dayStart: number;
-  entries: TimelineEntry[];
+  entries: Message[];
 }
 
 /** Entries arrive newest first and stay that way inside each day, so the page
  *  reads top-down as "most recent first" at both levels. */
-function groupByDay(entries: readonly TimelineEntry[]): TimelineDay[] {
+function groupByDay(entries: readonly Message[]): TimelineDay[] {
   const days: TimelineDay[] = [];
   for (const entry of entries) {
     const dayStart = startOfDay(entry.timestamp);

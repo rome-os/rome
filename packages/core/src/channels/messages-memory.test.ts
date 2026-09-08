@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { TimelineEntry } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import { memoryMessages, type HeldMessage } from "./messages-memory.js";
 import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
 
@@ -28,7 +28,7 @@ const entry = (
   timestamp: number,
   ref: string,
   direction: "inbound" | "outbound" = "inbound",
-): TimelineEntry => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
+): Message => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
 
 const held: HeldMessage[] = [
   { channel: "whatsapp", address: PHONE, entry: entry("whatsapp", 100, "wa:a") },

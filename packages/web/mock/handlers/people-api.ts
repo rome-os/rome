@@ -4,7 +4,6 @@ import {
   accountPresentation,
   comparePeople,
   countPeople,
-  isAfterTimelineCursor,
   isAssignableBondLevel,
   latestDynamic,
   parseAccountCursor,
@@ -13,13 +12,11 @@ import {
   parseMergeRequest,
   parsePersonFilterLevel,
   parseSendMessageRequest,
-  parseTimelineCursor,
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
   sliceAccountDirectory,
   sliceAccountStream,
-  timelineCursor,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
@@ -33,9 +30,14 @@ import {
   type PersonResource,
   type SendRefusal,
   type StreamAccount,
-  type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/people";
+import {
+  isAfterMessageCursor,
+  messageCursor,
+  parseMessageCursor,
+  type Message,
+} from "@rome/api-types/message";
 import { talkConnections } from "./connections-store";
 import { memoryProfilePath } from "./memory-files";
 import {
@@ -586,19 +588,19 @@ export const peopleHandlers = [
       (entry) => !channel || entry.source === channel,
     );
     const rawCursor = search.get("cursor");
-    const cursor = parseTimelineCursor(rawCursor);
+    const cursor = parseMessageCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return HttpResponse.json({ error: "cursor is not a timeline cursor" }, { status: 400 });
     }
     const limit = timelinePageLimit(search.get("limit"));
-    const remaining: TimelineEntry[] = cursor
-      ? all.filter((entry) => isAfterTimelineCursor(entry, cursor))
+    const remaining: Message[] = cursor
+      ? all.filter((entry) => isAfterMessageCursor(entry, cursor))
       : all;
     const page = remaining.slice(0, limit);
     const oldest = page.at(-1);
     return HttpResponse.json({
       entries: page,
-      nextCursor: remaining.length > page.length && oldest ? timelineCursor(oldest) : null,
+      nextCursor: remaining.length > page.length && oldest ? messageCursor(oldest) : null,
     } satisfies TimelinePage);
   }),
 
