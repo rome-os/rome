@@ -29,7 +29,7 @@
     "lint:sh": "scripts/lint-shell.sh",
     "lint:prose": "node scripts/check-prose.mjs",
     "lint:agents": "tsx scripts/check-agents-symlinks.ts",
-    "lint:deadcode": "knip --no-config-hints --max-issues 39",
+    "lint:deadcode": "knip --no-config-hints --max-issues 35",
     "lint:deadcode:report": "knip --no-exit-code",
     "typecheck:lint-agents": "tsc -p tsconfig.lint-agents.json",
     "format": "biome format --write .",
