@@ -810,61 +810,89 @@ export class WebChatRepository {
     projectName?: string;
     projectPath?: string;
   }): Promise<{ id: string; agentName: string | null }> {
-    const parent =
-      input.parentThreadId && input.parentThreadId !== input.threadId
-        ? await this.ensureChannelConversation({
-            ...input,
-            threadId: input.parentThreadId,
-            parentThreadId: undefined,
-            threadName: undefined,
-            threadType: "group",
-          })
-        : null;
-    const existing = await this.findChannelConversation(input.channel, input.threadId);
-    if (existing) {
-      if (!parent) return existing;
-      // A native thread has its own model session but not its own routing
-      // policy. Keep the derived row in sync with the parent on admission.
-      await this.db
-        .update(romeSessions)
-        .set({ parentSessionId: parent.id, agentName: parent.agentName })
-        .where(eq(romeSessions.id, existing.id));
-      return { ...existing, agentName: parent.agentName };
-    }
-
-    const id = channelConversationId(input.channel, input.threadId);
     const now = new Date();
-    await this.db
-      .insert(romeSessions)
-      .values({
-        id,
-        name: input.threadName ?? `${input.channel}:${input.threadId}`,
-        personaId: null,
-        projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
-        projectPath: input.projectPath ?? null,
-        largeModelSelection: null,
-        agentName: parent
-          ? parent.agentName
-          : isCoreMainAgentId(input.agentName)
-            ? null
-            : input.agentName,
-        type: "channel",
-        sourceChannel: input.channel,
-        sourceThreadId: input.threadId,
-        sourceThreadName: input.threadName ?? null,
-        sourceThreadType: input.threadType ?? null,
-        parentSessionId: parent?.id ?? null,
-        createdAt: now,
-        activityAt: now,
-        lastSeenActivityAt: null,
-      })
-      .onConflictDoNothing();
+    const parentThreadId = input.parentThreadId;
+    // The parent ensure, the child lookup, the child update-or-insert, and the
+    // read-back are one fact and run in one transaction. Splitting the parent
+    // link update off as its own write let a failure after the parent ensure
+    // leave a child whose parent_session_id/agent_name disagreed with its
+    // parent; rolling the whole set back together closes that window. The
+    // recursion is only one level deep — the parent branch passes no
+    // parentThreadId — so the parent ensure is inlined here rather than
+    // reopening (and nesting) a transaction. findChannelConversation stays out:
+    // its read must be on `tx`, so the lookup is issued inline instead.
+    return this.db.transaction((tx) => {
+      const lookup = (threadId: string): { id: string; agentName: string | null } | null =>
+        tx
+          .select({ id: romeSessions.id, agentName: romeSessions.agentName })
+          .from(romeSessions)
+          .where(
+            and(
+              eq(romeSessions.type, "channel"),
+              eq(romeSessions.sourceChannel, input.channel),
+              eq(romeSessions.sourceThreadId, threadId),
+            ),
+          )
+          .limit(1)
+          .all()[0] ?? null;
 
-    const conversation = await this.findChannelConversation(input.channel, input.threadId);
-    if (!conversation) {
-      throw new Error(`Failed to resolve conversation ${input.channel}:${input.threadId}`);
-    }
-    return conversation;
+      const ensureOne = (
+        threadId: string,
+        threadName: string | undefined,
+        threadType: "private" | "group" | undefined,
+        parent: { id: string; agentName: string | null } | null,
+      ): { id: string; agentName: string | null } => {
+        const existing = lookup(threadId);
+        if (existing) {
+          if (!parent) return existing;
+          // A native thread has its own model session but not its own routing
+          // policy. Keep the derived row in sync with the parent on admission.
+          tx.update(romeSessions)
+            .set({ parentSessionId: parent.id, agentName: parent.agentName })
+            .where(eq(romeSessions.id, existing.id))
+            .run();
+          return { ...existing, agentName: parent.agentName };
+        }
+
+        tx.insert(romeSessions)
+          .values({
+            id: channelConversationId(input.channel, threadId),
+            name: threadName ?? `${input.channel}:${threadId}`,
+            personaId: null,
+            projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
+            projectPath: input.projectPath ?? null,
+            largeModelSelection: null,
+            agentName: parent
+              ? parent.agentName
+              : isCoreMainAgentId(input.agentName)
+                ? null
+                : input.agentName,
+            type: "channel",
+            sourceChannel: input.channel,
+            sourceThreadId: threadId,
+            sourceThreadName: threadName ?? null,
+            sourceThreadType: threadType ?? null,
+            parentSessionId: parent?.id ?? null,
+            createdAt: now,
+            activityAt: now,
+            lastSeenActivityAt: null,
+          })
+          .onConflictDoNothing()
+          .run();
+
+        const conversation = lookup(threadId);
+        if (!conversation) {
+          throw new Error(`Failed to resolve conversation ${input.channel}:${threadId}`);
+        }
+        return conversation;
+      };
+
+      const parent =
+        parentThreadId && parentThreadId !== input.threadId
+          ? ensureOne(parentThreadId, undefined, "group", null)
+          : null;
+      return ensureOne(input.threadId, input.threadName, input.threadType, parent);
+    });
   }
 
   async addConversationMessage(input: {

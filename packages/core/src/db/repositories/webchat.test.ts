@@ -155,6 +155,72 @@ describe("WebChatRepository", () => {
       expect(parentRows[0]?.agentName).toBe("release-agent");
     });
 
+    it("ensures the parent, looks up, writes, and reads back through one transaction", async () => {
+      const { db, statements } = trackStatements(testDb.db);
+      const trackedRepo = new WebChatRepository(db);
+
+      await trackedRepo.ensureChannelConversation({
+        channel: "discord",
+        threadId: "one-transaction-thread",
+        parentThreadId: "one-transaction-channel",
+        agentName: "main",
+      });
+
+      // The parent ensure, the child lookup, the child insert, and the
+      // read-back all reach the connection through a single transaction rather
+      // than as separate autocommit statements.
+      expect(statements).toEqual(["transaction"]);
+    });
+
+    it("rolls back the parent ensure when the child parent-link update fails", async () => {
+      // Seed the child on its own first, so the parent-linked call takes the
+      // existing-row update path (parent insert, then child link update).
+      const child = await repo.ensureChannelConversation({
+        channel: "discord",
+        threadId: "rollback-child",
+        agentName: "main",
+      });
+      const [childBefore] = await testDb.db
+        .select()
+        .from(romeSessions)
+        .where(eq(romeSessions.id, child.id));
+
+      // Fail the parent-link update at the database the way a constraint or a
+      // disk error would, so the assertion is about the rollback and not about
+      // a stubbed repository method.
+      testDb.db.run(sql`
+        CREATE TRIGGER reject_parent_link_update
+        BEFORE UPDATE OF parent_session_id ON rome_sessions
+        BEGIN
+          SELECT RAISE(ABORT, 'parent link update failed');
+        END;
+      `);
+
+      await expect(
+        repo.ensureChannelConversation({
+          channel: "discord",
+          threadId: "rollback-child",
+          parentThreadId: "rollback-parent",
+          agentName: "main",
+        }),
+      ).rejects.toThrow(/parent link update failed/);
+
+      // The parent row written before the failing update is rolled back with it.
+      const parentRows = await testDb.db
+        .select()
+        .from(romeSessions)
+        .where(eq(romeSessions.id, channelConversationId("discord", "rollback-parent")));
+      expect(parentRows).toEqual([]);
+
+      // The child row is untouched: no parent link, its original agent name.
+      const [childAfter] = await testDb.db
+        .select()
+        .from(romeSessions)
+        .where(eq(romeSessions.id, child.id));
+      expect(childAfter.parentSessionId).toBeNull();
+      expect(childAfter.agentName).toBe(childBefore.agentName);
+    });
+
     it("deduplicates webhook retries within a conversation but not across conversations", async () => {
       const first = await repo.ensureChannelConversation({
         channel: "telegram",
