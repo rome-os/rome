@@ -35,6 +35,7 @@ import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
+import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { SlotContent } from "@/components/slot";
 import {
@@ -457,7 +458,7 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
+  const { sessionName, model, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
   const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
@@ -631,14 +632,21 @@ export function FreeGrid() {
                   size="sm"
                   className="shrink-0"
                 />
-                <span className="truncate text-ui text-foreground">
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                </span>
-                {sessionName?.trim() && pinnedAgentMention && (
-                  <span className="shrink-0 truncate text-aux text-muted-foreground">
-                    {pinnedAgentMention.appLabel}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-ui text-foreground">
+                    {sessionName?.trim() ||
+                      pinnedAgentMention?.appLabel ||
+                      t("recentChats.newChat")}
                   </span>
-                )}
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SessionModelLabel model={model} />
+                    {sessionName?.trim() && pinnedAgentMention && (
+                      <span className="truncate text-aux text-muted-foreground">
+                        {pinnedAgentMention.appLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
             <WidgetPicker

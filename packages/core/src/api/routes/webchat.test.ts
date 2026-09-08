@@ -1387,6 +1387,41 @@ describe("Webchat API", () => {
     });
   });
 
+  describe("session model", () => {
+    it("returns the stored model pin for the selected agent and model key", async () => {
+      const app = createWebchatRuntime(deps).routes;
+      const response = await app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Model identity" }),
+      });
+      const session = (await response.json()) as { id: string };
+      const read = async () => (await app.request(`/chat/sessions/${session.id}`)).json();
+      expect(await read()).toMatchObject({ model: null });
+
+      const runtimeId = await deps.sessionsRepo.create({
+        agentName: "main",
+        channelThreadKey: `webchat:${session.id}`,
+      });
+      await deps.sessionsRepo.setProviderInfo(runtimeId, "codex", "thread-1", "gpt-5.5");
+      const otherAgentId = await deps.sessionsRepo.create({
+        agentName: "other-agent",
+        channelThreadKey: `webchat:${session.id}`,
+      });
+      await deps.sessionsRepo.setProviderInfo(otherAgentId, "claude", "thread-2", "other-model");
+      expect(await read()).toMatchObject({ model: "gpt-5.5" });
+
+      await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol");
+      expect(await read()).toMatchObject({ model: null });
+      const selectedRuntimeId = await deps.sessionsRepo.create({
+        agentName: "main",
+        channelThreadKey: `webchat:${session.id}:large-model:gpt-5-6-sol`,
+      });
+      await deps.sessionsRepo.setProviderInfo(selectedRuntimeId, "codex", "thread-3", "gpt-6");
+      expect(await read()).toMatchObject({ model: "gpt-6" });
+    });
+  });
+
   describe("rename route", () => {
     const createSession = async (
       app: ReturnType<typeof createWebchatRuntime>["routes"],

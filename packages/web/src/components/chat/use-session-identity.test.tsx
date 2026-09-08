@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { AgentCatalogGroup, ChatSession } from "@/lib/chat-types";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { setPresentationMode } from "@/lib/presentation-mode";
 import { useSessionIdentity } from "./use-session-identity";
 
@@ -73,4 +74,53 @@ describe("useSessionIdentity presentation mode", () => {
     await waitFor(() => expect(result.current.sessionName).toBe("Planning the launch"));
     expect(result.current.pinnedAgentMention).toBeNull();
   });
+});
+
+describe("useSessionIdentity model", () => {
+  it("shows the actual model rather than the requested selection and refreshes it", async () => {
+    rs.mocked(getSession).mockResolvedValue({
+      ...session,
+      largeModelSelection: "auto",
+      model: "gpt-5.5",
+    });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.model).toBe("gpt-5.5"));
+    rs.mocked(getSession).mockResolvedValue({ ...session, model: "claude-opus-4-6" });
+    act(() => emitSessionsChanged());
+    await waitFor(() => expect(result.current.model).toBe("claude-opus-4-6"));
+  });
+
+  it("clears the model when navigating to a session without a pin", async () => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, model: "gpt-5.5" });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result, rerender } = renderHook(({ id }) => useSessionIdentity(id), {
+      initialProps: { id: "s1" },
+    });
+    await waitFor(() => expect(result.current.model).toBe("gpt-5.5"));
+    rs.mocked(getSession).mockResolvedValue({ ...session, id: "s2" });
+    rerender({ id: "s2" });
+    await waitFor(() => expect(result.current.model).toBeNull());
+  });
+});
+
+it("ignores an old session's pending model refresh after navigation", async () => {
+  rs.mocked(getSession).mockResolvedValue({ ...session, model: "gpt-5.5" });
+  rs.mocked(listChatAgents).mockResolvedValue(groups);
+  const { result, rerender } = renderHook(({ id }) => useSessionIdentity(id), {
+    initialProps: { id: "s1" },
+  });
+  await waitFor(() => expect(result.current.model).toBe("gpt-5.5"));
+  let finishRefresh!: (session: ChatSession) => void;
+  rs.mocked(getSession).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishRefresh = resolve;
+    }),
+  );
+  act(() => emitSessionsChanged());
+  rs.mocked(getSession).mockResolvedValue({ ...session, id: "s2", model: "claude-opus-4-6" });
+  rerender({ id: "s2" });
+  await waitFor(() => expect(result.current.model).toBe("claude-opus-4-6"));
+  await act(async () => finishRefresh({ ...session, model: "gpt-5.5" }));
+  expect(result.current.model).toBe("claude-opus-4-6");
 });
