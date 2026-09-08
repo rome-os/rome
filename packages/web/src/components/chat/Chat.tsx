@@ -1707,6 +1707,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                   text: liveAssistantText,
                   blockIx: floorSessionStream?.assistantBlockIx,
                   sourceText: floorSessionStream?.assistantText,
+                  textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
                   identity: floorIdentity,
                 }}
                 selection={
