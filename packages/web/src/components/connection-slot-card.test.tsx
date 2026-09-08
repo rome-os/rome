@@ -49,7 +49,7 @@ describe("ConnectionSlotCard", () => {
     // The action node renders.
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
     // Setup guidance yields to the connected-state line once connected.
-    expect(screen.queryByText("Add a bot from @BotFather")).toBeNull();
+    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
     // No identity detail means no subtitle; the dialog header already carries
     // the connected status.
     expect(screen.queryByText("Connected")).toBeNull();
@@ -97,7 +97,7 @@ describe("ConnectionSlotCard", () => {
 
     expect(screen.getByText("Adding it lets your agent also")).toBeTruthy();
     // Secondary session slot carries subtitle + bullets.
-    expect(screen.getByText("Sign in with your phone number")).toBeTruthy();
+    expect(screen.getByText("Sign in with your phone number.")).toBeTruthy();
     expect(
       screen.getByText("Send messages from your account — reach suppliers and customers as you"),
     ).toBeTruthy();
@@ -149,7 +149,7 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
     const { container } = render(
       <SoleSlotScope>
         <ConnectionSlotCard
-          service="wechat"
+          service="telegram"
           slot={slot("bot", "unauthorized")}
           state="unconnected"
           role="primary"
@@ -160,14 +160,15 @@ describe("ConnectionSlotCard inside SoleSlotScope (single-slot connection)", () 
       </SoleSlotScope>,
     );
 
-    // No inner card box, no duplicate brand icon, no "Your WeChat" title echo —
-    // the dialog header already carries brand + name — and no setup subtitle:
-    // the ceremony below carries the how-to.
+    // No inner card box, no duplicate brand icon, no "Your Telegram bot" title
+    // echo — the dialog header already carries brand + name — and no setup
+    // subtitle: the ceremony below carries the how-to. Telegram is the service
+    // under test because it is the only one that carries a subtitle to drop.
     const section = container.querySelector("section");
     expect(section?.className).not.toContain("border");
     expect(screen.queryByTestId("icon")).toBeNull();
-    expect(screen.queryByText("Your WeChat")).toBeNull();
-    expect(screen.queryByText("Link your account by scanning a QR code")).toBeNull();
+    expect(screen.queryByText("Your Telegram bot")).toBeNull();
+    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
     // Bullets and ceremony are unchanged.
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();
     expect(screen.getByTestId("ceremony")).toBeTruthy();

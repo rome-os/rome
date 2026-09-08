@@ -119,15 +119,12 @@ export function slotCardCopy(
   return { title, subtitle, bullets, privacyNote };
 }
 
-/** Slots that carry a `subtitle` key. */
-const SUBTITLE_SLOTS = new Set([
-  "telegram.bot",
-  "telegram.session",
-  "whatsapp.bot",
-  "wechat.bot",
-  "linkedin.bot",
-  "discord.bot",
-]);
+/**
+ * Slots that carry a `subtitle` key. Only Telegram: a single-slot connection
+ * renders its card bare (see `SoleSlotScope`), and a bare card drops the
+ * subtitle, so a subtitle on any other service would never reach the screen.
+ */
+const SUBTITLE_SLOTS = new Set(["telegram.bot", "telegram.session"]);
 
 /** Slots that carry a `privacyNote` lock box. */
 const PRIVACY_SLOTS = new Set(["telegram.session", "github.user", "google.user", "slack.user"]);

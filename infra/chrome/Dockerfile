@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
       chromium \
-      xvfb x11vnc novnc websockify openbox \
+      tigervnc-standalone-server novnc websockify openbox \
       socat curl ca-certificates python3 python3-websocket \
       fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation
 
@@ -38,7 +38,8 @@ RUN chmod +x /usr/local/bin/chrome-sidecar-entrypoint.sh
 # mountpoint (compose.dev.yml); created here so the named volume inherits
 # this ownership on first use.
 RUN useradd --create-home --shell /bin/bash chrome && \
-    mkdir -p /home/chrome/.rome && \
+    mkdir -p /home/chrome/.rome /tmp/.X11-unix && \
+    chmod 1777 /tmp/.X11-unix && \
     chown -R chrome:chrome /home/chrome/.rome
 USER chrome
 ENV HOME=/home/chrome

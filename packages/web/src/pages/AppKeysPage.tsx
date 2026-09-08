@@ -132,7 +132,6 @@ export default function AppKeysPage() {
             <AppKeysBadge />
             <div className="min-w-0 flex-1">
               <h1 className="text-title text-foreground">{t("appKeys.title")}</h1>
-              <p className="mt-1 text-body text-muted-foreground">{t("appKeys.subtitle")}</p>
             </div>
             {form === null && (
               <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>

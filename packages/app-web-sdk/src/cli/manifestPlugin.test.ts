@@ -1,20 +1,23 @@
 import { describe, expect, it } from "@rstest/core";
-import type { Chunk, Compilation } from "@rspack/core";
+import type { Rspack } from "@rslib/core";
 import { findEntryChunk } from "./manifestPlugin.js";
 
 // A build that splits a runtime chunk out — any app with a dynamic import —
 // emits two initial chunks. Only one of them holds the generated entry module
 // and exports `mount`, so the manifest has to name that one.
-function chunk(name: string): Chunk {
-  return { name, canBeInitial: () => true } as unknown as Chunk;
+function chunk(name: string): Rspack.Chunk {
+  return { name, canBeInitial: () => true } as unknown as Rspack.Chunk;
 }
 
-function compilation(opts: { entryChunk: Chunk | null; chunks: Chunk[] }): Compilation {
+function compilation(opts: {
+  entryChunk: Rspack.Chunk | null;
+  chunks: Rspack.Chunk[];
+}): Rspack.Compilation {
   const entrypoint = { getEntrypointChunk: () => opts.entryChunk };
   return {
     chunks: opts.chunks,
     entrypoints: new Map([["index", entrypoint]]),
-  } as unknown as Compilation;
+  } as unknown as Rspack.Compilation;
 }
 
 describe("findEntryChunk", () => {

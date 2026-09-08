@@ -290,6 +290,10 @@ describe("control scale", () => {
     // the threshold under which iOS Safari zooms a focused field, so no width
     // needs one. Its 20px line box is the controls' own, so a field on the
     // denser role would gain nothing back.
+    //
+    // The exception is by size, not by width: the 28px step reads UI, asserted
+    // in `control-typography-roles.test.tsx`. Sizes are the axis a field's role
+    // varies on; breakpoints stay one role, which is what this asserts.
     render(<Input aria-label="Search" />);
     const cls = screen.getByRole("textbox", { name: "Search" }).className;
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.1](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.0...app-web-sdk-v0.3.1) (2026-09-05)
+
+
+### Features
+
+* **deps:** upgrade Rslib to 1.0.0 ([#234](https://github.com/rome-os/rome/issues/234)) ([2f3736e](https://github.com/rome-os/rome/commit/2f3736e7912021a593f2733a8b2a66887d003847))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.2.2 to ^0.2.5
+
 ## [0.3.0](https://github.com/rome-os/rome/compare/app-web-sdk-v0.2.22...app-web-sdk-v0.3.0) (2026-08-28)
 
 

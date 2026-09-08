@@ -133,9 +133,7 @@ describe("AI Tools destructive actions", () => {
 
     expect(logoutCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Log out of Claude?" });
-    expect(
-      within(dialog).getByText("Signs out on this server only. You can sign back in anytime."),
-    ).toBeTruthy();
+    expect(within(dialog).getByText("Signs out on this server only.")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Log Out" }));
 
@@ -192,7 +190,9 @@ describe("AI Tools destructive actions", () => {
     expect(deleteCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Remove MiniMax API key?" });
     expect(
-      within(dialog).getByText("Claude sessions stop using MiniMax. Restoring it needs a new key."),
+      within(dialog).getByText(
+        "Claude sessions stop using MiniMax. Restoring it requires a new key.",
+      ),
     ).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));

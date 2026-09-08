@@ -49,8 +49,17 @@ function CommandInput({
   return (
     <div
       data-slot="command-input-wrapper"
+      // The one Control member with no focus edge, for two reasons that hold
+      // independently. The row is a full-bleed header inside Command's
+      // `overflow-hidden`, so the role's edge — 2px at `outline-offset: 0`,
+      // outside the box — is drawn past the clip and cut away on three sides.
+      // And cmdk holds focus in this input for the life of the surface, so an
+      // edge keyed to it stays lit and marks nothing. `border-b-border` is
+      // what reads the header against the list. Trailing controls below draw
+      // their own edges and have room for them.
+      // Role and divergence: docs/ui/component-roles.md.
       className={cn(
-        "flex h-[var(--control-h-md)] w-full items-center gap-[var(--control-gap)] rounded-[var(--control-r-md)] border border-transparent border-b-border px-[var(--control-px-start-md)] has-[input:focus-visible]:outline-solid has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-0 has-[input:focus-visible]:outline-ring has-[input[aria-invalid=true]]:outline-solid has-[input[aria-invalid=true]]:outline-2 has-[input[aria-invalid=true]]:outline-offset-0 has-[input[aria-invalid=true]]:outline-destructive has-[input[aria-invalid=true]:focus-visible]:outline-destructive",
+        "flex h-[var(--control-h-md)] w-full items-center gap-[var(--control-gap)] rounded-[var(--control-r-md)] border border-transparent border-b-border px-[var(--control-px-start-md)]",
         className,
       )}
     >

@@ -61,6 +61,11 @@ export default defineConfig({
   // downstream has to transform it. Dev-only surface: the docs are reachable
   // from /dev, which drops out of production builds.
   tools: {
+    htmlPlugin(config, { entryName }) {
+      if (entryName === "desktop-vnc") {
+        config.template = resolve(packageDir, "desktop-vnc.html");
+      }
+    },
     rspack: {
       module: {
         rules: [
@@ -75,7 +80,10 @@ export default defineConfig({
     },
   },
   source: {
-    entry: { index: resolve(srcDir, "main.tsx") },
+    entry: {
+      index: resolve(srcDir, "main.tsx"),
+      "desktop-vnc": resolve(srcDir, "desktop-vnc.ts"),
+    },
     define: {
       ...publicVars,
       "import.meta.env.ROME_CLOUD_ORIGIN": JSON.stringify(romeCloudOrigin),

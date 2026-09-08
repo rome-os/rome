@@ -359,6 +359,13 @@ PY
 # ─── Start virtual desktop stack ────────────────────────────────────────────
 DISPLAY_NUM="${DISPLAY#:}"
 SCREEN_SIZE="${ROME_SCREEN_SIZE:-1280x800x24}"
+if [[ "$SCREEN_SIZE" =~ ^([0-9]+x[0-9]+)(x([0-9]+))?$ ]]; then
+  SCREEN_GEOMETRY="${BASH_REMATCH[1]}"
+  SCREEN_DEPTH="${BASH_REMATCH[3]:-24}"
+else
+  echo "Error: ROME_SCREEN_SIZE must use WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH."
+  exit 1
+fi
 NOVNC_PORT="${ROME_NOVNC_PORT:-6080}"
 VNC_PORT="${ROME_VNC_PORT:-5900}"
 
@@ -368,28 +375,49 @@ chmod 1777 /tmp/.X11-unix
 REUSED_X_SERVER="0"
 cleanup_stale_x11_state "$DISPLAY_NUM"
 
-XVFB_PID=""
-if [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]; then
-  echo "Starting Xvfb on ${DISPLAY} ..."
-  Xvfb "$DISPLAY" -screen 0 "$SCREEN_SIZE" -ac +extension GLX +render -noreset >/tmp/xvfb.log 2>&1 &
-  XVFB_PID=$!
+TIGERVNC_PID=""
+if [ "$REUSED_X_SERVER" = "1" ]; then
+  if ! process_cmdline_contains_all Xtigervnc "$DISPLAY" -rfbport "$VNC_PORT"; then
+    echo "Error: the existing X server on ${DISPLAY} is not Rome's TigerVNC process."
+    exit 1
+  fi
+  echo "Reusing TigerVNC on ${DISPLAY}, RFB :${VNC_PORT}."
+else
+  if tcp_port_listening "$VNC_PORT"; then
+    echo "Error: TCP port ${VNC_PORT} is already in use by another process."
+    exit 1
+  fi
+
+  echo "Starting TigerVNC on ${DISPLAY}, RFB :${VNC_PORT} ..."
+  Xtigervnc "$DISPLAY" \
+    -geometry "$SCREEN_GEOMETRY" \
+    -depth "$SCREEN_DEPTH" \
+    -SecurityTypes None \
+    -localhost yes \
+    -rfbport "$VNC_PORT" \
+    -AlwaysShared \
+    -AcceptCutText \
+    -SendCutText \
+    -ac >/tmp/xtigervnc.log 2>&1 &
+  TIGERVNC_PID=$!
 fi
 
 RETRIES=0
 while [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ] && [ "$RETRIES" -lt 30 ]; do
-  if [ -n "$XVFB_PID" ] && ! kill -0 "$XVFB_PID" 2>/dev/null; then
-    echo "Error: Xvfb exited before creating display ${DISPLAY}."
-    tail -n 50 /tmp/xvfb.log || true
+  if [ -n "$TIGERVNC_PID" ] && ! kill -0 "$TIGERVNC_PID" 2>/dev/null; then
+    echo "Error: TigerVNC exited before creating display ${DISPLAY}."
+    tail -n 50 /tmp/xtigervnc.log || true
     exit 1
   fi
   RETRIES=$((RETRIES + 1))
   sleep 1
 done
 if [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]; then
-  echo "Error: Xvfb did not start within 30 seconds."
-  tail -n 50 /tmp/xvfb.log || true
+  echo "Error: TigerVNC did not start within 30 seconds."
+  tail -n 50 /tmp/xtigervnc.log || true
   exit 1
 fi
+wait_for_tcp_port "$VNC_PORT" "TigerVNC" "$TIGERVNC_PID" /tmp/xtigervnc.log
 
 OPENBOX_PID=""
 if [ "$REUSED_X_SERVER" = "1" ] && process_env_contains openbox "DISPLAY=${DISPLAY}"; then
@@ -400,21 +428,6 @@ else
   OPENBOX_PID=$!
   wait_for_background_process "$OPENBOX_PID" "Openbox" /tmp/openbox.log
 fi
-
-X11VNC_PID=""
-if process_cmdline_contains_all x11vnc -display "$DISPLAY" -rfbport "$VNC_PORT"; then
-  echo "Reusing x11vnc on :${VNC_PORT}."
-else
-  if tcp_port_listening "$VNC_PORT"; then
-    echo "Error: TCP port ${VNC_PORT} is already in use by another process."
-    exit 1
-  fi
-
-  echo "Starting x11vnc on :${VNC_PORT} ..."
-  x11vnc -display "$DISPLAY" -forever -shared -rfbport "$VNC_PORT" -nopw -xkb >/tmp/x11vnc.log 2>&1 &
-  X11VNC_PID=$!
-fi
-wait_for_tcp_port "$VNC_PORT" "x11vnc" "$X11VNC_PID" /tmp/x11vnc.log
 
 NOVNC_PID=""
 if process_cmdline_contains_all websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}"; then
@@ -810,8 +823,8 @@ cleanup() {
     kill "$CHROME_WRAPPER_PID" 2>/dev/null || true
     wait "$CHROME_WRAPPER_PID" 2>/dev/null || true
   fi
-  kill "$NOVNC_PID" "$X11VNC_PID" "$OPENBOX_PID" "$XVFB_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
-  wait "$NOVNC_PID" "$X11VNC_PID" "$OPENBOX_PID" "$XVFB_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
+  kill "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
+  wait "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGTERM SIGINT

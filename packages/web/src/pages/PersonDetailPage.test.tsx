@@ -4,7 +4,8 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { OutboxMessage, TimelineEntry } from "@rome/api-types/people";
+import type { OutboxMessage } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import {
   countPeople,
   linkConflict,
@@ -67,6 +68,7 @@ const PERSON: PersonResource = {
   ],
   messageCount: 12,
   latest: { source: "whatsapp", timestamp: NOW - 300, preview: "the landlord replies fast" },
+  memoryPath: "memory/relationship/wei-chen.md",
 };
 
 /** Reachable on one channel Rome mirrors and cannot write to — the composer's
@@ -86,9 +88,10 @@ const READ_ONLY_PERSON: PersonResource = {
   ],
   messageCount: 1,
   latest: null,
+  memoryPath: null,
 };
 
-const ENTRIES: TimelineEntry[] = [
+const ENTRIES: Message[] = [
   {
     source: "whatsapp",
     timestamp: NOW - 300,
@@ -120,6 +123,7 @@ const DUPLICATE: PersonResource = {
   accounts: [],
   messageCount: 2,
   latest: null,
+  memoryPath: null,
 };
 
 const UNPLACED: DirectoryAccount = {
@@ -162,9 +166,9 @@ interface FetchCall {
 function mockApi(
   options: {
     person?: PersonResource | "missing" | "fail";
-    entries?: TimelineEntry[] | "fail";
+    entries?: Message[] | "fail";
     nextCursor?: string | null;
-    older?: TimelineEntry[];
+    older?: Message[];
     people?: PersonResource[];
     accounts?: DirectoryAccount[];
     writes?: "fail";
@@ -194,7 +198,7 @@ function mockApi(
   // outbox, never both and never neither. Nothing here marks a row delivered —
   // it moves between the stores, and the reads report where it is.
   const outbox: OutboxMessage[] = [...(options.outbox ?? [])];
-  const delivered: TimelineEntry[] = [];
+  const delivered: Message[] = [];
   /** The channel took it and its mirror now holds it — which is what puts it on
    *  the timeline, and therefore what takes it out of the outbox. */
   const accept = (row: OutboxMessage) =>
@@ -419,6 +423,7 @@ describe("PersonDetailPage", () => {
         timestamp: NOW - 300,
         preview: "sent you a note about the role",
       },
+      memoryPath: null,
     };
     mockApi({
       person,
@@ -481,14 +486,14 @@ describe("PersonDetailPage", () => {
     // entries would render twice, under keys React would then see twice.
     // Paging belongs to the query rather than to state kept here, so there is
     // no cursor to snap back — this is that, pinned.
-    const older: TimelineEntry = {
+    const older: Message = {
       source: "telegram",
       timestamp: NOW - 400_000,
       body: "first hello",
       direction: "inbound",
       ref: "sentinel:1",
     };
-    const arrival: TimelineEntry = {
+    const arrival: Message = {
       source: "whatsapp",
       timestamp: NOW - 5,
       body: "one more thing",
@@ -600,8 +605,13 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("combobox", { name: "Bond" }));
-    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Change bond" }));
+    // Chosen by keyboard: a pointer leaving the submenu's trigger for the item
+    // closes the submenu in jsdom, where the pointer has no position to keep
+    // it inside the grace area. Enter on the focused item is the same select.
+    (await screen.findByRole("menuitemradio", { name: "Inner circle" })).focus();
+    await user.keyboard("{Enter}");
 
     const patch = await waitFor(() => {
       const call = calls.find((c) => c.method === "PATCH");
@@ -614,13 +624,42 @@ describe("PersonDetailPage management", () => {
     expect(patch.body).toEqual({ bondLevel: "inner-circle" });
   });
 
+  it("opens the memory profile Rome wrote about them, at the address Memory reads it from", async () => {
+    const user = userEvent.setup();
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+
+    // A link out to Memory, not a fourth write: the profile is a file, and the
+    // editor, the history and the sync state are all on that page.
+    const item = await screen.findByRole("menuitem", { name: "Memory profile" });
+    expect(item.getAttribute("href")).toBe("/memory/relationship/wei-chen.md");
+  });
+
+  it("offers no memory profile for a person nobody has written one about", async () => {
+    const user = userEvent.setup();
+    // Creating a person writes no profile, so the read answers none — and an
+    // item that opened nothing would be on most people's menu.
+    mockApi({ person: { ...PERSON, memoryPath: null } });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Link account\u2026" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Memory profile" })).toBeNull();
+  });
+
   it("links an account the directory holds onto this person", async () => {
     const user = userEvent.setup();
     const calls = mockApi({ accounts: [UNPLACED] });
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Link account…" }));
     await user.click(await screen.findByRole("button", { name: /Rachel Lim/ }));
 
     const link = await waitFor(() => {
@@ -643,7 +682,8 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Link account…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Link account…" }));
     await user.click(await screen.findByRole("button", { name: /mira_c/ }));
 
     // The refusal names the owner rather than reading as a failed write.
@@ -670,7 +710,8 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Merge into another person…" }));
     await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
 
     const merge = await waitFor(() => {
@@ -691,8 +732,13 @@ describe("PersonDetailPage management", () => {
     renderPage();
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("combobox", { name: "Bond" }));
-    await user.click(await screen.findByRole("option", { name: "Inner circle" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Change bond" }));
+    // Chosen by keyboard: a pointer leaving the submenu's trigger for the item
+    // closes the submenu in jsdom, where the pointer has no position to keep
+    // it inside the grace area. Enter on the focused item is the same select.
+    (await screen.findByRole("menuitemradio", { name: "Inner circle" })).focus();
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
@@ -738,7 +784,8 @@ describe("PersonDetailPage back link survives a merge", () => {
     renderPage("wei-chen", "/people/directory?level=inner-circle");
 
     await screen.findByRole("heading", { name: "Wei Chen" });
-    await user.click(screen.getByRole("button", { name: "Merge into another person…" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Wei Chen" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Merge into another person…" }));
     await user.click(await screen.findByRole("button", { name: /W\. Chen/ }));
     await screen.findByRole("heading", { name: "W. Chen" });
 
@@ -792,6 +839,16 @@ describe("PersonDetailPage back link consumes the dossier's history entry", () =
 // request carries the account that was on screen, and the view that already
 // names an account offers no second choice.
 describe("PersonDetailPage, sending", () => {
+  it("pins the composer so a history longer than the screen scrolls under it", async () => {
+    mockApi();
+    renderPage();
+
+    // The box is a sticky floor at the bottom of the viewport, so it is on
+    // screen at every scroll position instead of only past the last row.
+    const box = await screen.findByRole("textbox", { name: "Message text" });
+    expect(box.closest(".sticky")).toBeTruthy();
+  });
+
   it("names the account it will send to before anything is typed", async () => {
     mockApi();
     renderPage();

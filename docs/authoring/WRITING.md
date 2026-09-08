@@ -2,6 +2,8 @@
 
 These rules apply to every file under `docs/`, and to the surfaces that adopt them by reference.
 
+They do not apply to strings rendered in a UI. Product copy follows [`../ui/VOICE.md`](../ui/VOICE.md), which wins wherever the two disagree.
+
 ## Terminology
 
 Use the industry-standard term when one exists.

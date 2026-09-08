@@ -4,8 +4,11 @@ import { AppServerClient, type AppServerClientOptions } from "./app-server-clien
 import {
   Method,
   ServerRequestMethod,
+  toThreadConfigurationOverrides,
   type DynamicToolCallParams,
   type DynamicToolCallResponse,
+  type ThreadHistoryMode,
+  type ThreadResumeParams,
   type ThreadStartParams,
 } from "./app-server-protocol.js";
 
@@ -23,6 +26,7 @@ export type CodexAppServerExitListener = (error: Error) => void;
 interface StoredThreadBinding {
   callbacks: CodexThreadBinding;
   config: ThreadStartParams;
+  handle: CodexThreadHandle;
   generation: number;
   resumePromise: Promise<void> | null;
 }
@@ -37,6 +41,12 @@ export interface CodexAppServerConnection {
   request(method: string, params?: unknown): Promise<unknown>;
   notify(method: string, params?: unknown): void;
   close(): void;
+}
+
+/** Mutable because a cold resume can migrate the persisted history mode. */
+export interface CodexThreadHandle {
+  threadId: string;
+  historyMode: ThreadHistoryMode | null;
 }
 
 export interface CodexAppServerManagerOptions {
@@ -54,17 +64,31 @@ function defaultCodexEnvironment(): Record<string, string> {
   return env;
 }
 
-function threadIdFromResponse(result: unknown, method: string): string {
-  const threadId = (result as { thread?: { id?: unknown } } | undefined)?.thread?.id;
+function threadFromResponse(result: unknown, method: string): CodexThreadHandle {
+  const thread = (result as { thread?: { id?: unknown; historyMode?: unknown } } | undefined)
+    ?.thread;
+  const threadId = thread?.id;
   if (typeof threadId !== "string" || !threadId) {
     throw new Error(`codex ${method} did not return a thread id`);
   }
-  return threadId;
+  const historyMode =
+    thread?.historyMode === "legacy" || thread?.historyMode === "paginated"
+      ? thread.historyMode
+      : null;
+  return { threadId, historyMode };
 }
 
 function threadIdFromParams(params: unknown): string | null {
   const threadId = (params as { threadId?: unknown } | undefined)?.threadId;
   return typeof threadId === "string" && threadId ? threadId : null;
+}
+
+function buildThreadResumeParams(threadId: string, config: ThreadStartParams): ThreadResumeParams {
+  return {
+    threadId,
+    ...toThreadConfigurationOverrides(config),
+    excludeTurns: true,
+  };
 }
 
 export class CodexAppServerManager {
@@ -128,16 +152,17 @@ export class CodexAppServerManager {
     config: ThreadStartParams,
     callbacks: CodexThreadBinding,
     resumeThreadId?: string,
-  ): Promise<string> {
+  ): Promise<CodexThreadHandle> {
     if (this.closed) throw new Error("codex app-server manager is closed");
     const connection = await this.ensureConnection();
     const method = resumeThreadId ? Method.threadResume : Method.threadStart;
     const startedAt = Date.now();
-    const result = await connection.client.request(method, {
-      ...(resumeThreadId ? { threadId: resumeThreadId } : {}),
-      ...config,
-    });
-    const threadId = threadIdFromResponse(result, method);
+    const result = await connection.client.request(
+      method,
+      resumeThreadId ? buildThreadResumeParams(resumeThreadId, config) : config,
+    );
+    const handle = threadFromResponse(result, method);
+    const threadId = handle.threadId;
     if (resumeThreadId && threadId !== resumeThreadId) {
       throw new Error(
         `codex thread/resume returned unexpected thread id ${threadId} (wanted ${resumeThreadId})`,
@@ -149,6 +174,7 @@ export class CodexAppServerManager {
     this.bindings.set(threadId, {
       callbacks,
       config,
+      handle,
       generation: connection.generation,
       resumePromise: null,
     });
@@ -158,7 +184,7 @@ export class CodexAppServerManager {
       generation: connection.generation,
       durationMs: Date.now() - startedAt,
     });
-    return threadId;
+    return handle;
   }
 
   async requestForThread<T>(threadId: string, method: string, params: unknown): Promise<T> {
@@ -215,16 +241,18 @@ export class CodexAppServerManager {
     if (!binding.resumePromise) {
       binding.resumePromise = (async () => {
         const startedAt = Date.now();
-        const result = await connection.client.request(Method.threadResume, {
-          threadId,
-          ...binding.config,
-        });
-        const resumedThreadId = threadIdFromResponse(result, Method.threadResume);
+        const result = await connection.client.request(
+          Method.threadResume,
+          buildThreadResumeParams(threadId, binding.config),
+        );
+        const resumed = threadFromResponse(result, Method.threadResume);
+        const resumedThreadId = resumed.threadId;
         if (resumedThreadId !== threadId) {
           throw new Error(
             `codex thread/resume returned unexpected thread id ${resumedThreadId} (wanted ${threadId})`,
           );
         }
+        binding.handle.historyMode = resumed.historyMode;
         binding.generation = connection.generation;
         log.info("codex thread resumed after shared app-server restart", {
           threadId,

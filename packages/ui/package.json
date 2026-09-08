@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",
@@ -142,6 +142,10 @@
     "./textarea": {
       "types": "./dist/textarea.d.ts",
       "default": "./dist/textarea.js"
+    },
+    "./timestamp": {
+      "types": "./dist/timestamp.d.ts",
+      "default": "./dist/timestamp.js"
     },
     "./toggle": {
       "types": "./dist/toggle.d.ts",

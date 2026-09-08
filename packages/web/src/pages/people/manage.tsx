@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { MoreHorizontal } from "lucide-react";
 import {
   accountRef,
   ASSIGNABLE_BOND_LEVELS,
@@ -19,14 +21,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -36,6 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { usePeople } from "@/hooks/use-people";
+import { getFileBrowserUrlPath } from "@/lib/file-browser-routing";
 import { ChannelPill } from "./channel-meta";
 import { MutationError } from "./triage";
 import { levelLabelKey } from "./rows";
@@ -60,10 +68,14 @@ function handleOf(account: { channel: string; channelUserId: string }): string {
 }
 
 /**
- * The bond select, the two pickers, and whatever the last write said.
+ * The card's menu: the bond, the two pickers, and whatever the last write said.
+ *
+ * One ⋯ menu rather than controls laid on the card. The bond is a fact the
+ * header states beside the name, and changing it is a gesture like the other
+ * two, so it lives with them — as a submenu of levels, the current one marked.
  *
  * The guardian's bond does not move — the contract refuses it — so their card
- * reads the level rather than offering to change it.
+ * offers no menu at all: the badge reads the level and nothing changes it.
  */
 export function PersonManagement({
   person,
@@ -92,35 +104,63 @@ export function PersonManagement({
   }
 
   return (
-    <div className="flex flex-col items-stretch gap-2 sm:items-end">
-      {level === "guardian" ? (
-        <p className="text-aux text-muted-foreground sm:text-right">
-          {t("detail.bond")}: {t(levelLabelKey(level))}
-        </p>
-      ) : (
-        <Select value={level} disabled={savingBond} onValueChange={(next) => void handleBond(next)}>
-          <SelectTrigger aria-label={t("detail.bond")} className="w-full sm:w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ASSIGNABLE_BOND_LEVELS.map((value) => (
-              <SelectItem key={value} value={value}>
-                {t(levelLabelKey(value))}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-
+    <div className="flex shrink-0 flex-col items-end gap-2">
       {level !== "guardian" && (
-        <div className="flex flex-wrap gap-2 sm:justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={() => setPicker("link")}>
-            {t("detail.linkAccount")}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setPicker("merge")}>
-            {t("actions.mergeInto")}
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {/* A `Button` rather than `IconButton` for the `ghost` aria-expanded
+                paint, as on the directory's rows. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={savingBond}
+              aria-label={t("actions.rowMenu", { name: person.displayName })}
+            >
+              <MoreHorizontal aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>{t("detail.changeBond")}</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={level}
+                  onValueChange={(next) => void handleBond(next)}
+                >
+                  {ASSIGNABLE_BOND_LEVELS.map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      {t(levelLabelKey(value))}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setPicker("link")}>
+              {t("detail.linkAccount")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPicker("merge")}>
+              {t("actions.mergeInto")}
+            </DropdownMenuItem>
+            {person.memoryPath && (
+              <>
+                <DropdownMenuSeparator />
+                {/* Leaves for Memory rather than rendering the profile here: it
+                    is a file the guardian edits, and the editor, the history and
+                    the sync state are all there. Offered only when the read
+                    names one — nothing writes a profile when a person is
+                    created, so an item on every person would usually open
+                    nothing. */}
+                <DropdownMenuItem asChild>
+                  <Link to={getFileBrowserUrlPath("memory", person.memoryPath)}>
+                    {t("detail.memoryProfile")}
+                  </Link>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       <MutationError message={error} />

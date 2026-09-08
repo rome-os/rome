@@ -72,7 +72,11 @@ function getAnthropicCacheWriteMultiplier(rawUsage?: Record<string, unknown>): n
   return ANTHROPIC_5_MINUTE_CACHE_WRITE_MULTIPLIER;
 }
 
-function openAi56Rates(
+// OpenAI's Codex-era rate card: cache reads at 0.1x and cache writes at
+// 1.25x the input rate, with the whole request billed at long-context
+// multipliers once the prompt passes 272K input tokens. GPT-5.6 and GPT-6
+// publish the same rules, so one helper serves both generations.
+function openAiLongContextRates(
   inputUsdPerMillion: number,
   outputUsdPerMillion: number,
   rawUsage?: Record<string, unknown>,
@@ -166,19 +170,24 @@ const PRICING_RULES: PricingRule[] = [
   // previously recorded rows.
   {
     provider: "openai",
+    matchesModel: (model) => matchesModelAlias(model, "gpt-6-astra"),
+    resolveRates: (rawUsage) => openAiLongContextRates(10, 50, rawUsage),
+  },
+  {
+    provider: "openai",
     matchesModel: (model) =>
       matchesModelAlias(model, "gpt-5.6-sol") || matchesModelAlias(model, "gpt-5.6"),
-    resolveRates: (rawUsage) => openAi56Rates(5, 30, rawUsage),
+    resolveRates: (rawUsage) => openAiLongContextRates(5, 30, rawUsage),
   },
   {
     provider: "openai",
     matchesModel: (model) => matchesModelAlias(model, "gpt-5.6-terra"),
-    resolveRates: (rawUsage) => openAi56Rates(2.5, 15, rawUsage),
+    resolveRates: (rawUsage) => openAiLongContextRates(2.5, 15, rawUsage),
   },
   {
     provider: "openai",
     matchesModel: (model) => matchesModelAlias(model, "gpt-5.6-luna"),
-    resolveRates: (rawUsage) => openAi56Rates(1, 6, rawUsage),
+    resolveRates: (rawUsage) => openAiLongContextRates(1, 6, rawUsage),
   },
   {
     provider: "openai",

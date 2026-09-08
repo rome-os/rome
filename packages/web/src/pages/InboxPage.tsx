@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Timestamp } from "@rome-os/ui/timestamp";
 import { PageShell, PageBody } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
@@ -215,9 +216,11 @@ function TriageActivitySection({
                     {entry.action}
                   </span>
                 </div>
-                <span className="text-aux text-subtle-foreground">
-                  {new Date(entry.createdAt).toLocaleString()}
-                </span>
+                <Timestamp
+                  value={entry.createdAt}
+                  format="datetime"
+                  className="text-aux text-subtle-foreground"
+                />
               </div>
 
               {entry.text && <p className="mb-1 text-body text-foreground">{entry.text}</p>}

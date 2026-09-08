@@ -7,10 +7,10 @@
 // without another writer landing in between; this turns the reason it gives
 // back into the sentence a caller reads.
 //
-// What a merge does NOT touch: the merged-away person's profile file
-// (`memory/relationship/<id>.md`) and anything else written in memory. A
-// filesystem write cannot join the transaction the links move in, so folding
-// the prose in here would reintroduce the half-done state merge exists to rule
+// What a merge does NOT touch: the merged-away person's profile file in the
+// relationship directory, and anything else written in memory. A filesystem
+// write cannot join the transaction the links move in, so folding the prose in
+// here would reintroduce the half-done state merge exists to rule
 // out — and concatenating two hand-written profiles states both sides of every
 // disagreement as fact. The file stays where it is, unreferenced and readable,
 // for the guardian or the agent to fold in as prose.

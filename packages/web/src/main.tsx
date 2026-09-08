@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { GuardianTimestampProvider } from "./components/guardian-timestamp-provider";
 import { ThemeProvider } from "./hooks/use-theme";
 import { initAnalytics } from "./lib/analytics";
 import { injectThemeCss } from "./lib/theme";
@@ -23,9 +24,11 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <GuardianTimestampProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </GuardianTimestampProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,

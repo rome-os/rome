@@ -5,11 +5,11 @@
 
 import { describe, expect, it } from "@rstest/core";
 import {
-  compareTimelineEntries,
-  isAfterTimelineCursor,
-  timelineCursor,
-  type TimelineEntry,
-} from "@rome/api-types/people";
+  compareMessages,
+  isAfterMessageCursor,
+  messageCursor,
+  type Message,
+} from "@rome/api-types/message";
 import type { MessageAccount, MessageConversation, Messages } from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
@@ -83,7 +83,7 @@ export function testMessagesContract(
       const store = await subject();
       const page = await store.messages.read({ accounts: store.accounts, limit: PAGE });
       expect(page.length).toBeLessThanOrEqual(PAGE);
-      expect(page).toEqual([...page].sort(compareTimelineEntries));
+      expect(page).toEqual([...page].sort(compareMessages));
     });
 
     it("answers only messages strictly after the cursor", async () => {
@@ -96,19 +96,19 @@ export function testMessagesContract(
         after: cursor,
         limit: WHOLE_HISTORY,
       });
-      expect(next.every((entry) => isAfterTimelineCursor(entry, cursor))).toBe(true);
+      expect(next.every((entry) => isAfterMessageCursor(entry, cursor))).toBe(true);
     });
 
     it("pages to exhaustion over exactly the full read", async () => {
       const store = await subject();
       const full = await fullRead(store);
 
-      const walked: TimelineEntry[] = [];
-      let after: TimelineEntry | null = null;
+      const walked: Message[] = [];
+      let after: Message | null = null;
       // Bounded rather than `while (true)`: a store that answers the same page
       // forever fails as a wrong page count instead of hanging the suite.
       for (let page = 0; page <= Math.ceil(full.length / PAGE); page++) {
-        const entries: TimelineEntry[] = await store.messages.read({
+        const entries: Message[] = await store.messages.read({
           accounts: store.accounts,
           after,
           limit: PAGE,
@@ -139,7 +139,7 @@ export function testMessagesContract(
       const full = await fullRead(store);
       // Two entries that compare equal serialize to one cursor, so resuming
       // from it drops one of the pair — the pages above would never show it.
-      expect(new Set(full.map(timelineCursor)).size).toBe(full.length);
+      expect(new Set(full.map(messageCursor)).size).toBe(full.length);
     });
 
     it("holds nothing for a silent account", async () => {
@@ -174,7 +174,7 @@ export function testMessagesContract(
         limit: PAGE,
       });
       expect(page.length).toBeLessThanOrEqual(PAGE);
-      expect(page).toEqual([...page].sort(compareTimelineEntries));
+      expect(page).toEqual([...page].sort(compareMessages));
     });
 
     it("answers only messages of a conversation strictly after the cursor", async () => {
@@ -190,17 +190,17 @@ export function testMessagesContract(
         after: cursor,
         limit: WHOLE_HISTORY,
       });
-      expect(next.every((entry) => isAfterTimelineCursor(entry, cursor))).toBe(true);
+      expect(next.every((entry) => isAfterMessageCursor(entry, cursor))).toBe(true);
     });
 
     it("pages a conversation to exhaustion over exactly its full read", async () => {
       const store = await subject();
       const full = await fullConversation(store);
 
-      const walked: TimelineEntry[] = [];
-      let after: TimelineEntry | null = null;
+      const walked: Message[] = [];
+      let after: Message | null = null;
       for (let page = 0; page <= Math.ceil(full.length / PAGE); page++) {
-        const entries: TimelineEntry[] = await store.messages.readConversation({
+        const entries: Message[] = await store.messages.readConversation({
           conversation: store.conversation,
           after,
           limit: PAGE,
@@ -216,7 +216,7 @@ export function testMessagesContract(
     it("gives every message of a conversation its own cursor position", async () => {
       const store = await subject();
       const full = await fullConversation(store);
-      expect(new Set(full.map(timelineCursor)).size).toBe(full.length);
+      expect(new Set(full.map(messageCursor)).size).toBe(full.length);
     });
 
     // An empty page rather than a failure or a null: a conversation the store

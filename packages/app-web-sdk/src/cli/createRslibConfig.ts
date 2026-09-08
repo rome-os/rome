@@ -82,11 +82,11 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
   const webLib: LibConfig = {
     format: "esm",
     bundle: true,
-    autoExternal: false,
     source: {
       entry: { index: generatedEntry },
     },
     output: {
+      autoExternal: false,
       minify: true,
       externals: "",
       emitCss: true,
@@ -168,7 +168,6 @@ function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
   return {
     format: "esm",
     bundle: false,
-    autoExternal: true,
     syntax: "esnext",
     outBase: srcDir,
     source: {
@@ -188,6 +187,7 @@ function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
       },
     },
     output: {
+      autoExternal: true,
       target: "node",
       distPath: { root: outDir },
       // Don't wipe outDir — the web lib also writes here (web/).

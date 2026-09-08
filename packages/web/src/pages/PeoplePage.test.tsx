@@ -76,6 +76,7 @@ const GUARDIAN: PersonResource = {
   accounts: [{ channel: "webchat", channelUserId: "wc-1", displayName: "wc-1" }],
   messageCount: 0,
   latest: null,
+  memoryPath: "memory/relationship/GUARDIAN.md",
 };
 
 const FRIEND: PersonResource = {
@@ -85,6 +86,7 @@ const FRIEND: PersonResource = {
   accounts: [{ channel: "telegram", channelUserId: "418820113", displayName: "wei_c" }],
   messageCount: 30,
   latest: { source: "telegram", timestamp: NOW - 600, preview: "on my way" },
+  memoryPath: "memory/relationship/wei-chen.md",
 };
 
 const QUIET_PERSON: PersonResource = {
@@ -94,6 +96,7 @@ const QUIET_PERSON: PersonResource = {
   accounts: [],
   messageCount: 0,
   latest: null,
+  memoryPath: null,
 };
 
 /**
@@ -189,6 +192,7 @@ const LINKEDIN_PERSON: PersonResource = {
   accounts: [{ channel: "linkedin", channelUserId: "ACoAAPriya01", displayName: "Priya Nair" }],
   messageCount: 4,
   latest: { source: "linkedin", timestamp: NOW - 900, preview: "sent you a note about the role" },
+  memoryPath: null,
 };
 
 /** The world both reads are served from, and every write applies to. */
@@ -282,6 +286,7 @@ function applyWrite(
       accounts: [],
       messageCount: 0,
       latest: null,
+      memoryPath: null,
     };
     world.people.push(person);
     for (const ref of refs) attach(world, person, ref);
@@ -1003,6 +1008,7 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
       ],
       messageCount: 8,
       latest: null,
+      memoryPath: null,
     };
     mockApi({ people: [GUARDIAN, WHATSAPP_PERSON, LINKEDIN_PERSON] });
     renderPage();

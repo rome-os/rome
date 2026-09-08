@@ -36,10 +36,29 @@ describe("Command control geometry", () => {
     expect(wrapper?.classList).toContain("h-[var(--control-h-md)]");
     expect(wrapper?.classList).toContain("rounded-[var(--control-r-md)]");
     expect(wrapper?.classList).toContain("px-[var(--control-px-start-md)]");
-    expect(wrapper?.classList).toContain("has-[input:focus-visible]:outline-ring");
-    expect(wrapper?.classList).toContain("has-[input[aria-invalid=true]]:outline-destructive");
-    expect(wrapper?.classList).not.toContain("focus-within:outline-ring");
     expect(input.classList).not.toContain("py-3");
+  });
+
+  // The row is a full-bleed header inside Command's `overflow-hidden`, so an
+  // edge at `outline-offset: 0` renders clipped on three sides, and cmdk holds
+  // focus here for the whole life of the surface, so one would never turn off.
+  // Asserting the absence keeps a future "every Control gets the focus edge"
+  // pass from reinstating it silently. See docs/ui/component-roles.md.
+  it("paints no focus or invalid edge on the input row", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" />
+      </Command>,
+    );
+
+    const wrapper = screen
+      .getByPlaceholderText("Search…")
+      .closest('[data-slot="command-input-wrapper"]');
+
+    for (const cls of Array.from(wrapper?.classList ?? [])) {
+      expect(cls).not.toContain("outline-ring");
+      expect(cls).not.toContain("outline-destructive");
+    }
   });
 
   it("lets caller classes override the outer Control geometry", () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Chunk, Compilation, Compiler, RspackPluginInstance } from "@rspack/core";
+import type { Rspack } from "@rslib/core";
 
 export interface ManifestPluginOptions {
   displayName: string;
@@ -8,10 +8,10 @@ export interface ManifestPluginOptions {
 
 const PLUGIN_NAME = "RomeAppManifestPlugin";
 
-export class RomeAppManifestPlugin implements RspackPluginInstance {
+export class RomeAppManifestPlugin implements Rspack.RspackPluginInstance {
   constructor(private readonly options: ManifestPluginOptions) {}
 
-  apply(compiler: Compiler): void {
+  apply(compiler: Rspack.Compiler): void {
     const { webpack } = compiler;
     const { sources } = webpack;
 
@@ -66,10 +66,10 @@ export class RomeAppManifestPlugin implements RspackPluginInstance {
  *  `mount`. Read it off the entrypoint rather than scanning `compilation.chunks`
  *  for the first initial chunk: an app whose build splits a runtime chunk out —
  *  any app with a dynamic import — has two initial chunks, and the runtime one
- *  exports nothing. Which of them came first depended on the module graph, so a
- *  source edit could silently repoint the manifest at the runtime chunk and the
- *  host would fail to mount the app. */
-export function findEntryChunk(compilation: Compilation): Chunk | null {
+ *  exports nothing. Which of them came first depended on the module graph and on
+ *  whether the build was cached, so a source edit could silently repoint the
+ *  manifest at the runtime chunk and the host would fail to mount the app. */
+export function findEntryChunk(compilation: Rspack.Compilation): Rspack.Chunk | null {
   for (const entrypoint of compilation.entrypoints.values()) {
     const chunk = entrypoint.getEntrypointChunk();
     if (chunk) {
@@ -88,13 +88,13 @@ function pickJsFile(files: ReadonlySet<string>): string | null {
   return null;
 }
 
-function collectStyles(compilation: Compilation): string[] {
+function collectStyles(compilation: Rspack.Compilation): string[] {
   return Object.keys(compilation.assets)
     .filter((name) => name.endsWith(".css"))
     .sort();
 }
 
-function hashAssets(compilation: Compilation): string {
+function hashAssets(compilation: Rspack.Compilation): string {
   const hash = createHash("sha256");
   const names = Object.keys(compilation.assets).sort();
   for (const name of names) {

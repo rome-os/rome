@@ -28,12 +28,16 @@
 // Rome contributes is which person it belongs to. So the writes here move a
 // link between people; none of them creates or destroys the account under it.
 //
-// The bond ladder, the merged timeline and the activity order both the person
-// listing and the account stream run on live here too. They are the pieces both
-// nouns share: a row's `latest` is the head of the timeline the same row opens,
-// and a cursor written against one activity listing has to name a position in
-// the other. A second definition of any of them is a page boundary the two ends
-// disagree about, so they are stated once, here.
+// The bond ladder, the activity order both the person listing and the account
+// stream run on, and a person's timeline paging (`TimelinePage`,
+// `latestDynamic`) live here. What that timeline holds — the message shape, its
+// order and its cursor — is the message module's (`./message.ts`), which this
+// file imports. They are the pieces the two nouns share: a row's `latest` is
+// the head of the timeline the same row opens, and a cursor written against one
+// activity listing has to name a position in the other. A second definition of
+// any of them is a page boundary the two ends disagree about, so each is stated
+// once — the activity order here, the message shape and its order in
+// `./message.ts`.
 //
 // The account read is two reads, because two surfaces ask two questions. The
 // directory is a contacts list: every account, ordered by name, carrying
@@ -43,6 +47,7 @@
 // on. Each has its own row shape and its own cursor, so neither pays for the
 // other's fields and neither order can be resumed with the other's position.
 
+import { compareCodePoints, type Message } from "./message.js";
 import { STRANGER_PERSON_ID } from "./persons.js";
 
 // ---------------------------------------------------------------------------
@@ -103,18 +108,12 @@ export function normalizeBondLevel(raw: string): PlacedBondLevel {
 // ---------------------------------------------------------------------------
 
 /**
- * Compare two strings by code point, returning zero only for exact equality.
- *
- * `localeCompare` answers zero for strings that are canonically equivalent but
- * distinct — "\u00e9" and "e\u0301" — and its result depends on the running
- * locale, so a server and a client can disagree on the same pair. Neither is
- * acceptable where an order has to be total and has to mean the same thing on
- * both ends of a cursor.
+ * The total string order the account and display-name orders settle their ties
+ * with. Re-exported from the message module ({@link compareCodePoints}), which
+ * owns it because the message cursor is written against it, so "how two strings
+ * order for a cursor" has one definition here rather than a second that drifts.
  */
-export function compareCodePoints(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
+export { compareCodePoints };
 
 /**
  * Order two display names the same way in every runtime.
@@ -184,39 +183,18 @@ export function isChannelIdentifier(channel: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The merged timeline, and the cursor that resumes it
+// A person's merged timeline
 // ---------------------------------------------------------------------------
-
-/**
- * One entry on a person's merged timeline, whichever surface produced it.
- *
- * Deliberately generic: `source` names the producer, `ref` is that producer's
- * own id for the entry, and `body` is the line to render. A Rome App that
- * starts contributing dynamics fills the same five fields instead of
- * extending this shape.
- *
- * `ref` must be unique across everything one `source` can put on one person's
- * timeline, not merely within the conversation it came from. A person holds
- * several accounts, and a producer whose ids are per-conversation (WhatsApp
- * message ids are unique within a chat, not within an account) has to qualify
- * them — `<chat>:<messageId>` — before writing them here.
- * {@link compareTimelineEntries} settles ties on `(source, ref)`, so two
- * entries sharing one within the same second compare equal, serialize to the
- * same cursor, and lose one of the pair on resume.
- */
-export interface TimelineEntry {
-  source: string;
-  /** Epoch seconds. */
-  timestamp: number;
-  body: string | null;
-  direction: "inbound" | "outbound";
-  ref: string;
-}
+//
+// What the timeline holds is a {@link Message}, and the order it is read in and
+// the cursor that resumes it are the message module's ({@link compareMessages},
+// {@link messageCursor}). A person's timeline is still a timeline; its rows are
+// messages, and its paging is the People surface's own — stated below.
 
 /** One page of a person's timeline, newest first. `nextCursor` is opaque and
- *  null once the oldest entry has been sent. */
+ *  null once the oldest message has been sent. */
 export interface TimelinePage {
-  entries: TimelineEntry[];
+  entries: Message[];
   nextCursor: string | null;
 }
 
@@ -224,24 +202,7 @@ export const TIMELINE_PAGE_DEFAULT_LIMIT = 100;
 export const TIMELINE_PAGE_MAX_LIMIT = 300;
 
 /**
- * The timeline's order: newest first, and total.
- *
- * Producers share no key but the timestamp, and timestamps collide — whole
- * seconds from two stores, and a reply Rome sent recorded against the message
- * it answers. So the order is settled past the timestamp: a reply sits above
- * the line it answers, and `source`/`ref` break what remains. Totality is not
- * cosmetic — it is what lets a cursor name a position and resume there without
- * repeating or skipping an entry.
- */
-export function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {
-  if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
-  if (a.direction !== b.direction) return a.direction === "outbound" ? -1 : 1;
-  const bySource = compareCodePoints(a.source, b.source);
-  return bySource !== 0 ? bySource : compareCodePoints(a.ref, b.ref);
-}
-
-/**
- * The dynamic a row reports as `latest`: the newest entry of that row's own
+ * The dynamic a row reports as `latest`: the newest message of that row's own
  * timeline, projected.
  *
  * One definition rather than two. A separate "newest dynamic" comparison
@@ -250,56 +211,13 @@ export function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): numb
  * another, and neither would be wrong. Deriving the preview from the ordering
  * makes that disagreement unrepresentable.
  *
- * `entries` must already be in {@link compareTimelineEntries} order.
+ * `entries` must already be in {@link compareMessages} order.
  */
-export function latestDynamic(entries: readonly TimelineEntry[]): AccountDynamic | null {
+export function latestDynamic(entries: readonly Message[]): AccountDynamic | null {
   const newest = entries[0];
   return newest
     ? { source: newest.source, timestamp: newest.timestamp, preview: newest.body }
     : null;
-}
-
-/**
- * A cursor naming the exact entry a page ended on.
- *
- * Encoded rather than a bare timestamp: the timestamp alone cannot say *which*
- * of a second's entries was the last one sent, so resuming from it drops the
- * rest of that second.
- *
- * Every part is escaped. `source` is whatever a producer calls itself and a
- * Rome App names its own, so neither it nor `ref` can be trusted to leave the
- * separator alone — an unescaped one shifts the split and resumes the page at
- * a position no entry occupies.
- */
-export function timelineCursor(entry: TimelineEntry): string {
-  return [entry.timestamp, entry.direction, entry.source, entry.ref]
-    .map((part) => encodeURIComponent(String(part)))
-    .join("|");
-}
-
-/** Decode a {@link timelineCursor}, or null when it is not one. */
-export function parseTimelineCursor(raw: string | undefined | null): TimelineEntry | null {
-  if (!raw) return null;
-  const parts = raw.split("|");
-  if (parts.length !== 4) return null;
-  let decoded: string[];
-  try {
-    decoded = parts.map(decodeURIComponent);
-  } catch {
-    return null;
-  }
-  const [rawTimestamp, direction, source, ref] = decoded;
-  const timestamp = Number(rawTimestamp);
-  if (rawTimestamp === "" || !Number.isFinite(timestamp)) return null;
-  if (direction !== "inbound" && direction !== "outbound") return null;
-  if (!ref) return null;
-  return { timestamp, direction, source, ref, body: null };
-}
-
-/** Whether an entry falls after a cursor in {@link compareTimelineEntries}
- *  order — i.e. belongs on a later page than the one that cursor ended. */
-export function isAfterTimelineCursor(entry: TimelineEntry, cursor: TimelineEntry): boolean {
-  return compareTimelineEntries(cursor, entry) < 0;
 }
 
 /**
@@ -900,8 +818,13 @@ export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAc
  * it and `messageCount` is how many entries it holds, so the line a row
  * previews is the line its dossier opens on, and the number beside it counts
  * what the dossier will show. A group conversation contributes to neither: a
- * timeline entry names no sender, so nothing said in a room of ten people is
+ * message names no sender, so nothing said in a room of ten people is
  * attributable to one of them.
+ *
+ * `memoryPath` is the profile Rome has written about them, as a path under the
+ * memory root — the same address the memory file browser reads. Null when no
+ * profile has been written: nothing writes one when a person is created, so a
+ * path here means a file a reader can actually open.
  */
 export interface PersonResource {
   id: string;
@@ -910,6 +833,7 @@ export interface PersonResource {
   accounts: LinkedAccount[];
   messageCount: number;
   latest: AccountDynamic | null;
+  memoryPath: string | null;
 }
 
 /**
@@ -1289,7 +1213,7 @@ export function whatsAppDisplayName(contact: {
  * The account is named, always. There is no shape of this request that omits
  * it and no rule anywhere that fills it in, because every rule that could is a
  * rule that decides who receives a message on evidence too thin to carry it:
- * a timeline entry names its channel and not its address, so "reply where they
+ * a message names its channel and not its address, so "reply where they
  * last wrote" cannot separate two numbers on one channel, and "use another
  * channel when this one is down" silently sends somewhere nobody chose.
  * {@link defaultSendAccount} exists for surfaces that want a preselected
@@ -1341,11 +1265,11 @@ export type OutboxState = "sending" | "unconfirmed" | "failed";
 /**
  * One message Rome is still trying to deliver.
  *
- * Deliberately not a {@link TimelineEntry} with a status on it. A timeline
- * entry is a message that happened; these have not, and some never will. Two
- * nouns keep the timeline's contract — its `ref` uniqueness and the ordering
- * its cursor is written against — free of rows that may yet be withdrawn, and
- * keep each account owned by exactly one store.
+ * Deliberately not a {@link Message} with a status on it. A message is
+ * something that happened; these have not, and some never will. Two nouns keep
+ * the message contract — its `ref` uniqueness and the ordering its cursor is
+ * written against — free of rows that may yet be withdrawn, and keep each
+ * account owned by exactly one store.
  *
  * `ref` is the entry this message would become at the address it was sent to.
  * It is a hint and not a key: a channel that folds several addresses onto one

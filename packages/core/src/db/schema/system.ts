@@ -149,7 +149,7 @@ export const waContacts = sqliteTable("wa_contacts", {
  *
  * Not a message store, and deliberately not part of the timeline. A row here
  * is a send that has not happened yet and may never; a timeline entry is one
- * that did. Keeping them apart is what lets `TimelineEntry`'s `ref` stay unique
+ * that did. Keeping them apart is what lets `Message`'s `ref` stay unique
  * and its ordering stay total — a cursor cannot be written across rows that may
  * still be withdrawn — and what keeps each account owned by exactly one message
  * store rather than two that disagree.

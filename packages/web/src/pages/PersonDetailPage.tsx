@@ -1,8 +1,9 @@
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { formatWhatsAppPhone } from "@rome/api-types/people";
+import { formatWhatsAppPhone, normalizeBondLevel } from "@rome/api-types/people";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageShell, PageBody } from "@/shell/PageShell";
 import { Avatar } from "./people/avatar";
@@ -10,6 +11,7 @@ import { ChannelPill } from "./people/channel-meta";
 import { PersonConversation } from "./people/conversation";
 import { PersonManagement } from "./people/manage";
 import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
+import { levelLabelKey } from "./people/rows";
 import { usePerson } from "./people/use-roster";
 
 /**
@@ -105,14 +107,30 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   }
 
   return (
-    <PageShell>
-      <PageBody>
+    // The page fills the content column so the conversation can take whatever
+    // the header leaves, and the composer's floor reaches the viewport's foot.
+    <PageShell className="flex flex-1 flex-col">
+      <PageBody className="flex flex-1 flex-col">
         <BackLink onClick={back} />
 
-        <div className="flex flex-wrap items-start gap-4 rounded-14 border border-border bg-surface p-5 shadow-1">
-          <Avatar name={person.displayName} tone="bg-surface-muted text-muted-foreground" />
-          <div className="min-w-0 flex-1 basis-64">
-            <h1 className="text-title text-foreground">{person.displayName}</h1>
+        {/* One row at any width: the avatar, then who this is, then a menu of
+            what can be done to them. The bond reads as a badge on the name line
+            and is changed from the menu, so the card states the facts and keeps
+            every gesture in one place — nothing here has to stack or wrap into
+            pieces when the card is narrow. */}
+        <div className="flex items-start gap-4 rounded-14 border border-border bg-surface p-5 shadow-1">
+          <Avatar
+            name={person.displayName}
+            size="lg"
+            tone="bg-surface-muted text-muted-foreground"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-title text-foreground">{person.displayName}</h1>
+              <Badge variant="outline">
+                {t(levelLabelKey(normalizeBondLevel(person.bondLevel)))}
+              </Badge>
+            </div>
             <p className="text-aux text-muted-foreground">
               {t("row.messageCount", { count: person.messageCount })}
             </p>

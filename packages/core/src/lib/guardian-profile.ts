@@ -8,13 +8,15 @@ import { pickRandomAgentPreset } from "./agent-presets.js";
 import { generatePersonSlug } from "../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
-import { ensureProfileMemoryInitialized } from "../profile-memory.js";
+import {
+  ensureProfileMemoryInitialized,
+  getGuardianProfileFile,
+  getRelationshipDir,
+  GUARDIAN_PROFILE_PATH,
+} from "../profile-memory.js";
 import { applyGuardianTimezoneWrite } from "../routines/guardian-timezone.js";
 
 const log = createLogger("guardian-profile");
-
-/** The guardian person row's profile note, relative to the profile memory dir. */
-export const GUARDIAN_PROFILE_PATH = "memory/relationship/GUARDIAN.md";
 
 /** The guardian and agent identity every setup path writes. Only the fields
  *  present are written; an absent field keeps its stored value. */
@@ -192,8 +194,7 @@ async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promis
 function writeProfileNotes(profile: GuardianProfileInput): void {
   try {
     const profileMemoryDir = ensureProfileMemoryInitialized();
-    const relationshipDir = join(profileMemoryDir, "relationship");
-    mkdirSync(relationshipDir, { recursive: true });
+    mkdirSync(getRelationshipDir(), { recursive: true });
 
     const guardianLines = ["# Guardian Profile", "", `**Name:** ${profile.guardianName}`, ""];
     if (profile.guardianTimezone) {
@@ -210,7 +211,7 @@ function writeProfileNotes(profile: GuardianProfileInput): void {
     if (profile.interests && profile.interests.length > 0) {
       guardianLines.push("## Interests", "", profile.interests.join(", "), "");
     }
-    writeFileSync(join(relationshipDir, "GUARDIAN.md"), guardianLines.join("\n"));
+    writeFileSync(getGuardianProfileFile(), guardianLines.join("\n"));
 
     const identityLines = ["# Identity", ""];
     if (profile.agentName) identityLines.push(`**Agent Name:** ${profile.agentName}`, "");

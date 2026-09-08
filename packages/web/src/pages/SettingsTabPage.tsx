@@ -30,6 +30,7 @@ import {
   Mail,
   Monitor,
   Moon,
+  Info,
   Palette,
   RefreshCw,
   Sun,
@@ -72,6 +73,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ADVANCED_EASTER_EGG_ART,
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
@@ -1772,12 +1774,26 @@ function TailscaleDaemonSection({
           <Card className="mt-4">
             <CardHeader>
               {/* h4, not CardTitle's h3: this panel is nested inside the Tailscale
-                  section, so it labels a control rather than heading a section —
-                  hence the label/description roles over CardTitle/CardDescription. */}
-              <h4 className="text-ui text-foreground">{t("tailscale.exitNode.title")}</h4>
-              <p className="text-aux text-muted-foreground">
-                {t("tailscale.exitNode.description")}
-              </p>
+                  section, so it labels a control rather than heading a section.
+                  "Exit node" is a term rather than a fact, so its meaning sits in
+                  a tooltip and the row carries no description. */}
+              <div className="flex items-center gap-2">
+                <h4 className="text-ui text-foreground">{t("tailscale.exitNode.title")}</h4>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={t("tailscale.exitNode.termTooltip")}
+                      >
+                        <Info className="size-3.5" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("tailscale.exitNode.termTooltip")}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <CardAction>
                 <ToggleSwitch
                   checked={exitNodeEnabled}

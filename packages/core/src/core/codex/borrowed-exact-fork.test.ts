@@ -70,8 +70,8 @@ describe("evaluateBorrowedExactFork", () => {
 });
 
 describe("createBorrowedExactForkSession", () => {
-  it("scopes dynamic tools to the fork runtime and rolls back", async () => {
-    const rollbackTurn = rs.fn(async () => undefined);
+  it("scopes dynamic tools to the fork runtime and reverts before the borrowed turn", async () => {
+    const revertTurn = rs.fn(async () => undefined);
     let hasForkActionTool = false;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
@@ -84,7 +84,7 @@ describe("createBorrowedExactForkSession", () => {
         await runtime.beforeTerminal?.({ threadId: "source-thread", turnId: "fork-turn" });
         runtime.sink.push({ type: "result", content: "done" });
       },
-      rollbackTurn,
+      revertTurn,
       interrupt: async () => undefined,
     });
 
@@ -97,7 +97,7 @@ describe("createBorrowedExactForkSession", () => {
     await session.close();
 
     expect(hasForkActionTool).toBe(true);
-    expect(rollbackTurn).toHaveBeenCalledWith("source-thread");
+    expect(revertTurn).toHaveBeenCalledWith("source-thread", "fork-turn");
   });
 
   // A webchat-sourced exact fork opens with supportsInteractiveSurface: true
@@ -129,7 +129,7 @@ describe("createBorrowedExactForkSession", () => {
         confirmRes = await runtime.romeTools.callTool("confirm_output", {});
         runtime.sink.push({ type: "result", content: "done" });
       },
-      rollbackTurn: async () => undefined,
+      revertTurn: async () => undefined,
       interrupt: async () => undefined,
     });
 

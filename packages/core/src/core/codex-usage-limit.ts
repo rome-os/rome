@@ -1,6 +1,6 @@
 // Detects "codex ran out of quota" from a failed turn's error payload.
 //
-// codex (pinned at @openai/codex 0.144.5) reports turn failures as a v2
+// codex (pinned at @openai/codex 0.153.4) reports turn failures as a v2
 // `TurnError { message, codexErrorInfo?, additionalDetails? }`, serialized in
 // camelCase. The usage-limit variant of `CodexErrorInfo` is the unit value
 // `"usageLimitExceeded"` (NOTE the lowercase first letter — serde

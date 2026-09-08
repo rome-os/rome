@@ -251,6 +251,10 @@
   "modelSelector": {
     "label": "Model",
     "saveFailed": "Failed to save model selection.",
+    "searchPlaceholder": "Search models…",
+    "clearSearch": "Clear search",
+    "showAll": "Show all {{count}} models",
+    "noMatches": "No matching models.",
     "options": {
       "auto": "Auto",
       "claudeOpus": "Opus",
@@ -259,6 +263,7 @@
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
+      "gpt6Astra": "GPT-6 Astra",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"

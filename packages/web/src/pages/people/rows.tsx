@@ -78,7 +78,10 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
  *
  * `actions` is whatever gesture the page offers for the position it is in:
  * placing it, or taking a dismissal back. The gestures themselves are
- * `people/triage.tsx`; the row only says where they go.
+ * `people/triage.tsx`; the row only says where they go. They show on the row
+ * under the pointer, or holding focus, so a screen of rows reads as evidence
+ * rather than as a wall of buttons. Hover is not a thing on touch screens, so
+ * there they stay put.
  */
 export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
   const { t } = useTranslation("people");
@@ -88,7 +91,7 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
     <div
       className={cn(
         ROW_BASE,
-        "grid-cols-[2rem_minmax(0,1fr)_auto] sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
+        "group grid-cols-[2rem_minmax(0,1fr)_auto] hover:bg-surface sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
       )}
     >
       <Avatar name={row.displayName} />
@@ -114,7 +117,11 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
         <span className="font-mono text-badge tabular-nums text-subtle-foreground">
           {timeAgo(t, row.latest?.timestamp ?? null)}
         </span>
-        {actions}
+        {actions && (
+          <span className="touch-show flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+            {actions}
+          </span>
+        )}
       </span>
     </div>
   );

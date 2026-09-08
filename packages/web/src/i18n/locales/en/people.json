@@ -2,7 +2,7 @@
   "page": {
     "loading": "Loading…",
     "emptyTitle": "Nothing new yet",
-    "emptyHint": "Anyone who messages you shows up here, ready to place.",
+    "emptyHint": "People appear here after they message you.",
     "emptyForSearch": "Nobody matches your search",
     "emptyDirectory": "Nobody here yet",
     "loadMore": "Show more"
@@ -106,6 +106,8 @@
     "back": "People",
     "bond": "Bond",
     "linkAccount": "Link account…",
+    "changeBond": "Change bond",
+    "memoryProfile": "Memory profile",
     "timeline": "Timeline",
     "timelineEmpty": "Nothing has happened on any channel yet.",
     "loadOlder": "Load older",
@@ -120,6 +122,7 @@
     "noAccounts": "No accounts yet"
   },
   "send": {
+    "to": "To",
     "segments": {
       "label": "Account",
       "all": "All",
@@ -171,7 +174,7 @@
   },
   "strangerConfirm": {
     "title": "Treat {{name}} as a stranger?",
-    "description": "Rome will treat messages from {{name}} as coming from a stranger, and they will no longer appear under {{section}}. You can restore them from the Stranger view."
+    "description": "{{name}} no longer appears under {{section}}. Restore them anytime from the Stranger view."
   },
   "transfer": {
     "title": "Move this account?",

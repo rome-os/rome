@@ -31,6 +31,7 @@ import {
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Spinner } from "@rome-os/ui/spinner";
+import { Timestamp } from "@rome-os/ui/timestamp";
 import {
   TraceDrawer,
   traceDrawerContentInsetClass,
@@ -76,7 +77,6 @@ import {
   formatCost,
   formatDate,
   formatOutcome,
-  formatRelativeDate,
   SESSION_TYPE_LABELS,
   sourceLabel,
 } from "./sessions-format";
@@ -421,14 +421,7 @@ function SessionsIndexPage({
         header: "Last activity",
         className: "w-28 whitespace-nowrap",
         headerClassName: "w-28",
-        cell: (session) => (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>{formatRelativeDate(session.activityAt ?? session.createdAt)}</span>
-            </TooltipTrigger>
-            <TooltipContent>{formatDate(session.activityAt ?? session.createdAt)}</TooltipContent>
-          </Tooltip>
-        ),
+        cell: (session) => <Timestamp value={session.activityAt ?? session.createdAt} />,
       },
     ],
     [],
@@ -792,9 +785,10 @@ function SessionsIndexPage({
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-4 text-aux text-muted-foreground">
                         <span className="truncate">{formatOutcome(session.stats.outcomes)}</span>
-                        <span className="shrink-0">
-                          {formatRelativeDate(session.activityAt ?? session.createdAt)}
-                        </span>
+                        <Timestamp
+                          value={session.activityAt ?? session.createdAt}
+                          className="shrink-0"
+                        />
                       </div>
                     </button>
                   ))

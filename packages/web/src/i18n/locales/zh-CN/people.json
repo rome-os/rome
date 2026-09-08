@@ -2,7 +2,7 @@
   "page": {
     "loading": "加载中…",
     "emptyTitle": "暂无新动态",
-    "emptyHint": "任何给你发消息的人都会出现在这里，等待你安置。",
+    "emptyHint": "给你发过消息的人会出现在这里。",
     "emptyForSearch": "没有符合搜索条件的人",
     "emptyDirectory": "这里还没有人",
     "loadMore": "显示更多"
@@ -106,6 +106,8 @@
     "back": "人物",
     "bond": "亲密度",
     "linkAccount": "关联账号…",
+    "changeBond": "更改亲密度",
+    "memoryProfile": "记忆档案",
     "timeline": "时间线",
     "timelineEmpty": "各个渠道都还没有任何往来。",
     "loadOlder": "加载更早",
@@ -120,6 +122,7 @@
     "noAccounts": "暂无账号"
   },
   "send": {
+    "to": "发送至",
     "segments": {
       "label": "账号",
       "all": "全部",
@@ -171,7 +174,7 @@
   },
   "strangerConfirm": {
     "title": "将 {{name}} 视为陌生人？",
-    "description": "Rome 将把来自 {{name}} 的消息视为陌生人发送，他们也不再出现在{{section}}中。你可以在“陌生人”视图中恢复。"
+    "description": "{{name}} 将不再出现在{{section}}中。随时可在“陌生人”视图中恢复。"
   },
   "transfer": {
     "title": "移动这个账号？",

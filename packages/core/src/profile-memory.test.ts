@@ -1,7 +1,14 @@
 import { describe, expect, it, rs, beforeEach } from "@rstest/core";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 rs.mock("./paths.js", () => ({
@@ -12,7 +19,11 @@ rs.mock("./paths.js", () => ({
 }));
 
 import { getProfileDir, getProfileMemoryDir, getProjectRoot, getCoreRoot } from "./paths.js";
-import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
+import {
+  ensureProfileMemoryInitialized,
+  RELATIONSHIP_DIR,
+  resolveProfileMemoryPath,
+} from "./profile-memory.js";
 
 const mockedGetProfileDir = rs.mocked(getProfileDir);
 const mockedGetProfileMemoryDir = rs.mocked(getProfileMemoryDir);
@@ -150,5 +161,36 @@ describe("profile-memory", () => {
       join(profileDir, "memory", "IDENTITY.md"),
     );
     expect(resolveProfileMemoryPath("CHARTER.md")).toBe(join(projectRoot, "CHARTER.md"));
+  });
+});
+
+// The package's own source, walked to see who else names the relationship dir.
+const SRC_DIR = resolve(fileURLToPath(import.meta.url), "..");
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) return [];
+    return [path];
+  });
+}
+
+describe("where relationship profiles live", () => {
+  // Onboarding writes the guardian's profile there, the people read answers
+  // where a person's is, and webchat reads the guardian's back — each one an
+  // address that has to agree with the others. A second copy of the string is
+  // not caught by anything: it keeps working once the folder moves, and answers
+  // about a file nobody writes any more. So the string lives in this module,
+  // and every reader and writer in the package imports it.
+  //
+  // Tests are excluded: one asserting the convention has to spell it out, or it
+  // asserts the constant against itself.
+  it("is stated in this module and nowhere else in the package", () => {
+    const statedIn = sourceFiles(SRC_DIR)
+      .filter((file) => readFileSync(file, "utf-8").includes(RELATIONSHIP_DIR))
+      .map((file) => relative(SRC_DIR, file));
+
+    expect(statedIn).toEqual(["profile-memory.ts"]);
   });
 });

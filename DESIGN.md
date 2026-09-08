@@ -75,6 +75,7 @@
 - Account email: The dialog rejects malformed, unchanged, and already-used addresses inline; submission atomically updates the canonical lowercase email and removes only the Google federated identity; success keeps the dialog open long enough to explain that the user must sign in with the matching verified Google account, while stable account data, provider connections, and current sessions remain unchanged.
 
 ## Content Voice
+- Voice: [`docs/ui/VOICE.md`](docs/ui/VOICE.md) governs how every string a guardian reads sounds. The lines below are surface-specific terminology.
 - Tone: Clear, calm, and explicit about who gets access.
 - Terminology: Use "Search chats", "Recent chats", "Active", "Archived", and "Current" for chat search; use "Private", "Public", and "Rome Cloud email list" for app access; use "visitor" in code but avoid making end users parse that term.
 - Microcopy rules: Describe chat search as matching titles or projects and avoid implying message-body search; name the effect of an option, not the implementation; keep access warnings short; show exact invalid email addresses when validation fails. Use “Change account email” for the admin action, “Google sign-in” for the identity effect, and avoid implementation terms such as “federated identity,” “subject,” or “rebind” in UI copy.

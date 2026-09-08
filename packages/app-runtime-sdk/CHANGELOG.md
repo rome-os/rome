@@ -1,5 +1,13 @@
 # @rome-os/app-runtime
 
+## [0.6.4](https://github.com/rome-os/rome/compare/app-runtime-v0.6.3...app-runtime-v0.6.4) (2026-09-03)
+
+
+### Features
+
+* **chat:** add a universal stop command ([#168](https://github.com/rome-os/rome/issues/168)) ([6c33dad](https://github.com/rome-os/rome/commit/6c33dad63f60e6f33ff2d9c5819f2390cf035eff))
+* **people:** send a message to a person ([#208](https://github.com/rome-os/rome/issues/208)) ([2ecc85e](https://github.com/rome-os/rome/commit/2ecc85efb7bce8e7b23a8148c3241168511c139b))
+
 ## [0.6.3](https://github.com/rome-os/rome/compare/app-runtime-v0.6.2...app-runtime-v0.6.3) (2026-09-01)
 
 

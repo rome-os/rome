@@ -42,7 +42,7 @@ allowBuilds:
   utf-8-validate: false
 
 overrides:
-  "@rsbuild/core": "2.2.1"
+  "@rsbuild/core": "2.2.3"
   react: "19.2.6"
   react-dom: "19.2.6"
   "@types/react": "19.2.15"

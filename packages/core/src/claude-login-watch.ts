@@ -11,12 +11,14 @@
  * rejected code needs no nudge).
  *
  * The first-run wizard is an Ink TUI, so its output differs from the old plain
- * `claude auth login` text: it colourises, positions words with cursor-forward
- * (CUF) escapes instead of spaces, and may print the sign-in URL either as an
- * OSC-8 hyperlink or as a wrapped plain URL. `stripAnsi` therefore turns CUF
- * into a space (so glued words separate for text matching) and drops the
- * OSC/CSI noise; the URL parser first tries the OSC-8 target and then rebuilds
- * the wrapped plain URL from its physical terminal lines.
+ * `claude auth login` text: it colourises, positions words with cursor escapes
+ * instead of spaces — cursor-forward (CUF) historically, with column-absolute
+ * (CHA) joining it in CLI 2.1.251, and one stream can carry both — and may
+ * print the sign-in URL either as an OSC-8 hyperlink or as a wrapped plain
+ * URL. `stripAnsi` therefore turns CUF and CHA into a space (so glued words
+ * separate for text matching) and drops the OSC/CSI noise; the URL parser
+ * first tries the OSC-8 target and then rebuilds the wrapped plain URL from
+ * its physical terminal lines.
  *
  * Deliberately fail-open: a parser miss (CLI reword) emits nothing and sends no
  * key, so the flow degrades to the modal's "sign-in URL never arrived" timeout
@@ -29,14 +31,14 @@ export type ClaudeLoginEvent =
   | { type: "auth_error"; message: string };
 
 // Strip the escape soup the Ink TUI emits so plain text can be matched. Order
-// matters: OSC first (hyperlinks/window titles), then CUF→space (so
+// matters: OSC first (hyperlinks/window titles), then CUF/CHA→space (so
 // cursor-positioned words don't glue together), then the remaining CSI and
 // two-char escapes, then any stray ESC. Each branch is anchored on ESC (\x1b),
 // so URL/text characters survive.
 export function stripAnsi(s: string): string {
   return s
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC … terminated by BEL or ST
-    .replace(/\x1b\[[0-9]*C/g, " ") // CUF (cursor forward) → single space
+    .replace(/\x1b\[[0-9]*[CG]/g, " ") // CUF / CHA (cursor positioning) → single space
     .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, "") // other CSI sequences
     .replace(/\x1b[@-Z\\-_=>78]/g, "") // two-char (Fe/Fs) escapes, incl. DECSC/DECRC
     .replace(/\x1b/g, ""); // any stray ESC left over

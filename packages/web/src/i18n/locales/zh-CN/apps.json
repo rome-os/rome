@@ -93,13 +93,13 @@
     "update": "更新",
     "updateBanner": "有新版本 v{{version}} 可用。",
     "enabledTitle": "已启用",
-    "enabledHint": "关闭后将隐藏此应用,并停用其智能体、动作和钩子。",
+    "enabledHint": "关闭后，此应用会被隐藏，其智能体、动作和钩子也会停止运行。",
     "chatTitle": "通过对话更新",
-    "chatHint": "在此应用的源码项目中打开对话进行修改。",
+    "chatHint": "在此应用的源码项目中打开对话。",
     "publishTitle": "发布到应用商店",
-    "publishHint": "将已安装的应用包(v{{version}})上传到 Rome 应用商店。",
-    "uninstallHint": "移除应用,数据会保留以便日后重装。",
-    "uninstallPurgeHint": "移除应用并清除其数据。此操作不可撤销。"
+    "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
+    "uninstallHint": "移除应用，数据会保留以便日后重装。",
+    "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
   "installed": {
     "loading": "正在加载应用...",
@@ -141,7 +141,7 @@
     "publishSuccess": "已将 {{name}} v{{version}} 发布到应用商店。",
     "publishDialog": {
       "title": "将 {{name}} 发布到应用商店?",
-      "description": "将把已安装的应用包(v{{version}})上传到 Rome 应用商店,并公开供安装。",
+      "description": "任何人都可以在 Rome 应用商店中找到并安装 v{{version}}。",
       "confirm": "发布"
     },
     "uninstallDialog": {
@@ -159,13 +159,13 @@
     "accessPrivate": "仅限自己访问",
     "accessDialog": {
       "title": "{{name}} 的访问权限",
-      "description": "选择谁可以从公开的 Rome URL 打开此应用。",
+      "description": "此设置只作用于公开的 Rome URL，不影响你自己的仪表盘访问。",
       "privateTitle": "私有",
-      "privateDescription": "只有守护者仪表盘会话可以使用此应用。",
+      "privateDescription": "只有你可以打开此应用。",
       "publicTitle": "公开",
       "publicDescription": "任何拥有应用 URL 的人都可以打开并使用它。",
       "cloudEmailTitle": "Rome Cloud 邮箱列表",
-      "cloudEmailDescription": "访客先用 Rome Cloud 登录，Rome 会在加载应用前检查邮箱。",
+      "cloudEmailDescription": "访客需使用 Rome Cloud 登录，且只有你列出的邮箱可以打开此应用。",
       "emailLabel": "允许的 Rome Cloud 邮箱",
       "emailPlaceholder": "ada@example.com",
       "emailHelp": "按回车添加。粘贴列表时会按逗号、空格或换行自动拆分。",

@@ -251,6 +251,10 @@
   "modelSelector": {
     "label": "模型",
     "saveFailed": "保存模型选择失败。",
+    "searchPlaceholder": "搜索模型…",
+    "clearSearch": "清除搜索",
+    "showAll": "显示全部 {{count}} 个模型",
+    "noMatches": "没有匹配的模型。",
     "options": {
       "auto": "自动",
       "claudeOpus": "Claude Opus",
@@ -259,6 +263,7 @@
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
+      "gpt6Astra": "GPT-6 Astra",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"

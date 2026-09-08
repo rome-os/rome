@@ -9,12 +9,19 @@ const CODE =
   "TEST.left+SEGMENT/ABCDEFGHIJKLMNOPQRSTUVWXYZ012345#TEST~right=SEGMENT_abcdefghijklmnopqrstuvwxyz6789";
 
 describe("formatClaudeLoginCodeInput", () => {
-  it("submits sanitized codes as raw terminal input plus Enter", () => {
-    expect(formatClaudeLoginCodeInput(CODE)).toBe(`${CODE}\r`);
+  // The code rides in a bracketed-paste envelope so the Ink prompt on CLI 2.1.251
+  // takes it as one paste and reads the trailing Enter as a submit. A bare
+  // `${code}\r` write hangs for realistic (~130-char) codes: the TUI folds the
+  // burst's Enter into the pasted text instead of submitting. Sanitized codes
+  // never contain ESC, so the paste sentinels cannot appear inside the code.
+  const paste = (code: string) => `\x1b[200~${code}\x1b[201~\r`;
+
+  it("submits sanitized codes inside a bracketed-paste envelope plus Enter", () => {
+    expect(formatClaudeLoginCodeInput(CODE)).toBe(paste(CODE));
   });
 
   it("strips accidental surrounding and wrapped whitespace", () => {
-    expect(formatClaudeLoginCodeInput(`  ${CODE.replace("#", "\n#")}  `)).toBe(`${CODE}\r`);
+    expect(formatClaudeLoginCodeInput(`  ${CODE.replace("#", "\n#")}  `)).toBe(paste(CODE));
   });
 });
 

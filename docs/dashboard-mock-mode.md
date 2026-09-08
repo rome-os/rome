@@ -2,7 +2,7 @@
 
 `pnpm --filter rome-web dev:mock` (from the root, `pnpm start:web:mock`) serves the full dashboard SPA with no backend at http://localhost:3200. An MSW service worker answers `/api` calls from fixtures in `packages/web/mock/handlers/`.
 
-`index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, the projects file browser, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `settings.ts`. The connection ledger itself lives in `connections-store.ts`, because the People page's send routes have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
+`index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `settings.ts`. The two file browsers go through `file-browser.ts`, an in-memory filesystem the projects tree and the memory dir (`memory-files.ts`) are each served from — `/api/projects` and `/api/memory` are the same routes over a different root, so one factory answers both. The connection ledger itself lives in `connections-store.ts`, because the People page's send routes have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
 
 Mock mode is a separate entry (`mock/rsbuild.config.ts` plus `mock/main.tsx`) rather than a dev branch in the SPA. `pnpm build` only reads the root config, so MSW and the fixtures never reach a production bundle.
 
@@ -52,6 +52,8 @@ Sending is out of scope. There is no model behind it, so `POST /turns` is unhand
 Interactive login flows (Claude and Codex device and browser round-trips) are deliberately unhandled. There is no fixture equivalent of a third-party redirect, so their modals surface their own failure.
 
 Embedded `rome_apps` surfaces need the real backend, since `/app-assets` is module federation. Exercise those in `dev:all` rather than here.
+
+The mock filesystem is text. Its tree has no bytes behind it, so upload refuses and the asset and download routes are unhandled — a file browser in mock mode reads, edits, creates, renames, moves and deletes, and moves no binaries.
 
 Fixtures are typed against the same types the fetch sites parse into, either `@rome/api-types` or the web-local type. An API contract change is therefore likely to break `pnpm typecheck` in `mock/handlers/` instead of drifting silently. The caveat is that an empty collection fixture only pins the container shape, not its element type.
 

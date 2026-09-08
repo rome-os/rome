@@ -24,11 +24,11 @@ const QUESTIONS: TimelineQuestion[] = [
   { messageId: "q4", text: "can we cache it?" },
 ];
 
-// The dots, excluding the hide control — which is a button too, but is
-// deliberately focusable and is not one of the questions. Hidden dots stay
+// The markers, excluding the hide control — which is a button too, but is
+// deliberately focusable and is not one of the questions. Hidden markers stay
 // mounted so the retract animates, and leave the a11y tree via aria-hidden —
 // which is exactly what getAllByRole filters on.
-function dots(): HTMLElement[] {
+function markers(): HTMLElement[] {
   return screen.getAllByRole("button").filter((el) => el.getAttribute("aria-expanded") === null);
 }
 
@@ -115,22 +115,20 @@ function renderRail(
 }
 
 describe("ChatTimelineRail", () => {
-  it("renders one dot per question, labelled with its text", () => {
+  it("renders one bar per question, labelled with its text", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(dots()).toHaveLength(4);
+    expect(markers()).toHaveLength(4);
     expect(screen.getByRole("button", { name: "how do I ship this?" })).toBeTruthy();
   });
 
-  it("jumps to the question a dot points at", () => {
+  it("jumps to the question a marker points at", () => {
     const onJump = rs.fn();
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS, onJump);
     fireEvent.click(screen.getByRole("button", { name: "what broke the build?" }));
     expect(onJump).toHaveBeenCalledWith("q2");
   });
 
-  it("keeps every question clickable when they crowd together", () => {
-    // All four within 12px of content. They spread down the track instead of
-    // merging, so none becomes unreachable — the whole point of spreading.
+  it("keeps a compact rhythm regardless of message positions", () => {
     const onJump = rs.fn();
     renderRail(
       stubScroller([
@@ -142,7 +140,15 @@ describe("ChatTimelineRail", () => {
       QUESTIONS,
       onJump,
     );
-    expect(dots()).toHaveLength(4);
+    expect(markers().map((marker) => marker.style.top)).toEqual([
+      "238px",
+      "246px",
+      "254px",
+      "262px",
+    ]);
+    const navigation = screen.getByRole("navigation", { name: "Question timeline" });
+    expect(navigation.className).toContain("left-0");
+    expect(markers()[0].className).toContain("left-4");
     fireEvent.click(screen.getByRole("button", { name: "can we cache it?" }));
     expect(onJump).toHaveBeenCalledWith("q4");
   });
@@ -150,9 +156,14 @@ describe("ChatTimelineRail", () => {
   it("takes one tab stop for the whole column", () => {
     // Search cannot scroll to a message yet, so the rail is the only keyboard
     // route to an earlier question — but forty questions must not mean forty
-    // tab stops. Exactly one dot is tabbable; arrows reach the rest.
+    // tab stops. Exactly one marker is tabbable; arrows reach the rest.
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(dots().map((d) => d.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"]);
+    expect(markers().map((marker) => marker.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+      "-1",
+      "-1",
+    ]);
     expect(
       screen.getByRole("button", { name: "Hide timeline" }).getAttribute("tabindex"),
     ).toBeNull();
@@ -160,12 +171,17 @@ describe("ChatTimelineRail", () => {
 
   it("moves between questions with the arrow keys", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    const all = dots();
+    const all = markers();
     all[0].focus();
 
     fireEvent.keyDown(all[0], { key: "ArrowDown" });
     expect(document.activeElement).toBe(all[1]);
-    expect(dots().map((d) => d.getAttribute("tabindex"))).toEqual(["-1", "0", "-1", "-1"]);
+    expect(markers().map((marker) => marker.getAttribute("tabindex"))).toEqual([
+      "-1",
+      "0",
+      "-1",
+      "-1",
+    ]);
 
     fireEvent.keyDown(all[1], { key: "ArrowUp" });
     expect(document.activeElement).toBe(all[0]);
@@ -179,7 +195,7 @@ describe("ChatTimelineRail", () => {
 
   it("stops at the ends rather than wrapping", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    const all = dots();
+    const all = markers();
     all[0].focus();
     fireEvent.keyDown(all[0], { key: "ArrowUp" });
     expect(document.activeElement).toBe(all[0]);
@@ -189,19 +205,21 @@ describe("ChatTimelineRail", () => {
     expect(document.activeElement).toBe(all[3]);
   });
 
-  it("takes hidden dots out of the tab order", () => {
+  it("takes hidden markers out of the tab order", () => {
     // They stay mounted so the retract animates, and carry aria-hidden — which
     // must never contain something focusable.
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
     fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-    const hiddenDots = [...document.querySelectorAll<HTMLElement>("[data-timeline-track] button")];
-    expect(hiddenDots).toHaveLength(4);
-    for (const dot of hiddenDots) {
-      expect(dot.getAttribute("tabindex")).toBe("-1");
+    const hiddenMarkers = [
+      ...document.querySelectorAll<HTMLElement>("[data-timeline-markers] button"),
+    ];
+    expect(hiddenMarkers).toHaveLength(4);
+    for (const marker of hiddenMarkers) {
+      expect(marker.getAttribute("tabindex")).toBe("-1");
     }
   });
 
-  it("renders no dots below the question floor", () => {
+  it("renders no markers below the question floor", () => {
     const { container } = renderRail(
       stubScroller(SPREAD_ANCHORS.slice(0, 2)),
       QUESTIONS.slice(0, 2),
@@ -209,27 +227,28 @@ describe("ChatTimelineRail", () => {
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 
-  it("renders no dots when the transcript fits on one screen", () => {
+  it("renders no markers when the transcript fits on one screen", () => {
     const scroller = stubScroller(SPREAD_ANCHORS);
     Object.defineProperty(scroller, "scrollHeight", { value: 700, configurable: true });
     const { container } = renderRail(scroller, QUESTIONS);
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 
-  it("renders no dots without a scroller", () => {
+  it("renders no markers without a scroller", () => {
     const { container } = renderRail(null, QUESTIONS);
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 
-  it("hides the dots and offers to bring them back", () => {
+  it("hides the markers and offers to bring them back", () => {
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(dots()).toHaveLength(4);
+    expect(markers()).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Hide timeline" }).style.top).toBe("214px");
 
     fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-    expect(dots()).toHaveLength(0);
+    expect(markers()).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Show timeline" }));
-    expect(dots()).toHaveLength(4);
+    expect(markers()).toHaveLength(4);
   });
 
   it("remembers a hide across mounts", () => {
@@ -238,8 +257,44 @@ describe("ChatTimelineRail", () => {
     cleanup();
 
     renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(dots()).toHaveLength(0);
+    expect(markers()).toHaveLength(0);
     expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
+  });
+
+  it("repositions the show control when the track resizes while hidden", () => {
+    let fire: (() => void) | null = null;
+    const RealRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private readonly callback: () => void;
+
+      constructor(callback: () => void) {
+        this.callback = callback;
+        fire = callback;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {
+        if (fire === this.callback) fire = null;
+      }
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      const { container } = renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+      expect(screen.getByRole("button", { name: "Hide timeline" }).style.top).toBe("214px");
+
+      fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
+      const track = container.querySelector<HTMLElement>("[data-timeline-track]");
+      expect(track).not.toBeNull();
+      Object.defineProperty(track, "clientHeight", { value: 200, configurable: true });
+
+      act(() => {
+        fire?.();
+        rs.advanceTimersByTime(200);
+      });
+      expect(screen.getByRole("button", { name: "Show timeline" }).style.top).toBe("64px");
+    } finally {
+      globalThis.ResizeObserver = RealRO;
+    }
   });
 
   it("keeps watching while hidden with nothing to show", () => {

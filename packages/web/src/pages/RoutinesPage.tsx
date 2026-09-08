@@ -843,7 +843,6 @@ function RoutineCardsView({
     <div className="space-y-8">
       <CardsSection
         title={t("sections.schedule.title")}
-        subtitle={t("sections.schedule.subtitle")}
         routines={scheduleRoutines}
         onToggle={onToggle}
         onDelete={onDelete}
@@ -851,7 +850,6 @@ function RoutineCardsView({
       />
       <CardsSection
         title={t("sections.event.title")}
-        subtitle={t("sections.event.subtitle")}
         routines={eventRoutines}
         onToggle={onToggle}
         onDelete={onDelete}
@@ -859,7 +857,6 @@ function RoutineCardsView({
       />
       <CardsSection
         title={t("sections.manual.title")}
-        subtitle={t("sections.manual.subtitle")}
         routines={manualRoutines}
         onToggle={onToggle}
         onDelete={onDelete}
@@ -877,14 +874,12 @@ function RoutineCardsView({
 
 function CardsSection({
   title,
-  subtitle,
   routines,
   onToggle,
   onDelete,
   onError,
 }: {
   title: string;
-  subtitle: string;
   routines: Routine[];
   onToggle: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
@@ -893,10 +888,7 @@ function CardsSection({
   if (routines.length === 0) return null;
   return (
     <section className="space-y-3">
-      <div>
-        <h2 className="text-section text-foreground">{title}</h2>
-        <p className="text-body text-muted-foreground">{subtitle}</p>
-      </div>
+      <h2 className="text-section text-foreground">{title}</h2>
       <div className="space-y-3">
         {routines.map((r) => (
           <RoutineCard
@@ -2270,12 +2262,9 @@ export default function RoutinesPage() {
             leaves the page identity and the create action in place instead of
             blanking the whole route. */}
         <header className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-title text-foreground">{t("header.title")}</h1>
-              <HealthPill failing={failing} onShowFailing={showFailing} />
-            </div>
-            <p className="text-body text-muted-foreground">{t("header.subtitle")}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="text-title text-foreground">{t("header.title")}</h1>
+            <HealthPill failing={failing} onShowFailing={showFailing} />
           </div>
           <Button onClick={() => setShowCreate(true)} className="flex-shrink-0">
             <Plus className="size-4" aria-hidden />

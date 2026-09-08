@@ -361,7 +361,28 @@ describe("AI tools status API", () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual(refreshed);
-      expect(refresh).toHaveBeenCalledWith();
+      // No `?provider` → a full refresh (undefined is the "all providers" case).
+      expect(refresh).toHaveBeenCalledWith(undefined);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("scopes the refresh to one provider when ?provider is given", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      const refresh = rs
+        .spyOn(deps.aiToolState, "refresh")
+        .mockResolvedValue(deps.aiToolState.get());
+      const app = new Hono().route("/", aiToolsRoutes(deps));
+
+      await app.request("/ai-tools/refresh?provider=anthropic", { method: "POST" });
+      expect(refresh).toHaveBeenLastCalledWith("anthropic");
+
+      // An unknown provider falls back to a full refresh rather than erroring.
+      await app.request("/ai-tools/refresh?provider=bogus", { method: "POST" });
+      expect(refresh).toHaveBeenLastCalledWith(undefined);
     } finally {
       testDb.close();
     }

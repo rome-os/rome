@@ -43,8 +43,8 @@ describe("AppServerClient", () => {
     await expect(inflight).rejects.toThrow(/exited/);
     expect(onExit).toHaveBeenCalledWith(1);
     // …and later requests reject immediately instead of pending forever —
-    // the borrowed exact-fork rollback depends on this to not hang.
-    await expect(client.request("thread/rollback", {})).rejects.toThrow(/exited/);
+    // the borrowed exact-fork revert depends on this to not hang.
+    await expect(client.request("thread/revert", {})).rejects.toThrow(/exited/);
   });
 
   it("turns a stdin EPIPE into one transport exit instead of an unhandled error", async () => {

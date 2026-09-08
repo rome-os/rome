@@ -164,6 +164,8 @@
     "addApp": "应用",
     "back": "返回",
     "noApps": "暂无可用应用",
+    "searchWidgets": "搜索组件",
+    "noWidgetMatches": "没有组件匹配 “{{query}}”。",
     "newChat": "新对话",
     "orPickSession": "或选择已有对话"
   },

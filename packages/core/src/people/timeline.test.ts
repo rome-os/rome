@@ -1,5 +1,6 @@
 import { describe, it, expect } from "@rstest/core";
-import { latestDynamic, parseTimelineCursor, type TimelineEntry } from "@rome/api-types/people";
+import { latestDynamic } from "@rome/api-types/people";
+import { parseMessageCursor, type Message } from "@rome/api-types/message";
 import { memoryMessages } from "../channels/messages-memory.js";
 import type { MessageAccount, Messages } from "../channels/messages.js";
 import { readPersonTimeline } from "./timeline.js";
@@ -20,7 +21,7 @@ const entry = (
   timestamp: number,
   ref: string,
   direction: "inbound" | "outbound" = "inbound",
-): TimelineEntry => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
+): Message => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
 
 /**
  * A store holding `held`, keyed by the address each entry arrived at — the
@@ -30,7 +31,7 @@ const entry = (
  * An entry's `source` is the channel it belongs to, so an address on one
  * channel never answers for an account on another.
  */
-function store(held: Record<string, TimelineEntry[]>): Messages {
+function store(held: Record<string, Message[]>): Messages {
   return memoryMessages(
     Object.entries(held).flatMap(([address, entries]) =>
       entries.map((held) => ({ channel: held.source, address, entry: held })),
@@ -74,13 +75,13 @@ describe("readPersonTimeline", () => {
   it("pages by nextCursor with no duplicate and no missing entry", async () => {
     const whole = (await readPersonTimeline([whatsapp, telegram], accounts, { limit: 10 })).entries;
 
-    const walked: TimelineEntry[] = [];
-    let cursor: TimelineEntry | null = null;
+    const walked: Message[] = [];
+    let cursor: Message | null = null;
     for (let page = 0; page < 10; page += 1) {
       const next = await readPersonTimeline([whatsapp, telegram], accounts, { cursor, limit: 1 });
       walked.push(...next.entries);
       if (next.nextCursor === null) break;
-      cursor = parseTimelineCursor(next.nextCursor);
+      cursor = parseMessageCursor(next.nextCursor);
       expect(cursor).not.toBeNull();
     }
     expect(walked).toEqual(whole);
@@ -100,7 +101,7 @@ describe("readPersonTimeline", () => {
     const one = [account("whatsapp", "c-1")];
     const first = await readPersonTimeline([crowded], one, { limit: 2 });
     const rest = await readPersonTimeline([crowded], one, {
-      cursor: parseTimelineCursor(first.nextCursor),
+      cursor: parseMessageCursor(first.nextCursor),
       limit: 10,
     });
     expect([...first.entries, ...rest.entries].map((e) => e.ref)).toEqual(["b", "a", "c", "d"]);

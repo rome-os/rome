@@ -21,7 +21,7 @@ Each role names what the text is, never a size or a look. The roster covers a he
 - `text-display` — Used for the one hero moment on a screen, such as the home greeting. Not used for a second element on the same screen.
 - `text-title` — Used for the heading a page or dialog carries once, at the top. Not used for a section inside one.
 - `text-section` — Used for the heading of a section, card, or panel inside a surface. Not used for a single control's label.
-- `text-body` — Used for prose someone reads as content: chat messages, paragraphs, text typed into a field. Not used for controls or labels.
+- `text-body` — Used for prose someone reads as content: chat messages, paragraphs, text typed into a field. Not used for controls or labels. A field on the 28px control step is the single exception and reads `text-ui`. Constraints covers why.
 - `text-ui` — Used for controls: sidebar rows, menu items, buttons, tabs, their labels, and both rows of a compact callout such as an alert. Not used for prose.
 - `text-badge` — Used for text inside a compact labeled container: chips, tags, badges, status pills, and counters. Not used for metadata that annotates other content, which stays `text-aux`.
 - `text-aux` — Used for metadata that annotates other content: timestamps, uncontained counts, group headers, and captions. Not used for compact labeled containers. A column of times or counts adds `tabular-nums`.
@@ -50,7 +50,7 @@ Letter spacing is 0 in every role.
 - Hierarchy comes from size, weight, position, and color. Never compose a second type utility onto a role. For emphasis, use color or position. `[mech]`
 - Every role's line box lands on the 4px spacing grid. Retuning a size means taking the line height step cut for it, never carrying the old one across. `[mech]`
 - If a size feels wrong, the role choice is wrong or the role mapping needs tuning. Retune on the specimen page, never at the call site. `[human]`
-- A field reads Body, which sits at the 16px threshold mobile Safari zooms below. No surface restores a size exception. `[human]`
+- A field reads Body, which sits at the 16px threshold mobile Safari zooms below. The one exception is the 28px control step: a field there reads UI, because it sits in a compact row beside a Button and a SelectTrigger already on UI, and Body left it two points larger than everything around it. That step is below the 44px touch minimum and so is never a touch target — a field a thumb is meant to hit takes the 36px step, which keeps Body. No surface restores a size exception of its own. `[human]`
 - Each role declares all four properties explicitly. A role nested under an inherited weight or letter-spacing utility still renders as drawn. `[mech]`
 - Every control declares a role, including an icon-only one. Without one it falls back to the document size, which an em-sized glyph or tooltip resolves against. `[mech]`
 - The roster of seven is the contract. Components bind to role names, so a value change never touches a call site. An eighth role enters through a roster decision, never as a new size at a call site. `[human]`
