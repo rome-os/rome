@@ -239,6 +239,10 @@
   "modelSelector": {
     "label": "Model",
     "saveFailed": "Failed to save model selection.",
+    "searchPlaceholder": "Search models…",
+    "clearSearch": "Clear search",
+    "showAll": "Show all {{count}} models",
+    "noMatches": "No matching models.",
     "options": {
       "auto": "Auto",
       "claudeOpus": "Opus",
