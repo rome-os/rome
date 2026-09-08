@@ -52,17 +52,20 @@ export function ModelSelectorMenu({
   const [showAll, setShowAll] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // `auto` is a value like any other, so the trigger always has something to
-  // name. The label IS the state — nothing has to encode "non-default" on top.
-  const selected =
-    LARGE_MODEL_OPTIONS.find((option) => option.id === value) ??
-    LARGE_MODEL_OPTIONS.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
-
-  // Resolve labels once so the filter and the rows read the exact same text.
+  // Resolve labels once so the trigger, the filter, and the rows all read the
+  // exact same text — a single source for "what the model is called".
   const options = useMemo(
     () => LARGE_MODEL_OPTIONS.map((option) => ({ ...option, label: t(option.labelKey) })),
     [t],
   );
+
+  // `auto` is a value like any other, so the trigger always has something to
+  // name. The label IS the state — nothing has to encode "non-default" on top.
+  // Resolved from `options` (not raw LARGE_MODEL_OPTIONS) so the trigger renders
+  // the same translated label as the rows, with no second lookup path.
+  const selected =
+    options.find((option) => option.id === value) ??
+    options.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
 
   const trimmedQuery = query.trim().toLowerCase();
 
@@ -97,6 +100,17 @@ export function ModelSelectorMenu({
     setShowAll(false);
   }
 
+  // Picking a row closes the menu by flipping the parent's `open` prop, which
+  // Radix does NOT route through the Popover's onOpenChange wrapper below — so
+  // resetting only there would leave `query`/`showAll` alive across a select and
+  // reopen filtered or expanded. Route every close through here instead, so the
+  // documented "each open starts collapsed and unfiltered" contract holds on the
+  // most common path too.
+  function close() {
+    resetView();
+    onOpenChange(false);
+  }
+
   return (
     <Popover
       open={open}
@@ -117,7 +131,7 @@ export function ModelSelectorMenu({
           title={t("modelSelector.label")}
           className="touch-target"
         >
-          <span>{t(selected.labelKey)}</span>
+          <span>{selected.label}</span>
           <ChevronDown data-icon="inline-end" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
@@ -175,7 +189,7 @@ export function ModelSelectorMenu({
                   value={option.id}
                   onSelect={() => {
                     onChange(option.id);
-                    onOpenChange(false);
+                    close();
                   }}
                   className={cn(
                     "justify-between",
