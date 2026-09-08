@@ -1,0 +1,11 @@
+name: snapshot
+type: custom
+description: >-
+  Read every task and where it stands: its state, its position, its brief, and
+  the last few facts on it. Read this before writing anything, so you name a task
+  the person means rather than opening a second one for the same work.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

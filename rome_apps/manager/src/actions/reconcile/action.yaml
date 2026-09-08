@@ -1,0 +1,12 @@
+name: reconcile
+type: custom
+description: >-
+  Run one reconciliation pass over the ledger. Folds every task, writes the next
+  fact each one calls for, and launches or stops workers. Fires on a schedule and
+  again after every fact, so it is safe to call at any time; it is not something
+  an agent needs to reason about.
+entry: ./index.ts
+complexity: moderate
+speed: fast
+reliability: high
+sideEffects: write

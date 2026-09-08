@@ -1,0 +1,29 @@
+formatVersion: 2
+id: manager
+name: Manager
+icon: assets/icon.svg
+version: 0.1.0
+description: >-
+  A long-running agent that keeps working on your tasks across sessions. Tell it
+  what you want in chat; it records the task in an append-only ledger, puts a
+  coding session on it, retries what fails, asks you when it is stuck, and
+  reports when there is something to look at. Only you close a task.
+appRoot: dist
+includeSource: true
+
+db:
+  migrations: db/migrations
+  tablePrefix: manager
+
+agents:
+  - agents/manager.yaml
+
+actions:
+  - actions/setup
+  - actions/reconcile
+  - actions/run-worker
+  - actions/create
+  - actions/reply
+  - actions/complete
+  - actions/cancel
+  - actions/snapshot

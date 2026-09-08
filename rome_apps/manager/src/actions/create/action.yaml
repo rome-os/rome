@@ -1,0 +1,11 @@
+name: create
+type: custom
+description: >-
+  Record a new task the person just asked for. `brief` is what to do, in your
+  words; `source` is the person's own message, verbatim. Use this when their
+  words describe work that is not already a task.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

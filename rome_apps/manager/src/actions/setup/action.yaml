@@ -1,0 +1,11 @@
+name: setup
+type: custom
+description: >-
+  Configure the Manager and register its recurring reconcile. Takes the absolute
+  directory workers work in, plus optional caps. Safe to run again — it updates
+  the config and re-registers the routine only when the cadence changed.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

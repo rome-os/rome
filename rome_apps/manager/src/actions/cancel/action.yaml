@@ -1,0 +1,10 @@
+name: cancel
+type: custom
+description: >-
+  Close a task as not wanted, on a person's say-so. Use it when their words drop
+  the work rather than approve it. `source` is their message, verbatim.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

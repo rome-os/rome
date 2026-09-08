@@ -1149,6 +1149,22 @@ importers:
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
 
+  rome_apps/manager:
+    dependencies:
+      '@rome-os/app-runtime':
+        specifier: ^0.6.0
+        version: link:../../packages/app-runtime-sdk
+      drizzle-orm:
+        specifier: ^0.45.1
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(@types/pg@8.16.0)(better-sqlite3@12.6.2)(pg@8.18.0)
+    devDependencies:
+      drizzle-kit:
+        specifier: ^0.31.9
+        version: 0.31.9(supports-color@8.1.1)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   rome_apps/recap:
     dependencies:
       '@rome-os/app-runtime':

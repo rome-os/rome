@@ -1,0 +1,11 @@
+name: reply
+type: custom
+description: >-
+  Record what a person said about a task that is already running. Use it to
+  answer a question the task is stuck on, or to steer work in progress. `text` is
+  what the worker should know; `source` is the person's message, verbatim.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

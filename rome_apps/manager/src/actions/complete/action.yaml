@@ -1,0 +1,11 @@
+name: complete
+type: custom
+description: >-
+  Close a task as done, on a person's say-so. Only a person ends a task, so call
+  this only when their words approve the result — never on your own reading of
+  what a worker returned. `source` is their message, verbatim.
+entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write

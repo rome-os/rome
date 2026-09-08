@@ -1,0 +1,11 @@
+name: run_worker
+type: custom
+description: >-
+  Internal. Runs the coding session named by a Started fact and writes what came
+  back — Returned or Failed — to the ledger on the worker's behalf, then triggers
+  a reconcile. The runtime dispatches this detached; nothing else should call it.
+entry: ./index.ts
+complexity: complex
+speed: slow
+reliability: medium
+sideEffects: write
