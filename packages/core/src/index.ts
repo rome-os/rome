@@ -1,3 +1,4 @@
+import { createPairingAdmission } from "./channels/pairing.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -281,7 +282,10 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
-  const talkRouter = createTalkRouter(connectionRegistry);
+  const talkRouter = createTalkRouter(
+    connectionRegistry,
+    createPairingAdmission({ approvalsRepo, personMappingRepo }),
+  );
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup

@@ -8,7 +8,7 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 
 ### Invariants
 
-- **Setup is uniform.** Enabling any channel drives the same generic surface (a conferral setup addressed by connection + grant). There is no bespoke per-service connect, pairing, or `verify-status` route — a channel that reads connected was guardian-linked during the setup's terminal write, so nothing polls a separate status endpoint afterward.
+- **Setup is uniform.** Enabling any channel drives the same generic surface (a conferral setup addressed by connection + grant). Setup proves provider credentials, while account pairing grants human authority. A connected bot can receive pairing requests before any account is linked to the guardian.
 - **The dashboard renders setups generically.** The connect UI is a single standard renderer plus a small set of registered custom components for the few steps that need bespoke presentation (e.g. rendering a QR image). Adding a channel adds neither a connect route nor a per-service connect card.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.
 
@@ -23,3 +23,20 @@ LinkedIn replies use the shared [People outbox](../concepts/people.md#outbox) an
 - A send receipt and a history read identify the same provider message. A successful click or a matching message body cannot establish acceptance.
 - Once LinkedIn accepts a reply, a local mirror failure cannot turn it into a failed send. Unknown send outcomes require an explicit retry.
 - A retry keeps the original conversation. A changed destination requires a new reply.
+
+## Account pairing
+
+An unknown Telegram, Discord, or Feishu account creates one expiring [approval](../concepts/messaging.md#approvals). The guardian resolves it in the authenticated Web UI, or the requesting account returns the displayed code in a private message.
+
+### Invariants
+
+- Unknown accounts cannot reach app handlers, automatic person matching, or agents before approval, even when reply settings include strangers. Their messages receive pairing guidance instead of entering conversation history. Existing linked accounts retain their permissions.
+- Activity and Connections show the same approval record. Connections filters channel pairing approvals, and both surfaces share the confirmation and resolution behavior.
+- Approval links the exact requesting account to the guardian and resolves the request in one transaction. A conflicting account link prevents approval rather than transferring ownership.
+- Codes belong to one request, connection, channel, and sender. Verification messages never reach agents, including invalid or replayed codes from linked senders.
+- Group messages cannot redeem a code. Group guidance points to a private bot conversation or authenticated Web approval without exposing the code.
+- Requests expire after ten minutes without extending on repeated messages. Five wrong codes disable code verification while leaving Web approval available until expiry.
+- The bot asks an approved account to resend its message. No blocked message is automatically replayed.
+- Approval records retain creation and resolution. Web decisions record the verified guardian identity, and code decisions record the provider-authenticated account and completion method.
+- Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
+- Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.

@@ -1,3 +1,4 @@
+import { z } from "zod";
 // The approval record's closed value sets.
 //
 // `type` selects a lifecycle, not a subject. Each of the three has one creator:
@@ -30,3 +31,28 @@ export const APPROVAL_EXECUTION_STATES = [
   "failed",
 ] as const;
 export type ApprovalExecutionState = (typeof APPROVAL_EXECUTION_STATES)[number];
+
+export const pairingPayloadSchema = z.object({
+  action: z.literal("channel_pairing"),
+  channel: z.enum(["telegram", "discord", "feishu"]),
+  connectionId: z.string().min(1),
+  channelUserId: z.string().min(1),
+  displayName: z.string(),
+  expiresAt: z.number().int(),
+  failedAttempts: z.number().int().nonnegative(),
+  lastGuidanceAt: z.number().int(),
+  conversationId: z.string().optional(),
+  resolution: z
+    .enum(["web", "verification_code", "rejected", "expired", "account_linked"])
+    .optional(),
+});
+export type PairingPayload = z.infer<typeof pairingPayloadSchema>;
+
+export function pairingPayload(approval: {
+  type: string;
+  payload?: unknown;
+}): PairingPayload | null {
+  if (approval.type !== "person_mapping") return null;
+  const parsed = pairingPayloadSchema.safeParse(approval.payload);
+  return parsed.success ? parsed.data : null;
+}

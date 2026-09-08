@@ -151,5 +151,31 @@
       "dumpTitle": "下载原始 trace JSON",
       "dumpAriaLabel": "下载原始 trace JSON"
     }
+  },
+  "pairing": {
+    "title": "渠道配对",
+    "account": "{{account}} 的配对请求",
+    "expires": "有效期至 {{time}}",
+    "code": "验证码",
+    "copy": "复制验证码",
+    "destination": "请使用 {{account}} 在 {{channel}} 中将此验证码私聊发送给 bot。",
+    "approve": "批准",
+    "reject": "拒绝",
+    "cancel": "取消",
+    "confirmTitle": "授予 guardian 权限？",
+    "confirmBody": "{{channel}} 账号 {{account}} 将获得此 Rome 实例的 guardian 权限。请仅批准你本人控制的账号。",
+    "copied": "验证码已复制",
+    "copyFailed": "无法复制验证码",
+    "resolveFailed": "无法处理审批，请刷新并确认请求状态。",
+    "loadFailed": "无法加载审批",
+    "loading": "加载中…",
+    "locked": "验证码已因五次验证失败而锁定。guardian 仍可在此批准请求。",
+    "empty": "暂无渠道配对请求。",
+    "approved": "已批准",
+    "rejected": "已拒绝",
+    "expired": "已过期",
+    "requested": "请求时间：{{time}}",
+    "resolved": "处理人：{{actor}} · {{time}}",
+    "retry": "重试"
   }
 }

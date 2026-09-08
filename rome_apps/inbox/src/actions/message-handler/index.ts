@@ -323,40 +323,6 @@ async function resolveRequestedAgent(
 }
 
 // ---------------------------------------------------------------------------
-// Discord: auto-map the first message sender as guardian
-// ---------------------------------------------------------------------------
-
-async function tryAutoMapDiscordGuardian(
-  deps: MessageHandlerDeps,
-  channelUserId: string,
-  displayName: string,
-): Promise<PersonRecord | null> {
-  const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
-  if (guardians.length === 0) return null;
-
-  const guardian = guardians[0];
-  const alreadyMapped = guardian.channelMappings.some((m) => m.channel === "discord");
-  if (alreadyMapped) return null;
-
-  await deps.personMappingRepo.addChannelMapping(
-    guardian.id,
-    "discord",
-    channelUserId,
-    displayName,
-  );
-  log.info("auto-mapped first Discord user as guardian", {
-    channelUserId,
-    displayName,
-    personId: guardian.id,
-  });
-
-  return deps.personMappingRepo.findByChannelUser(
-    "discord",
-    channelUserId,
-  ) as Promise<PersonRecord | null>;
-}
-
-// ---------------------------------------------------------------------------
 // Auto-map unknown sender by display name
 // ---------------------------------------------------------------------------
 
@@ -691,11 +657,6 @@ export function createMessageHandlerAction(
               channelUserId,
               displayName,
             )) as PersonRecord | null;
-          }
-
-          // Discord: auto-map the first sender as guardian (no verification code needed)
-          if (!person && channel === "discord") {
-            person = await tryAutoMapDiscordGuardian(deps, channelUserId, displayName);
           }
         }
 

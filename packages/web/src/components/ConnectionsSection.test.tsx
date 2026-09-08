@@ -16,7 +16,10 @@ beforeEach(() => {
   // Opening a row's detail dialog mounts ceremony cards that self-fetch their
   // transient status (verify-status, telegram user/status, ...). None of these
   // tests assert ceremony state, so a fresh minimal ok JSON keeps them quiet.
-  rs.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
+  rs.spyOn(globalThis, "fetch").mockImplementation(
+    async (input) =>
+      new Response(String(input) === "/api/approvals" ? "[]" : "{}", { status: 200 }),
+  );
 });
 
 afterEach(() => {

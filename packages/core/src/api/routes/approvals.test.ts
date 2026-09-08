@@ -1,3 +1,4 @@
+import { runWithSessionActor } from "../../lib/session-actor.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
@@ -24,7 +25,11 @@ describe("Approvals API", () => {
     baseline = await seedBaseline(testDb.db);
     approvalHandler = stubApprovalHandler();
     const deps = { ...(await buildTestDeps(testDb.db)), approvalHandler };
-    app = new Hono().route("/", approvalsRoutes(deps));
+    app = new Hono();
+    app.use("*", (_c, next) =>
+      runWithSessionActor({ kind: "guardian", userId: "test-owner", via: "cookie" }, next),
+    );
+    app.route("/", approvalsRoutes(deps));
   });
 
   afterEach(() => {
@@ -33,6 +38,34 @@ describe("Approvals API", () => {
   });
 
   describe("GET /approvals", () => {
+    it("refuses anonymous and visitor access to all approval entry points", async () => {
+      const deps = { ...(await buildTestDeps(testDb.db)), approvalHandler };
+      for (const actor of [
+        { kind: "anonymous" } as const,
+        { kind: "visitor", accountId: "guest", email: "guest@example.com" } as const,
+      ]) {
+        const guarded = new Hono();
+        guarded.use("*", (_c, next) => runWithSessionActor(actor, next));
+        guarded.route("/", approvalsRoutes(deps));
+        for (const path of [
+          "/approvals",
+          `/approvals/${baseline.approvals.pendingId}`,
+          `/approvals/${baseline.approvals.pendingId}/code`,
+        ]) {
+          expect((await guarded.request(path)).status).toBe(403);
+        }
+        for (const action of ["resolve", "approve", "reject", "retry"]) {
+          expect(
+            (
+              await guarded.request(`/approvals/${baseline.approvals.pendingId}/${action}`, {
+                method: "POST",
+              })
+            ).status,
+          ).toBe(403);
+        }
+      }
+    });
+
     it("lists baseline approvals (unfiltered)", async () => {
       const res = await app.request("/approvals");
       expect(res.status).toBe(200);
@@ -66,6 +99,42 @@ describe("Approvals API", () => {
   });
 
   describe("POST /approvals/:id/resolve", () => {
+    it("shares pairing records and atomic resolution across route aliases", async () => {
+      const repo = new ApprovalsRepository(testDb.db, () => Buffer.alloc(32, 3));
+      const deps = { ...(await buildTestDeps(testDb.db)), approvalsRepo: repo, approvalHandler };
+      const pairingApp = new Hono();
+      pairingApp.use("*", (_c, next) =>
+        runWithSessionActor({ kind: "guardian", userId: "verified-owner", via: "cookie" }, next),
+      );
+      pairingApp.route("/", approvalsRoutes(deps));
+      const id = repo.requestPairing({
+        channel: "telegram",
+        connectionId: "test-telegram",
+        channelUserId: "new-account",
+        displayName: "New account",
+      })!.approval.id;
+      const codeResponse = await pairingApp.request(`/approvals/${id}/code`);
+      expect(codeResponse.headers.get("cache-control")).toBe("no-store");
+      const { code } = (await codeResponse.json()) as { code: string };
+      expect(code).toMatch(/^ROME-PAIR-/);
+      expect(await (await pairingApp.request("/approvals")).text()).not.toContain(code);
+      const resolved = await pairingApp.request(`/approvals/${id}/approve`, { method: "POST" });
+      expect(resolved.status).toBe(202);
+      expect((await repo.findById(id))?.resolvedBy).toBe("verified-owner");
+      expect(
+        (await deps.personMappingRepo.findByChannelUser("telegram", "new-account"))?.bondLevel,
+      ).toBe("guardian");
+      const second = await pairingApp.request(`/approvals/${id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject" }),
+      });
+      expect(second.status).toBe(409);
+      expect(await (await pairingApp.request(`/approvals/${id}/code`)).json()).toEqual({
+        code: null,
+      });
+    });
+
     it("rejects invalid actions with 400", async () => {
       const res = await app.request(`/approvals/${baseline.approvals.pendingId}/resolve`, {
         method: "POST",

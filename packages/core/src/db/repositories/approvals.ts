@@ -1,8 +1,15 @@
-import { and, eq, or } from "drizzle-orm";
+import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
+import { and, eq, or, desc, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { approvals } from "../schema.js";
+import { approvals, persons, channelMappings } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
+import {
+  pairingPayload,
+  type PairingPayload,
+  APPROVAL_TYPES,
+  type ApprovalStatus,
+  type ApprovalType,
+} from "@rome/api-types/approvals";
 
 type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
@@ -18,7 +25,218 @@ export type RetryExecutionResult =
   | { outcome: "not_retryable"; approval: ApprovalRow };
 
 export class ApprovalsRepository {
-  constructor(private db: DrizzleDb) {}
+  constructor(
+    private db: DrizzleDb,
+    private readonly getPairingKey = loadPairingKey,
+  ) {}
+
+  expirePairings(now = Date.now()) {
+    this.db
+      .update(approvals)
+      .set({
+        status: "rejected",
+        resolvedAt: new Date(now),
+        resolvedBy: "system:expiry",
+        payload: sql`json_set(${approvals.payload}, '$.resolution', 'expired')`,
+      })
+      .where(
+        and(
+          eq(approvals.type, "person_mapping"),
+          eq(approvals.status, "pending"),
+          sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+          sql`json_extract(${approvals.payload}, '$.expiresAt') <= ${now}`,
+        ),
+      )
+      .run();
+  }
+
+  async list(status?: ApprovalStatus) {
+    this.expirePairings();
+    return this.db
+      .select()
+      .from(approvals)
+      .where(status ? eq(approvals.status, status) : undefined)
+      .orderBy(desc(approvals.createdAt));
+  }
+
+  requestPairing(
+    input: Pick<
+      PairingPayload,
+      "channel" | "connectionId" | "channelUserId" | "displayName" | "conversationId"
+    >,
+    now = Date.now(),
+  ) {
+    return this.db.transaction((tx) => {
+      this.expirePairings(now);
+      const mapped = tx
+        .select()
+        .from(channelMappings)
+        .where(
+          and(
+            eq(channelMappings.channel, input.channel),
+            eq(channelMappings.channelUserId, input.channelUserId),
+          ),
+        )
+        .get();
+      if (mapped) return null;
+      const previous = tx
+        .select()
+        .from(approvals)
+        .where(
+          and(
+            eq(approvals.type, "person_mapping"),
+            sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+            sql`json_extract(${approvals.payload}, '$.channel') = ${input.channel}`,
+            sql`json_extract(${approvals.payload}, '$.channelUserId') = ${input.channelUserId}`,
+            sql`json_extract(${approvals.payload}, '$.expiresAt') > ${now}`,
+          ),
+        )
+        .orderBy(desc(approvals.createdAt))
+        .get();
+      if (previous) {
+        const payload = pairingPayload(previous)!;
+        if (previous.status !== "pending" || payload.connectionId !== input.connectionId)
+          return null;
+        const guide = now - payload.lastGuidanceAt >= 30_000;
+        const updated = {
+          ...payload,
+          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+          lastGuidanceAt: guide ? now : payload.lastGuidanceAt,
+        };
+        tx.update(approvals).set({ payload: updated }).where(eq(approvals.id, previous.id)).run();
+        return { approval: { ...previous, payload: updated }, guide };
+      }
+      const payload: PairingPayload = {
+        ...input,
+        action: "channel_pairing",
+        expiresAt: now + 10 * 60_000,
+        failedAttempts: 0,
+        lastGuidanceAt: now,
+      };
+      const approval = tx
+        .insert(approvals)
+        .values({
+          id: uuid(),
+          type: "person_mapping",
+          status: "pending",
+          requestedBy: `${input.channel}:${input.channelUserId}`,
+          description: `Pair ${input.displayName || input.channelUserId} on ${input.channel}`,
+          payload,
+          createdAt: new Date(now),
+          executionState: "idle",
+        })
+        .returning()
+        .get();
+      return { approval, guide: true };
+    });
+  }
+
+  async pairingCode(id: string): Promise<string | null> {
+    const approval = await this.findById(id);
+    const payload = approval && pairingPayload(approval);
+    if (!approval || !payload || approval.status !== "pending" || payload.failedAttempts >= 5)
+      return null;
+    return pairingCode(this.getPairingKey(), id);
+  }
+
+  verifyPairing(input: {
+    connectionId: string;
+    channel: string;
+    channelUserId: string;
+    code: string;
+  }) {
+    return this.db.transaction(() => {
+      this.expirePairings();
+      const approval = this.db
+        .select()
+        .from(approvals)
+        .where(
+          and(
+            eq(approvals.status, "pending"),
+            eq(approvals.type, "person_mapping"),
+            sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+            sql`json_extract(${approvals.payload}, '$.connectionId') = ${input.connectionId}`,
+            sql`json_extract(${approvals.payload}, '$.channel') = ${input.channel}`,
+            sql`json_extract(${approvals.payload}, '$.channelUserId') = ${input.channelUserId}`,
+          ),
+        )
+        .get();
+      const payload = approval && pairingPayload(approval);
+      if (!approval || !payload || payload.failedAttempts >= 5)
+        return { outcome: "invalid_code" as const };
+      if (!matchesPairingCode(pairingCode(this.getPairingKey(), approval.id), input.code)) {
+        this.db
+          .update(approvals)
+          .set({ payload: { ...payload, failedAttempts: payload.failedAttempts + 1 } })
+          .where(eq(approvals.id, approval.id))
+          .run();
+        return { outcome: "invalid_code" as const, notify: true };
+      }
+      return this.resolvePairing(
+        approval.id,
+        "approve",
+        `${input.channel}:${input.channelUserId}`,
+        "verification_code",
+      );
+    });
+  }
+
+  private resolvePairing(
+    id: string,
+    action: ResolveAction,
+    actor: string,
+    method: "web" | "verification_code",
+  ): ResolvePendingResult {
+    return this.db.transaction((tx) => {
+      this.expirePairings();
+      const approval = tx.select().from(approvals).where(eq(approvals.id, id)).get();
+      if (!approval) return { outcome: "not_found" };
+      const payload = pairingPayload(approval);
+      if (!payload || approval.status !== "pending")
+        return { outcome: "already_resolved", approval };
+      let resolution: PairingPayload["resolution"] = action === "approve" ? method : "rejected";
+      if (action === "approve") {
+        const holder = tx
+          .select()
+          .from(channelMappings)
+          .where(
+            and(
+              eq(channelMappings.channel, payload.channel),
+              eq(channelMappings.channelUserId, payload.channelUserId),
+            ),
+          )
+          .get();
+        if (holder) {
+          resolution = "account_linked";
+          action = "reject";
+        } else {
+          const guardian = tx.select().from(persons).where(eq(persons.bondLevel, "guardian")).get();
+          if (!guardian) throw new Error("Guardian person is unavailable");
+          tx.insert(channelMappings)
+            .values({
+              id: uuid(),
+              personId: guardian.id,
+              channel: payload.channel,
+              channelUserId: payload.channelUserId,
+              displayName: payload.displayName,
+            })
+            .run();
+        }
+      }
+      const resolved = tx
+        .update(approvals)
+        .set({
+          status: action === "approve" ? "approved" : "rejected",
+          resolvedAt: new Date(),
+          resolvedBy: actor,
+          payload: { ...payload, resolution },
+        })
+        .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
+        .returning()
+        .get()!;
+      return { outcome: "resolved", approval: resolved };
+    });
+  }
 
   async create(data: {
     type: ApprovalType;
@@ -54,42 +272,47 @@ export class ApprovalsRepository {
   }
 
   async findPending() {
+    this.expirePairings();
     return this.db.select().from(approvals).where(eq(approvals.status, "pending"));
   }
 
   async findByType(type: ApprovalType) {
+    this.expirePairings();
     return this.db.select().from(approvals).where(eq(approvals.type, type));
   }
 
   async findById(id: string) {
+    this.expirePairings();
     const rows = await this.db.select().from(approvals).where(eq(approvals.id, id));
     return rows[0] ?? null;
   }
 
-  async approve(id: string, resolvedBy: string = "guardian") {
-    const rows = await this.db
-      .update(approvals)
-      .set({
-        status: "approved",
-        resolvedAt: new Date(),
-        resolvedBy,
-      })
-      .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
-      .returning();
-    return rows.length > 0;
+  async approve(id: string, resolvedBy = "guardian") {
+    const existing = await this.findById(id);
+    if (existing && pairingPayload(existing))
+      return (await this.resolvePending(id, "approve", resolvedBy)).outcome === "resolved";
+    return (
+      this.db
+        .update(approvals)
+        .set({ status: "approved", resolvedAt: new Date(), resolvedBy })
+        .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
+        .returning()
+        .all().length > 0
+    );
   }
 
-  async reject(id: string, resolvedBy: string = "guardian") {
-    const rows = await this.db
-      .update(approvals)
-      .set({
-        status: "rejected",
-        resolvedAt: new Date(),
-        resolvedBy,
-      })
-      .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
-      .returning();
-    return rows.length > 0;
+  async reject(id: string, resolvedBy = "guardian") {
+    const existing = await this.findById(id);
+    if (existing && pairingPayload(existing))
+      return (await this.resolvePending(id, "reject", resolvedBy)).outcome === "resolved";
+    return (
+      this.db
+        .update(approvals)
+        .set({ status: "rejected", resolvedAt: new Date(), resolvedBy })
+        .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
+        .returning()
+        .all().length > 0
+    );
   }
 
   async resolvePending(
@@ -102,6 +325,10 @@ export class ApprovalsRepository {
       return { outcome: "not_found" };
     }
 
+    if (pairingPayload(existing)) {
+      if (resolvedBy === "guardian") throw new Error("Pairing requires an accountable actor");
+      return this.resolvePairing(id, action, resolvedBy, "web");
+    }
     const nextStatus = action === "approve" ? "approved" : "rejected";
     const shouldQueueExecution = action === "approve" && existing.type === "action_execution";
 

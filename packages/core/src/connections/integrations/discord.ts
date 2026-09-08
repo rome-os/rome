@@ -27,7 +27,6 @@ import type {
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
-import { SetupAbortError } from "../setup/session.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
@@ -134,22 +133,6 @@ export interface DiscordDeps {
     token: string,
     signal?: AbortSignal,
   ) => Promise<{ botId: string; botUsername: string }>;
-  /**
-   * Injectable guardian-link probe for the setup. Opens a TEMPORARY
-   * gateway on the PENDING (unconferred) token — never the real adapter — and
-   * resolves with the id of the guardian who sends the one-time `code` back to
-   * the bot, so the mapping lands in the same terminal write as the credential.
-   * Must honor the abort signal (cancel interrupts the wait promptly).
-   * Production uses a throwaway discord.js client; tests inject a fake.
-   */
-  waitForGuardianLink?: (
-    token: string,
-    code: string,
-    signal: AbortSignal,
-  ) => Promise<{ channelUserId: string }>;
-  /** Injectable one-time guardian-link code generator (defaults to a random
-   *  six-digit code); tests inject a fixed value. */
-  generateVerificationCode?: () => string;
 }
 
 /** Default `users/@me` probe: a non-ok response means the token is refused. */
@@ -179,93 +162,11 @@ async function pingDiscordIdentity(
   return { botId: data.id, botUsername: data.username };
 }
 
-/**
- * Default guardian-link probe: a throwaway discord.js client logged in on the
- * pending token. It resolves with the author of the first non-bot message whose
- * text is the expiring one-time `code` shown in the dashboard — NOT merely the
- * first person to message the bot. Requiring the code closes the shared-guild
- * hole where any member could race the real guardian and win the guardian
- * mapping; a member who cannot see the dashboard code cannot forge the proof.
- * Non-matching messages are ignored and the wait continues. The client is
- * always destroyed, and the wait is cancellable via the abort signal (the setup
- * runtime also races the abort, so a hung gateway never wedges a cancel).
- */
-/**
- * The guardian-link security gate: a message proves its sender is the guardian
- * ONLY when it comes from a non-bot author and its text is exactly the
- * one-time `code` shown in the dashboard. Extracted as a pure predicate so
- * the shared-guild race defense is unit-tested without a live gateway.
- */
-export function isGuardianLinkMessage(
-  msg: { author?: { bot?: boolean; id?: string }; content?: string },
-  code: string,
-): boolean {
-  if (!msg.author || msg.author.bot) return false;
-  return typeof msg.content === "string" && msg.content.trim() === code;
-}
-
-export async function waitForDiscordGuardianLink(
-  token: string,
-  code: string,
-  signal: AbortSignal,
-): Promise<{ channelUserId: string }> {
-  const { Client, GatewayIntentBits, Partials } = await import("discord.js");
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.DirectMessages,
-    ],
-    partials: [Partials.Channel],
-  });
-  try {
-    const channelUserId = await new Promise<string>((resolve, reject) => {
-      if (signal.aborted) return reject(new SetupAbortError());
-      const onAbort = (): void => reject(new SetupAbortError());
-      signal.addEventListener("abort", onAbort, { once: true });
-      client.on("messageCreate", (msg) => {
-        // Wrong-code / bot messages are ignored and the loop continues; only the
-        // guardian's code-bearing message resolves.
-        if (!isGuardianLinkMessage(msg, code)) return;
-        signal.removeEventListener("abort", onAbort);
-        resolve(msg.author.id);
-      });
-      client.login(token).catch(reject);
-    });
-    return { channelUserId };
-  } finally {
-    await client.destroy().catch(() => {});
-  }
-}
-
-/** A random six-digit guardian-link code, matching the telegram/feishu pattern. */
-function sixDigitCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-/**
- * Build the Discord conferral setup. A linear coroutine:
- *   1. prompt the bot token (re-prompt on a refused token, carrying the error),
- *   2. probe it (`users/@me`) for the bot identity,
- *   3. show the guardian-link instructions,
- *   4. `ctx.step` — wait for the guardian to message the bot (probe on the
- *      pending token), then
- *   5. return the terminal conferral: credential + profile + guardian mapping.
- * The runtime performs the single durable write from the returned conferral.
- */
 export function makeDiscordSetup(deps: {
   probeBotIdentity: (
     token: string,
     signal?: AbortSignal,
   ) => Promise<{ botId: string; botUsername: string }>;
-  waitForGuardianLink: (
-    token: string,
-    code: string,
-    signal: AbortSignal,
-  ) => Promise<{ channelUserId: string }>;
-  /** Mints the one-time guardian-link code shown in the dashboard. */
-  generateCode: () => string;
 }): SetupFn {
   return async (interact, ctx) => {
     let error: string | undefined;
@@ -310,35 +211,17 @@ export function makeDiscordSetup(deps: {
       }
     }
 
-    // Mint a one-time code the guardian must send to the bot. Binding is gated
-    // on this proof (see waitForDiscordGuardianLink) so a shared-guild member
-    // cannot race the guardian by simply messaging the bot first.
-    const code = deps.generateCode();
-    interact.show({
-      title: "Link your account",
-      body: [
-        `Your bot @${identity.botUsername} is verified.`,
-        "To finish linking your account as guardian, send this exact code to the bot in Discord:",
-        code,
-      ],
-      steps: [{ text: `Send ${code} to your bot in Discord` }],
-      progress: true,
-    });
-
-    const { channelUserId } = await ctx.step("discord-guardian-link", (signal) =>
-      deps.waitForGuardianLink(token, code, signal),
-    );
-
     const profile =
       discordProfileFromSettings({ botId: identity.botId, botUsername: identity.botUsername }) ??
       undefined;
     return {
       credential: { material: { token }, expiresAt: "never" },
       profile,
-      guardianChannelUserId: channelUserId,
       summary: {
         title: "Discord connected",
-        body: [`@${identity.botUsername} is live and your account is linked as guardian.`],
+        body: [
+          `@${identity.botUsername} is live. Send it a private message, then approve your account in Settings → Connections or Activity.`,
+        ],
       },
     };
   };
@@ -352,19 +235,13 @@ export function makeDiscordSetup(deps: {
 export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
   const validateToken = deps.validateToken ?? pingDiscordToken;
   const probeBotIdentity = deps.probeBotIdentity ?? pingDiscordIdentity;
-  const waitForGuardianLink = deps.waitForGuardianLink ?? waitForDiscordGuardianLink;
-  const generateCode = deps.generateVerificationCode ?? sixDigitCode;
 
   const botScheme = tokenPaste({
     label: "Discord bot token",
     instructions: "Paste the bot token from the Discord Developer Portal.",
     validate: validateToken,
   });
-  // The Discord conferral setup: prompt the bot token, probe it,
-  // present the guardian-link instructions, then wait (inside the setup, on
-  // the PENDING token) for the guardian to message the bot before the single
-  // terminal write of credential + profile + guardian mapping.
-  botScheme.setup = makeDiscordSetup({ probeBotIdentity, waitForGuardianLink, generateCode });
+  botScheme.setup = makeDiscordSetup({ probeBotIdentity });
 
   return {
     service: "discord",

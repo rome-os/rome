@@ -284,11 +284,6 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       signal: AbortSignal;
       onQrCode: (qr: { url: string; qrDataUrl: string | null; expiresAt: string | null }) => void;
     }) => Promise<FeishuPendingMaterial>;
-    waitForGuardianLink?: (
-      m: FeishuPendingMaterial,
-      code: string,
-      signal: AbortSignal,
-    ) => Promise<{ channelUserId: string }>;
   }
 
   function feishuDeps(fakes: FeishuFakes, personRepo: unknown) {
@@ -309,9 +304,6 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       registerAgentApp:
         fakes.registerAgentApp ??
         (async () => ({ appId: "cli_minted", appSecret: "minted", domain: "feishu" as const })),
-      waitForGuardianLink:
-        fakes.waitForGuardianLink ?? (async () => ({ channelUserId: "ou_guardian" })),
-      generateVerificationCode: () => "424242",
     });
   }
 
@@ -326,14 +318,8 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     };
   }
 
-  it("manual mode: prompts, probes, links the guardian, and confers in one terminal write", async () => {
-    let resolveLink!: (v: { channelUserId: string }) => void;
-    const { app, registry, personRepo } = feishuHarness({
-      waitForGuardianLink: () =>
-        new Promise<{ channelUserId: string }>((res) => {
-          resolveLink = res;
-        }),
-    });
+  it("manual mode: validates and confers credentials without a guardian mapping", async () => {
+    const { app, registry, personRepo } = feishuHarness({});
 
     const startRes = await app.request("/connections/feishu/grants/app/setup", {
       method: "POST",
@@ -347,31 +333,14 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     const afterMode = await feed(app, cid, { mode: "manual", domain: "lark" });
     expect(afterMode.state.status).toBe("awaiting-input");
     const afterCreds = await feed(app, cid, { appId: "cli_abc", appSecret: "shh" });
-    // Guardian-link wait: the one-time code is in the presented payload.
-    expect(afterCreds.state.status).toBe("presenting");
-    expect(afterCreds.state.view?.body).toContain("424242");
+    expect(afterCreds.state.status).toBe("done");
 
-    // Nothing durable before the terminal conferral.
-    expect(registry.find("feishu")).toHaveLength(0);
-
-    resolveLink({ channelUserId: "ou_guardian" });
-    await rs.waitFor(async () => {
-      const poll = await app.request(`/setups/${cid}`);
-      expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
-    });
-
-    // One terminal write: credential + profile landed and the guardian mapped.
     const conn = registry.find("feishu")[0];
     expect(conn).toBeDefined();
     const grant = await registry.getLedger().getGrant(conn.id, "app");
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ appId: "cli_abc", domain: "lark", appType: "manual" });
-    expect(personRepo.writeChannelMapping).toHaveBeenCalledWith(
-      expect.anything(),
-      "guardian",
-      "feishu",
-      "ou_guardian",
-    );
+    expect(personRepo.writeChannelMapping).not.toHaveBeenCalled();
   });
 
   it("agent-ready mode: presents the QR mid-step and confers the minted credential", async () => {
