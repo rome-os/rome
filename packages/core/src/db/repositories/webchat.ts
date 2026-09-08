@@ -819,8 +819,8 @@ export class WebChatRepository {
     // parent; rolling the whole set back together closes that window. The
     // recursion is only one level deep — the parent branch passes no
     // parentThreadId — so the parent ensure is inlined here rather than
-    // reopening (and nesting) a transaction. findChannelConversation stays out:
-    // its read must be on `tx`, so the lookup is issued inline instead.
+    // reopening (and nesting) a transaction. The lookup runs on `tx`, so it is
+    // issued inline as a local closure rather than through a separate method.
     return this.db.transaction((tx) => {
       const lookup = (threadId: string): { id: string; agentName: string | null } | null =>
         tx
@@ -1184,24 +1184,6 @@ export class WebChatRepository {
           isNull(romeAgentMessages.contextInjectedTurnId),
         ),
       );
-  }
-
-  private async findChannelConversation(
-    channel: string,
-    threadId: string,
-  ): Promise<{ id: string; agentName: string | null } | null> {
-    const rows = await this.db
-      .select({ id: romeSessions.id, agentName: romeSessions.agentName })
-      .from(romeSessions)
-      .where(
-        and(
-          eq(romeSessions.type, "channel"),
-          eq(romeSessions.sourceChannel, channel),
-          eq(romeSessions.sourceThreadId, threadId),
-        ),
-      )
-      .limit(1);
-    return rows[0] ?? null;
   }
 
   async deleteSession(id: string) {
