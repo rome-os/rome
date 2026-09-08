@@ -164,6 +164,8 @@
     "addApp": "App",
     "back": "Back",
     "noApps": "No apps available",
+    "searchWidgets": "Search widgets",
+    "noWidgetMatches": "No widgets match “{{query}}”.",
     "newChat": "New chat",
     "orPickSession": "or pick an existing session"
   },
