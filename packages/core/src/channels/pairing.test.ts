@@ -148,6 +148,9 @@ describe("channel pairing approvals", () => {
     };
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][2].text).toContain(
+      `Learn more in the [pairing guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
+    );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     const request = (await repo.findPending())[0];

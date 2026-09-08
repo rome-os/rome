@@ -8,7 +8,9 @@ import { isPairingCodeMessage } from "./pairing-code.js";
 const log = createLogger("channel-pairing");
 const SUCCESS = "Your account is paired with Rome. Please send your original message again.";
 const GUIDANCE =
-  "Your message was not delivered. Ask the guardian to approve your account in Settings → Connections (or Activity), or send the verification code shown there in a private message to this bot. Group messages cannot verify a pairing code.";
+  "Pair your account using either option:\n\n" +
+  "- Ask the guardian to approve it in `Settings` → `Connections`.\n" +
+  "- Send the verification code to this bot (in a private chat).";
 
 export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
@@ -21,6 +23,7 @@ export function createPairingAdmission(deps: {
     router: TalkRouter,
   ): Promise<boolean> => {
     if (service !== "telegram" && service !== "discord" && service !== "feishu") return true;
+    const guidance = `${GUIDANCE}\n\nLearn more in the [pairing guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
@@ -31,7 +34,7 @@ export function createPairingAdmission(deps: {
             displayName: message.senderDisplayName ?? message.senderId,
           });
           if (request?.guide)
-            await router.send(connectionId, message.conversationId, { text: GUIDANCE });
+            await router.send(connectionId, message.conversationId, { text: guidance });
           return false;
         }
         const result = deps.approvalsRepo.verifyPairing({
@@ -65,7 +68,7 @@ export function createPairingAdmission(deps: {
         ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
       });
       if (request?.guide) {
-        await router.send(connectionId, message.conversationId, { text: GUIDANCE });
+        await router.send(connectionId, message.conversationId, { text: guidance });
         log.info("pairing guidance sent", { approvalId: request.approval.id, connectionId });
       }
       return false;
