@@ -253,13 +253,7 @@ const RowView = memo(function RowView({
   // Running turn: its persisted trace isn't written yet, so the live trace button
   // carries it. Settled turn: its stored trace.
   const subtitle = live ? (
-    <CollapsedTraceButton
-      summary={live.snapshot?.summary}
-      segments={live.snapshot?.segments}
-      onClick={onOpenLiveTrace}
-      live
-      compact
-    />
+    <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live compact />
   ) : row.trace ? (
     renderTrace(row.trace, onOpenStoredTrace)
   ) : undefined;
@@ -394,7 +388,6 @@ function StandaloneLiveTail({
       subtitle={
         <CollapsedTraceButton
           summary={live.snapshot?.summary}
-          segments={live.snapshot?.segments}
           onClick={onOpenLiveTrace}
           live
           compact

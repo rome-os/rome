@@ -195,25 +195,6 @@
   }
 }
 
-/* Standalone live-activity dot: the same breathing dot as the caret, but a real
-   element instead of a tail pseudo-element. Shown when the turn is streaming yet
-   has no text to ride on — between text blocks, during a tool call, or before
-   the first token — so "the turn is still working" never goes dark. */
-.rome-live-activity-dot {
-  display: inline-block;
-  width: 0.45em;
-  height: 0.45em;
-  border-radius: var(--rome-radius-full);
-  background: var(--info);
-  animation: rome-activity-breathe 1.6s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rome-live-activity-dot {
-    animation: none;
-  }
-}
-
 @keyframes rome-sheet-rise {
   from {
     transform: translateY(100%);
@@ -515,41 +496,11 @@
   }
 }
 
-@keyframes rome-trace-ripple {
-  0% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-
-  100% {
-    transform: scale(1.7);
-    opacity: 0;
-  }
-}
-
-.rome-trace-icon-ripple {
-  position: relative;
-}
-
-.rome-trace-icon-ripple::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 1.5px solid var(--color-border-strong);
-  animation: rome-trace-ripple 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
-  pointer-events: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .shimmer {
     animation: none;
     background-image: none;
     -webkit-text-fill-color: currentColor;
-  }
-
-  .rome-trace-icon-ripple::before {
-    display: none;
   }
 }
 
