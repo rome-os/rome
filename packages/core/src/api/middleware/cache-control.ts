@@ -13,17 +13,19 @@ import type { MiddlewareHandler } from "hono";
  * handler left the header unset. Note this middleware is mounted on the `/api`
  * sub-app only, so root-mounted static surfaces such as
  * `/app-assets/:appId/:version/*` and the dashboard shell are untouched.
+ *
+ * We set the default through `c.header(...)` rather than mutating
+ * `c.res.headers` directly: app API handlers under `/api/apps/*` and
+ * `/api/app-api/*` can return a raw `fetch()` result or `Response.redirect()`,
+ * whose headers are immutable and reject an in-place `set()`. Hono's `c.header`
+ * re-wraps a finalized response in a fresh `Response` with mutable headers, so
+ * the default still applies to those responses instead of being silently lost.
  */
 export function defaultApiCacheControl(): MiddlewareHandler {
   return async (c, next) => {
     await next();
-    if (c.res && !c.res.headers.has("Cache-Control")) {
-      try {
-        c.res.headers.set("Cache-Control", "no-store");
-      } catch {
-        // Some responses (e.g. certain redirects) expose immutable headers.
-        // A missing default is acceptable; never let it break the response.
-      }
+    if (!c.res.headers.has("Cache-Control")) {
+      c.header("Cache-Control", "no-store");
     }
   };
 }
