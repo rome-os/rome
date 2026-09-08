@@ -1008,16 +1008,10 @@ importers:
       react:
         specifier: 19.2.6
         version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
     devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
 
   rome_apps/coding:
     dependencies:
@@ -1119,16 +1113,10 @@ importers:
       react:
         specifier: 19.2.6
         version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
     devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
 
   rome_apps/inbox:
     dependencies:
@@ -1141,16 +1129,10 @@ importers:
       react:
         specifier: 19.2.6
         version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
     devDependencies:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
 
   rome_apps/recap:
     dependencies:
@@ -1329,9 +1311,6 @@ importers:
       react:
         specifier: 19.2.6
         version: 19.2.6
-      react-dom:
-        specifier: 19.2.6
-        version: 19.2.6(react@19.2.6)
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1339,9 +1318,6 @@ importers:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.15)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.6.2
