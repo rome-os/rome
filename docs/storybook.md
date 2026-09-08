@@ -13,7 +13,6 @@ The default port is 6006. Use `pnpm storybook --port 6007` for a second instance
 An occupied port fails with an error instead of selecting another port or prompting.
 The local development command uses `--no-open` to prevent automatic browser launch while retaining interactive prompts.
 For CI, add `--ci` explicitly with `pnpm storybook --ci`.
-When debugging through Codex, prefer its built-in browser.
 
 The stable story ID is `dev-design-styleguide--default`.
 The [direct iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) omits the manager UI.
@@ -53,6 +52,7 @@ The page's token groups and component examples are curated lists, so adding a ne
 [`rsbuild.config.ts`](../packages/web/.storybook/rsbuild.config.ts) resolves UI and web-content imports to workspace source, including package barrels and subpaths.
 Edit `packages/ui/src` or `packages/web-content/src` while Storybook runs to receive HMR.
 No package rebuild or server restart is required.
+Aliases are generated from each package's `exports`, mapping compiled JavaScript entries to their TypeScript sources and preserving CSS targets.
 Published package exports stay unchanged.
 Theme context lives in a separate module so changing palette definitions does not recreate its identity during HMR.
 Shared UI CSS registers its component sources through `@source`, and the preview uses the dashboard PostCSS configuration.
@@ -63,7 +63,7 @@ The style guide requires no API fixtures.
 Storybook configuration and story wrappers live outside the dashboard source tree.
 The existing `/dev` routes stay available for their current callers.
 
-The selected versions are `storybook-react-rsbuild` 3.4.2 and Storybook 10.6.0, with the workspace Rsbuild 2.2.3 and React 19.2.6 pins.
+See the [web package manifest](../packages/web/package.json) for Storybook dependencies and the [workspace catalog](../pnpm-workspace.yaml) for shared version pins.
 See the [framework configuration guide](https://storybook.rsbuild.rs/guide/configuration) for builder options.
 
 Initial measurements and verification evidence are recorded in [PR #273](https://github.com/rome-os/rome/pull/273).

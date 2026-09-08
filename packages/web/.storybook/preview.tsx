@@ -7,8 +7,10 @@ import "../src/globals.css";
 injectThemeCss();
 
 function ColorMode({ mode, children }: { mode: ThemePreference; children: ReactNode }) {
-  const { setPreference } = useTheme();
-  useLayoutEffect(() => setPreference(mode), [mode, setPreference]);
+  const { preference, setPreference } = useTheme();
+  useLayoutEffect(() => {
+    if (preference !== mode) setPreference(mode);
+  }, [mode, preference, setPreference]);
   return children;
 }
 
