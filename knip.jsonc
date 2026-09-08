@@ -1,0 +1,165 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+
+  // Dead-code analysis for the whole workspace. Knip walks the import graph
+  // from a set of entry points and reports what nothing reaches. Everything
+  // here exists because Rome reaches code through a mechanism knip cannot
+  // read: an `app.yaml` manifest, an oclif command directory, or a worker the
+  // runtime spawns by path.
+  "ignore": [
+    // Extensions to the vendored OpenCLI fork, loaded by that CLI's own plugin
+    // system at runtime. Nothing in this repo imports them. See
+    // opencli-plugins/README.md.
+    "opencli-plugins/**",
+    // Agent skills. Their scripts are invoked by an agent reading SKILL.md, so
+    // nothing imports them.
+    ".claude/**",
+    // Browser-side scripts delivered by a <script> tag, not bundled.
+    "packages/cdp-client/public/**",
+    "packages/web/public/**",
+    "packages/web/mock/public/**",
+    // Scaffolding copied into a new app's directory by `rome init`. It is a
+    // template, so its imports resolve against the generated app's manifest
+    // rather than this workspace.
+    "packages/app-template/template/**",
+    "packages/app-template/workflow/**"
+  ],
+
+  // Host tools the runtime shells out to, installed in the container image or
+  // on the operator's machine rather than as npm packages. `expo` is the
+  // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
+  // invokes it at root scope, where that dependency is out of view. Removing it
+  // here on the strength of the mobile dependency reintroduces the finding.
+  "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo"],
+
+  // Severity decides the exit code: only `error` counts, `warn` prints and
+  // passes. The export rules are `warn` because a barrel that re-exports a
+  // package's public API for apps and SDK consumers is indistinguishable, to
+  // knip, from one nothing reads. Promote them once those barrels are pruned.
+  //
+  // `pnpm lint:deadcode` passes `--max-issues N`, where N is the count of
+  // `error` findings on the day this landed. package.json carries N and is the
+  // only place that does, so lowering it is a single edit. N is a ceiling on
+  // the aggregate, not a per-finding baseline: one finding past N fails, so
+  // dead code added on its own blocks a PR, but a PR that adds one finding and
+  // removes another still totals N and passes, and a deletion that does not
+  // lower N leaves headroom for the next one. Comparing findings by identity
+  // against a checked-in baseline is the fix, tracked separately.
+  // Nothing is suppressed: `pnpm lint:deadcode:report` prints every category
+  // including the warnings.
+  "rules": {
+    "files": "error",
+    "dependencies": "error",
+    "devDependencies": "error",
+    "unlisted": "error",
+    "unresolved": "error",
+    "binaries": "error",
+    "duplicates": "warn",
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn",
+    "enumMembers": "warn",
+    "namespaceMembers": "warn",
+    "optionalPeerDependencies": "warn",
+    "catalog": "warn",
+    "catalogReferences": "warn",
+    "cycles": "warn"
+  },
+
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.{mjs,ts,js}", "infra/**/*.test.mjs"],
+      // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
+      // which is an import knip can follow.
+      "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
+    },
+    "packages/core": {
+      "entry": [
+        // The action engine spawns these by resolved path, so no import
+        // reaches them. See packages/core/src/actions/engine.ts.
+        "src/actions/worker.ts",
+        "src/actions/worker-bootstrap.ts",
+        // oclif discovers commands by directory, named in package.json.
+        "src/apps/cli/commands/**/*.ts",
+        "src/bin/*.ts",
+        "src/apps/__fixtures__/**",
+        "drizzle.*.config.ts"
+      ]
+    },
+    "packages/web": {
+      // Knip 6.34's rstest plugin throws on the object form of
+      // `testEnvironment`, which this workspace and packages/ui both use.
+      // Upstream issue 2009. Declaring the test files by hand covers what the
+      // plugin would have contributed.
+      "rstest": false,
+      "entry": [
+        "src/**/*.test.{ts,tsx}",
+        "src/test/setup.ts",
+        "rstest.config.mts",
+        "mock/main.tsx",
+        "mock/rsbuild.config.ts",
+        // The desktop VNC suite reaches both of these through a string, not an
+        // import: playwright.desktop-vnc.config.ts names the rsbuild config in
+        // its `webServer.command`, and that config swaps @novnc/novnc for
+        // fake-rfb.ts through a `resolve.alias` built with fileURLToPath.
+        "desktop-vnc-e2e/rsbuild.config.ts",
+        "desktop-vnc-e2e/fake-rfb.ts"
+      ]
+    },
+    "packages/ui": {
+      // Same rstest plugin crash as packages/web.
+      "rstest": false,
+      "entry": ["src/**/*.test.{ts,tsx}", "src/test/setup.ts", "rstest.config.mts"]
+    },
+    "packages/desktop": {
+      "entry": ["src/preload/index.ts", "src/**/*.test.ts", "build/*.mjs", "scripts/*.mjs"],
+      // Built by a `pnpm --filter` step in this package's own build script,
+      // never imported.
+      "ignoreDependencies": ["rome-desktop-base-web"]
+    },
+    "packages/mobile": {
+      // The expo plugin evaluates app.config.js, which reads a native build
+      // variable that is absent outside an EAS build.
+      "expo": false,
+      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"]
+    },
+    "packages/lib": { "entry": ["src/**/*.test.ts"] },
+    "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
+    "packages/app-web-sdk": {
+      // bin/rome.js reaches the CLI through a dynamic import of the compiled
+      // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless
+      // dist/ happens to be built. Naming the source entry keeps the count the
+      // same whether or not the workspace has been built.
+      "entry": ["src/cli/index.ts", "src/**/*.test.ts"]
+    },
+
+    // An app's manifest, not its imports, decides what the runtime loads. Each
+    // pattern below mirrors a key in `app.yaml` — see rome_apps/CLAUDE.md.
+    // These are globs over the shape of a manifest, not reads of one, so a
+    // directory that matches the shape counts as an entry even when no
+    // `app.yaml` lists it: an action dropped from a manifest goes quiet here
+    // rather than being reported. Deriving the entries from each manifest is
+    // tracked separately.
+    "rome_apps/*": {
+      "entry": [
+        "src/web/App.tsx",
+        "src/api/index.ts",
+        "src/actions/*/index.ts",
+        "src/hooks/*/index.ts",
+        "src/skills/**",
+        "src/**/*.test.{ts,tsx}",
+        "scripts/**",
+        "rslib.config.mjs"
+      ]
+    },
+    "example_apps/*": {
+      "entry": [
+        "src/web/App.tsx",
+        "src/api/index.ts",
+        "src/actions/*/index.ts",
+        "src/hooks/*/index.ts"
+      ]
+    }
+  }
+}

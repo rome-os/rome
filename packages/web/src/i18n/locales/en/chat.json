@@ -15,6 +15,7 @@
     "openSidebar": "Open sidebar"
   },
   "navbar": {
+    "sessionModel": "Session model: {{model}}",
     "add": "Add widget",
     "addShort": "Add widget",
     "more": "More actions",

@@ -3,20 +3,22 @@ import {
   accountMatchesQuery,
   compareCodePoints,
   compareDisplayNames,
-  compareTimelineEntries,
   comparePeople,
   encodeStreamCursor,
   latestDynamic,
   normalizeBondLevel,
   parseStreamCursor,
-  parseTimelineCursor,
   personMatchesQuery,
-  timelineCursor,
   type StreamCursor,
   type DirectoryAccount,
   type PersonResource,
-  type TimelineEntry,
 } from "@rome/api-types/people";
+import {
+  compareMessages,
+  messageCursor,
+  parseMessageCursor,
+  type Message,
+} from "@rome/api-types/message";
 import { protectedPersonReason, STRANGER_PERSON_ID } from "@rome/api-types/persons";
 
 // The rules `@rome/api-types/people` holds that both ends have to agree on,
@@ -31,7 +33,7 @@ import { protectedPersonReason, STRANGER_PERSON_ID } from "@rome/api-types/perso
 // those show up as a failure in the surface that calls them, only as a wrong
 // answer.
 
-const entry = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
+const entry = (over: Partial<Message> = {}): Message => ({
   source: "whatsapp",
   timestamp: 100,
   body: null,
@@ -63,29 +65,29 @@ const account = (
 describe("timeline cursor", () => {
   it("round-trips a source and a ref carrying the separator", () => {
     const tricky = entry({ source: "app|notes", ref: "chat|1:msg|2" });
-    const parsed = parseTimelineCursor(timelineCursor(tricky));
+    const parsed = parseMessageCursor(messageCursor(tricky));
 
     expect(parsed?.source).toBe("app|notes");
     expect(parsed?.ref).toBe("chat|1:msg|2");
     // The decoded position has to compare equal to the entry it names, or the
     // next page resumes somewhere no entry sits.
-    expect(compareTimelineEntries(parsed as TimelineEntry, tricky)).toBe(0);
+    expect(compareMessages(parsed as Message, tricky)).toBe(0);
   });
 
   it("keeps two entries whose separators would otherwise collide apart", () => {
     const a = entry({ source: "a|b", ref: "r" });
     const b = entry({ source: "a", ref: "b|r" });
 
-    expect(timelineCursor(a)).not.toBe(timelineCursor(b));
-    expect(compareTimelineEntries(a, b)).not.toBe(0);
+    expect(messageCursor(a)).not.toBe(messageCursor(b));
+    expect(compareMessages(a, b)).not.toBe(0);
   });
 
   it("rejects a value that is not a cursor", () => {
-    expect(parseTimelineCursor("100|inbound|whatsapp")).toBeNull();
-    expect(parseTimelineCursor("100|sideways|whatsapp|r1")).toBeNull();
-    expect(parseTimelineCursor("|inbound|whatsapp|r1")).toBeNull();
-    expect(parseTimelineCursor("100|inbound|whatsapp|")).toBeNull();
-    expect(parseTimelineCursor("%E0%A4%A|inbound|whatsapp|r1")).toBeNull();
+    expect(parseMessageCursor("100|inbound|whatsapp")).toBeNull();
+    expect(parseMessageCursor("100|sideways|whatsapp|r1")).toBeNull();
+    expect(parseMessageCursor("|inbound|whatsapp|r1")).toBeNull();
+    expect(parseMessageCursor("100|inbound|whatsapp|")).toBeNull();
+    expect(parseMessageCursor("%E0%A4%A|inbound|whatsapp|r1")).toBeNull();
   });
 });
 
@@ -125,7 +127,7 @@ describe("orderings are total", () => {
     expect("é".localeCompare("e\u0301")).toBe(0);
     expect(compareCodePoints("é", "e\u0301")).not.toBe(0);
 
-    expect(compareTimelineEntries(entry({ ref: "é" }), entry({ ref: "e\u0301" }))).not.toBe(0);
+    expect(compareMessages(entry({ ref: "é" }), entry({ ref: "e\u0301" }))).not.toBe(0);
   });
 
   it("separates two people whose names differ only by normalization", () => {
@@ -140,7 +142,7 @@ describe("orderings are total", () => {
     const inbound = entry({ direction: "inbound", ref: "msg" });
     const reply = entry({ direction: "outbound", ref: "msg:reply" });
 
-    expect(compareTimelineEntries(reply, inbound)).toBeLessThan(0);
+    expect(compareMessages(reply, inbound)).toBeLessThan(0);
   });
 });
 
@@ -197,7 +199,7 @@ describe("what a search matches", () => {
 });
 
 describe("latestDynamic", () => {
-  const said = (over: Partial<TimelineEntry> = {}) => entry({ body: "hello", ...over });
+  const said = (over: Partial<Message> = {}) => entry({ body: "hello", ...over });
 
   it("projects the head of the ordering, whatever it is", () => {
     // One definition of "newest". A second comparison would settle a same-second
@@ -205,7 +207,7 @@ describe("latestDynamic", () => {
     // opened on another.
     const inbound = said({ source: "telegram", direction: "inbound", ref: "a" });
     const outbound = said({ source: "whatsapp", direction: "outbound", ref: "b" });
-    const ordered = [inbound, outbound].sort(compareTimelineEntries);
+    const ordered = [inbound, outbound].sort(compareMessages);
 
     expect(latestDynamic(ordered)).toEqual({
       source: ordered[0].source,

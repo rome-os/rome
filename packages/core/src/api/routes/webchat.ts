@@ -2134,7 +2134,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    const runtimeSession = await deps.sessionManager.findReusableSession(
+      buildWebchatChannelThreadKey(
+        sessionId,
+        resolveStoredModelSelection(session.largeModelSelection),
+      ),
+      session.agentName ?? "main",
+    );
+    return c.json({
+      ...toWebchatSessionResponse(session, messageCount),
+      model: runtimeSession?.model ?? null,
+    });
   });
 
   app.delete("/chat/sessions/:id", async (c) => {

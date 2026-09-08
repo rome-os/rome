@@ -10,7 +10,7 @@
 // answers concurrent `resolve` calls from a single shared load.
 
 import { sql, type SQL } from "drizzle-orm";
-import type { TimelineEntry } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import type { DrizzleDb } from "../db/index.js";
 import type {
   ConversationRead,
@@ -119,7 +119,7 @@ export function sqlMessages(options: SqlMessagesOptions): Messages {
   const byAccount = batched<Job, JobResult>((jobs) => runBatch(options, "account", jobs));
   const byConversation = batched<Job, JobResult>((jobs) => runBatch(options, "conversation", jobs));
 
-  const job = (accounts: readonly MessageAccount[], after: TimelineEntry | null, limit: number) =>
+  const job = (accounts: readonly MessageAccount[], after: Message | null, limit: number) =>
     byAccount({ keys: accountKeys(accounts, options.channel), after, limit });
 
   return {
@@ -192,12 +192,12 @@ export function keysIn(scope: readonly MessageScopeKey[]): string[] {
  *  wants the length of a history and none of it. */
 interface Job {
   keys: readonly MessageScopeKey[];
-  after: TimelineEntry | null;
+  after: Message | null;
   limit: number;
 }
 
 interface JobResult {
-  entries: TimelineEntry[];
+  entries: Message[];
   /** The length of the job's whole history — meaningful for a job with no
    *  cursor, which is every job `count` raises. */
   total: number;
@@ -325,7 +325,7 @@ function askRow(index: number, job: Job): SQL {
 
 /**
  * The rows that fall strictly after a job's cursor, in the order the window's
- * ORDER BY imposes — which is `compareTimelineEntries` read as SQL.
+ * ORDER BY imposes — which is `compareMessages` read as SQL.
  *
  * The whole tuple, not `at < c_at`: a second holds more than one entry, and
  * resuming from the bare timestamp drops the rest of that second.
@@ -346,7 +346,7 @@ const AFTER_CURSOR = sql`
 function toEntry(
   row: Record<string, unknown>,
   body?: (raw: string | null) => string | null,
-): TimelineEntry {
+): Message {
   const raw = (row.body as string | null) ?? null;
   return {
     source: String(row.source),

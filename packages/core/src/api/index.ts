@@ -9,6 +9,7 @@ import { attachTerminalServer } from "../terminal-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
@@ -104,6 +105,11 @@ export function buildApp(
   // to derive a userId — the instance itself is the user. See
   // `scripts/generate-caddyfile.ts` for the edge-side enforcement.
   const api = new Hono();
+
+  // Dynamic API responses are mutable single-tenant state; default them to
+  // `Cache-Control: no-store` unless a route sets its own policy. Registered
+  // first so its post-handler pass runs last and can see the final headers.
+  api.use("*", defaultApiCacheControl());
 
   // Annotate-only (never gates): expose the request's session actor ambiently
   // so any action run during the request is stamped with who triggered it —

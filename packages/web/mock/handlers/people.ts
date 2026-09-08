@@ -6,11 +6,8 @@ import {
   STRANGER_PERSON_DISPLAY_NAME,
   STRANGER_PERSON_ID,
 } from "@rome/api-types/persons";
-import {
-  compareTimelineEntries,
-  whatsAppDisplayName,
-  type TimelineEntry,
-} from "@rome/api-types/people";
+import { whatsAppDisplayName } from "@rome/api-types/people";
+import { compareMessages, type Message } from "@rome/api-types/message";
 
 /**
  * The People tab's in-memory store: the curated people, the sentinel log, and
@@ -670,14 +667,14 @@ export interface AccountRef {
  * single line the sentinel recorded. Entries are generic — source, time, body,
  * direction, ref — so nothing here knows it is looking at WhatsApp.
  */
-export function personTimeline(personId: string): TimelineEntry[] | null {
+export function personTimeline(personId: string): Message[] | null {
   const channels = persons.find((person) => person.id === personId)?.channelMappings;
   return channels ? timelineForChannels(channels) : null;
 }
 
 /** One account's dynamics, newest first. Always an answer: an account Rome has
  *  never heard from has an empty history, not a missing one. */
-export function accountTimeline(ref: AccountRef): TimelineEntry[] {
+export function accountTimeline(ref: AccountRef): Message[] {
   return timelineForChannels([ref]);
 }
 
@@ -691,13 +688,13 @@ export function accountTimeline(ref: AccountRef): TimelineEntry[] {
  * to look the message up here and find it — the same comparison the route runs,
  * rather than a delivery bit someone remembered to set.
  */
-const deliveredEntries: (TimelineEntry & { channelUserId: string })[] = [];
+const deliveredEntries: (Message & { channelUserId: string })[] = [];
 
 /** Put a sent message where the timeline will find it. The `ref` is the one the
  *  outbox row is waiting on, which is what clears the row. */
 export function recordDelivered(
   account: AccountRef,
-  entry: Omit<TimelineEntry, "source" | "direction">,
+  entry: Omit<Message, "source" | "direction">,
 ): void {
   deliveredEntries.push({
     ...entry,
@@ -709,8 +706,8 @@ export function recordDelivered(
 
 /** One channel set's dynamics, newest first. The row's `latest` is this
  *  sequence's head, so the two cannot disagree about what happened last. */
-function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
+function timelineForChannels(channels: AccountRef[]): Message[] {
+  const entries: Message[] = [];
   for (const mapping of channels) {
     for (const sent of deliveredEntries) {
       if (sent.source !== mapping.channel || sent.channelUserId !== mapping.channelUserId) continue;
@@ -750,12 +747,12 @@ function timelineForChannels(channels: AccountRef[]): TimelineEntry[] {
     }
     entries.push(...sentinelEntriesFor(mapping));
   }
-  return entries.sort(compareTimelineEntries);
+  return entries.sort(compareMessages);
 }
 
 /** Every sentinel log row for one account, as timeline entries. */
-function sentinelEntriesFor(mapping: AccountRef): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
+function sentinelEntriesFor(mapping: AccountRef): Message[] {
+  const entries: Message[] = [];
   for (const sender of sentinelSenders) {
     if (sender.channel !== mapping.channel || sender.channelUserId !== mapping.channelUserId) {
       continue;

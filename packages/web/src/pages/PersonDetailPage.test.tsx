@@ -4,7 +4,8 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { OutboxMessage, TimelineEntry } from "@rome/api-types/people";
+import type { OutboxMessage } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import {
   countPeople,
   linkConflict,
@@ -90,7 +91,7 @@ const READ_ONLY_PERSON: PersonResource = {
   memoryPath: null,
 };
 
-const ENTRIES: TimelineEntry[] = [
+const ENTRIES: Message[] = [
   {
     source: "whatsapp",
     timestamp: NOW - 300,
@@ -165,9 +166,9 @@ interface FetchCall {
 function mockApi(
   options: {
     person?: PersonResource | "missing" | "fail";
-    entries?: TimelineEntry[] | "fail";
+    entries?: Message[] | "fail";
     nextCursor?: string | null;
-    older?: TimelineEntry[];
+    older?: Message[];
     people?: PersonResource[];
     accounts?: DirectoryAccount[];
     writes?: "fail";
@@ -197,7 +198,7 @@ function mockApi(
   // outbox, never both and never neither. Nothing here marks a row delivered —
   // it moves between the stores, and the reads report where it is.
   const outbox: OutboxMessage[] = [...(options.outbox ?? [])];
-  const delivered: TimelineEntry[] = [];
+  const delivered: Message[] = [];
   /** The channel took it and its mirror now holds it — which is what puts it on
    *  the timeline, and therefore what takes it out of the outbox. */
   const accept = (row: OutboxMessage) =>
@@ -485,14 +486,14 @@ describe("PersonDetailPage", () => {
     // entries would render twice, under keys React would then see twice.
     // Paging belongs to the query rather than to state kept here, so there is
     // no cursor to snap back — this is that, pinned.
-    const older: TimelineEntry = {
+    const older: Message = {
       source: "telegram",
       timestamp: NOW - 400_000,
       body: "first hello",
       direction: "inbound",
       ref: "sentinel:1",
     };
-    const arrival: TimelineEntry = {
+    const arrival: Message = {
       source: "whatsapp",
       timestamp: NOW - 5,
       body: "one more thing",
