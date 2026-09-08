@@ -31,29 +31,37 @@ export function findAddWidgetButton(): HTMLElement | null {
       document.querySelectorAll<HTMLButtonElement>("button[aria-label], button[title]"),
     ).find((b) => /widget/i.test(b.getAttribute("aria-label") || b.getAttribute("title") || ""));
   if (labelled) return labelled;
-  // 3. Cross-language fallback: the only menu-trigger button bearing a plus glyph
-  //    (the widget picker's "+"). Other menu triggers use different icons, so
-  //    scoping to a plus icon inside an `aria-haspopup="menu"` button is precise.
+  // 3. Cross-language fallback: the only popup-trigger button bearing a plus
+  //    glyph (the widget picker's "+"). Other popup triggers use different
+  //    icons, so scoping to a plus icon inside a popup trigger is precise. The
+  //    picker is a combobox, so its trigger announces `dialog`; other triggers
+  //    on the toolbar are menus.
   for (const b of Array.from(
-    document.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]'),
+    document.querySelectorAll<HTMLButtonElement>(
+      'button[aria-haspopup="dialog"], button[aria-haspopup="menu"]',
+    ),
   )) {
     if (b.querySelector("svg.lucide-plus")) return b;
   }
   return null;
 }
 
-/** The coach target: while the widget menu is open, point at its "Browser" item
+/** The coach target: while the widget picker is open, point at its "Browser" row
  *  (found by its Chrome icon, so it works cross-language); otherwise point at the
- *  "Add widget" (+) trigger. */
+ *  "Add widget" (+) trigger. The picker is a combobox — a listbox inside a
+ *  popover — so its rows are options; `menu`/`menuitem` stay in the selectors
+ *  because other Rome surfaces still open the same coach on a dropdown. */
+const WIDGET_ROW = '[role="option"], [role="menuitem"]';
+
 export function findWidgetCoachTarget(): HTMLElement | null {
-  const menu = document.querySelector('[role="menu"][data-state="open"]');
-  if (menu) {
+  const popup = document.querySelector(
+    '[role="dialog"][data-state="open"], [role="menu"][data-state="open"]',
+  );
+  if (popup) {
     const item =
-      menu.querySelector<HTMLElement>('[data-coach="widget-browser"]') ??
-      menu
-        .querySelector<HTMLElement>("svg.lucide-chrome")
-        ?.closest<HTMLElement>('[role="menuitem"]') ??
-      Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((el) =>
+      popup.querySelector<HTMLElement>('[data-coach="widget-browser"]') ??
+      popup.querySelector<HTMLElement>("svg.lucide-chrome")?.closest<HTMLElement>(WIDGET_ROW) ??
+      Array.from(popup.querySelectorAll<HTMLElement>(WIDGET_ROW)).find((el) =>
         /browser|desktop/i.test(el.textContent || ""),
       );
     if (item) return item;
