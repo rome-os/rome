@@ -23,8 +23,11 @@
     "packages/app-template/workflow/**"
   ],
 
-  // Host tools the runtime shells out to. They are installed in the container
-  // image or on the operator's machine, never as npm packages.
+  // Host tools the runtime shells out to, installed in the container image or
+  // on the operator's machine rather than as npm packages. `expo` is the
+  // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
+  // invokes it at root scope, where that dependency is out of view. Removing it
+  // here on the strength of the mobile dependency reintroduces the finding.
   "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo"],
 
   // Severity decides the exit code: only `error` counts, `warn` prints and
@@ -33,9 +36,13 @@
   // knip, from one nothing reads. Promote them once those barrels are pruned.
   //
   // `pnpm lint:deadcode` passes `--max-issues 39`, the number of `error`
-  // findings on the day this landed. The step fails at 40, so new dead code
-  // blocks a PR while the existing backlog does not. Deleting a finding means
-  // lowering that number by the same amount, which is what ratchets it down.
+  // findings on the day this landed. That is a ceiling on the aggregate count,
+  // not a per-finding baseline: it fails at 40, so dead code added on its own
+  // blocks a PR, but a PR that adds one finding and removes another still
+  // totals 39 and passes, and a deletion that does not lower the number leaves
+  // headroom for the next one. Walking it down is a manual edit. Comparing
+  // findings by identity against a checked-in baseline is the fix, tracked
+  // separately.
   // Nothing is suppressed: `pnpm lint:deadcode:report` prints every category
   // including the warnings.
   "rules": {
@@ -119,10 +126,21 @@
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
-    "packages/app-web-sdk": { "entry": ["src/**/*.test.ts"] },
+    "packages/app-web-sdk": {
+      // bin/rome.js reaches the CLI through a dynamic import of the compiled
+      // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless
+      // dist/ happens to be built. Naming the source entry keeps the count the
+      // same whether or not the workspace has been built.
+      "entry": ["src/cli/index.ts", "src/**/*.test.ts"]
+    },
 
     // An app's manifest, not its imports, decides what the runtime loads. Each
     // pattern below mirrors a key in `app.yaml` — see rome_apps/CLAUDE.md.
+    // These are globs over the shape of a manifest, not reads of one, so a
+    // directory that matches the shape counts as an entry even when no
+    // `app.yaml` lists it: an action dropped from a manifest goes quiet here
+    // rather than being reported. Deriving the entries from each manifest is
+    // tracked separately.
     "rome_apps/*": {
       "entry": [
         "src/web/App.tsx",

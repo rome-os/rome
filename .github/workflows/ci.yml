@@ -107,10 +107,10 @@ jobs:
 
       # Dead-code analysis. Knip resolves the import graph across every
       # workspace, so it needs the full install above and cannot move to a
-      # filtered job. The `--max-issues` count in the script is a ratchet over
+      # filtered job. The `--max-issues` count in the script is a ceiling over
       # the findings that already exist: the step passes at today's total and
-      # fails on the next one. knip.jsonc explains which rules it covers and
-      # how to lower the number.
+      # fails above it. knip.jsonc explains which rules it covers, what the
+      # ceiling does not catch, and how to lower the number.
       - run: pnpm lint:deadcode
 
       - run: pnpm typecheck
