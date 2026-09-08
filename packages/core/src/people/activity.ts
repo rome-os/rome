@@ -8,12 +8,8 @@
 // preview is the store's `latest`, which `Messages` binds to the head of the
 // history its `read` pages, and the number beside it is that history's `count`.
 
-import {
-  compareTimelineEntries,
-  latestDynamic,
-  type AccountDynamic,
-  type TimelineEntry,
-} from "@rome/api-types/people";
+import { latestDynamic, type AccountDynamic } from "@rome/api-types/people";
+import { compareMessages, type Message } from "@rome/api-types/message";
 import type { MessageAccount, Messages } from "../channels/messages.js";
 import { assignAccountHeads } from "./timeline.js";
 
@@ -43,7 +39,7 @@ export interface PeopleActivity {
   /** Each account's own newest entry, keyed by the account object passed in —
    *  the idiom `assignAccountHeads` uses, so a caller reads its answer back off
    *  the values it gave. Absent for an account no store holds. */
-  perAccount: Map<MessageAccount, TimelineEntry>;
+  perAccount: Map<MessageAccount, Message>;
 }
 
 /**
@@ -66,7 +62,7 @@ export async function readActivity(
 ): Promise<PeopleActivity> {
   const owned = await assignAccountHeads(stores, accountsByPerson.flat());
   const owner = new Map<MessageAccount, Messages>();
-  const perAccount = new Map<MessageAccount, TimelineEntry>();
+  const perAccount = new Map<MessageAccount, Message>();
   for (const [account, { store, head }] of owned) {
     owner.set(account, store);
     perAccount.set(account, head);
@@ -96,7 +92,7 @@ export async function readActivity(
     Promise.all(summaries.map((summary) => summary.store.latest(summary.accounts))),
   ]);
 
-  const activity = accountsByPerson.map(() => ({ heads: [] as TimelineEntry[], messageCount: 0 }));
+  const activity = accountsByPerson.map(() => ({ heads: [] as Message[], messageCount: 0 }));
   summaries.forEach((summary, index) => {
     const person = activity[summary.person];
     if (!person) return;
@@ -111,7 +107,7 @@ export async function readActivity(
       // order, so a person whose two accounts last spoke in the same second
       // previews the entry their merged timeline opens on rather than whichever
       // store the fold reached first.
-      latest: latestDynamic(person.heads.sort(compareTimelineEntries)),
+      latest: latestDynamic(person.heads.sort(compareMessages)),
       messageCount: person.messageCount,
     })),
     perAccount,

@@ -10,7 +10,8 @@
 // once, so no route can serve it by forgetting to.
 
 import { readdir } from "node:fs/promises";
-import type { AccountSendState, PersonResource, TimelineEntry } from "@rome/api-types/people";
+import type { AccountSendState, PersonResource } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getRelationshipDir, personProfileFileName, RELATIONSHIP_DIR } from "../profile-memory.js";
 import type { AccountNames } from "../channels/account-names.js";
@@ -150,7 +151,7 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
  * is the same rule `timelineAccounts` grouped by.
  */
 function latestAtOf(
-  heads: Map<MessageAccount, TimelineEntry>,
+  heads: Map<MessageAccount, Message>,
   accounts: readonly MessageAccount[] | undefined,
   mapping: { channel: string; channelUserId: string },
 ): number | null {

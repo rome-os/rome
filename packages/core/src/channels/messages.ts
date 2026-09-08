@@ -2,16 +2,15 @@
  * What was said to a channel's accounts, as one store holds it. `Accounts` (accounts.ts) answers who a channel can reach, and this
  * answers what passed between Rome and them.
  *
- * A message is a {@link TimelineEntry}, however the store was asked for it. A
+ * A message is a {@link Message}, however the store was asked for it. A
  * store holds one history and ranks it one way, and every read below cuts that
- * one ranking. The shape, the ordering and the cursor are written down in the
- * People contract (`@rome/api-types/people`) because a person's timeline was
- * the first surface to page them, not because it is the only one: a second
- * shape here would be a second ranking of the same rows, which is a page
- * boundary the two ends disagree about.
+ * one ranking. The shape, the ordering and the cursor are the message module's
+ * (`@rome/api-types/message`), stated once there so a store and a person's
+ * timeline cut the same ranking: a second shape here would be a second ranking
+ * of the same rows, which is a page boundary the two ends disagree about.
  */
 
-import type { TimelineEntry } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 
 /**
  * One account a store reads for, named by every address it answers to —
@@ -54,14 +53,14 @@ export interface MessageConversation {
 export interface MessageRead {
   accounts: readonly MessageAccount[];
   /** The entry the previous page ended on. Null or absent for the first page. */
-  after?: TimelineEntry | null;
+  after?: Message | null;
   limit: number;
 }
 
 export interface ConversationRead {
   conversation: MessageConversation;
   /** The entry the previous page ended on. Null or absent for the first page. */
-  after?: TimelineEntry | null;
+  after?: Message | null;
   limit: number;
 }
 
@@ -96,7 +95,7 @@ export interface ConversationRead {
 export interface Messages {
   /**
    * The store's newest messages for `accounts`, at most `limit` of them, every
-   * one strictly after `after`, in `compareTimelineEntries` order — newest
+   * one strictly after `after`, in `compareMessages` order — newest
    * first, and total.
    *
    * "Strictly after `after`" is the store's own obligation and not the
@@ -105,7 +104,7 @@ export interface Messages {
    * already seen, and the ones it dropped to make room are the ones no page
    * ever shows.
    */
-  read(request: MessageRead): Promise<TimelineEntry[]>;
+  read(request: MessageRead): Promise<Message[]>;
 
   /** How many messages the full read of `accounts` answers. */
   count(accounts: readonly MessageAccount[]): Promise<number>;
@@ -117,7 +116,7 @@ export interface Messages {
    * `read` with a limit of one, declared as its own verb so a store can answer
    * it in one pass over a whole directory rather than one page per row.
    */
-  latest(accounts: readonly MessageAccount[]): Promise<TimelineEntry | null>;
+  latest(accounts: readonly MessageAccount[]): Promise<Message | null>;
 
   /**
    * The store's newest messages in `conversation`, on `read`'s terms exactly:
@@ -140,5 +139,5 @@ export interface Messages {
    * them apart, and a store that failed the first would refuse a conversation
    * that exists on the channel and has simply not been mirrored yet.
    */
-  readConversation(request: ConversationRead): Promise<TimelineEntry[]>;
+  readConversation(request: ConversationRead): Promise<Message[]>;
 }

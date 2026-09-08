@@ -18,8 +18,8 @@ import {
   latestDynamic,
   type DirectoryAccount,
   type StreamAccount,
-  type TimelineEntry,
 } from "@rome/api-types/people";
+import type { Message } from "@rome/api-types/message";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import type { AccountNames } from "../channels/account-names.js";
 import { foldAccounts } from "../channels/account-fold.js";
@@ -93,7 +93,7 @@ export async function readAccountStream(deps: AccountDirectoryDeps): Promise<Str
   const accounts = await observeAccounts(deps);
   const stores = personMessageStores(deps);
 
-  const heads = new Map<DirectoryAccount, TimelineEntry>();
+  const heads = new Map<DirectoryAccount, Message>();
   for (const round of rounds(accounts)) {
     for (const [account, owned] of await assignAccountHeads(stores, round)) {
       heads.set(account, owned.head);
