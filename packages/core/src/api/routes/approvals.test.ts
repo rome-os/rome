@@ -66,6 +66,13 @@ describe("Approvals API", () => {
       }
     });
 
+    it("validates pairing history offsets", async () => {
+      for (const offset of ["-1", "1.5", "nope", "9007199254740992"]) {
+        expect((await app.request(`/approvals?pairingHistoryOffset=${offset}`)).status).toBe(400);
+      }
+      expect((await app.request("/approvals?pairingHistoryOffset=100")).status).toBe(200);
+    });
+
     it("lists baseline approvals (unfiltered)", async () => {
       const res = await app.request("/approvals");
       expect(res.status).toBe(200);

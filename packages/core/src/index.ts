@@ -244,7 +244,7 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db);
   const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db);
+  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
 
   // Instance token: the DB is the single runtime read path. A cloud VM

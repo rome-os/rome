@@ -32,9 +32,12 @@ export const APPROVAL_EXECUTION_STATES = [
 ] as const;
 export type ApprovalExecutionState = (typeof APPROVAL_EXECUTION_STATES)[number];
 
+export const PAIRING_CHANNELS = ["telegram", "discord", "feishu"] as const;
+export const PAIRING_HISTORY_PAGE_SIZE = 100;
+
 export const pairingPayloadSchema = z.object({
   action: z.literal("channel_pairing"),
-  channel: z.enum(["telegram", "discord", "feishu"]),
+  channel: z.enum(PAIRING_CHANNELS),
   connectionId: z.string().min(1),
   channelUserId: z.string().min(1),
   displayName: z.string(),
@@ -43,7 +46,7 @@ export const pairingPayloadSchema = z.object({
   lastGuidanceAt: z.number().int(),
   conversationId: z.string().optional(),
   resolution: z
-    .enum(["web", "verification_code", "rejected", "expired", "account_linked"])
+    .enum(["web", "verification_code", "rejected", "expired", "account_linked", "superseded"])
     .optional(),
 });
 export type PairingPayload = z.infer<typeof pairingPayloadSchema>;

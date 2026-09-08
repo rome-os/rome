@@ -1,10 +1,12 @@
+import { PersonMappingRepository } from "./person-mapping.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
-import { and, eq, or, desc, sql } from "drizzle-orm";
+import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { approvals, persons, channelMappings } from "../schema.js";
+import { approvals, channelMappings } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import {
   pairingPayload,
+  PAIRING_HISTORY_PAGE_SIZE,
   type PairingPayload,
   APPROVAL_TYPES,
   type ApprovalStatus,
@@ -25,9 +27,11 @@ export type RetryExecutionResult =
   | { outcome: "not_retryable"; approval: ApprovalRow };
 
 export class ApprovalsRepository {
+  private pairingKey?: Buffer;
   constructor(
     private db: DrizzleDb,
     private readonly getPairingKey = loadPairingKey,
+    private readonly personMappingRepo = new PersonMappingRepository(db),
   ) {}
 
   expirePairings(now = Date.now()) {
@@ -50,13 +54,40 @@ export class ApprovalsRepository {
       .run();
   }
 
-  async list(status?: ApprovalStatus) {
+  async list(status?: ApprovalStatus, pairingHistoryOffset = 0) {
     this.expirePairings();
-    return this.db
+    const pairing = and(
+      eq(approvals.type, "person_mapping"),
+      sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+    )!;
+    const history = this.db
       .select()
       .from(approvals)
-      .where(status ? eq(approvals.status, status) : undefined)
-      .orderBy(desc(approvals.createdAt));
+      .where(
+        and(
+          pairing,
+          ne(approvals.status, "pending"),
+          status ? eq(approvals.status, status) : undefined,
+        ),
+      )
+      .orderBy(desc(approvals.createdAt), desc(approvals.id))
+      .limit(PAIRING_HISTORY_PAGE_SIZE)
+      .offset(pairingHistoryOffset)
+      .all();
+    const current =
+      pairingHistoryOffset === 0
+        ? this.db
+            .select()
+            .from(approvals)
+            .where(
+              and(
+                or(eq(approvals.status, "pending"), sql`not coalesce(${pairing}, 0)`),
+                status ? eq(approvals.status, status) : undefined,
+              ),
+            )
+            .all()
+        : [];
+    return [...current, ...history].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   requestPairing(
@@ -89,23 +120,51 @@ export class ApprovalsRepository {
             sql`json_extract(${approvals.payload}, '$.channel') = ${input.channel}`,
             sql`json_extract(${approvals.payload}, '$.channelUserId') = ${input.channelUserId}`,
             sql`json_extract(${approvals.payload}, '$.expiresAt') > ${now}`,
+            sql`coalesce(json_extract(${approvals.payload}, '$.resolution'), '') != 'superseded'`,
           ),
         )
         .orderBy(desc(approvals.createdAt))
         .get();
       if (previous) {
         const payload = pairingPayload(previous)!;
-        if (previous.status !== "pending" || payload.connectionId !== input.connectionId)
-          return null;
-        const guide = now - payload.lastGuidanceAt >= 30_000;
-        const updated = {
-          ...payload,
-          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-          lastGuidanceAt: guide ? now : payload.lastGuidanceAt,
-        };
-        tx.update(approvals).set({ payload: updated }).where(eq(approvals.id, previous.id)).run();
-        return { approval: { ...previous, payload: updated }, guide };
+        if (previous.status !== "pending" && payload.resolution !== "superseded") return null;
+        if (previous.status === "pending" && payload.connectionId !== input.connectionId) {
+          tx.update(approvals)
+            .set({
+              status: "rejected",
+              resolvedAt: new Date(now),
+              resolvedBy: "system:connection-replaced",
+              payload: { ...payload, resolution: "superseded" },
+            })
+            .where(eq(approvals.id, previous.id))
+            .run();
+        } else if (previous.status === "pending") {
+          const guide = now - payload.lastGuidanceAt >= 30_000;
+          const updated = {
+            ...payload,
+            ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+            lastGuidanceAt: guide ? now : payload.lastGuidanceAt,
+          };
+          tx.update(approvals).set({ payload: updated }).where(eq(approvals.id, previous.id)).run();
+          return { approval: { ...previous, payload: updated }, guide };
+        }
       }
+      const sameConnection = and(
+        eq(approvals.type, "person_mapping"),
+        sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+        sql`json_extract(${approvals.payload}, '$.connectionId') = ${input.connectionId}`,
+      );
+      const pendingCount = tx
+        .select({ value: count() })
+        .from(approvals)
+        .where(and(sameConnection, eq(approvals.status, "pending")))
+        .get()!.value;
+      const dailyCount = tx
+        .select({ value: count() })
+        .from(approvals)
+        .where(and(sameConnection, gte(approvals.createdAt, new Date(now - 86_400_000))))
+        .get()!.value;
+      if (pendingCount >= 20 || dailyCount >= 100) return null;
       const payload: PairingPayload = {
         ...input,
         action: "channel_pairing",
@@ -136,7 +195,7 @@ export class ApprovalsRepository {
     const payload = approval && pairingPayload(approval);
     if (!approval || !payload || approval.status !== "pending" || payload.failedAttempts >= 5)
       return null;
-    return pairingCode(this.getPairingKey(), id);
+    return pairingCode((this.pairingKey ??= this.getPairingKey()), id);
   }
 
   verifyPairing(input: {
@@ -164,7 +223,12 @@ export class ApprovalsRepository {
       const payload = approval && pairingPayload(approval);
       if (!approval || !payload || payload.failedAttempts >= 5)
         return { outcome: "invalid_code" as const };
-      if (!matchesPairingCode(pairingCode(this.getPairingKey(), approval.id), input.code)) {
+      if (
+        !matchesPairingCode(
+          pairingCode((this.pairingKey ??= this.getPairingKey()), approval.id),
+          input.code,
+        )
+      ) {
         this.db
           .update(approvals)
           .set({ payload: { ...payload, failedAttempts: payload.failedAttempts + 1 } })
@@ -196,33 +260,19 @@ export class ApprovalsRepository {
         return { outcome: "already_resolved", approval };
       let resolution: PairingPayload["resolution"] = action === "approve" ? method : "rejected";
       if (action === "approve") {
-        const holder = tx
-          .select()
-          .from(channelMappings)
-          .where(
-            and(
-              eq(channelMappings.channel, payload.channel),
-              eq(channelMappings.channelUserId, payload.channelUserId),
-            ),
+        if (
+          !this.personMappingRepo.writeGuardianPairing(
+            tx,
+            payload.channel,
+            payload.channelUserId,
+            payload.displayName,
           )
-          .get();
-        if (holder) {
+        ) {
           resolution = "account_linked";
           action = "reject";
-        } else {
-          const guardian = tx.select().from(persons).where(eq(persons.bondLevel, "guardian")).get();
-          if (!guardian) throw new Error("Guardian person is unavailable");
-          tx.insert(channelMappings)
-            .values({
-              id: uuid(),
-              personId: guardian.id,
-              channel: payload.channel,
-              channelUserId: payload.channelUserId,
-              displayName: payload.displayName,
-            })
-            .run();
         }
       }
+
       const resolved = tx
         .update(approvals)
         .set({
@@ -287,38 +337,10 @@ export class ApprovalsRepository {
     return rows[0] ?? null;
   }
 
-  async approve(id: string, resolvedBy = "guardian") {
-    const existing = await this.findById(id);
-    if (existing && pairingPayload(existing))
-      return (await this.resolvePending(id, "approve", resolvedBy)).outcome === "resolved";
-    return (
-      this.db
-        .update(approvals)
-        .set({ status: "approved", resolvedAt: new Date(), resolvedBy })
-        .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
-        .returning()
-        .all().length > 0
-    );
-  }
-
-  async reject(id: string, resolvedBy = "guardian") {
-    const existing = await this.findById(id);
-    if (existing && pairingPayload(existing))
-      return (await this.resolvePending(id, "reject", resolvedBy)).outcome === "resolved";
-    return (
-      this.db
-        .update(approvals)
-        .set({ status: "rejected", resolvedAt: new Date(), resolvedBy })
-        .where(and(eq(approvals.id, id), eq(approvals.status, "pending")))
-        .returning()
-        .all().length > 0
-    );
-  }
-
   async resolvePending(
     id: string,
     action: ResolveAction,
-    resolvedBy: string = "guardian",
+    resolvedBy: string,
   ): Promise<ResolvePendingResult> {
     const existing = await this.findById(id);
     if (!existing) {
@@ -326,7 +348,6 @@ export class ApprovalsRepository {
     }
 
     if (pairingPayload(existing)) {
-      if (resolvedBy === "guardian") throw new Error("Pairing requires an accountable actor");
       return this.resolvePairing(id, action, resolvedBy, "web");
     }
     const nextStatus = action === "approve" ? "approved" : "rejected";

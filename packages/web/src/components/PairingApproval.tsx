@@ -167,6 +167,24 @@ export function PairingApproval({ approval }: { approval: Approval }) {
   );
 }
 
+export function ApprovalHistoryButton() {
+  const query = useApprovals();
+  const { t } = useTranslation("activity");
+  if (!query.hasNextPage) return null;
+  return (
+    <div>
+      {query.isFetchNextPageError && <p role="alert">{t("pairing.loadFailed")}</p>}
+      <Button
+        variant="outline"
+        disabled={query.isFetchingNextPage}
+        onClick={() => void query.fetchNextPage()}
+      >
+        {t(query.isFetchingNextPage ? "pairing.loading" : "pairing.loadHistory")}
+      </Button>
+    </div>
+  );
+}
+
 export function PairingApprovals({ connectionIds }: { connectionIds?: string[] }) {
   const { t } = useTranslation("activity");
   const query = useApprovals();
@@ -192,6 +210,7 @@ export function PairingApprovals({ connectionIds }: { connectionIds?: string[] }
       ) : (
         rows.map((approval) => <PairingApproval key={approval.id} approval={approval} />)
       )}
+      <ApprovalHistoryButton />
     </section>
   );
 }

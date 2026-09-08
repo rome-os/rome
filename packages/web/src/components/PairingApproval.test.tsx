@@ -123,4 +123,61 @@ describe("shared pairing approvals", () => {
     expect(fetch.mock.calls.every(([url]) => String(url) === "/api/approvals")).toBe(true);
     client.clear();
   });
+  it("loads earlier history into both slices while retaining pending requests", async () => {
+    const makeRow = (id: string, status: "pending" | "approved"): Approval => ({
+      id,
+      type: "person_mapping",
+      status,
+      requestedBy: "telegram:alice",
+      description: "Pair",
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+      resolvedBy: null,
+      executedAt: null,
+      executionError: null,
+      payload: {
+        action: "channel_pairing",
+        channel: "telegram",
+        connectionId: "telegram",
+        channelUserId: id,
+        displayName: id,
+        expiresAt: Date.now() + 600_000,
+        failedAttempts: 0,
+        lastGuidanceAt: Date.now(),
+      },
+    });
+    const first = [
+      makeRow("pending-user", "pending"),
+      ...Array.from({ length: 100 }, (_, n) => makeRow(`history-${n}`, "approved")),
+    ];
+    const fetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/code")) return Response.json({ code: "ROME-PAIR-EXAMPLE" });
+      return Response.json(
+        url.includes("pairingHistoryOffset=100") ? [makeRow("earlier-user", "approved")] : first,
+      );
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <div data-testid="activity">
+          <PairingApprovals />
+        </div>
+        <div data-testid="connections">
+          <PairingApprovals connectionIds={["telegram"]} />
+        </div>
+      </QueryClientProvider>,
+    );
+    const activity = within(screen.getByTestId("activity"));
+    const connections = within(screen.getByTestId("connections"));
+    fireEvent.click(await activity.findByRole("button", { name: "Load earlier pairing requests" }));
+    await activity.findByText("earlier-user (earlier-user)");
+    expect(connections.getByText("earlier-user (earlier-user)")).toBeTruthy();
+    expect(activity.getByText("pending-user (pending-user)")).toBeTruthy();
+    expect(activity.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("pairingHistoryOffset=100"))).toBe(
+      true,
+    );
+    client.clear();
+  });
 });

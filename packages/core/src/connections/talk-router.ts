@@ -19,10 +19,7 @@ export class ConnectionTalkRouter implements TalkRouter {
     Set<(message: InboundMessage) => Promise<void>>
   >();
 
-  private readonly attached = new Map<
-    ConnectionId,
-    { talk: NonNullable<Connection["talk"]>; detach: () => void }
-  >();
+  private readonly attached = new Map<ConnectionId, () => void>();
 
   constructor(
     private readonly registry: ConnectionRegistry,
@@ -97,8 +94,7 @@ export class ConnectionTalkRouter implements TalkRouter {
     const talk = connection.talk;
     if (!talk) return;
     const previous = this.attached.get(connection.id);
-    if (previous?.talk === talk) return;
-    previous?.detach();
+    previous?.();
     const detach = talk.subscribe(async (message) => {
       if (this.admit && !(await this.admit(connection.id, connection.service, message, this)))
         return;
@@ -106,7 +102,7 @@ export class ConnectionTalkRouter implements TalkRouter {
         [...(this.handlers.get(connection.id) ?? [])].map((handler) => handler(message)),
       );
     });
-    this.attached.set(connection.id, { talk, detach });
+    this.attached.set(connection.id, detach);
   }
 
   private requireTalk(connectionId: string) {

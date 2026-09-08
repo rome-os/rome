@@ -36,7 +36,6 @@ import {
 import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
-import { SetupAbortError } from "../setup/session.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type {
   TalkActivity,

@@ -30,7 +30,7 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 
 ### Invariants
 
-- Unknown accounts cannot reach app handlers, automatic person matching, or agents before approval, even when reply settings include strangers. Their messages receive pairing guidance instead of entering conversation history. Existing linked accounts retain their permissions.
+- Unknown accounts cannot reach app handlers, automatic person matching, or agents before approval, even when reply settings include strangers. Eligible messages receive pairing guidance instead of entering conversation history. Existing linked accounts retain their permissions.
 - Activity and Connections show the same approval record. Connections filters channel pairing approvals, and both surfaces share the confirmation and resolution behavior.
 - Approval links the exact requesting account to the guardian and resolves the request in one transaction. A conflicting account link prevents approval rather than transferring ownership.
 - Codes belong to one request, connection, channel, and sender. Verification messages never reach agents, including invalid or replayed codes from linked senders.
@@ -40,3 +40,9 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 - Approval records retain creation and resolution. Web decisions record the verified guardian identity, and code decisions record the provider-authenticated account and completion method.
 - Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
 - Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.
+
+Pairing admission creates requests for private messages, messages directed at the bot (mentions, replies, or bot-owned threads), and code attempts. Ambient group messages and Telegram channel identities create no pairing requests. Existing account mappings retain their normal routing.
+
+Each connection permits at most 20 pending pairing requests and 100 new requests in a rolling 24-hour window. Repeated messages can still reuse an existing request at either limit. Replacing a removed connection supersedes its pending request and invalidates its code. A guardian rejection retains its original cooldown.
+
+Approval listing includes pending requests and the latest 100 resolved pairing records by default. Earlier pairing history is paged with `pairingHistoryOffset`. Activity and Connections share the loaded pages. Pagination preserves all stored audit records.

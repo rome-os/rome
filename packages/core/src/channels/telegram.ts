@@ -126,15 +126,37 @@ export class TelegramAdapter implements ProviderAdapter {
       const msg: NormalizedMessage = {
         id: String(rawMsg.message_id),
         channel: "telegram",
-        channelUserId: ctx.from ? String(ctx.from.id) : String(ctx.chat!.id),
-        displayName: ctx.from
-          ? [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || "Unknown"
-          : "title" in ctx.chat!
-            ? ((ctx.chat as { title?: string }).title ?? "Channel")
-            : "Channel",
+        channelUserId: ctx.channelPost
+          ? String(ctx.chat!.id)
+          : rawMsg.sender_chat
+            ? String(rawMsg.sender_chat.id)
+            : ctx.from
+              ? String(ctx.from.id)
+              : String(ctx.chat!.id),
+        displayName:
+          ctx.from && !ctx.channelPost && !rawMsg.sender_chat
+            ? [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || "Unknown"
+            : "title" in ctx.chat!
+              ? ((ctx.chat as { title?: string }).title ?? "Channel")
+              : "Channel",
         threadId: String(ctx.chat!.id),
         threadName: "title" in ctx.chat! ? (ctx.chat as { title?: string }).title : undefined,
         threadType: ctx.chat!.type === "private" ? "private" : "group",
+        addressing:
+          ctx.chat!.type === "private"
+            ? "direct"
+            : (rawMsg.entities ?? rawMsg.caption_entities ?? []).some((entity) =>
+                  entity.type === "text_mention"
+                    ? entity.user.id === ctx.me.id
+                    : entity.type === "mention" &&
+                      (rawMsg.text ?? rawMsg.caption ?? "")
+                        .slice(entity.offset, entity.offset + entity.length)
+                        .toLowerCase() === `@${ctx.me.username.toLowerCase()}`,
+                )
+              ? "mention"
+              : rawMsg.reply_to_message?.from?.id === ctx.me.id
+                ? "reply"
+                : "ambient",
         timestamp: new Date(rawMsg.date * 1000),
         text: rawMsg.text ?? rawMsg.caption ?? "",
         attachments: this.extractAttachments(ctx),

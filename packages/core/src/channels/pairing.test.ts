@@ -122,6 +122,89 @@ describe("channel pairing approvals", () => {
     expect(pairingPayload((await repo.findById(id))!)?.resolution).toBe("account_linked");
   });
 
+  it("loads a key once per repository and accepts mixed-case codes without consuming attempts", async () => {
+    const load = rs.fn(() => key);
+    const cached = new ApprovalsRepository(testDb.db, load);
+    const id = cached.requestPairing(identity)!.approval.id;
+    const code = (await cached.pairingCode(id))!;
+    expect(await cached.pairingCode(id)).toBe(code);
+    expect(cached.verifyPairing({ ...identity, code: code.toLowerCase() })).toMatchObject({
+      outcome: "resolved",
+      approval: { status: "approved" },
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(pairingPayload((await cached.findById(id))!)?.failedAttempts).toBe(0);
+  });
+
+  it("replaces a removed connection's pending request while retaining rejection cooldown", async () => {
+    const old = repo.requestPairing(identity)!.approval.id;
+    const oldCode = (await repo.pairingCode(old))!;
+    const replacement = { ...identity, connectionId: "replacement" };
+    const next = repo.requestPairing(replacement)!;
+    expect(next.guide).toBe(true);
+    expect(next.approval.id).not.toBe(old);
+    expect(pairingPayload((await repo.findById(old))!)?.resolution).toBe("superseded");
+    expect(repo.requestPairing(replacement)!.approval.id).toBe(next.approval.id);
+    expect(await repo.findPending()).toHaveLength(1);
+    expect(repo.verifyPairing({ ...identity, code: oldCode }).outcome).toBe("invalid_code");
+    expect(repo.verifyPairing({ ...replacement, code: oldCode }).outcome).toBe("invalid_code");
+    await repo.resolvePending(next.approval.id, "reject", "owner-session");
+    expect(repo.requestPairing({ ...identity, connectionId: "third" })).toBeNull();
+  });
+
+  it("caps pending and rolling daily requests per connection, while allowing existing requests to complete", async () => {
+    for (let n = 0; n < 20; n++)
+      expect(repo.requestPairing({ ...identity, channelUserId: `user-${n}` })).not.toBeNull();
+    expect(repo.requestPairing({ ...identity, channelUserId: "overflow" })).toBeNull();
+    expect(repo.requestPairing({ ...identity, channelUserId: "user-0" })).not.toBeNull();
+    for (const row of await repo.findPending())
+      await repo.resolvePending(row.id, "reject", "owner-session");
+    for (let n = 20; n < 100; n++) {
+      const row = repo.requestPairing({ ...identity, channelUserId: `user-${n}` })!;
+      await repo.resolvePending(row.approval.id, "reject", "owner-session");
+    }
+    expect(repo.requestPairing({ ...identity, channelUserId: "daily-overflow" })).toBeNull();
+    expect(
+      repo.requestPairing({ ...identity, connectionId: "other", channelUserId: "other" }),
+    ).not.toBeNull();
+    expect(
+      repo.requestPairing({ ...identity, channelUserId: "tomorrow" }, Date.now() + 86_401_000),
+    ).not.toBeNull();
+  });
+
+  it("pages pairing history without losing pending requests or deleting audit rows", async () => {
+    for (let n = 0; n < 105; n++)
+      await repo.create({
+        type: "person_mapping",
+        status: "rejected",
+        requestedBy: "test",
+        description: "historical",
+        payload: {
+          ...identity,
+          connectionId: "historical",
+          action: "channel_pairing",
+          expiresAt: 0,
+          failedAttempts: 0,
+          lastGuidanceAt: 0,
+        },
+      });
+    const pending = repo.requestPairing(identity)!.approval.id;
+    const nonPairing = await repo.create({
+      type: "action_execution",
+      status: "approved",
+      requestedBy: "test",
+      description: "normal",
+    });
+    const first = await repo.list();
+    expect(first).toHaveLength(102);
+    expect(first.some((row) => row.id === pending)).toBe(true);
+    expect(first.some((row) => row.id === nonPairing)).toBe(true);
+    const second = await repo.list(undefined, 100);
+    expect(second).toHaveLength(5);
+    expect(new Set([...first, ...second].map((row) => row.id)).size).toBe(107);
+    expect(testDb.db.select().from(approvals).all()).toHaveLength(107);
+  });
+
   it.each([
     "telegram",
     "discord",
@@ -137,7 +220,7 @@ describe("channel pairing approvals", () => {
     }));
     const router = { send } as unknown as TalkRouter;
     const message: InboundMessage = {
-      senderId: "alice",
+      senderId: "123",
       senderDisplayName: "Owner",
       conversationId: "dm" as ConversationId,
       messageId: "one",
@@ -146,6 +229,26 @@ describe("channel pairing approvals", () => {
       timestamp: new Date(),
       thread: { kind: "dm" },
     };
+    const group = { ...message, thread: { kind: "group" as const } };
+    expect(await admit("connection", service, { ...group, addressing: "ambient" }, router)).toBe(
+      false,
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(await repo.findPending()).toHaveLength(0);
+    if (service === "telegram") {
+      expect(
+        await admit(
+          "connection",
+          service,
+          { ...group, senderId: "-100123", text: "ROME-PAIR-code" },
+          router,
+        ),
+      ).toBe(false);
+      expect(await repo.findPending()).toHaveLength(0);
+    }
+    expect(await admit("connection", service, { ...group, addressing: "mention" }, router)).toBe(
+      false,
+    );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2].text).toContain(
@@ -164,7 +267,9 @@ describe("channel pairing approvals", () => {
       ),
     ).toBe(false);
     expect((await repo.findById(request.id))?.status).toBe("pending");
-    expect(await admit("connection", service, { ...message, text: code }, router)).toBe(false);
+    expect(
+      await admit("connection", service, { ...message, text: code.toLowerCase() }, router),
+    ).toBe(false);
     expect(await admit("connection", service, { ...message, text: code }, router)).toBe(false);
     expect(await admit("connection", service, message, router)).toBe(true);
     expect(send.mock.calls.some(([, , body]) => body.text?.includes(code))).toBe(false);

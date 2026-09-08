@@ -1,3 +1,4 @@
+import { PAIRING_CHANNELS } from "@rome/api-types/approvals";
 import { PairingApprovals } from "./PairingApproval";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -55,7 +56,7 @@ export function ConnectionDetailBody({
 
   const body = (
     <div className="space-y-6">
-      {["telegram", "discord", "feishu"].includes(card.service) && (
+      {PAIRING_CHANNELS.some((channel) => channel === card.service) && (
         <PairingApprovals
           connectionIds={card.slots.flatMap((slot) =>
             slot.connectionId ? [slot.connectionId] : [],

@@ -1,7 +1,7 @@
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings } from "../schema.js";
-import type { DrizzleDb, SqliteExec } from "../index.js";
+import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
   generatePersonSlug,
@@ -390,6 +390,27 @@ export class PersonMappingRepository {
     }>,
   ) {
     await this.db.update(persons).set(data).where(eq(persons.id, id));
+  }
+
+  /** Enlist an unclaimed account in a caller's transaction without transferring a holder. */
+  writeGuardianPairing(
+    exec: DrizzleTx,
+    channel: string,
+    channelUserId: string,
+    displayName: string,
+  ): boolean {
+    const holder = exec
+      .select()
+      .from(channelMappings)
+      .where(
+        and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, channelUserId)),
+      )
+      .get();
+    if (holder) return false;
+    const guardian = exec.select().from(persons).where(eq(persons.bondLevel, "guardian")).get();
+    if (!guardian) throw new Error("Guardian person is unavailable");
+    this.writeChannelMapping(exec, guardian.id, channel, channelUserId, displayName);
+    return true;
   }
 
   /** Write helper for {@link addChannelMapping}, taking an executor so it runs

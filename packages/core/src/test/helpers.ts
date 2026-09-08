@@ -432,7 +432,7 @@ export async function buildTestDeps(
   const sentinelLogRepo = new SentinelLogRepository(db);
   const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db);
+  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.

@@ -86,10 +86,14 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
 
   app.get("/approvals", async (c) => {
     const status = c.req.query("status");
+    const offset = Number(c.req.query("pairingHistoryOffset") ?? "0");
+    if (!Number.isSafeInteger(offset) || offset < 0)
+      return c.json({ error: "Invalid history offset" }, 400);
     const rows = await deps.approvalsRepo.list(
       status && VALID_STATUSES.includes(status as ApprovalStatus)
         ? (status as ApprovalStatus)
         : undefined,
+      offset,
     );
     return c.json(rows);
   });

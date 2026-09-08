@@ -75,7 +75,8 @@
       "approve": "Approve",
       "retry": "Retry",
       "pending": "…"
-    }
+    },
+    "resolveFailed": "Could not resolve the approval. Refresh and try again."
   },
   "execution": {
     "errorPrefix": "Error · ",
@@ -176,6 +177,7 @@
     "expired": "Expired",
     "requested": "Requested {{time}}",
     "resolved": "Resolved by {{actor}} · {{time}}",
-    "retry": "Retry"
+    "retry": "Retry",
+    "loadHistory": "Load earlier pairing requests"
   }
 }

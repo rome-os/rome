@@ -1,5 +1,5 @@
 import { pairingPayload } from "@rome/api-types/approvals";
-import { PairingApproval } from "@/components/PairingApproval";
+import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
 import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -312,12 +312,16 @@ function ApprovalCard({
   const displayStatus = getApprovalDisplayStatus(approval);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [actionError, setActionError] = useState("");
   const canRetry = approval.type === "action_execution" && displayStatus === "execution_failed";
 
   async function handleAction(action: "approve" | "reject") {
     setActing(action);
+    setActionError("");
     try {
       await onAction(approval.id, action);
+    } catch {
+      setActionError(t("approval.resolveFailed"));
     } finally {
       setActing(null);
     }
@@ -371,6 +375,11 @@ function ApprovalCard({
               </>
             )}
           </p>
+          {actionError && (
+            <p role="alert" className="text-ui text-destructive">
+              {actionError}
+            </p>
+          )}
           {approval.executionError && (
             <Alert variant="destructive" className="mt-2 px-3 py-2">
               <AlertDescription className="text-aux">
@@ -901,6 +910,8 @@ export default function ActivityPage() {
             );
           })}
         </div>
+
+        <ApprovalHistoryButton />
 
         {/* Content */}
         {approvalsQuery.isError && (

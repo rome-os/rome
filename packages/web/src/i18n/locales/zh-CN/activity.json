@@ -75,7 +75,8 @@
       "approve": "批准",
       "retry": "重试",
       "pending": "…"
-    }
+    },
+    "resolveFailed": "审批处理失败，请刷新后重试。"
   },
   "execution": {
     "errorPrefix": "错误 · ",
@@ -176,6 +177,7 @@
     "expired": "已过期",
     "requested": "请求时间：{{time}}",
     "resolved": "处理人：{{actor}} · {{time}}",
-    "retry": "重试"
+    "retry": "重试",
+    "loadHistory": "加载更早的配对请求"
   }
 }

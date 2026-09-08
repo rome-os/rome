@@ -1,4 +1,4 @@
-import { pairingPayload } from "@rome/api-types/approvals";
+import { pairingPayload, PAIRING_HISTORY_PAGE_SIZE } from "@rome/api-types/approvals";
 import { pairingFixtures, PAIRING_FIXTURE_CODE } from "../../src/pages/dev/pairing-fixtures";
 import { http, HttpResponse } from "msw";
 import type { ApprovalRecord } from "@/lib/chat-types";
@@ -333,7 +333,7 @@ function findApproval(id: string): Approval | undefined {
 }
 
 export const activityHandlers = [
-  http.get("/api/approvals", () => {
+  http.get("/api/approvals", ({ request }) => {
     for (const approval of approvals) {
       const payload = pairingPayload(approval);
       if (payload && approval.status === "pending" && payload.expiresAt <= Date.now()) {
@@ -343,7 +343,16 @@ export const activityHandlers = [
         approval.resolvedAt = new Date().toISOString();
       }
     }
-    return HttpResponse.json(approvals);
+    const offset = Number(new URL(request.url).searchParams.get("pairingHistoryOffset") ?? "0");
+    const history = approvals.filter((row) => pairingPayload(row) && row.status !== "pending");
+    const current =
+      offset === 0
+        ? approvals.filter((row) => !pairingPayload(row) || row.status === "pending")
+        : [];
+    return HttpResponse.json([
+      ...current,
+      ...history.slice(offset, offset + PAIRING_HISTORY_PAGE_SIZE),
+    ]);
   }),
   http.get("/api/approvals/:id/code", ({ params }) => {
     const approval = findApproval(String(params.id));

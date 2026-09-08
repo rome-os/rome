@@ -307,7 +307,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
 
     await h.handler.onApproved(approvalId);
 
@@ -461,7 +461,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.reject(approvalId);
+    await h.approvalsRepo.resolvePending(approvalId, "reject", "test-guardian");
 
     await expect(h.handler.onRejected(approvalId)).resolves.toBeUndefined();
 
@@ -495,7 +495,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
     await h.handler.onApproved(approvalId);
 
     // Second call should not re-execute — duplicate-execution guard kicks in.

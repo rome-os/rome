@@ -1,5 +1,5 @@
 import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
-import { pairingPayload } from "@rome/api-types/approvals";
+import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { createLogger } from "../logger.js";
@@ -22,13 +22,16 @@ export function createPairingAdmission(deps: {
     message: InboundMessage,
     router: TalkRouter,
   ): Promise<boolean> => {
-    if (service !== "telegram" && service !== "discord" && service !== "feishu") return true;
+    const channel = pairingPayloadSchema.shape.channel.safeParse(service);
+    if (!channel.success) return true;
+    const pairingChannel = channel.data;
+    if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
     const guidance = `${GUIDANCE}\n\nLearn more in the [pairing guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
           const request = deps.approvalsRepo.requestPairing({
-            channel: service,
+            channel: pairingChannel,
             connectionId,
             channelUserId: message.senderId,
             displayName: message.senderDisplayName ?? message.senderId,
@@ -39,7 +42,7 @@ export function createPairingAdmission(deps: {
         }
         const result = deps.approvalsRepo.verifyPairing({
           connectionId,
-          channel: service,
+          channel: pairingChannel,
           channelUserId: message.senderId,
           code: message.text!,
         });
@@ -60,8 +63,13 @@ export function createPairingAdmission(deps: {
       }
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
       if (person) return true;
+      if (
+        message.thread?.kind !== "dm" &&
+        !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
+      )
+        return false;
       const request = deps.approvalsRepo.requestPairing({
-        channel: service,
+        channel: pairingChannel,
         connectionId,
         channelUserId: message.senderId,
         displayName: message.senderDisplayName ?? message.senderId,

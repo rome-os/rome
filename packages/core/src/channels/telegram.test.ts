@@ -89,6 +89,48 @@ describe("TelegramAdapter", () => {
       expect(captured[0].replyTo).toBeUndefined();
     });
 
+    it("distinguishes ambient groups, bot mentions, replies and anonymous channel senders", async () => {
+      const captured = await startCapturing();
+      await telegram.emitUpdate(makeUpdate({ chat: { id: -555, type: "group" } }));
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            text: "@FAKE_BOT hello",
+            entities: [{ type: "mention", offset: 0, length: 9 }],
+          },
+        }),
+      );
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            reply_to_message: {
+              message_id: 1,
+              date: 1700000000,
+              chat: { id: -555, type: "group" },
+              from: { id: 424242, is_bot: true, first_name: "bot" },
+            },
+          },
+        }),
+      );
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            sender_chat: { id: -555, type: "group", title: "Anonymous" },
+          },
+        }),
+      );
+      expect(captured.map((msg) => msg.addressing)).toEqual([
+        "ambient",
+        "mention",
+        "reply",
+        "ambient",
+      ]);
+      expect(captured[3].channelUserId).toBe("-555");
+    });
+
     it("normalizes a group message with threadName", async () => {
       const captured = await startCapturing();
 
@@ -189,10 +231,11 @@ describe("TelegramAdapter", () => {
     it("normalizes a channel post", async () => {
       const captured = await startCapturing();
 
-      // Channel posts arrive as channel_post instead of message, with no from
+      // A channel post is a channel identity even when an author is supplied.
       await telegram.emitUpdate({
         channel_post: {
           message_id: 77,
+          from: { id: 111, is_bot: false, first_name: "Alice" },
           date: 1700000000,
           text: "channel announcement",
           chat: { id: -1001234, type: "channel", title: "My Channel" },

@@ -22,7 +22,7 @@ export function pairingCode(key: Buffer, approvalId: string): string {
 }
 
 export function matchesPairingCode(expected: string, submitted: string): boolean {
-  const value = Buffer.from(submitted.trim());
+  const value = Buffer.from(submitted.trim().toUpperCase());
   const code = Buffer.from(expected);
   return value.length === code.length && timingSafeEqual(value, code);
 }
