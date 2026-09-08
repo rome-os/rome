@@ -145,10 +145,10 @@ export function CollapsedTraceButton({
     return (
       <Button
         type="button"
-        variant="ghost"
+        variant="link"
         size="xs"
         onClick={onClick}
-        className="-mx-2 max-w-none select-text justify-start text-left"
+        className="-mx-2 max-w-none select-text justify-start text-left hover:no-underline"
       >
         <CollapsedTraceContent summary={summary} segments={segments} live={live} compact />
       </Button>
@@ -183,6 +183,15 @@ function CollapsedTraceContent({
 
   if (summary?.terminalError) {
     return <TraceErrorSummary error={summary.terminalError} />;
+  }
+  if (compact && (live || summary)) {
+    return (
+      <CollapsedTraceSummary
+        summary={summary ?? { distinctApps: [], totalSteps: 0, invocationCounts: {} }}
+        live={live}
+        compact
+      />
+    );
   }
   if (summary && !isEmptySummary(summary)) {
     return (

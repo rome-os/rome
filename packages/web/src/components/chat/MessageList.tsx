@@ -12,6 +12,7 @@ import {
   type DelegatedSubagentNode,
 } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
+import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
@@ -45,6 +46,7 @@ export interface LivePreview {
   blockIx?: number;
   /** The full SSE text, which may be ahead of the typewriter preview. */
   sourceText?: string;
+  textThroughOrdinal?: number;
   identity: AgentIdentity;
 }
 
@@ -203,18 +205,6 @@ function turnCopyText(messages: ChatMessage[]): string {
   return parts.join("\n\n");
 }
 
-// The streaming-activity indicator shown when the running turn has no text tail
-// to ride on — between text blocks, during a tool call, or before the first
-// token. Mirrors the live caret's breathing dot (globals.css) as a standalone
-// element so the turn never reads as idle while Stop is still showing.
-function LiveActivityDot() {
-  return (
-    <div className="py-1" role="status" aria-label="Working">
-      <span className="rome-live-activity-dot" />
-    </div>
-  );
-}
-
 // Stable row keys preserve inline-card drafts when the live block moves on or
 // the turn ends. Memoization keeps token updates out of the historical rows.
 const RowView = memo(function RowView({
@@ -341,13 +331,13 @@ const RowView = memo(function RowView({
         <div className="rome-live-caret">
           {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
         </div>
-      ) : live ? (
-        // Streaming with no text tail (tool call / block gap): keep the
-        // breathing dot alive on its own so the turn never reads as idle. A
-        // live Plan already carries its own animated state marker.
-        summary?.plan?.steps.length ? null : (
-          <LiveActivityDot />
-        )
+      ) : null}
+      {live ? (
+        <LiveTurnActivity
+          snapshot={live.snapshot}
+          textThroughOrdinal={live.textThroughOrdinal}
+          hasText={!!live.text}
+        />
       ) : null}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
       {copyText || showFeedback ? (
@@ -421,11 +411,12 @@ function StandaloneLiveTail({
         <div className="rome-live-caret">
           {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
         </div>
-      ) : live.snapshot?.summary.plan?.steps.length ? null : (
-        // No text persisted yet (turn just opened, or first phase is a tool
-        // call): the breathing dot stands in for the missing tail.
-        <LiveActivityDot />
-      )}
+      ) : null}
+      <LiveTurnActivity
+        snapshot={live.snapshot}
+        textThroughOrdinal={live.textThroughOrdinal}
+        hasText={!!live.text}
+      />
       <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
     </MessageRow>
   );

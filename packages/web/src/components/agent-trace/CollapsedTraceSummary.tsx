@@ -1,6 +1,5 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AppRefDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 
@@ -62,7 +61,7 @@ export function CollapsedTraceSummary({
   compact?: boolean;
 }) {
   if (compact) {
-    return <CompactCollapsedSummary summary={summary} segments={segments} live={live} />;
+    return <CompactCollapsedSummary summary={summary} live={live} />;
   }
   if (live) {
     return <LiveCollapsedSummary summary={summary} segments={segments} />;
@@ -72,41 +71,28 @@ export function CollapsedTraceSummary({
 
 // A single short line (tiny icons + one label), sized to sit under the agent
 // name beside the avatar. Used for both live and done traces in the transcript.
-function CompactCollapsedSummary({
-  summary,
-  segments,
-  live,
-}: {
-  summary: TraceSummary;
-  segments?: TraceSegment[];
-  live: boolean;
-}) {
+function CompactCollapsedSummary({ summary, live }: { summary: TraceSummary; live: boolean }) {
   const { t } = useTranslation("activity");
   const visible = summary.distinctApps.slice(0, MAX_ICONS);
   const appCount = summary.distinctApps.length;
   const stepCount = summary.totalSteps;
 
-  let label: string;
-  if (live) {
-    label = getLiveActivity(segments, t).label;
-  } else {
-    const appsLabel = t(
-      appCount === 1 ? "trace.summary.appsUsedSingle" : "trace.summary.appsUsedMultiple",
-      { count: appCount },
-    );
-    const stepsLabel = t(
-      stepCount === 1 ? "trace.summary.stepsSingle" : "trace.summary.stepsMultiple",
-      { count: stepCount },
-    );
-    const durationStr = formatDuration(summary.totalDurationMs);
-    label =
-      appsLabel +
-      t("trace.summary.joiner") +
-      stepsLabel +
-      (durationStr ? `${t("trace.summary.joiner")}${durationStr}` : "") +
-      (summary.stoppedByUser ? t("trace.summary.stoppedSuffix") : "") +
-      (summary.terminalError ? t("trace.summary.failedSuffix") : "");
-  }
+  const appsLabel = t(
+    appCount === 1 ? "trace.summary.liveAppsSingle" : "trace.summary.liveAppsMultiple",
+    { count: appCount },
+  );
+  const stepsLabel = t(
+    stepCount === 1 ? "trace.summary.stepsSingle" : "trace.summary.stepsMultiple",
+    { count: stepCount },
+  );
+  const durationStr = live ? null : formatDuration(summary.totalDurationMs);
+  const label =
+    appsLabel +
+    t("trace.summary.joiner") +
+    stepsLabel +
+    (durationStr ? `${t("trace.summary.joiner")}${durationStr}` : "") +
+    (summary.stoppedByUser ? t("trace.summary.stoppedSuffix") : "") +
+    (summary.terminalError ? t("trace.summary.failedSuffix") : "");
 
   return (
     <div className="flex w-max items-center gap-2 text-aux text-muted-foreground">
@@ -122,7 +108,7 @@ function CompactCollapsedSummary({
           ))}
         </div>
       )}
-      <span className={cn("whitespace-nowrap", live && "shimmer")}>{label}</span>
+      <span className="whitespace-nowrap">{label}</span>
     </div>
   );
 }
