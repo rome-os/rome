@@ -1,0 +1,70 @@
+<meta name="color-scheme" content="light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap">
+<link rel="stylesheet" href="style.css">
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  // Pandoc emits fenced mermaid blocks as <pre class="mermaid"><code>...</code></pre>.
+  // Mermaid wants the source as the pre's own text, so unwrap the <code>.
+  const blocks = [];
+  document.querySelectorAll("pre.mermaid > code, pre > code.mermaid").forEach(code => {
+    const pre = code.parentElement;
+    pre.classList.add("mermaid");
+    pre.textContent = code.textContent;
+    blocks.push(pre);
+  });
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "base",
+    fontFamily: "Lato, sans-serif",
+    themeVariables: {
+      fontFamily: "Lato, sans-serif",
+      fontSize: "15px",
+      background: "#f4f4f4",
+      primaryColor: "#f4f4f4",
+      primaryTextColor: "#111",
+      primaryBorderColor: "#111",
+      lineColor: "#111",
+      textColor: "#111",
+      secondaryColor: "#f4f4f4",
+      secondaryTextColor: "#111",
+      secondaryBorderColor: "#111",
+      tertiaryColor: "#f4f4f4",
+      tertiaryTextColor: "#111",
+      tertiaryBorderColor: "#111",
+      noteBkgColor: "#fff",
+      noteBorderColor: "#111",
+      noteTextColor: "#111",
+      // Sequence diagrams: actors are black boxes with white text, like the heading marks.
+      actorBkg: "#111",
+      actorBorder: "#111",
+      actorTextColor: "#fff",
+      actorLineColor: "#111",
+      signalColor: "#111",
+      signalTextColor: "#111",
+      labelBoxBkgColor: "#fff",
+      labelBoxBorderColor: "#111",
+      labelTextColor: "#111",
+      loopTextColor: "#111",
+      activationBkgColor: "#111",
+      activationBorderColor: "#111",
+      sequenceNumberColor: "#fff",
+    },
+    sequence: { useMaxWidth: true, mirrorActors: false, actorFontWeight: 400, noteFontWeight: 400, messageFontWeight: 400 },
+  });
+  // Render each block with its own id. mermaid.run() derives ids from the
+  // clock, and blocks rendered in the same millisecond collide and lose
+  // their viewBox.
+  let i = 0;
+  for (const pre of blocks) {
+    try {
+      const { svg } = await mermaid.render("seq-" + (i++), pre.textContent);
+      pre.innerHTML = svg;
+      pre.dataset.processed = "true";
+    } catch (e) {
+      pre.insertAdjacentHTML("afterbegin", "<p class=\"diagram-error\">diagram failed: " + String(e.message || e) + "</p>");
+      console.error("mermaid", e);
+    }
+  }
+</script>
