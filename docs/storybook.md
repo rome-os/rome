@@ -36,14 +36,14 @@ The preview imports the dashboard stylesheet and uses the real `injectThemeCss` 
 The [design system](design-system.md) owns the theme contract.
 
 Use the preview toolbar's color-mode menu to select Light, Dark, or System.
-It drives the real `ThemeProvider`; the specimens and shadow DOM follow the selected mode.
+It drives the real `ThemeProvider`. The specimens and shadow DOM follow the selected mode.
 The selection is shareable through Storybook's `globals=colorMode:dark` URL parameter.
-This changes the rendered story; Storybook's sidebar appearance is separate.
+This changes the rendered story. Storybook's sidebar appearance is separate.
 The `compareModes` control restores the side-by-side comparison, which remains the default for the original `/dev/styleguide` route.
 The palette still comes from `rome-theme-name` in the preview origin's local storage.
 
 The story imports the existing page rather than copying it. Theme values come from `packages/web/src/lib/themes.ts`, and shared CSS and components resolve to workspace source.
-Edits to existing definitions update the development preview through HMR; a served static build must be rebuilt.
+Edits to existing definitions update the development preview through HMR. A served static build must be rebuilt.
 The page's token groups and component examples are curated lists, so adding a new token or component does not automatically add an example.
 
 [`rsbuild.config.ts`](../packages/web/.storybook/rsbuild.config.ts) resolves UI and web-content imports to workspace source, including package barrels and subpaths.
@@ -73,17 +73,17 @@ Measured on macOS arm64 with Node 24.14.0 and pnpm 11.6.0 in the devShell, with 
 | Static output | 96 files, 10,062,061 bytes |
 
 These are single-run observations, excluding devShell startup and installation.
-The startup measurement used `--ci`; the local script now uses `--no-open`.
+The startup measurement used `--ci`. The local script now uses `--no-open`.
 
 The development and served static stories passed the six theme/mode checks.
-Temporary edits through existing consumers verified UI and web-content HMR without page reloads or changes to either package's `dist` output; the edits were restored.
+Temporary edits through existing consumers verified UI and web-content HMR without page reloads or changes to either package's `dist` output. The edits were restored.
 The dashboard build passed, and its 388 source maps contained no Storybook, story, mock, MSW, or style-guide entries.
 React, React DOM, and the shared Radix Dialog resolved to single instances across their consumers.
 
 Host type checking and the complete unit command passed: 4,360 core tests, 1,384 web tests, 559 UI tests, and 153 other workspace tests.
-An earlier combined run had three core failures; both a focused rerun and the later complete run passed.
+An earlier combined run had three core failures. Both a focused rerun and the later complete run passed.
 The fullstack development container reached `Rome started`.
 
 The color-mode toolbar was exercised in Codex's built-in browser, including Light, Dark, System, and the comparison control.
-A temporary edit to the real dark-background definition updated the preview and its displayed color value automatically; restoration updated it again.
+A temporary edit to the real dark-background definition updated the preview and its displayed color value automatically. Restoration updated it again.
 Theme context lives in a separate module so changing palette definitions does not recreate its identity during HMR.
