@@ -15,6 +15,7 @@
     "openSidebar": "打开侧边栏"
   },
   "navbar": {
+    "sessionModel": "会话模型：{{model}}",
     "add": "添加小组件",
     "addShort": "加组件",
     "more": "更多操作",

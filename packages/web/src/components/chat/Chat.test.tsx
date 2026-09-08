@@ -191,6 +191,22 @@ afterEach(() => {
 });
 
 describe("Chat agent identity", () => {
+  it("shows the session model in the chat header", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      model: "gpt-5.5",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByLabelText("navbar.sessionModel").textContent).toBe("gpt-5.5");
+  });
+
+  it("does not invent a model for a session without a pin", () => {
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();
+  });
+
   it("uses the guardian-chosen name for the default main agent", () => {
     renderChat(<Chat sessionId="session-1" mainAgentDisplayName="  Atlas  " />);
 
