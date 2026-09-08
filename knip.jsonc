@@ -11,6 +11,8 @@
     // system at runtime. Nothing in this repo imports them. See
     // opencli-plugins/README.md.
     "opencli-plugins/**",
+    // Agent skills. Their scripts are invoked by an agent reading SKILL.md, so
+    // nothing imports them.
     ".claude/**",
     // Browser-side scripts delivered by a <script> tag, not bundled.
     "packages/cdp-client/public/**",
@@ -35,14 +37,14 @@
   // package's public API for apps and SDK consumers is indistinguishable, to
   // knip, from one nothing reads. Promote them once those barrels are pruned.
   //
-  // `pnpm lint:deadcode` passes `--max-issues 39`, the number of `error`
-  // findings on the day this landed. That is a ceiling on the aggregate count,
-  // not a per-finding baseline: it fails at 40, so dead code added on its own
-  // blocks a PR, but a PR that adds one finding and removes another still
-  // totals 39 and passes, and a deletion that does not lower the number leaves
-  // headroom for the next one. Walking it down is a manual edit. Comparing
-  // findings by identity against a checked-in baseline is the fix, tracked
-  // separately.
+  // `pnpm lint:deadcode` passes `--max-issues N`, where N is the count of
+  // `error` findings on the day this landed. package.json carries N and is the
+  // only place that does, so lowering it is a single edit. N is a ceiling on
+  // the aggregate, not a per-finding baseline: one finding past N fails, so
+  // dead code added on its own blocks a PR, but a PR that adds one finding and
+  // removes another still totals N and passes, and a deletion that does not
+  // lower N leaves headroom for the next one. Comparing findings by identity
+  // against a checked-in baseline is the fix, tracked separately.
   // Nothing is suppressed: `pnpm lint:deadcode:report` prints every category
   // including the warnings.
   "rules": {
@@ -74,7 +76,6 @@
     },
     "packages/core": {
       "entry": [
-        "src/index.ts",
         // The action engine spawns these by resolved path, so no import
         // reaches them. See packages/core/src/actions/engine.ts.
         "src/actions/worker.ts",
@@ -82,7 +83,6 @@
         // oclif discovers commands by directory, named in package.json.
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
-        "src/db/migrate.ts",
         "src/apps/__fixtures__/**",
         "drizzle.*.config.ts"
       ]
@@ -122,7 +122,7 @@
       // The expo plugin evaluates app.config.js, which reads a native build
       // variable that is absent outside an EAS build.
       "expo": false,
-      "entry": ["index.js", "app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"]
+      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
