@@ -238,6 +238,48 @@ describe("SegmentedControl", () => {
     expect(onValueChange).toHaveBeenCalledWith("open");
   });
 
+  it("lifts the selected segment onto the canvas surface", () => {
+    render(
+      <SegmentedControl
+        aria-label="Sessions view"
+        options={OPTIONS}
+        value="sessions"
+        onValueChange={() => {}}
+      />,
+    );
+
+    // The active segment reads as an elevated surface — `bg-background` +
+    // `shadow-1` — while the others stay flat on the muted track.
+    const selected = screen.getByRole("radio", { name: "Sessions" });
+    expect(selected.className).toContain("aria-checked:bg-background");
+    expect(selected.className).toContain("aria-checked:shadow-1");
+  });
+
+  it("keeps the selected surface on a segment carrying a title (#264)", () => {
+    render(
+      <SegmentedControl
+        aria-label="Epic filter"
+        options={[
+          { value: "all", label: "All", title: "Everything" },
+          { value: "open", label: "Open", title: "Only projects with unfinished work" },
+        ]}
+        value="all"
+        onValueChange={() => {}}
+      />,
+    );
+
+    // A `title` wraps the item in a Radix TooltipTrigger, whose merged
+    // `data-state` used to clobber Radix's `checked`. Keying the selected
+    // styles on `aria-checked` — which the tooltip never touches — keeps the
+    // active segment lit regardless of the tooltip's state.
+    const selected = screen.getByRole("radio", { name: "All" });
+    expect(selected.getAttribute("aria-checked")).toBe("true");
+    expect(selected.className).toContain("aria-checked:bg-background");
+    expect(selected.className).toContain("aria-checked:shadow-1");
+    // The old, broken keying must be gone so the tooltip's data-state can't win.
+    expect(selected.className).not.toContain("data-[state=checked]");
+  });
+
   it("hands the caller its own value union back, not a bare string", () => {
     type EpicFilter = "all" | "open" | "archived";
     const epicOptions: SegmentedControlOption<EpicFilter>[] = [
