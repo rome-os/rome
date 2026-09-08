@@ -38,8 +38,12 @@ The [design system](design-system.md) owns the theme contract.
 Use the preview toolbar's color-mode menu to select Light, Dark, or System.
 It drives the real `ThemeProvider`. The specimens and shadow DOM follow the selected mode.
 The selection is shareable through Storybook's `globals=colorMode:dark` URL parameter.
+Without a Storybook override, the initial mode uses the preview origin's saved `rome-theme` preference.
+An explicit global takes precedence and updates that preference before the story paints.
 This changes the rendered story. Storybook's sidebar appearance is separate.
 The `compareModes` control restores the side-by-side comparison, which remains the default for the original `/dev/styleguide` route.
+Comparison columns scope semantic tokens independently. Tailwind `dark:` utilities still match a dark ancestor, including the document root.
+Use the single-mode view to verify component variants in each mode.
 The palette still comes from `rome-theme-name` in the preview origin's local storage.
 
 The story imports the existing page rather than copying it. Theme values come from `packages/web/src/lib/themes.ts`, and shared CSS and components resolve to workspace source.
@@ -50,6 +54,7 @@ The page's token groups and component examples are curated lists, so adding a ne
 Edit `packages/ui/src` or `packages/web-content/src` while Storybook runs to receive HMR.
 No package rebuild or server restart is required.
 Published package exports stay unchanged.
+Theme context lives in a separate module so changing palette definitions does not recreate its identity during HMR.
 Shared UI CSS registers its component sources through `@source`, and the preview uses the dashboard PostCSS configuration.
 
 Storybook has its own Rsbuild configuration and entry points.
@@ -61,29 +66,4 @@ The existing `/dev` routes stay available for their current callers.
 The selected versions are `storybook-react-rsbuild` 3.4.2 and Storybook 10.6.0, with the workspace Rsbuild 2.2.3 and React 19.2.6 pins.
 See the [framework configuration guide](https://storybook.rsbuild.rs/guide/configuration) for builder options.
 
-## Integration verification
-
-Measured on macOS arm64 with Node 24.14.0 and pnpm 11.6.0 in the devShell, with dependencies and browser binaries already installed:
-
-| Measurement | Result |
-| --- | --- |
-| Fresh server process: command to ready | 5.237 s |
-| Fresh server process: command to rendered style guide | 5.706 s |
-| Static build wall time | 5.447 s |
-| Static output | 96 files, 10,062,061 bytes |
-
-These are single-run observations, excluding devShell startup and installation.
-The startup measurement used `--ci`. The local script now uses `--no-open`.
-
-The development and served static stories passed the six theme/mode checks.
-Temporary edits through existing consumers verified UI and web-content HMR without page reloads or changes to either package's `dist` output. The edits were restored.
-The dashboard build passed, and its 388 source maps contained no Storybook, story, mock, MSW, or style-guide entries.
-React, React DOM, and the shared Radix Dialog resolved to single instances across their consumers.
-
-Host type checking and the complete unit command passed: 4,360 core tests, 1,384 web tests, 559 UI tests, and 153 other workspace tests.
-An earlier combined run had three core failures. Both a focused rerun and the later complete run passed.
-The fullstack development container reached `Rome started`.
-
-The color-mode toolbar was exercised in Codex's built-in browser, including Light, Dark, System, and the comparison control.
-A temporary edit to the real dark-background definition updated the preview and its displayed color value automatically. Restoration updated it again.
-Theme context lives in a separate module so changing palette definitions does not recreate its identity during HMR.
+Initial measurements and verification evidence are recorded in [PR #273](https://github.com/rome-os/rome/pull/273).

@@ -4,12 +4,9 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 import type { ResolvedTheme } from "@/lib/theme";
 
-// Dev-only design-system gallery. The verification surface for the semantic
-// token layer: specimens follow the active mode or compare light and dark
-// (comparison columns force `.light`/`.dark`, independent of the global mode),
-// and each `ui/` primitive is rendered in every variant. The shadow-DOM parity
-// panel proves an app sandbox inherits the host theme across the shadow boundary
-// with nothing injected.
+// Comparison columns scope semantic tokens to each mode. Tailwind `dark:`
+// utilities still match a dark ancestor, so use the single-mode view to verify
+// component variants. The shadow specimen inherits the host's semantic tokens.
 
 type TokenGroup = { name: string; tokens: string[] };
 

@@ -1,14 +1,14 @@
 import type { Preview } from "storybook-react-rsbuild";
-import { useEffect, type ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { ThemeProvider, useTheme } from "../src/hooks/use-theme";
-import { injectThemeCss, type ThemePreference } from "../src/lib/theme";
+import { injectThemeCss, readStoredPreference, type ThemePreference } from "../src/lib/theme";
 import "../src/globals.css";
 
 injectThemeCss();
 
 function ColorMode({ mode, children }: { mode: ThemePreference; children: ReactNode }) {
   const { setPreference } = useTheme();
-  useEffect(() => setPreference(mode), [mode, setPreference]);
+  useLayoutEffect(() => setPreference(mode), [mode, setPreference]);
   return children;
 }
 
@@ -29,7 +29,7 @@ const preview: Preview = {
       },
     },
   },
-  initialGlobals: { colorMode: "system" },
+  initialGlobals: { colorMode: readStoredPreference() },
   decorators: [
     (Story, { globals }) => (
       <ThemeProvider>
