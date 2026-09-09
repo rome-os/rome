@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "storybook-react-rsbuild";
-import { useTranslation } from "react-i18next";
-import "../src/i18n";
+import i18n from "../src/i18n";
 import { ConnectionBrandBadge } from "../src/components/brand-icons/connection-badges";
 import { ConnectionSlotCard, SoleSlotScope } from "../src/components/connection-slot-card";
 import { ConnectionDetailHeader } from "../src/components/ConnectionDetail";
@@ -40,46 +39,48 @@ const connected: ConnectionCard = {
   ],
 };
 
-function ChannelStatusCard({ card, onClose }: { card: ConnectionCard; onClose: () => void }) {
-  const { t } = useTranslation("settings");
-  const slot = card.slots[0];
-  const isConnected = slot.state !== "unauthorized";
-
-  return (
-    <Dialog open onClose={onClose} size="lg">
-      <ConnectionDetailHeader card={card} onClose={onClose} />
-      <DialogBody>
-        <SoleSlotScope>
-          <ConnectionSlotCard
-            service={card.service}
-            slot={slot}
-            state={isConnected ? "connected" : "unconnected"}
-            role="primary"
-            icon={<ConnectionBrandBadge connection={card.service} />}
-            identityTitle={isConnected ? slot.identity : null}
-            action={
-              isConnected ? (
-                <Button variant="destructive" size="sm" onClick={() => undefined}>
-                  {t("common.disconnect")}
-                </Button>
-              ) : undefined
-            }
-          >
-            {!isConnected && <Button onClick={() => undefined}>{t("common.connect")}</Button>}
-          </ConnectionSlotCard>
-        </SoleSlotScope>
-      </DialogBody>
-    </Dialog>
-  );
-}
-
 const meta = {
   title: "Dev/Connections/Channel status",
-  component: ChannelStatusCard,
+  component: ConnectionDetailHeader,
   parameters: { layout: "padded" },
   args: { onClose: () => undefined },
   argTypes: { card: { control: false }, onClose: { control: false } },
-} satisfies Meta<typeof ChannelStatusCard>;
+  render: (args) => {
+    const slot = args.card.slots[0];
+    const isConnected = slot.state !== "unauthorized";
+
+    return (
+      <Dialog open onClose={args.onClose} size="lg">
+        <ConnectionDetailHeader {...args} />
+        <DialogBody>
+          <SoleSlotScope>
+            <ConnectionSlotCard
+              service={args.card.service}
+              slot={slot}
+              state={isConnected ? "connected" : "unconnected"}
+              role="primary"
+              icon={<ConnectionBrandBadge connection={args.card.service} />}
+              identityTitle={isConnected ? slot.identity : null}
+              action={
+                isConnected ? (
+                  <Button variant="destructive" size="sm" onClick={() => undefined}>
+                    {i18n.t("common.disconnect", { ns: "settings" })}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {!isConnected && (
+                <Button onClick={() => undefined}>
+                  {i18n.t("common.connect", { ns: "settings" })}
+                </Button>
+              )}
+            </ConnectionSlotCard>
+          </SoleSlotScope>
+        </DialogBody>
+      </Dialog>
+    );
+  },
+} satisfies Meta<typeof ConnectionDetailHeader>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
