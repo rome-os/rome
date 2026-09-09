@@ -146,6 +146,9 @@ static build instead. The check covers the selected design story and network-fre
 It observes initial-render requests and fails for `/api` or another service origin. It does not
 intercept or rewrite requests.
 
+Storybook disables lazy compilation. Its dynamic-import proxy can race HMR during a cold CI render.
+Keep it disabled unless the Playwright container check passes with the builder version in this repository.
+
 ## Build and check
 
 1. Run `pnpm build:storybook` in the devShell.
