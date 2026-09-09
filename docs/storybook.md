@@ -1,6 +1,6 @@
 # Storybook
 
-Storybook serves self-contained design demonstrations without a Rome backend. Its page stories make no service requests. Runtime diagnostic tools and application flows remain in `/dev` and E2E. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
+Storybook serves self-contained design demonstrations without a Rome backend. Its initial page-story renders make no service requests. Runtime diagnostic tools and application flows remain in `/dev` and E2E. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
 
 ## Start
 
@@ -37,20 +37,21 @@ Storybook provides parallel design demonstrations. It does not replace runtime d
 
 ## Network-free component states
 
-Each story imports a production renderer and passes typed fixtures or callbacks. The stories do not
-load API clients, mock handlers, fetch overrides, or request guards.
+Each story imports a production renderer and passes typed fixtures or callbacks. The initial render
+does not use mock handlers, fetch overrides, or request guards.
 
 | Source component | Fixture and state | Story ID | Iframe |
 | --- | --- | --- | --- |
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` compact question | [`dev-chat-blocks--compact-question`](http://localhost:6006/?path=/story/dev-chat-blocks--compact-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story) |
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` stacked question | [`dev-chat-blocks--stacked-question`](http://localhost:6006/?path=/story/dev-chat-blocks--stacked-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--stacked-question&viewMode=story) |
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` resolved question | [`dev-chat-blocks--resolved-question`](http://localhost:6006/?path=/story/dev-chat-blocks--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story) |
-| `ConnectionDetailHeader` + bare `ConnectionSlotCard` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
-| `ConnectionDetailHeader` + bare `ConnectionSlotCard` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
+| `ConnectionDetailDialog` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
+| `ConnectionDetailDialog` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
 
-`/dev/connections` stays out of Storybook. It mounts connection ceremonies and replaces the global
-fetch function to block their service requests. The connection stories compose the detail header with
-the pure, bare `ConnectionSlotCard` body instead of mounting connection ceremonies.
+`/dev/connections` stays out of Storybook because it loads application data and owns selected-connection
+state. The connection stories pass typed `ConnectionCard` fixtures directly to the production
+`ConnectionDetailDialog`. Their initial render does not start a setup; connection actions retain their
+production behavior and belong to application-flow coverage.
 
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
@@ -59,8 +60,8 @@ the auth query cache, and service-backed submit or setup flows.
 
 Run `pnpm --filter rome-web test:storybook` to start Storybook and check the direct iframe stories.
 Set `STORYBOOK_PORT` to use another development port. Set `STORYBOOK_BASE_URL` to check a running
-static build instead. The check observes requests and fails for `/api` or another service origin. It
-does not intercept or rewrite requests.
+static build instead. The check observes initial-render requests and fails for `/api` or another service
+origin. It does not intercept or rewrite requests.
 
 ## Build and check
 
