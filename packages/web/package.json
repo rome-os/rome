@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm build:kit && rsbuild dev",
     "dev:mock": "pnpm build:kit && rsbuild dev --config mock/rsbuild.config.ts",
-    "storybook": "storybook dev --port 6006 --exact-port --no-open",
+    "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open",
     "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
     "build": "tsc --noEmit && rsbuild build",

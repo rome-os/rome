@@ -16,7 +16,7 @@ export default defineConfig({
   webServer: process.env.STORYBOOK_BASE_URL
     ? undefined
     : {
-        command: `pnpm exec storybook dev --port ${port} --exact-port --no-open`,
+        command: `pnpm exec storybook dev --host 127.0.0.1 --port ${port} --exact-port --no-open`,
         url: baseURL,
         reuseExistingServer: !isCI,
         timeout: isCI ? 180_000 : 60_000,
