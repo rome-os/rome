@@ -11,7 +11,6 @@
     "@composio/client": "0.1.0-alpha.73",
     "@octokit/rest": "^22.0.1",
     "@octokit/webhooks-methods": "^6.0.0",
-    "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-slot": "^1.1.2",
     "@rome-os/app-runtime": "^0.6.0",
     "@rome-os/app-web-sdk": "^0.3.0",
@@ -21,12 +20,12 @@
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "tailwindcss": "^4.1.0"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "dotenv": "^17.3.1",
     "typescript": "^5.9.3"
   }
 }
