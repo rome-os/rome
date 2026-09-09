@@ -198,7 +198,7 @@ afterEach(() => {
 });
 
 describe("Chat agent identity", () => {
-  it("always offers Show apps, including an empty or already expanded panel", async () => {
+  it("shows the expand control only while the apps panel is collapsed", async () => {
     const user = userEvent.setup();
     const { rerender } = renderChat(<Chat sessionId="session-1" />);
     await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
@@ -209,9 +209,14 @@ describe("Chat agent identity", () => {
         <Chat sessionId="session-1" />
       </MemoryRouter>,
     );
-    expect(
-      screen.getByRole("button", { name: "chat.expandTools" }).getAttribute("aria-expanded"),
-    ).toBe("true");
+    expect(screen.queryByRole("button", { name: "chat.expandTools" })).toBeNull();
+    appsPanel.collapsed = true;
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
   });
 
   it("shows the session model in the chat header", () => {

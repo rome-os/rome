@@ -1655,24 +1655,26 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <IconButton
-              size="sm"
-              data-coach={toolView.collapsed ? "add-widget" : undefined}
-              aria-expanded={!toolView.collapsed}
-              onClick={() => setToolsCollapsed(false)}
-              label={t("chat.expandTools", { ns: "common" })}
-              icon={
-                <span className="relative">
-                  <PanelRightOpen />
-                  {toolView.unreadIds.length > 0 && (
-                    <span
-                      className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
-                      aria-label={t("chat.toolUpdated", { ns: "common" })}
-                    />
-                  )}
-                </span>
-              }
-            />
+            {toolView.collapsed && (
+              <IconButton
+                size="sm"
+                data-coach="add-widget"
+                aria-expanded={false}
+                onClick={() => setToolsCollapsed(false)}
+                label={t("chat.expandTools", { ns: "common" })}
+                icon={
+                  <span className="relative">
+                    <PanelRightOpen />
+                    {toolView.unreadIds.length > 0 && (
+                      <span
+                        className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+                        aria-label={t("chat.toolUpdated", { ns: "common" })}
+                      />
+                    )}
+                  </span>
+                }
+              />
+            )}
           </div>
           {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,

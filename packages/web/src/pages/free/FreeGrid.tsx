@@ -7,6 +7,7 @@ import {
   Pin,
   PinOff,
   PanelRightOpen,
+  PanelRightClose,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -329,14 +330,16 @@ export function FreeGrid() {
           >
             {!chatSessionId && (
               <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">
-                <IconButton
-                  size="sm"
-                  data-coach={toolView.collapsed ? "add-widget" : undefined}
-                  aria-expanded={!toolView.collapsed}
-                  onClick={() => setToolsCollapsed(false)}
-                  label={t("chat.expandTools")}
-                  icon={<PanelRightOpen />}
-                />
+                {toolView.collapsed && (
+                  <IconButton
+                    size="sm"
+                    data-coach="add-widget"
+                    aria-expanded={false}
+                    onClick={() => setToolsCollapsed(false)}
+                    label={t("chat.expandTools")}
+                    icon={<PanelRightOpen />}
+                  />
+                )}
               </div>
             )}
             <ChatWidget
@@ -401,12 +404,12 @@ export function FreeGrid() {
             </DropdownMenu>
             <IconButton
               size="md"
-              label={t("chat.expandTools")}
+              label={t(toolView.collapsed ? "chat.expandTools" : "chat.collapseTools")}
               aria-expanded={!toolView.collapsed}
               icon={
                 <span className="relative">
-                  <PanelRightOpen />
-                  {toolView.unreadIds.length > 0 && (
+                  {toolView.collapsed ? <PanelRightOpen /> : <PanelRightClose />}
+                  {toolView.collapsed && toolView.unreadIds.length > 0 && (
                     <span
                       className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
                       aria-label={t("chat.toolUpdated")}
@@ -414,7 +417,7 @@ export function FreeGrid() {
                   )}
                 </span>
               }
-              onClick={() => setToolsCollapsed(false)}
+              onClick={() => setToolsCollapsed(!toolView.collapsed)}
             />
           </SlotContent>
         </WorkspaceContextRegistryContext.Provider>

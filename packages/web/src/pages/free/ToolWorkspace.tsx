@@ -1,4 +1,4 @@
-import { ChevronDown, LayoutGrid, MessageSquare, PanelRightClose, Plus, X } from "lucide-react";
+import { ChevronDown, LayoutGrid, PanelRightClose, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -223,14 +223,6 @@ export function ToolWorkspace({
         style={{ display: open ? undefined : "none" }}
       >
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-          {compact && (
-            <IconButton
-              size="sm"
-              label={t("nav.chat")}
-              icon={<MessageSquare />}
-              onClick={() => setCollapsed(true)}
-            />
-          )}
           {sorted.length > 0 ? (
             <TabsList
               aria-label={t("chat.tools")}
@@ -278,14 +270,14 @@ export function ToolWorkspace({
               <IconButton size="sm" data-coach="add-widget" label={t("chat.add")} icon={<Plus />} />
             </WidgetPicker>
           )}
-          {!compact && (
-            <IconButton
-              size="sm"
-              label={t("chat.collapseTools")}
-              icon={<PanelRightClose />}
-              onClick={() => setCollapsed(true)}
-            />
-          )}
+          <IconButton
+            size="sm"
+            className="max-md:hidden"
+            label={t("chat.collapseTools")}
+            aria-expanded={true}
+            icon={<PanelRightClose />}
+            onClick={() => setCollapsed(true)}
+          />
         </div>
         <div className="relative min-h-0 flex-1">
           {placements.length === 0 && (

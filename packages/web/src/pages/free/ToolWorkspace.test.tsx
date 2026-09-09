@@ -138,7 +138,7 @@ describe("ToolWorkspace", () => {
     const { rerender } = render(workspace(view));
     expect(screen.queryByRole("separator")).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Chat draft" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Chat", exact: true })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Chat", exact: true })).toBeNull();
     rerender(workspace({ ...view, collapsed: true }));
     expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
     expect(screen.queryByRole("tabpanel")).toBeNull();
