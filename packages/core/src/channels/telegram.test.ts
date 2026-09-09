@@ -75,18 +75,36 @@ describe("TelegramAdapter", () => {
     it("normalizes a private message", async () => {
       const captured = await startCapturing();
 
-      await telegram.emitUpdate(makeUpdate());
+      await telegram.emitUpdate(makeUpdate({ from: { username: "alice_smith" } }));
 
       expect(captured).toHaveLength(1);
       expect(captured[0].id).toBe("42");
       expect(captured[0].channel).toBe("telegram");
       expect(captured[0].channelUserId).toBe("111");
       expect(captured[0].displayName).toBe("Alice Smith");
+      expect(captured[0].username).toBe("alice_smith");
       expect(captured[0].threadId).toBe("999");
       expect(captured[0].threadType).toBe("private");
       expect(captured[0].text).toBe("hello");
       expect(captured[0].attachments).toEqual([]);
       expect(captured[0].replyTo).toBeUndefined();
+    });
+
+    it("recognizes commands addressed to this bot in groups", async () => {
+      const captured = await startCapturing();
+      for (const text of ["/start@FAKE_BOT", "/start@other_bot", "/start"]) {
+        await telegram.emitUpdate(
+          makeUpdate({
+            chat: { id: -555, type: "group" },
+            message: { text, entities: [{ type: "bot_command", offset: 0, length: text.length }] },
+          }),
+        );
+      }
+      expect(captured.map((message) => message.addressing)).toEqual([
+        "mention",
+        "ambient",
+        "ambient",
+      ]);
     });
 
     it("distinguishes ambient groups, bot mentions, replies and anonymous channel senders", async () => {

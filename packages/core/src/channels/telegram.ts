@@ -139,20 +139,25 @@ export class TelegramAdapter implements ProviderAdapter {
             : "title" in ctx.chat!
               ? ((ctx.chat as { title?: string }).title ?? "Channel")
               : "Channel",
+        username:
+          ctx.from && !ctx.channelPost && !rawMsg.sender_chat ? ctx.from.username : undefined,
         threadId: String(ctx.chat!.id),
         threadName: "title" in ctx.chat! ? (ctx.chat as { title?: string }).title : undefined,
         threadType: ctx.chat!.type === "private" ? "private" : "group",
         addressing:
           ctx.chat!.type === "private"
             ? "direct"
-            : (rawMsg.entities ?? rawMsg.caption_entities ?? []).some((entity) =>
-                  entity.type === "text_mention"
-                    ? entity.user.id === ctx.me.id
-                    : entity.type === "mention" &&
-                      (rawMsg.text ?? rawMsg.caption ?? "")
-                        .slice(entity.offset, entity.offset + entity.length)
-                        .toLowerCase() === `@${ctx.me.username.toLowerCase()}`,
-                )
+            : (rawMsg.entities ?? rawMsg.caption_entities ?? []).some((entity) => {
+                  if (entity.type === "text_mention") return entity.user.id === ctx.me.id;
+                  const text = (rawMsg.text ?? rawMsg.caption ?? "")
+                    .slice(entity.offset, entity.offset + entity.length)
+                    .toLowerCase();
+                  const handle = `@${ctx.me.username.toLowerCase()}`;
+                  return (
+                    (entity.type === "mention" && text === handle) ||
+                    (entity.type === "bot_command" && text.endsWith(handle))
+                  );
+                })
               ? "mention"
               : rawMsg.reply_to_message?.from?.id === ctx.me.id
                 ? "reply"

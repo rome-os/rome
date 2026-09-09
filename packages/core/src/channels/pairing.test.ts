@@ -33,6 +33,13 @@ describe("channel pairing approvals", () => {
     "discord",
     "feishu",
   ] as const)("%s privately notifies a group requester after Web approval without undoing approval on delivery failure", async (channel) => {
+    const id = channel === "feishu" ? "ou_123" : "123";
+    const account =
+      channel === "telegram"
+        ? "@actualuser (`123`)"
+        : channel === "discord"
+          ? "<@123> (`123`)"
+          : '<at user_id="ou_123">ou_123</at> (`ou_123`)';
     const send = rs.fn<TalkRouter["send"]>(async (_connection, conversationId) => ({
       messageId: "sent",
       conversationId,
@@ -48,7 +55,8 @@ describe("channel pairing approvals", () => {
       "connection",
       channel,
       {
-        senderId: "123",
+        senderId: id,
+        senderUsername: channel === "telegram" ? "actualuser" : undefined,
         conversationId: "group" as ConversationId,
         messageId: "request",
         text: "hello",
@@ -66,9 +74,9 @@ describe("channel pairing approvals", () => {
     send.mockClear();
     await notifyPairingResolution(router, result.approval);
     expect(feature).toHaveBeenCalledWith("connection", "directMessaging");
-    expect(conversationFor).toHaveBeenCalledWith("123");
+    expect(conversationFor).toHaveBeenCalledWith(id);
     expect(send).toHaveBeenCalledWith("connection", "private-chat", {
-      text: "Your account is paired with Rome. Please send your original message again.",
+      text: `✅ ${account} is paired with Rome. You can start chatting now.`,
     });
     send.mockRejectedValueOnce(new Error("Private messages disabled"));
     await expect(notifyPairingResolution(router, result.approval)).resolves.toBeUndefined();
@@ -76,11 +84,47 @@ describe("channel pairing approvals", () => {
     expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
   });
 
+  it.each([
+    ["telegram", "123", "Alice [Smith]", "[@Alice \\[Smith\\]](tg://user?id=123) (`123`)"],
+    ["discord", "123", "@everyone", "<@123> (`123`)"],
+    [
+      "feishu",
+      "ou_123",
+      "Alice <at>&",
+      '<at user_id="ou_123">Alice &lt;at&gt;&amp;</at> (`ou_123`)',
+    ],
+  ])("%s mentions only the requester even with special characters in their name", async (channel, id, name, expected) => {
+    const send = rs.fn<TalkRouter["send"]>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    await createPairingAdmission({
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db),
+    })(
+      "connection",
+      channel,
+      {
+        senderId: id,
+        senderDisplayName: name,
+        conversationId: "dm" as ConversationId,
+        messageId: "request",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(),
+        thread: { kind: "dm" },
+      },
+      { send } as unknown as TalkRouter,
+    );
+    expect(send.mock.calls[0][2].text).toContain(`Pair ${expected} with Rome.`);
+  });
+
   it("reuses a pending identity, limits guidance, and retains codes across repository restarts", async () => {
     const first = repo.requestPairing(identity)!;
-    const second = repo.requestPairing(identity)!;
+    const second = repo.requestPairing({ ...identity, username: "current_handle" })!;
     expect(second.approval.id).toBe(first.approval.id);
     expect(second.guide).toBe(false);
+    expect(second.approval.payload).toMatchObject({ username: "current_handle" });
     expect((await repo.list()).length).toBe(1);
     const code = await repo.pairingCode(first.approval.id);
     expect(code).toMatch(/^RP-[0-9A-F]{8}$/);
@@ -267,9 +311,17 @@ describe("channel pairing approvals", () => {
       conversationId: "dm" as ConversationId,
     }));
     const router = { send } as unknown as TalkRouter;
+    const id = service === "feishu" ? "ou_123" : "123";
+    const account =
+      service === "telegram"
+        ? "@realowner (`123`)"
+        : service === "discord"
+          ? "<@123> (`123`)"
+          : '<at user_id="ou_123">Owner</at> (`ou_123`)';
     const message: InboundMessage = {
-      senderId: "123",
+      senderId: id,
       senderDisplayName: "Owner",
+      senderUsername: service === "telegram" ? "realowner" : undefined,
       conversationId: "dm" as ConversationId,
       messageId: "one",
       text: "hello",
@@ -299,8 +351,9 @@ describe("channel pairing approvals", () => {
     );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][2].text).toContain(`🔗 Pair ${account} with Rome.`);
     expect(send.mock.calls[0][2].text).toContain(
-      `Learn more in the [pairing guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
+      `Learn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
     );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
@@ -320,6 +373,12 @@ describe("channel pairing approvals", () => {
     ).toBe(false);
     expect(await admit("connection", service, { ...message, text: code }, router)).toBe(false);
     expect(await admit("connection", service, message, router)).toBe(true);
+    expect(
+      send.mock.calls.some(
+        ([, , body]) =>
+          body.text === `✅ ${account} is paired with Rome. You can start chatting now.`,
+      ),
+    ).toBe(true);
     expect(send.mock.calls.some(([, , body]) => body.text?.includes(code))).toBe(false);
   });
 });

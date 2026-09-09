@@ -113,6 +113,7 @@ function restMessageToNormalized(
     channel: "discord",
     channelUserId: msg.author.id,
     displayName: msg.author.global_name ?? msg.author.username,
+    username: msg.author.username,
     threadId: channelId,
     threadName: `${guildName}/#${channelName}`,
     threadType: "group",
@@ -821,6 +822,7 @@ export class DiscordAdapter implements ProviderAdapter {
       channelUserId: message.author.id,
       displayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
+      username: message.author.username,
       threadId: message.channelId,
       parentThreadId: parentId ?? undefined,
       threadName,

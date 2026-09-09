@@ -41,6 +41,7 @@ export const pairingPayloadSchema = z.object({
   connectionId: z.string().min(1),
   channelUserId: z.string().min(1),
   displayName: z.string(),
+  username: z.string().optional(),
   expiresAt: z.number().int(),
   failedAttempts: z.number().int().nonnegative(),
   lastGuidanceAt: z.number().int(),

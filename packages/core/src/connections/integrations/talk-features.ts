@@ -22,6 +22,7 @@ export function toInboundMessage(message: NormalizedMessage): InboundMessage {
       : {}),
     senderId: message.channelUserId,
     senderDisplayName: message.displayName,
+    ...(message.username ? { senderUsername: message.username } : {}),
     text: message.text,
     attachments: message.attachments,
     timestamp: message.timestamp,

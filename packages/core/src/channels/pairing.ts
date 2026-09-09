@@ -6,8 +6,39 @@ import { createLogger } from "../logger.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 
 const log = createLogger("channel-pairing");
-const SUCCESS = "Your account is paired with Rome. Please send your original message again.";
-const GUIDANCE = "Open `Settings` → `Connections` in the Rome Web UI to pair your account.";
+function pairingAccount(
+  channel: string,
+  id: string,
+  displayName?: string,
+  username?: string,
+): string {
+  const name = username ? `@${username}` : displayName?.replace(/\s+/g, " ").trim();
+  const code = `\`${id}\``;
+  if (channel === "discord" && /^[1-9][0-9]*$/.test(id)) return `<@${id}> (${code})`;
+  if (channel === "feishu" && /^ou_[a-zA-Z0-9_-]+$/.test(id)) {
+    const label = (displayName || id)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return `<at user_id="${id}">${label}</at> (${code})`;
+  }
+  if (channel === "telegram" && !username && /^[1-9][0-9]*$/.test(id)) {
+    const label = (name || id).replace(/[\\`*_{}\[\]()<>#+.!|~-]/g, "\\$&");
+    return `[@${label}](tg://user?id=${id}) (${code})`;
+  }
+  return name && name !== id
+    ? `${name.replace(/[\\`*_{}\[\]()<>#+.!|~-]/g, "\\$&")} (${code})`
+    : code;
+}
+
+function pairingSuccess(
+  channel: string,
+  id: string,
+  displayName?: string,
+  username?: string,
+): string {
+  return `✅ ${pairingAccount(channel, id, displayName, username)} is paired with Rome. You can start chatting now.`;
+}
 
 export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
@@ -23,7 +54,7 @@ export function createPairingAdmission(deps: {
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
-    const guidance = `${GUIDANCE}\n\nLearn more in the [pairing guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
@@ -32,6 +63,7 @@ export function createPairingAdmission(deps: {
             connectionId,
             channelUserId: message.senderId,
             displayName: message.senderDisplayName ?? message.senderId,
+            username: message.senderUsername,
           });
           if (request?.guide)
             await router.send(connectionId, message.conversationId, { text: guidance });
@@ -49,7 +81,14 @@ export function createPairingAdmission(deps: {
           outcome: result.outcome,
         });
         if (result.outcome === "resolved" && result.approval.status === "approved") {
-          await router.send(connectionId, message.conversationId, { text: SUCCESS });
+          await router.send(connectionId, message.conversationId, {
+            text: pairingSuccess(
+              service,
+              message.senderId,
+              message.senderDisplayName,
+              message.senderUsername,
+            ),
+          });
         }
         if (result.outcome === "invalid_code" && "notify" in result && result.notify) {
           await router.send(connectionId, message.conversationId, {
@@ -70,6 +109,7 @@ export function createPairingAdmission(deps: {
         connectionId,
         channelUserId: message.senderId,
         displayName: message.senderDisplayName ?? message.senderId,
+        username: message.senderUsername,
         ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
       });
       if (request?.guide) {
@@ -98,7 +138,14 @@ export async function notifyPairingResolution(
         .feature(payload.connectionId, "directMessaging")
         ?.conversationFor(payload.channelUserId));
     if (!conversationId) throw new Error("Direct conversation unavailable");
-    await router.send(payload.connectionId, conversationId, { text: SUCCESS });
+    await router.send(payload.connectionId, conversationId, {
+      text: pairingSuccess(
+        payload.channel,
+        payload.channelUserId,
+        payload.displayName,
+        payload.username,
+      ),
+    });
   } catch {
     log.warn("pairing notification failed", {
       approvalId: approval.id,

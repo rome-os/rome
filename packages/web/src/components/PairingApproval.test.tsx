@@ -89,11 +89,22 @@ describe("shared pairing approvals", () => {
     );
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
+    await activity.findByRole("button", { name: "Approve" });
+    expect(activity.getByText("ID alice")).toBeTruthy();
+    expect(activity.getByText("Telegram")).toBeTruthy();
+    for (const slice of [activity, connections]) {
+      const summary = slice.getByText("Pair with a verification code");
+      expect(summary.closest("details")?.open).toBe(false);
+      fireEvent.click(summary);
+    }
     await activity.findByText(code);
     expect(activity.getAllByText(code)).toHaveLength(1);
     expect(connections.getAllByText(code)).toHaveLength(1);
-    expect(activity.getByText(/private telegram message from Alice/)).toBeTruthy();
-    fireEvent.click(activity.getByRole("button", { name: "Copy code" }));
+    expect(
+      activity.getByText("Send this code to the bot in a private Telegram message from Alice."),
+    ).toBeTruthy();
+    expect(activity.getByText(/Valid for 10 minutes/)).toBeTruthy();
+    fireEvent.click(activity.getByRole("button", { name: "Copy" }));
     await activity.findByRole("button", { name: "Code copied" });
     expect(writeText).toHaveBeenCalledWith(code);
     fireEvent.click(connections.getByRole("button", { name: "Approve" }));
@@ -103,7 +114,7 @@ describe("shared pairing approvals", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(activity.getByText("Approved")).toBeTruthy());
     expect(connections.queryByText("Approved")).toBeNull();
-    expect(connections.getByText("No active channel pairing requests.")).toBeTruthy();
+    expect(connections.getByText(/No pending pairing requests/)).toBeTruthy();
     expect(activity.queryByText(code)).toBeNull();
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(activity.getByText(/verified-owner/)).toBeTruthy();
@@ -140,7 +151,7 @@ describe("shared pairing approvals", () => {
         </QueryClientProvider>
       </MemoryRouter>,
     );
-    await screen.findByText("No active channel pairing requests.");
+    await screen.findByText(/No pending pairing requests/);
     expect(screen.queryByText("Expired")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(fetch.mock.calls.every(([url]) => String(url) === "/api/approvals")).toBe(true);
@@ -196,14 +207,14 @@ describe("shared pairing approvals", () => {
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
     fireEvent.click(await activity.findByRole("button", { name: "Load earlier pairing requests" }));
-    await activity.findByText("earlier-user (earlier-user)");
-    expect(connections.queryByText("earlier-user (earlier-user)")).toBeNull();
-    expect(connections.queryByText("history-0 (history-0)")).toBeNull();
+    await activity.findByText("earlier-user");
+    expect(connections.queryByText("earlier-user")).toBeNull();
+    expect(connections.queryByText("history-0")).toBeNull();
     expect(
       connections.getByRole("link", { name: "View all requests in Activity" }).getAttribute("href"),
     ).toBe("/activity");
     expect(connections.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
-    expect(activity.getByText("pending-user (pending-user)")).toBeTruthy();
+    expect(activity.getByText("pending-user")).toBeTruthy();
     expect(activity.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
     expect(fetch.mock.calls.some(([url]) => String(url).includes("pairingHistoryOffset=100"))).toBe(
       true,

@@ -1,5 +1,3 @@
-import { PAIRING_CHANNELS } from "@rome/api-types/approvals";
-import { PairingApprovals } from "./PairingApproval";
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
@@ -56,13 +54,6 @@ export function ConnectionDetailBody({
 
   const body = (
     <div className="space-y-6">
-      {PAIRING_CHANNELS.some((channel) => channel === card.service) && (
-        <PairingApprovals
-          connectionIds={card.slots.flatMap((slot) =>
-            slot.connectionId ? [slot.connectionId] : [],
-          )}
-        />
-      )}
       {card.slots.map((slot, index) => {
         const isSecondary = index > 0;
         const showAvailableToAdd = isSecondary && slot.state === "unauthorized";

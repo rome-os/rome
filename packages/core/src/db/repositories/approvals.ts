@@ -3,7 +3,7 @@ import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/
 import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals, channelMappings } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, SqliteExec } from "../index.js";
 import {
   pairingPayload,
   PAIRING_HISTORY_PAGE_SIZE,
@@ -33,6 +33,26 @@ export class ApprovalsRepository {
     private readonly getPairingKey = loadPairingKey,
     private readonly personMappingRepo = new PersonMappingRepository(db),
   ) {}
+
+  supersedePairings(connectionId: string, exec: SqliteExec = this.db) {
+    exec
+      .update(approvals)
+      .set({
+        status: "rejected",
+        resolvedAt: new Date(),
+        resolvedBy: "system:connection-disconnected",
+        payload: sql`json_set(${approvals.payload}, '$.resolution', 'superseded')`,
+      })
+      .where(
+        and(
+          eq(approvals.type, "person_mapping"),
+          eq(approvals.status, "pending"),
+          sql`json_extract(${approvals.payload}, '$.action') = 'channel_pairing'`,
+          sql`json_extract(${approvals.payload}, '$.connectionId') = ${connectionId}`,
+        ),
+      )
+      .run();
+  }
 
   expirePairings(now = Date.now()) {
     this.db
@@ -93,7 +113,7 @@ export class ApprovalsRepository {
   requestPairing(
     input: Pick<
       PairingPayload,
-      "channel" | "connectionId" | "channelUserId" | "displayName" | "conversationId"
+      "channel" | "connectionId" | "channelUserId" | "displayName" | "username" | "conversationId"
     >,
     now = Date.now(),
   ) {
@@ -142,6 +162,7 @@ export class ApprovalsRepository {
           const guide = now - payload.lastGuidanceAt >= 30_000;
           const updated = {
             ...payload,
+            username: input.username,
             ...(input.conversationId ? { conversationId: input.conversationId } : {}),
             lastGuidanceAt: guide ? now : payload.lastGuidanceAt,
           };

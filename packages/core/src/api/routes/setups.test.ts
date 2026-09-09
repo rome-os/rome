@@ -39,6 +39,7 @@ import type { PersonMappingRepository } from "../../db/repositories/person-mappi
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
+import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { connectionsRoutes } from "./connections.js";
 
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };
@@ -79,7 +80,7 @@ function fakePersonRepo(): PersonMappingRepository {
     // write helpers enlisted in its transaction — not the async setters.
     writeChannelUserId: rs.fn(),
     writeChannelMapping: rs.fn(() => "id"),
-    deleteGuardianChannelMappings: rs.fn(),
+    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
 
@@ -94,6 +95,8 @@ function harness() {
   const personMappingRepo = fakePersonRepo();
   const manager = new SetupManager({ registry, personMappingRepo });
   const deps = {
+    db,
+    approvalsRepo: new ApprovalsRepository(db),
     connectionRegistry: registry,
     setupManager: manager,
     personMappingRepo,

@@ -294,7 +294,10 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   ): Promise<void> => {
     const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
     if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return;
-    await deps.personMappingRepo.deleteGuardianChannelMappings(conn.service);
+    deps.db.transaction((tx) => {
+      deps.approvalsRepo.supersedePairings(conn.id, tx);
+      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    });
   };
 
   /** The connection-level guardian-mapping teardown, expressed as a transaction
@@ -308,7 +311,10 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   ): ((tx: DrizzleTx) => void) | undefined => {
     const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
     if (!talker) return undefined;
-    return (tx) => deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    return (tx) => {
+      deps.approvalsRepo.supersedePairings(conn.id, tx);
+      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    };
   };
 
   app.delete("/connections/:id/grants/:name", async (c) => {

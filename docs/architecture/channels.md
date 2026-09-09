@@ -36,13 +36,13 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 - Codes belong to one request, connection, channel, and sender. Verification messages never reach agents, including invalid or replayed codes from linked senders.
 - Group messages cannot redeem a code. Group guidance points to a private bot conversation or authenticated Web approval without exposing the code.
 - Requests expire after ten minutes without extending on repeated messages. Five wrong codes disable code verification while leaving Web approval available until expiry.
-- The bot asks an approved account to resend its message. No blocked message is automatically replayed.
+- The bot confirms pairing and tells the approved account it can start chatting. No blocked message is automatically replayed.
 - Approval records retain creation and resolution. Web decisions record the verified guardian identity, and code decisions record the provider-authenticated account and completion method.
 - Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
 - Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.
 
 Pairing admission creates requests for private messages, messages directed at the bot (mentions, replies, or bot-owned threads), and code attempts. Ambient group messages and Telegram channel identities create no pairing requests. Existing account mappings retain their normal routing.
 
-Each connection permits at most 20 pending pairing requests and 100 new requests in a rolling 24-hour window. Repeated messages can still reuse an existing request at either limit. Replacing a removed connection supersedes its pending request and invalidates its code. A guardian rejection retains its original cooldown.
+Each connection permits at most 20 pending pairing requests and 100 new requests in a rolling 24-hour window. Repeated messages can still reuse an existing request at either limit. Deleting a connection or revoking a Talk grant supersedes its pending requests and invalidates their codes. Revoking an unrelated grant preserves pending requests. A guardian rejection retains its original cooldown.
 
 Approval listing includes pending requests and the latest 100 resolved pairing records by default. Earlier pairing history is paged with `pairingHistoryOffset`. Activity provides the full history; Connections shows only active pending requests and links to Activity. Pagination preserves all stored audit records.
