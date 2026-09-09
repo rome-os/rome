@@ -10,7 +10,6 @@ import {
   RESTEvents,
   Routes,
   SlashCommandBuilder,
-  PermissionFlagsBits,
   type Message,
   type TextChannel,
   type DMChannel,
@@ -36,6 +35,7 @@ import type {
   ConversationSettingsSnapshot,
   ChatStopHandler,
   MessageAddressing,
+  PersonRecord,
 } from "@rome-os/app-runtime";
 import type {
   NormalizedMessage,
@@ -178,7 +178,6 @@ export function buildDiscordSlashCommands() {
   const channel = new SlashCommandBuilder()
     .setName("channel")
     .setDescription("Configure Rome Bot behavior for this channel")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .addSubcommand((sub) =>
       sub.setName("ignore").setDescription("Permanently silence the bot in this channel"),
     )
@@ -277,7 +276,6 @@ export function buildDiscordSlashCommands() {
   const bot = new SlashCommandBuilder()
     .setName("bot")
     .setDescription("Global Rome Bot status and management")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .addSubcommand((sub) => sub.setName("status").setDescription("Show all channel overrides"));
 
   const help = new SlashCommandBuilder()
@@ -332,7 +330,9 @@ export class DiscordAdapter implements ProviderAdapter {
    * disappears later).
    */
   private listAgents?: () => string[];
-  private isGuardian?: (channelUserId: string) => Promise<boolean>;
+  private resolveDiscordPerson?: (
+    channelUserId: string,
+  ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
   private chatStop?: ChatStopHandler;
 
   /**
@@ -357,7 +357,9 @@ export class DiscordAdapter implements ProviderAdapter {
     };
     maxMessagesPerChannel?: number;
     listAgents?: () => string[];
-    isGuardian?: (channelUserId: string) => Promise<boolean>;
+    resolveDiscordPerson?: (
+      channelUserId: string,
+    ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
     chatStop?: ChatStopHandler;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   }) {
@@ -365,7 +367,7 @@ export class DiscordAdapter implements ProviderAdapter {
     this.conversationSettings = config.conversationSettings;
     this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
     this.listAgents = config.listAgents;
-    this.isGuardian = config.isGuardian;
+    this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
     this.client = new Client({
@@ -871,7 +873,7 @@ export class DiscordAdapter implements ProviderAdapter {
         return;
       }
 
-      if (this.isGuardian && !(await this.isGuardian(interaction.user.id))) {
+      if (!(await this.canConfigure(interaction.user.id, interaction.commandName))) {
         await interaction.editReply({
           content: "Only the linked guardian can configure this Discord conversation.",
         });
@@ -1128,6 +1130,45 @@ export class DiscordAdapter implements ProviderAdapter {
     }
   }
 
+  private async canConfigure(discordUserId: string, command: string): Promise<boolean> {
+    let person: Pick<PersonRecord, "id" | "bondLevel"> | null = null;
+    let authorizationResult = "unlinked";
+
+    try {
+      if (this.resolveDiscordPerson) {
+        person = await this.resolveDiscordPerson(discordUserId);
+        authorizationResult = person ? "bond_level_not_guardian" : "unlinked";
+      } else {
+        authorizationResult = "resolver_unavailable";
+      }
+    } catch {
+      authorizationResult = "resolution_failed";
+      log.warn("discord configuration command authorization rejected", {
+        connectionId: this.connectionId ?? null,
+        discordUserId,
+        command,
+        authorized: false,
+        decision: "deny",
+        authorizationResult,
+      });
+      return false;
+    }
+
+    if (person?.bondLevel === "guardian") return true;
+
+    log.warn("discord configuration command authorization rejected", {
+      connectionId: this.connectionId ?? null,
+      discordUserId,
+      command,
+      authorized: false,
+      decision: "deny",
+      authorizationResult,
+      personId: person?.id ?? null,
+      bondLevel: person?.bondLevel ?? null,
+    });
+    return false;
+  }
+
   /**
    * Discord typeahead for slash-command string options that have
    * `.setAutocomplete(true)`. Currently only `/channel agent set <name>` opts
@@ -1146,6 +1187,10 @@ export class DiscordAdapter implements ProviderAdapter {
       const sub = interaction.options.getSubcommand(false);
       const focused = interaction.options.getFocused(true);
       if (subGroup !== "agent" || sub !== "set" || focused.name !== "name") return;
+      if (!(await this.canConfigure(interaction.user.id, interaction.commandName))) {
+        await interaction.respond([]);
+        return;
+      }
 
       const all = this.listAgents?.() ?? [];
       // Hide "main" from typeahead — it's the default; if the guardian wants

@@ -385,9 +385,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             conversationSettings: deps.conversationSettings,
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
-            isGuardian: async (channelUserId) =>
-              (await deps.personMappingRepo.findByChannelUser("discord", channelUserId))
-                ?.bondLevel === "guardian",
+            resolveDiscordPerson: (channelUserId) =>
+              deps.personMappingRepo.findByChannelUser("discord", channelUserId),
             // Live gateway faults (post-login) route through here; the descriptor
             // maps the adapter's kind onto grant state vs. transport.
             onGatewayFault: ({ kind, cause }) => {
@@ -480,7 +479,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                       kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
                       displayName: channel.name,
                       containerName: channel.guildName,
-                      ...(channel.parentId
+                      // Discord also uses parentId for a channel's category.
+                      // Only native threads inherit conversation settings.
+                      ...(channel.type === "thread" && channel.parentId
                         ? {
                             parent: {
                               connectionId: kit.connectionId,

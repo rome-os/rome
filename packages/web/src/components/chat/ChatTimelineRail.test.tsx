@@ -1,8 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-// Real bundles, so the hide control's accessible name is the shipped
-// string rather than its key — the same thing a screen reader would read.
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@/i18n";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ChatTimelineRail } from "./ChatTimelineRail";
@@ -14,7 +12,6 @@ beforeEach(() => {
 afterEach(() => {
   rs.useRealTimers();
   cleanup();
-  localStorage.clear();
 });
 
 const QUESTIONS: TimelineQuestion[] = [
@@ -24,12 +21,8 @@ const QUESTIONS: TimelineQuestion[] = [
   { messageId: "q4", text: "can we cache it?" },
 ];
 
-// The markers, excluding the hide control — which is a button too, but is
-// deliberately focusable and is not one of the questions. Hidden markers stay
-// mounted so the retract animates, and leave the a11y tree via aria-hidden —
-// which is exactly what getAllByRole filters on.
 function markers(): HTMLElement[] {
-  return screen.getAllByRole("button").filter((el) => el.getAttribute("aria-expanded") === null);
+  return screen.getAllByRole("button");
 }
 
 function rect(top: number, height = 0): DOMRect {
@@ -164,9 +157,6 @@ describe("ChatTimelineRail", () => {
       "-1",
       "-1",
     ]);
-    expect(
-      screen.getByRole("button", { name: "Hide timeline" }).getAttribute("tabindex"),
-    ).toBeNull();
   });
 
   it("moves between questions with the arrow keys", () => {
@@ -205,20 +195,6 @@ describe("ChatTimelineRail", () => {
     expect(document.activeElement).toBe(all[3]);
   });
 
-  it("takes hidden markers out of the tab order", () => {
-    // They stay mounted so the retract animates, and carry aria-hidden — which
-    // must never contain something focusable.
-    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-    const hiddenMarkers = [
-      ...document.querySelectorAll<HTMLElement>("[data-timeline-markers] button"),
-    ];
-    expect(hiddenMarkers).toHaveLength(4);
-    for (const marker of hiddenMarkers) {
-      expect(marker.getAttribute("tabindex")).toBe("-1");
-    }
-  });
-
   it("renders no markers below the question floor", () => {
     const { container } = renderRail(
       stubScroller(SPREAD_ANCHORS.slice(0, 2)),
@@ -239,105 +215,10 @@ describe("ChatTimelineRail", () => {
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 
-  it("hides the markers and offers to bring them back", () => {
-    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(markers()).toHaveLength(4);
-    expect(screen.getByRole("button", { name: "Hide timeline" }).style.top).toBe("214px");
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-    expect(markers()).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "Show timeline" }));
-    expect(markers()).toHaveLength(4);
-  });
-
-  it("remembers a hide across mounts", () => {
-    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-    cleanup();
-
-    renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-    expect(markers()).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
-  });
-
-  it("repositions the show control when the track resizes while hidden", () => {
-    let fire: (() => void) | null = null;
-    const RealRO = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      private readonly callback: () => void;
-
-      constructor(callback: () => void) {
-        this.callback = callback;
-        fire = callback;
-      }
-      observe() {}
-      unobserve() {}
-      disconnect() {
-        if (fire === this.callback) fire = null;
-      }
-    } as unknown as typeof ResizeObserver;
-
-    try {
-      const { container } = renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
-      expect(screen.getByRole("button", { name: "Hide timeline" }).style.top).toBe("214px");
-
-      fireEvent.click(screen.getByRole("button", { name: "Hide timeline" }));
-      const track = container.querySelector<HTMLElement>("[data-timeline-track]");
-      expect(track).not.toBeNull();
-      Object.defineProperty(track, "clientHeight", { value: 200, configurable: true });
-
-      act(() => {
-        fire?.();
-        rs.advanceTimersByTime(200);
-      });
-      expect(screen.getByRole("button", { name: "Show timeline" }).style.top).toBe("64px");
-    } finally {
-      globalThis.ResizeObserver = RealRO;
-    }
-  });
-
-  it("keeps watching while hidden with nothing to show", () => {
-    // A hidden rail that measured nothing — too narrow, too short — must stay
-    // subscribed, or becoming eligible later leaves no Show control until the
-    // next message or a reload.
-    const observed: Element[] = [];
-    let fire: (() => void) | null = null;
-    const RealRO = globalThis.ResizeObserver;
-    globalThis.ResizeObserver = class {
-      constructor(cb: () => void) {
-        fire = cb;
-      }
-      observe(el: Element) {
-        observed.push(el);
-      }
-      unobserve() {}
-      disconnect() {}
-    } as unknown as typeof ResizeObserver;
-
-    try {
-      localStorage.setItem("rome-timeline-hidden", "1");
-      // A transcript under two viewports: ineligible, so nothing is measured.
-      const scroller = stubScroller(SPREAD_ANCHORS);
-      Object.defineProperty(scroller, "scrollHeight", { value: 700, configurable: true });
-      renderRail(scroller, QUESTIONS);
-      expect(screen.queryByRole("button")).toBeNull();
-      expect(observed.length).toBeGreaterThan(0);
-
-      // It grows past the threshold; the observer has to bring the control back.
-      Object.defineProperty(scroller, "scrollHeight", { value: 3000, configurable: true });
-      act(() => {
-        fire?.();
-        rs.advanceTimersByTime(200);
-      });
-      expect(screen.getByRole("button", { name: "Show timeline" })).toBeTruthy();
-    } finally {
-      globalThis.ResizeObserver = RealRO;
-    }
-  });
-
-  it("offers no control when there is no timeline to hide", () => {
-    renderRail(stubScroller(SPREAD_ANCHORS.slice(0, 2)), QUESTIONS.slice(0, 2));
-    expect(screen.queryByRole("button")).toBeNull();
+  it("renders no hide control", () => {
+    const { container } = renderRail(stubScroller(SPREAD_ANCHORS), QUESTIONS);
+    expect(container.querySelectorAll("[data-timeline-markers] button")).toHaveLength(4);
+    expect(container.querySelectorAll("button")).toHaveLength(4);
+    expect(container.querySelector("svg")).toBeNull();
   });
 });

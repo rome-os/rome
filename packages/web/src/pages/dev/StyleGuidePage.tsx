@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useTheme } from "@/hooks/use-theme";
+import type { ResolvedTheme } from "@/lib/theme";
 
-// Dev-only design-system gallery. The verification surface for the semantic
-// token layer: every token is shown as a swatch in both light and dark at once
-// (left/right columns force `.light`/`.dark`, independent of the global theme),
-// and each `ui/` primitive is rendered in every variant. The shadow-DOM parity
-// panel proves an app sandbox inherits the host theme across the shadow boundary
-// with nothing injected.
+// Compare semantic tokens side by side. Verify Tailwind `dark:` variants in
+// single-mode view because they also match the document's dark ancestor.
 
 type TokenGroup = { name: string; tokens: string[] };
 
@@ -84,11 +82,15 @@ const BUTTON_VARIANTS = [
 const BUTTON_SIZES = ["xs", "sm", "default"] as const;
 
 function Swatch({ token }: { token: string }) {
+  const { theme, resolved } = useTheme();
   const ref = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState("");
   useEffect(() => {
-    if (ref.current) setValue(getComputedStyle(ref.current).backgroundColor);
-  }, []);
+    const frame = requestAnimationFrame(() => {
+      if (ref.current) setValue(getComputedStyle(ref.current).backgroundColor);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [theme, resolved]);
   return (
     <div className="flex flex-col gap-1">
       <div
@@ -221,38 +223,45 @@ function ShadowPanel({ mode }: { mode: "light" | "dark" }) {
   return <div ref={ref} />;
 }
 
-function ShadowParityDemo() {
+function ShadowParityDemo({ modes }: { modes: ResolvedTheme[] }) {
+  const { theme } = useTheme();
   return (
-    <div className="mt-4 grid grid-cols-1 overflow-hidden rounded-12 border border-border-strong sm:grid-cols-2">
-      <div className="light">
-        <ShadowPanel mode="light" />
-      </div>
-      <div className="dark">
-        <ShadowPanel mode="dark" />
-      </div>
+    <div
+      className={`mt-4 grid grid-cols-1 overflow-hidden rounded-12 border border-border-strong ${modes.length === 2 ? "sm:grid-cols-2" : ""}`}
+    >
+      {modes.map((mode) => (
+        <div key={mode} className={mode} data-theme={theme}>
+          <ShadowPanel mode={mode} />
+        </div>
+      ))}
     </div>
   );
 }
 
-export default function StyleGuidePage() {
+export default function StyleGuidePage({ compareModes = true }: { compareModes?: boolean }) {
+  const { theme, resolved } = useTheme();
+  const modes: ResolvedTheme[] = compareModes ? ["light", "dark"] : [resolved];
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-surface px-6 py-4">
         <h1 className="text-title text-foreground">Design System — Styleguide</h1>
         <p className="text-body text-muted-foreground">
-          Dev-only. Left column forces <code className="text-aux">.light</code>, right forces{" "}
-          <code className="text-aux">.dark</code> — both shown at once, independent of the app
-          theme.
+          {compareModes
+            ? "Light and dark specimens are shown together for comparison."
+            : `Showing ${resolved} mode. Specimens follow the active color mode.`}
         </p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2">
-        <div className="light border-border lg:border-r">
-          <Showcase />
-        </div>
-        <div className="dark">
-          <Showcase />
-        </div>
+      <div className={`grid grid-cols-1 ${compareModes ? "lg:grid-cols-2" : ""}`}>
+        {modes.map((mode) => (
+          <div
+            key={mode}
+            className={`${mode} border-border ${compareModes ? "first:lg:border-r" : ""}`}
+            data-theme={theme}
+          >
+            <Showcase />
+          </div>
+        ))}
       </div>
 
       <div className="border-t border-border bg-surface px-6 py-8">
@@ -266,7 +275,7 @@ export default function StyleGuidePage() {
           entirely from the <code className="text-aux">.light</code>/
           <code className="text-aux">.dark</code> ancestor wrapper.
         </p>
-        <ShadowParityDemo />
+        <ShadowParityDemo modes={modes} />
       </div>
     </div>
   );

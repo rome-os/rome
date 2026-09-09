@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { ThemeContext, type ThemeContextValue } from "./theme-context";
 import {
   applyTheme,
   applyThemeName,
@@ -14,18 +15,6 @@ import {
   type ThemeName,
   type ThemePreference,
 } from "../lib/theme";
-
-type ThemeContextValue = {
-  preference: ThemePreference;
-  resolved: ResolvedTheme;
-  setPreference: (next: ThemePreference) => void;
-  toggle: () => void;
-  theme: ThemeName;
-  setTheme: (next: ThemeName) => void;
-  themes: { id: ThemeName; label: string }[];
-};
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>(() => readStoredPreference());
