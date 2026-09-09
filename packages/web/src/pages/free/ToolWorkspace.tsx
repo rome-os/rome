@@ -23,7 +23,8 @@ import type { ToolView, WidgetPlacement, WidgetType } from "./use-free-cells";
 const WIDTH_KEY = "rome:tool-chat-ratio";
 const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
-const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + 8;
+const SEPARATOR_WIDTH = 1;
+const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
 
 function readRatio() {
   try {
@@ -120,7 +121,7 @@ export function ToolWorkspace({
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const compact = width < COMPACT_WIDTH;
   const open = !view.collapsed;
-  const available = Math.max(0, width - 8);
+  const available = Math.max(0, width - SEPARATOR_WIDTH);
   const chatWidth = Math.max(
     MIN_PANE_WIDTH,
     Math.min(available - MIN_PANE_WIDTH, available * ratio),
@@ -185,7 +186,8 @@ export function ToolWorkspace({
           aria-valuemin={MIN_PANE_WIDTH}
           aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
           aria-valuenow={Math.round(chatWidth)}
-          className="z-40 w-2 shrink-0 cursor-col-resize touch-none border-x border-border-subtle hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-ring"
+          data-resizing={resizing || undefined}
+          className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-2 focus-visible:outline-ring focus-visible:after:w-1 data-[resizing]:after:w-1"
           onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
