@@ -40,6 +40,8 @@ Storybook provides parallel design demonstrations. It does not replace runtime d
 
 Each story imports a production renderer and passes typed fixtures or callbacks. The initial render
 does not use mock handlers, fetch overrides, or request guards.
+Storybook uses the preview browser's detected locale. In a browser check, set the locale before
+asserting translated text. Otherwise, assert a role, fixture identity, or local control label.
 
 | Source component | Fixture and state | Story ID | Iframe |
 | --- | --- | --- | --- |
@@ -48,6 +50,9 @@ does not use mock handlers, fetch overrides, or request guards.
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` resolved question | [`dev-chat-blocks--resolved-question`](http://localhost:6006/?path=/story/dev-chat-blocks--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story) |
 | `ConnectionDetailDialog` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
 | `ConnectionDetailDialog` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram bot, unconnected | [`dev-connections-slot-card--unconnected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--unconnected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--unconnected-bot&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram bot, connected | [`dev-connections-slot-card--connected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--connected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--connected-bot&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram session, available to add | [`dev-connections-slot-card--add-session`](http://localhost:6006/?path=/story/dev-connections-slot-card--add-session) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story) |
 
 `/dev/connections` stays out of Storybook because it loads application data and owns selected-connection
 state. The connection stories pass typed `ConnectionCard` fixtures directly to the production
@@ -70,6 +75,28 @@ user or workstation configuration, and do not commit the file for this workflow.
 url = "http://127.0.0.1:6046/mcp"
 ```
 
+Codex asks for approval before an MCP call by default. If an unattended run uses the loopback
+Storybook instance started by this checkout, replace the minimal table with this allowlisted table.
+Do not use the approval setting for a remote or untrusted endpoint.
+
+```toml
+[mcp_servers.rome_storybook]
+url = "http://127.0.0.1:6046/mcp"
+enabled_tools = [
+  "stories-preview",
+  "get-storybook-story-instructions",
+  "stories-changed",
+  "stories-find-by-component",
+  "docs-list",
+  "docs-show",
+  "docs-show-story",
+]
+default_tools_approval_mode = "approve"
+```
+
+Start a new Codex task after changing the project MCP configuration. An existing task retains its
+tool catalog.
+
 For another MCP client, use its project-scoped connection flow. The Storybook helper can create a
 project-scoped entry when the client supports it:
 
@@ -81,10 +108,11 @@ The endpoint page at `http://127.0.0.1:6046/mcp` shows enabled toolsets. The cur
 exposes `stories-preview`, `get-storybook-story-instructions`, `stories-changed`,
 `stories-find-by-component`, `docs-list`, `docs-show`, and `docs-show-story`.
 
+Before creating or changing a `*.stories.*` file, call `get-storybook-story-instructions`.
 Use `docs-list` to discover the current story IDs. Use `docs-show` or `docs-show-story` for the
 generated documentation. Use `stories-find-by-component` with a source path to map an edited
-component to its story. Use `stories-changed` after an edit to list changed or related stories.
-Use `stories-preview` to return the matching manager link.
+component to its story. After a visual edit, call `stories-changed`, then use `stories-preview`
+to return the matching manager link.
 
 The manifest covers the current page and fixture stories. It is not a complete props catalog for
 published packages. The `test-run` MCP tool stays disabled because this repository does not install
@@ -93,17 +121,19 @@ does not receive `review-create` without Storybook's experimental review feature
 repository does not enable. Return the manager and iframe links from [Pages](#pages) for review.
 
 `stories-changed` follows Storybook's module graph and Git state. A changed preview or configuration
-file can be unreachable from a story. In that case, use the documented source location and
-`stories-find-by-component` for the affected renderer instead of inventing a story ID.
+file can be unreachable from a story. A browser-check file is also unreachable because it has no
+visual import. For a renderer, use `stories-find-by-component` instead of inventing a story ID.
+Run an unreachable browser check directly.
 
 ### Clean local exercise
 
 1. In a clean worktree, run `pnpm storybook --port 6046`.
-2. Discover `dev-design-styleguide--default` with `docs-list` or use its source and links in [Pages](#pages) when MCP is unavailable.
-3. Open the [style guide iframe](http://localhost:6046/iframe.html?id=dev-design-styleguide--default&viewMode=story) and confirm the `Design System — Styleguide` heading.
-4. Make a temporary source edit in `packages/web/src/pages/dev/StyleGuidePage.tsx`. Confirm HMR updates the open iframe, then restore the source.
-5. Run `STORYBOOK_PORT=6046 pnpm --filter rome-web test:storybook`.
-6. Return the [style guide manager link](http://localhost:6046/?path=/story/dev-design-styleguide--default) and iframe link. Replace `6046` with the active port.
+2. Call `get-storybook-story-instructions`, then discover `dev-design-styleguide--default` with `docs-list`.
+3. If MCP is unavailable, use its source and links in [Pages](#pages).
+4. Open the [style guide iframe](http://localhost:6046/iframe.html?id=dev-design-styleguide--default&viewMode=story) and confirm the `Design System — Styleguide` heading.
+5. Make a temporary source edit in `packages/web/src/pages/dev/StyleGuidePage.tsx`. Confirm HMR updates the open iframe, then restore the source.
+6. Run `STORYBOOK_PORT=6046 pnpm --filter rome-web test:storybook`.
+7. Return the [style guide manager link](http://localhost:6046/?path=/story/dev-design-styleguide--default) and iframe link. Replace `6046` with the active port.
 
 The same workflow works without MCP. Run `pnpm storybook --port 6047` for a concurrent second
 instance. Both commands keep Storybook's exact-port behavior.

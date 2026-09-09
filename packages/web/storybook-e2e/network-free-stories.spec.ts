@@ -50,6 +50,16 @@ test("network-free stories stay isolated and issue no service requests", async (
   await expect(page.getByText("This connection lets your agent", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
 
+  await page.goto("/iframe.html?id=dev-connections-slot-card--unconnected-bot&viewMode=story");
+  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-slot-card--connected-bot&viewMode=story");
+  await expect(page.getByText("@rome_bot", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story");
+  await expect(page.getByRole("button", { name: "Add session" })).toBeVisible();
+
   await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Warm" })).toHaveAttribute("aria-pressed", "false");
 
