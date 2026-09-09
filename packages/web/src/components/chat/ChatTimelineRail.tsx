@@ -180,8 +180,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
 
                     Focus is styled like hover, so the bar under the caret
                     reads like the one under the cursor. Only the roving marker is
-                    tabbable; hidden markers leave the tab order entirely, so
-                    nothing focusable ever sits inside `aria-hidden`. */}
+                    tabbable. */}
                       <button
                         type="button"
                         ref={(el) => {
