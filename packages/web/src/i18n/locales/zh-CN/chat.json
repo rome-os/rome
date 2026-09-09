@@ -1,4 +1,8 @@
 {
+  "markdown": {
+    "code": "代码",
+    "mermaid": "Mermaid 图表"
+  },
   "title": "Rome",
   "inputState": {
     "queued": "等待加入对话",
