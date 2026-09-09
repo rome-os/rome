@@ -85,7 +85,7 @@ export function parseReplyReceipt(json, payload, { threadId, threadUrl, originTo
   function visit(value) {
     if (!value || typeof value !== "object") return;
     if (value.$type === "com.linkedin.messenger.Message") {
-      if (value.originToken && value.originToken !== originToken) return;
+      if (value.originToken !== originToken) return;
       // History prefers the backend id. Without it a receipt can name a different id later.
       if (
         typeof value.backendUrn === "string" &&

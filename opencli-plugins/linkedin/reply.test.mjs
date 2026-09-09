@@ -3,7 +3,12 @@ import test from "node:test";
 import vm from "node:vm";
 import { getRegistry } from "@jackwener/opencli/registry";
 import { parseThreadMessagePayloads } from "./thread-snapshot-helpers.mjs";
-import { parseReplyReceipt, postLinkedInReply, verifiedReplyTarget } from "./reply-helpers.mjs";
+import {
+  UNKNOWN_REPLY_OUTCOME,
+  parseReplyReceipt,
+  postLinkedInReply,
+  verifiedReplyTarget,
+} from "./reply-helpers.mjs";
 import "./reply.js";
 
 const threadId = "2-target==";
@@ -102,12 +107,27 @@ test("a reply receipt and a later snapshot use the same provider id", () => {
   assert.equal(receipt.status, "sent");
 });
 
+for (const [label, token] of [
+  ["missing", undefined],
+  ["null", null],
+  ["empty", ""],
+  ["mismatched", "another-send"],
+]) {
+  test(`receipt parsing treats ${label} origin tokens as unknown outcomes`, () => {
+    const response = JSON.parse(
+      JSON.stringify({ data: { value: message({ originToken: token }) } }),
+    );
+    assert.throws(() => parseReplyReceipt(response, payload(), { ...expected, originToken }), {
+      message: UNKNOWN_REPLY_OUTCOME,
+    });
+  });
+}
+
 test("receipt parsing rejects unknown, unrelated, inbound, or incomplete results", () => {
   for (const value of [
     {},
     { status: "sent" },
     message({ backendUrn: undefined }),
-    message({ originToken: "another-send" }),
     message({ "*sender": recipient }),
     message({ deliveredAt: null }),
     message({ backendConversationUrn: "urn:li:messagingThread:other", "*conversation": "other" }),
@@ -223,4 +243,15 @@ test("the command refuses unverified recipients and reports uncertain outcomes w
   const unknown = fakePage({ outcome: { uncertain: true } });
   await assert.rejects(command.func(unknown, { ...args, send: true }), /outcome is unknown/);
   assert.equal(unknown.writes.length, 1);
+});
+
+test("the command reports a missing receipt token as unknown without sending again", async () => {
+  const command = getRegistry().get("linkedin/reply");
+  const page = fakePage({
+    outcome: JSON.parse(JSON.stringify({ json: { value: message({ originToken: undefined }) } })),
+  });
+  await assert.rejects(command.func(page, { ...args, send: true }), {
+    message: UNKNOWN_REPLY_OUTCOME,
+  });
+  assert.equal(page.writes.length, 1);
 });
