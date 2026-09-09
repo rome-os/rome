@@ -157,17 +157,27 @@
     "iframeTitle": "Rome Desktop"
   },
   "chat": {
-    "add": "Add widget",
+    "add": "Open an app",
     "addChat": "Chat",
     "addDesktop": "Browser",
     "addProjects": "Projects",
     "addApp": "App",
     "back": "Back",
     "noApps": "No apps available",
-    "searchWidgets": "Search widgets",
-    "noWidgetMatches": "No widgets match “{{query}}”.",
+    "searchWidgets": "Search apps",
+    "noWidgetMatches": "No apps match “{{query}}”.",
     "newChat": "New chat",
-    "orPickSession": "or pick an existing session"
+    "orPickSession": "or pick an existing session",
+    "tools": "Apps",
+    "toolOpened": "Open",
+    "toolUpdated": "New content",
+    "closeTool": "Close {{name}}",
+    "allTools": "All open apps",
+    "collapseTools": "Hide apps",
+    "expandTools": "Show apps",
+    "resizeTools": "Resize chat and apps",
+    "emptyAppsTitle": "No apps open",
+    "emptyAppsDescription": "Open an app to use it alongside this chat."
   },
   "connectChatApp": {
     "title": "Connect your chat app",

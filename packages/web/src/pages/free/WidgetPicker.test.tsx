@@ -82,7 +82,7 @@ describe("WidgetPicker", () => {
     await user.type(search, "zzz");
 
     expect(optionNames()).toEqual([]);
-    expect(screen.getByText("No widgets match “zzz”.")).toBeTruthy();
+    expect(screen.getByText("No apps match “zzz”.")).toBeTruthy();
   });
 
   it("selects the app behind a searched row on Enter", async () => {
