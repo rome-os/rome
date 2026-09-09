@@ -134,7 +134,10 @@
       // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless
       // dist/ happens to be built. Naming the source entry keeps the count the
       // same whether or not the workspace has been built.
-      "entry": ["src/cli/index.ts", "src/**/*.test.ts"]
+      // Knip's Rstest plugin cannot parse this workspace's object-form test
+      // environment. Keep the config and setup in the explicit entry graph.
+      "rstest": false,
+      "entry": ["src/cli/index.ts", "src/**/*.test.ts", "src/test/setup.ts", "rstest.config.mts"]
     },
 
     // An app's manifest, not its imports, decides what the runtime loads. Each
