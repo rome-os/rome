@@ -22,6 +22,10 @@ import type { StreamFault, Talker } from "../types.js";
 // and lets a test make start() reject with a chosen error.
 type FakeConfig = {
   botToken: string;
+  resolveDiscordPerson?: (channelUserId: string) => Promise<{
+    id: string;
+    bondLevel: string;
+  } | null>;
   onGatewayFault?: (f: { kind: "credential" | "transport"; cause: unknown }) => void;
 };
 const fakeState: {
@@ -198,6 +202,28 @@ describe("discord descriptor shape", () => {
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
+  });
+
+  it("resolves command actors through the same Discord person link used by inbound messages", async () => {
+    const guardian = { id: "guardian", bondLevel: "guardian" };
+    const findByChannelUser = rs.fn(async () => guardian);
+    const desc = makeDiscordDescriptor({
+      ...deps,
+      personMappingRepo: { findByChannelUser } as never,
+    });
+    desc.capabilities.talker!.build(
+      { bot: validCred() },
+      {
+        connectionId: "discord-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+
+    await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
+      guardian,
+    );
+    expect(findByChannelUser).toHaveBeenCalledWith("discord", "guardian-777");
   });
 
   it("passes the opaque conversation id to the adapter", async () => {
