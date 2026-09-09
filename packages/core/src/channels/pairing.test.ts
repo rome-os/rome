@@ -83,7 +83,7 @@ describe("channel pairing approvals", () => {
     expect(second.guide).toBe(false);
     expect((await repo.list()).length).toBe(1);
     const code = await repo.pairingCode(first.approval.id);
-    expect(code).toMatch(/^ROME-PAIR-[0-9A-F]{20}$/);
+    expect(code).toMatch(/^RP-[0-9A-F]{8}$/);
     expect(await new ApprovalsRepository(testDb.db, () => key).pairingCode(first.approval.id)).toBe(
       code,
     );

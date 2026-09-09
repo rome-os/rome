@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import { Check, Copy } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { pairingPayload } from "@rome/api-types/approvals";
@@ -20,6 +22,7 @@ export function PairingApproval({ approval }: { approval: Approval }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [copiedCode, setCopiedCode] = useState("");
   const resolve = useResolveApproval();
   const payload = pairingPayload(approval);
   const pending = approval.status === "pending" && !!payload && payload.expiresAt > Date.now();
@@ -46,9 +49,11 @@ export function PairingApproval({ approval }: { approval: Approval }) {
   }
   async function copy() {
     if (!code.data?.code) return;
+    setFeedback("");
+    setCopiedCode("");
     try {
       await navigator.clipboard.writeText(code.data.code);
-      setFeedback(t("pairing.copied"));
+      setCopiedCode(code.data.code);
     } catch {
       setFeedback(t("pairing.copyFailed"));
     }
@@ -74,7 +79,16 @@ export function PairingApproval({ approval }: { approval: Approval }) {
                 <code className="break-all text-title" aria-label={t("pairing.code")}>
                   {code.data.code}
                 </code>
-                <Button variant="outline" onClick={() => void copy()}>
+                <Button
+                  variant="outline"
+                  onClick={() => void copy()}
+                  aria-label={t(copiedCode === code.data.code ? "pairing.copied" : "pairing.copy")}
+                >
+                  {copiedCode === code.data.code ? (
+                    <Check aria-hidden="true" />
+                  ) : (
+                    <Copy aria-hidden="true" />
+                  )}
                   {t("pairing.copy")}
                 </Button>
               </div>
@@ -191,7 +205,12 @@ export function PairingApprovals({ connectionIds }: { connectionIds?: string[] }
   const rows =
     query.data?.filter((approval) => {
       const payload = pairingPayload(approval);
-      return payload && (!connectionIds || connectionIds.includes(payload.connectionId));
+      return (
+        payload &&
+        approval.status === "pending" &&
+        payload.expiresAt > Date.now() &&
+        (!connectionIds || connectionIds.includes(payload.connectionId))
+      );
     }) ?? [];
   return (
     <section className="space-y-3" aria-label={t("pairing.title")}>
@@ -210,7 +229,9 @@ export function PairingApprovals({ connectionIds }: { connectionIds?: string[] }
       ) : (
         rows.map((approval) => <PairingApproval key={approval.id} approval={approval} />)
       )}
-      <ApprovalHistoryButton />
+      <Link to="/activity" className="text-ui text-primary underline underline-offset-4">
+        {t("pairing.viewActivity")}
+      </Link>
     </section>
   );
 }

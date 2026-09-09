@@ -143,14 +143,14 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("does not navigate — service rows are buttons, only the app-keys row links out", () => {
+  it("opens services in dialogs and links to pairing history and app keys", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
-    // Service rows render no anchor navigation; each opens a dialog. The one
-    // link in the list is the app-keys entry row, which routes to its page.
     const links = screen.queryAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/settings/connections/app-keys");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/activity",
+      "/settings/connections/app-keys",
+    ]);
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();
   });
 

@@ -123,7 +123,7 @@ describe("Approvals API", () => {
       const codeResponse = await pairingApp.request(`/approvals/${id}/code`);
       expect(codeResponse.headers.get("cache-control")).toBe("no-store");
       const { code } = (await codeResponse.json()) as { code: string };
-      expect(code).toMatch(/^ROME-PAIR-/);
+      expect(code).toMatch(/^RP-/);
       expect(await (await pairingApp.request("/approvals")).text()).not.toContain(code);
       const resolved = await pairingApp.request(`/approvals/${id}/approve`, { method: "POST" });
       expect(resolved.status).toBe(202);

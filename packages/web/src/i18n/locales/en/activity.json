@@ -171,13 +171,14 @@
     "loadFailed": "Could not load approvals",
     "loading": "Loading…",
     "locked": "Code verification is locked after five failed attempts. The guardian can still approve this request here.",
-    "empty": "No channel pairing requests.",
+    "empty": "No active channel pairing requests.",
     "approved": "Approved",
     "rejected": "Rejected",
     "expired": "Expired",
     "requested": "Requested {{time}}",
     "resolved": "Resolved by {{actor}} · {{time}}",
     "retry": "Retry",
+    "viewActivity": "View all requests in Activity",
     "loadHistory": "Load earlier pairing requests"
   }
 }

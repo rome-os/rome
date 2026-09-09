@@ -4,7 +4,24 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import type { Approval } from "@/pages/ActivityPage";
-import { PairingApprovals } from "./PairingApproval";
+import { MemoryRouter } from "react-router-dom";
+import { useApprovals } from "@/hooks/use-approvals";
+import { pairingPayload } from "@rome/api-types/approvals";
+import { PairingApproval, ApprovalHistoryButton, PairingApprovals } from "./PairingApproval";
+
+function ActivitySlice() {
+  const query = useApprovals();
+  return (
+    <>
+      {query.data
+        ?.filter((row) => pairingPayload(row))
+        .map((row) => (
+          <PairingApproval key={row.id} approval={row} />
+        ))}
+      <ApprovalHistoryButton />
+    </>
+  );
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -38,7 +55,7 @@ describe("shared pairing approvals", () => {
         lastGuidanceAt: Date.now(),
       },
     };
-    const code = "ROME-PAIR-0123456789ABCDEF0123";
+    const code = "RP-0123ABCD";
     const writeText = rs.fn(async (_value: string) => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     const resolve = rs.fn();
@@ -59,14 +76,16 @@ describe("shared pairing approvals", () => {
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <QueryClientProvider client={client}>
-        <div data-testid="activity">
-          <PairingApprovals />
-        </div>
-        <div data-testid="connections">
-          <PairingApprovals connectionIds={["telegram"]} />
-        </div>
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <div data-testid="activity">
+            <ActivitySlice />
+          </div>
+          <div data-testid="connections">
+            <PairingApprovals connectionIds={["telegram"]} />
+          </div>
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
@@ -75,7 +94,7 @@ describe("shared pairing approvals", () => {
     expect(connections.getAllByText(code)).toHaveLength(1);
     expect(activity.getByText(/private telegram message from Alice/)).toBeTruthy();
     fireEvent.click(activity.getByRole("button", { name: "Copy code" }));
-    await activity.findByText("Code copied");
+    await activity.findByRole("button", { name: "Code copied" });
     expect(writeText).toHaveBeenCalledWith(code);
     fireEvent.click(connections.getByRole("button", { name: "Approve" }));
     expect(resolve).not.toHaveBeenCalled();
@@ -83,7 +102,8 @@ describe("shared pairing approvals", () => {
     expect(within(dialog).getByText(/Alice \(alice\).*guardian authority/)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(activity.getByText("Approved")).toBeTruthy());
-    expect(connections.getByText("Approved")).toBeTruthy();
+    expect(connections.queryByText("Approved")).toBeNull();
+    expect(connections.getByText("No active channel pairing requests.")).toBeTruthy();
     expect(activity.queryByText(code)).toBeNull();
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(activity.getByText(/verified-owner/)).toBeTruthy();
@@ -114,16 +134,19 @@ describe("shared pairing approvals", () => {
     );
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <QueryClientProvider client={client}>
-        <PairingApprovals />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <PairingApprovals />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
-    await screen.findByText("Expired");
+    await screen.findByText("No active channel pairing requests.");
+    expect(screen.queryByText("Expired")).toBeNull();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(fetch.mock.calls.every(([url]) => String(url) === "/api/approvals")).toBe(true);
     client.clear();
   });
-  it("loads earlier history into both slices while retaining pending requests", async () => {
+  it("keeps loaded history in Activity and only active requests in Connections", async () => {
     const makeRow = (id: string, status: "pending" | "approved"): Approval => ({
       id,
       type: "person_mapping",
@@ -159,20 +182,27 @@ describe("shared pairing approvals", () => {
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <QueryClientProvider client={client}>
-        <div data-testid="activity">
-          <PairingApprovals />
-        </div>
-        <div data-testid="connections">
-          <PairingApprovals connectionIds={["telegram"]} />
-        </div>
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <div data-testid="activity">
+            <ActivitySlice />
+          </div>
+          <div data-testid="connections">
+            <PairingApprovals connectionIds={["telegram"]} />
+          </div>
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
     fireEvent.click(await activity.findByRole("button", { name: "Load earlier pairing requests" }));
     await activity.findByText("earlier-user (earlier-user)");
-    expect(connections.getByText("earlier-user (earlier-user)")).toBeTruthy();
+    expect(connections.queryByText("earlier-user (earlier-user)")).toBeNull();
+    expect(connections.queryByText("history-0 (history-0)")).toBeNull();
+    expect(
+      connections.getByRole("link", { name: "View all requests in Activity" }).getAttribute("href"),
+    ).toBe("/activity");
+    expect(connections.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
     expect(activity.getByText("pending-user (pending-user)")).toBeTruthy();
     expect(activity.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
     expect(fetch.mock.calls.some(([url]) => String(url).includes("pairingHistoryOffset=100"))).toBe(

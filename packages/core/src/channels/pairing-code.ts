@@ -18,7 +18,7 @@ export function loadPairingKey(): Buffer {
 }
 
 export function pairingCode(key: Buffer, approvalId: string): string {
-  return `ROME-PAIR-${createHmac("sha256", key).update(approvalId).digest("hex").slice(0, 20).toUpperCase()}`;
+  return `RP-${createHmac("sha256", key).update(approvalId).digest("hex").slice(0, 8).toUpperCase()}`;
 }
 
 export function matchesPairingCode(expected: string, submitted: string): boolean {
@@ -28,5 +28,5 @@ export function matchesPairingCode(expected: string, submitted: string): boolean
 }
 
 export function isPairingCodeMessage(text: string | undefined): boolean {
-  return /^ROME-PAIR-/i.test(text?.trim() ?? "");
+  return /^(?:RP-|ROME-PAIR-)/i.test(text?.trim() ?? "");
 }

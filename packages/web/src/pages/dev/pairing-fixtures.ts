@@ -1,6 +1,6 @@
 import type { Approval } from "@/pages/ActivityPage";
 
-export const PAIRING_FIXTURE_CODE = "ROME-PAIR-0123456789ABCDEF0123";
+export const PAIRING_FIXTURE_CODE = "RP-12AB34CD";
 
 export function pairingFixtures(now = Date.now()): Approval[] {
   return ["telegram", "discord", "feishu"].map((channel, index) => ({

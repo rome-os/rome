@@ -171,13 +171,14 @@
     "loadFailed": "无法加载审批",
     "loading": "加载中…",
     "locked": "验证码已因五次验证失败而锁定。guardian 仍可在此批准请求。",
-    "empty": "暂无渠道配对请求。",
+    "empty": "暂无活跃的渠道配对请求。",
     "approved": "已批准",
     "rejected": "已拒绝",
     "expired": "已过期",
     "requested": "请求时间：{{time}}",
     "resolved": "处理人：{{actor}} · {{time}}",
     "retry": "重试",
+    "viewActivity": "在 Activity 查看所有请求",
     "loadHistory": "加载更早的配对请求"
   }
 }

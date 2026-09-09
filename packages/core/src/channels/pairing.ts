@@ -7,10 +7,7 @@ import { isPairingCodeMessage } from "./pairing-code.js";
 
 const log = createLogger("channel-pairing");
 const SUCCESS = "Your account is paired with Rome. Please send your original message again.";
-const GUIDANCE =
-  "Pair your account using either option:\n\n" +
-  "- Ask the guardian to approve it in `Settings` → `Connections`.\n" +
-  "- Send the verification code to this bot (in a private chat).";
+const GUIDANCE = "Open `Settings` → `Connections` in the Rome Web UI to pair your account.";
 
 export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
