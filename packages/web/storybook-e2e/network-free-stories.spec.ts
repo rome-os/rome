@@ -25,8 +25,12 @@ test("network-free stories stay isolated and issue no service requests", async (
   await page.goto("/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
 
-  await page.goto("/iframe.html?id=dev-connections-slot-card--not-connected&viewMode=story");
-  await expect(page.getByText("Your GitHub account", { exact: true })).toBeVisible();
+  await page.goto("/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story");
+  await expect(page.getByRole("heading", { name: "Discord" })).toBeVisible();
+  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-channel-status--connected&viewMode=story");
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 
   await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Warm" })).toHaveAttribute("aria-pressed", "false");
