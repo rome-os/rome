@@ -30,12 +30,20 @@ function Message({ text }: { text: string }) {
 }
 
 describe("ChatMarkdown collapsible blocks", () => {
+  it("includes the visible language in the toggle's accessible name", () => {
+    render(<Message text={"```js\nconst one = 1;\n```"} />);
+
+    expect(screen.getByRole("button", { name: "js" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("expands code by default, collapses independently, and restores code and controls", () => {
     const { container } = render(
       <Message text={"```js\nconst one = 1;\n```\n\n```\nplain code\n```\n\n`inline`"} />,
     );
-    const toggles = screen.getAllByRole("button", { name: "Collapse code block" });
-    expect(toggles).toHaveLength(2);
+    const toggles = [
+      screen.getByRole("button", { name: "js" }),
+      screen.getByRole("button", { name: "Code" }),
+    ];
     expect(container.querySelectorAll('[data-streamdown="code-block"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-streamdown="inline-code"]')).toHaveLength(1);
     const bodyId = toggles[0].getAttribute("aria-controls")!;
@@ -44,7 +52,7 @@ describe("ChatMarkdown collapsible blocks", () => {
     expect(document.getElementById(bodyId)?.hidden).toBe(true);
     expect(container.querySelectorAll('[data-streamdown="code-block"]')).toHaveLength(1);
     expect(toggles[1].getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Expand code block" }));
+    fireEvent.click(toggles[0]);
     expect(document.getElementById(bodyId)?.hidden).toBe(false);
     expect(container.querySelectorAll('[data-streamdown="code-block"]')).toHaveLength(2);
     expect(container.querySelectorAll('[data-streamdown="code-block-actions"]')).toHaveLength(2);
@@ -52,15 +60,13 @@ describe("ChatMarkdown collapsible blocks", () => {
 
   it("keeps a collapsed block closed during streaming and expands the latest content", () => {
     const { container, rerender } = render(<Message text={"```text\nfirst"} />);
-    const toggle = screen.getByRole("button", { name: "Collapse code block" });
+    const toggle = screen.getByRole("button", { name: "text" });
     const bodyId = toggle.getAttribute("aria-controls");
     fireEvent.click(toggle);
     rerender(<Message text={"```text\nfirst\nsecond\n```\n\nDone."} />);
-    expect(
-      screen.getByRole("button", { name: "Expand code block" }).getAttribute("aria-controls"),
-    ).toBe(bodyId);
+    expect(screen.getByRole("button", { name: "text" }).getAttribute("aria-controls")).toBe(bodyId);
     expect(container.querySelector('[data-streamdown="code-block"]')).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Expand code block" }));
+    fireEvent.click(screen.getByRole("button", { name: "text" }));
     expect(container.querySelector('[data-streamdown="code-block"]')?.textContent).toContain(
       "second",
     );
@@ -68,11 +74,11 @@ describe("ChatMarkdown collapsible blocks", () => {
 
   it("collapses Mermaid without routing it to the code highlighter", () => {
     const { container } = render(<Message text={"```mermaid\ngraph TD; A-->B;\n```"} />);
-    const toggle = screen.getByRole("button", { name: "Collapse Mermaid diagram" });
+    const toggle = screen.getByRole("button", { name: "Mermaid diagram" });
     expect(toggle.textContent).toContain("Mermaid diagram");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(screen.getByRole("button", { name: "Expand Mermaid diagram" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mermaid diagram" }));
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(container.querySelector('[data-streamdown="code-block"]')).toBeNull();
     expect(container.querySelector('[data-streamdown="inline-code"]')).toBeNull();
@@ -81,7 +87,8 @@ describe("ChatMarkdown collapsible blocks", () => {
   it("translates the toggle labels", async () => {
     await i18n.changeLanguage("zh-CN");
     render(<Message text={"```\nplain code\n```"} />);
-    fireEvent.click(screen.getByRole("button", { name: "收起代码块" }));
-    expect(screen.getByRole("button", { name: "展开代码块" })).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "代码" });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 });

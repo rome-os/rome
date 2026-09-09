@@ -1,11 +1,7 @@
 {
   "markdown": {
     "code": "代码",
-    "mermaid": "Mermaid 图表",
-    "collapseCode": "收起代码块",
-    "expandCode": "展开代码块",
-    "collapseMermaid": "收起 Mermaid 图表",
-    "expandMermaid": "展开 Mermaid 图表"
+    "mermaid": "Mermaid 图表"
   },
   "title": "Rome",
   "inputState": {

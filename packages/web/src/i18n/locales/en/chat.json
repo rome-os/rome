@@ -1,11 +1,7 @@
 {
   "markdown": {
     "code": "Code",
-    "mermaid": "Mermaid diagram",
-    "collapseCode": "Collapse code block",
-    "expandCode": "Expand code block",
-    "collapseMermaid": "Collapse Mermaid diagram",
-    "expandMermaid": "Expand Mermaid diagram"
+    "mermaid": "Mermaid diagram"
   },
   "title": "Rome",
   "inputState": {
