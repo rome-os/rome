@@ -156,6 +156,21 @@
         "rslib.config.mjs"
       ]
     },
+    "rome_apps/showcases": {
+      // The `rome build` script compiles styles.css, whose Tailwind `@plugin`
+      // directive loads this package without a JavaScript import.
+      "ignoreDependencies": ["@tailwindcss/typography"],
+      "entry": [
+        "src/web/App.tsx",
+        "src/api/index.ts",
+        "src/actions/*/index.ts",
+        "src/hooks/*/index.ts",
+        "src/skills/**",
+        "src/**/*.test.{ts,tsx}",
+        "scripts/**",
+        "rslib.config.mjs"
+      ]
+    },
     "example_apps/*": {
       "entry": [
         "src/web/App.tsx",
