@@ -45,11 +45,12 @@ load API clients, mock handlers, fetch overrides, or request guards.
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` compact question | [`dev-chat-blocks--compact-question`](http://localhost:6006/?path=/story/dev-chat-blocks--compact-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story) |
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` stacked question | [`dev-chat-blocks--stacked-question`](http://localhost:6006/?path=/story/dev-chat-blocks--stacked-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--stacked-question&viewMode=story) |
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` resolved question | [`dev-chat-blocks--resolved-question`](http://localhost:6006/?path=/story/dev-chat-blocks--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story) |
-| `ConnectionDetailHeader` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
-| `ConnectionDetailHeader` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
+| `ConnectionDetailHeader` + bare `ConnectionSlotCard` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
+| `ConnectionDetailHeader` + bare `ConnectionSlotCard` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
 
 `/dev/connections` stays out of Storybook. It mounts connection ceremonies and replaces the global
-fetch function to block their service requests. The connection stories mount only `ConnectionDetailHeader`.
+fetch function to block their service requests. The connection stories compose the detail header with
+the pure, bare `ConnectionSlotCard` body instead of mounting connection ceremonies.
 
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
