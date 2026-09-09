@@ -5,6 +5,7 @@ node_modules/
 dist/
 # rome-web mock-mode build output (dev tool; see packages/web/mock/)
 dist-mock/
+storybook-static/
 # UX audit report build output (see .claude/skills/ux-semantics-audit/report/)
 dist-report/
 .env

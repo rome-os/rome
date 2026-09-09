@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "pnpm build:kit && rsbuild dev",
     "dev:mock": "pnpm build:kit && rsbuild dev --config mock/rsbuild.config.ts",
+    "storybook": "storybook dev --port 6006 --exact-port --no-open",
+    "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
     "build": "tsc --noEmit && rsbuild build",
     "typecheck": "tsc --noEmit",
@@ -73,6 +75,8 @@
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
     "remark-gfm": "^4.0.1",
+    "storybook": "10.6.0",
+    "storybook-react-rsbuild": "3.4.2",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3"
   }

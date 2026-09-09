@@ -12,6 +12,8 @@
     "dev": "pnpm build:apps && pnpm --filter @rome/core dev",
     "start:web": "pnpm --filter rome-web dev",
     "start:web:mock": "pnpm --filter rome-web dev:mock",
+    "storybook": "pnpm --filter rome-web storybook",
+    "build:storybook": "pnpm --filter rome-web build:storybook",
     "desktop:image:local": "pnpm --filter rome-desktop image:local",
     "start:cdp": "pnpm --filter rome-cdp-client start",
     "dev:all": "scripts/dev-up.sh",
