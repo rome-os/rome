@@ -15,6 +15,18 @@ function watchServiceRequests(page: import("@playwright/test").Page) {
 test("network-free stories stay isolated and issue no service requests", async ({ page }) => {
   const requests = watchServiceRequests(page);
 
+  await page.goto("/?path=/story/dev-design-styleguide--default");
+  const styleGuide = page.frameLocator("#storybook-preview-iframe");
+  await expect(
+    styleGuide.getByRole("heading", { name: "Design System — Styleguide" }),
+  ).toBeVisible();
+  await expect(styleGuide.getByRole("heading", { name: "Semantic tokens" })).toHaveCount(1);
+  await page.getByRole("switch", { name: "compareModes" }).press("Space");
+  await expect(
+    styleGuide.getByText("Light and dark specimens are shown together for comparison."),
+  ).toBeVisible();
+  await expect(styleGuide.getByRole("heading", { name: "Semantic tokens" })).toHaveCount(2);
+
   await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
   const warm = page.getByRole("button", { name: "Warm" });
   await expect(warm).toHaveAttribute("aria-pressed", "false");

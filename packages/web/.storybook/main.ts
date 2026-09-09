@@ -6,6 +6,13 @@ const config: StorybookConfig = {
     options: { builder: { rsbuildConfigPath: ".storybook/rsbuild.config.ts" } },
   },
   stories: ["./*.stories.tsx"],
+  addons: [
+    {
+      name: "@storybook/addon-mcp",
+      options: { toolsets: { test: false } },
+    },
+  ],
+  features: { componentsManifest: true },
   core: { disableTelemetry: true },
 };
 

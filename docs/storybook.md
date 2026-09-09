@@ -9,7 +9,8 @@ Storybook serves self-contained design demonstrations without a Rome backend. It
 3. Run `pnpm storybook` from the repository root.
 4. Open a page from [Pages](#pages).
 
-The default port is 6006. Use `pnpm storybook --port 6007` for a second instance.
+The default port is 6006. Use `pnpm storybook --port 6046` for an explicit local instance.
+Start `pnpm storybook --port 6047` for a second instance at the same time.
 An occupied port fails with an error instead of selecting another port or prompting.
 The local development command uses `--no-open` to prevent automatic browser launch while retaining interactive prompts.
 For CI, add `--ci` explicitly with `pnpm storybook --ci`.
@@ -18,14 +19,14 @@ For CI, add `--ci` explicitly with `pnpm storybook --ci`.
 
 Each story imports its existing page directly. The pages have one implementation.
 
-| Existing development URL | Source | Stable story ID |
-| --- | --- | --- |
-| `/dev/styleguide` | `src/pages/dev/StyleGuidePage.tsx` | [`dev-design-styleguide--default`](http://localhost:6006/?path=/story/dev-design-styleguide--default) |
-| `/dev/typography` | `src/pages/dev/TypographyPage.tsx` | [`dev-design-typography--default`](http://localhost:6006/?path=/story/dev-design-typography--default) |
-| `/dev/gallery` | `src/pages/dev/gallery/ComponentGalleryPage.tsx` | [`dev-design-gallery--default`](http://localhost:6006/?path=/story/dev-design-gallery--default) |
-| `/dev/mdx` | `src/pages/dev/mdx/MdxDocsPage.tsx` | [`dev-design-mdx--default`](http://localhost:6006/?path=/story/dev-design-mdx--default) |
+| Existing development URL | Source | Manager link | Iframe link |
+| --- | --- | --- | --- |
+| `/dev/styleguide` | `src/pages/dev/StyleGuidePage.tsx` | [`dev-design-styleguide--default`](http://localhost:6006/?path=/story/dev-design-styleguide--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) |
+| `/dev/typography` | `src/pages/dev/TypographyPage.tsx` | [`dev-design-typography--default`](http://localhost:6006/?path=/story/dev-design-typography--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-typography--default&viewMode=story) |
+| `/dev/gallery` | `src/pages/dev/gallery/ComponentGalleryPage.tsx` | [`dev-design-gallery--default`](http://localhost:6006/?path=/story/dev-design-gallery--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-gallery--default&viewMode=story) |
+| `/dev/mdx` | `src/pages/dev/mdx/MdxDocsPage.tsx` | [`dev-design-mdx--default`](http://localhost:6006/?path=/story/dev-design-mdx--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-mdx--default&viewMode=story) |
 
-The [style guide iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) omits the manager UI. Replace the port in these links when you start another instance.
+The iframe link omits the manager UI. Replace the port in these links when you start another instance.
 
 ## Retained development routes
 
@@ -56,18 +57,70 @@ production behavior and belong to application-flow coverage.
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
 
+## Agent workflow
+
+Start Storybook before connecting an agent. The official `@storybook/addon-mcp` exposes a local
+Streamable HTTP endpoint at `http://127.0.0.1:<port>/mcp`. It does not change an agent's settings.
+
+For Codex, add this entry to a trusted project's local `.codex/config.toml`. Do not add it to a
+user or workstation configuration, and do not commit the file for this workflow.
+
+```toml
+[mcp_servers.rome_storybook]
+url = "http://127.0.0.1:6046/mcp"
+```
+
+For another MCP client, use its project-scoped connection flow. The Storybook helper can create a
+project-scoped entry when the client supports it:
+
+```bash
+npx mcp-add --type http --url "http://127.0.0.1:6046/mcp" --scope project
+```
+
+The endpoint page at `http://127.0.0.1:6046/mcp` shows enabled toolsets. The current local setup
+exposes `stories-preview`, `get-storybook-story-instructions`, `stories-changed`,
+`stories-find-by-component`, `docs-list`, `docs-show`, and `docs-show-story`.
+
+Use `docs-list` to discover the current story IDs. Use `docs-show` or `docs-show-story` for the
+generated documentation. Use `stories-find-by-component` with a source path to map an edited
+component to its story. Use `stories-changed` after an edit to list changed or related stories.
+Use `stories-preview` to return the matching manager link.
+
+The manifest covers the current page and fixture stories. It is not a complete props catalog for
+published packages. The `test-run` MCP tool stays disabled because this repository does not install
+`@storybook/addon-vitest`. Run the existing Playwright command instead. A direct project MCP client
+does not receive `review-create` without Storybook's experimental review feature, which this
+repository does not enable. Return the manager and iframe links from [Pages](#pages) for review.
+
+`stories-changed` follows Storybook's module graph and Git state. A changed preview or configuration
+file can be unreachable from a story. In that case, use the documented source location and
+`stories-find-by-component` for the affected renderer instead of inventing a story ID.
+
+### Clean local exercise
+
+1. In a clean worktree, run `pnpm storybook --port 6046`.
+2. Discover `dev-design-styleguide--default` with `docs-list` or use its source and links in [Pages](#pages) when MCP is unavailable.
+3. Open the [style guide iframe](http://localhost:6046/iframe.html?id=dev-design-styleguide--default&viewMode=story) and confirm the `Design System — Styleguide` heading.
+4. Make a temporary source edit in `packages/web/src/pages/dev/StyleGuidePage.tsx`. Confirm HMR updates the open iframe, then restore the source.
+5. Run `STORYBOOK_PORT=6046 pnpm --filter rome-web test:storybook`.
+6. Return the [style guide manager link](http://localhost:6046/?path=/story/dev-design-styleguide--default) and iframe link. Replace `6046` with the active port.
+
+The same workflow works without MCP. Run `pnpm storybook --port 6047` for a concurrent second
+instance. Both commands keep Storybook's exact-port behavior.
+
 ## Browser checks
 
 Run `pnpm --filter rome-web test:storybook` to start Storybook and check the direct iframe stories.
 Set `STORYBOOK_PORT` to use another development port. Set `STORYBOOK_BASE_URL` to check a running
-static build instead. The check observes initial-render requests and fails for `/api` or another service
-origin. It does not intercept or rewrite requests.
+static build instead. The check covers the selected design story and network-free component states.
+It observes initial-render requests and fails for `/api` or another service origin. It does not
+intercept or rewrite requests.
 
 ## Build and check
 
 1. Run `pnpm build:storybook` in the devShell.
-2. Serve the output with `python3 -m http.server 6008 --bind 127.0.0.1 --directory storybook-static`.
-3. Open a page from [Pages](#pages), replacing port `6006` with `6008`.
+2. Serve the output with `python3 -m http.server 6048 --bind 127.0.0.1 --directory storybook-static`.
+3. Open a page from [Pages](#pages), replacing port `6006` with `6048`.
 4. Refresh the page to check the direct link.
 
 The build writes only to the root `storybook-static` directory. The dashboard output stays in `packages/web/dist`.
