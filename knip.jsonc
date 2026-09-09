@@ -88,6 +88,7 @@
       ]
     },
     "packages/web": {
+      "storybook": true,
       // Knip 6.34's rstest plugin throws on the object form of
       // `testEnvironment`, which this workspace and packages/ui both use.
       // Upstream issue 2009. Declaring the test files by hand covers what the
@@ -97,6 +98,8 @@
         "src/**/*.test.{ts,tsx}",
         "src/test/setup.ts",
         "rstest.config.mts",
+        ".storybook/rsbuild.config.ts",
+        ".storybook/*.test.ts",
         "mock/main.tsx",
         "mock/rsbuild.config.ts",
         // The desktop VNC suite reaches both of these through a string, not an
