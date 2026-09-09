@@ -37,7 +37,6 @@ export type WidgetSeed =
     };
 
 const STORAGE_PREFIX = "rome:free-layout:";
-export const STRIP_ITEM_MIN_WIDTH = 320;
 
 let listeners: Array<() => void> = [];
 let snapshot: WidgetPlacement[] = [];
@@ -132,7 +131,10 @@ function reconcileToolView(next: WidgetPlacement[]) {
     null;
   const unread = new Set(toolView.unreadIds);
   for (const p of next) {
-    if (!snapshot.some((previous) => previous.id === p.id)) unread.add(p.id);
+    const previous = snapshot.find((previous) => previous.id === p.id);
+    if (!previous || (p.type === "projects" && p.selectedPath !== previous.selectedPath)) {
+      unread.add(p.id);
+    }
   }
   saveToolView({
     activeId,
@@ -216,6 +218,13 @@ export function autoPlaceProjects(activate = false): string | null {
   const existing = current.find((p) => p.type === "projects");
   if (existing) {
     if (activate) selectTool(existing.id);
+    else if (
+      (toolView.collapsed || toolView.activeId !== existing.id) &&
+      !toolView.unreadIds.includes(existing.id)
+    ) {
+      saveToolView({ ...toolView, unreadIds: [...toolView.unreadIds, existing.id] });
+      notify();
+    }
     return existing.id;
   }
 
@@ -257,10 +266,6 @@ export function autoPlaceApp(
   // (`order`) so it doesn't jump, but mint a fresh id so the iframe remounts
   // at the new src.
   const existing = current.find((p) => p.type === "app" && p.targetId === appId);
-  if (existing && activate && route === undefined && params === undefined) {
-    selectTool(existing.id);
-    return existing.id;
-  }
   const order = existing ? existing.order : nextOrder(current);
   if (existing) {
     current = current.filter((p) => p.id !== existing.id);
@@ -433,22 +438,6 @@ export function updateProjectsSelection(placementId: string, selectedPath: strin
   );
 }
 
-export function reorderPlacements(
-  placements: WidgetPlacement[],
-  activeId: string,
-  overId: string,
-): WidgetPlacement[] | null {
-  const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const oldIndex = sorted.findIndex((p) => p.id === activeId);
-  const newIndex = sorted.findIndex((p) => p.id === overId);
-  if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return null;
-
-  const [moved] = sorted.splice(oldIndex, 1);
-  sorted.splice(newIndex, 0, moved);
-
-  return sorted.map((p, i) => ({ ...p, order: i + 1 }));
-}
-
 export function setActiveSession(sessionId: string | null) {
   if (activeSessionId === sessionId) return;
   const previousSessionId = activeSessionId;
@@ -522,17 +511,10 @@ export function useFreeCells() {
     persist(getSnapshot().filter((p) => p.id !== id));
   }, []);
 
-  const moveWidget = useCallback((activeId: string, overId: string) => {
-    const current = getSnapshot();
-    const result = reorderPlacements(current, activeId, overId);
-    if (result) persist(result);
-  }, []);
-
   return {
     placements,
     addWidget,
     removeWidget,
-    moveWidget,
     toolView: view,
     selectTool,
     setToolsCollapsed,

@@ -259,7 +259,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
   const { toolView, setToolsCollapsed } = useFreeCells();
-  const hasApps = !toolView.collapsed;
+  const isAppsPanelOpen = !toolView.collapsed;
   // Multiple sessions are in scope at once. Pick the right one deliberately:
   //   • mainSessionId  — the session THIS <Chat> owns (the prop). Use for the
   //     owned transcript's load / delete / agent lookup / scroll / navigation.
@@ -1586,14 +1586,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         onDrop={handleDrop}
       >
         {/* ---- Main Chat Area ---- */}
-        {/* When the trace drawer is open as a side panel (wide / no-apps layout,
+        {/* When the trace drawer is open as a side panel (wide / apps panel closed,
             @5xl/chat) it's `fixed` and out of flow, so reserve its 480px here to
             keep the toolbar, messages, and composer clear of it. In the narrow /
             apps-open layout the drawer covers the chat instead, so no reserve. */}
         <div
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
             traceDrawerTarget !== null,
-            hasApps,
+            isAppsPanelOpen,
           )}`}
         >
           {isDraggingFiles && (
@@ -1842,7 +1842,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         <TraceDrawer
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
-          hasApps={hasApps}
+          hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
             renderSingleBlock(block as StreamBlock, key, {
               onApprovalResolved: refreshActiveSession,

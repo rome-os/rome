@@ -69,6 +69,81 @@ describe("tool tabs", () => {
     expect(result.current.toolView.unreadIds).toHaveLength(2);
   });
 
+  it("navigates an existing app to its root when an explicit root link is opened", async () => {
+    const { store, result } = await setup();
+    act(() => store.autoPlaceApp("notes", "draft", { id: 4 }, true));
+    const previous = result.current.placements[0];
+    act(() => result.current.setToolsCollapsed(true));
+    act(() => store.autoPlaceApp("notes", undefined, undefined, true));
+    const current = result.current.placements[0];
+    expect(result.current.placements).toHaveLength(1);
+    expect(current).toEqual({
+      id: expect.any(String),
+      type: "app",
+      targetId: "notes",
+      order: previous.order,
+    });
+    expect(current.id).not.toBe(previous.id);
+    expect(result.current.toolView).toEqual({
+      activeId: current.id,
+      collapsed: false,
+      unreadIds: [],
+    });
+  });
+
+  it.each([
+    "inactive",
+    "collapsed",
+  ])("marks repeated passive Projects opens unread while %s without changing the view", async (visibility) => {
+    const { store, result } = await setup();
+    act(() => store.autoPlaceProjects(true));
+    const projects = result.current.placements[0];
+    act(() => {
+      if (visibility === "inactive") result.current.addWidget("desktop");
+      else result.current.setToolsCollapsed(true);
+    });
+    const before = result.current.toolView;
+    act(() => {
+      store.autoPlaceProjects();
+      store.autoPlaceProjects();
+    });
+    expect(result.current.placements[0]).toEqual(projects);
+    expect(result.current.toolView).toEqual({ ...before, unreadIds: [projects.id] });
+    expect(JSON.parse(localStorage.getItem("rome:tool-view:workspace") ?? "null")).toEqual(
+      result.current.toolView,
+    );
+    act(() => store.autoPlaceProjects(true));
+    expect(result.current.toolView).toEqual({
+      activeId: projects.id,
+      collapsed: false,
+      unreadIds: [],
+    });
+  });
+
+  it("does not mark visible Projects updates unread", async () => {
+    const { store, result } = await setup();
+    act(() => store.autoPlaceProjects(true));
+    const projects = result.current.placements[0];
+    act(() => {
+      store.autoPlaceProjects();
+      store.updateProjectsSelection(projects.id, "projects/default/report.md");
+    });
+    expect(result.current.toolView.unreadIds).toEqual([]);
+  });
+
+  it("marks a later file update unread after Projects was read and hidden in the same turn", async () => {
+    const { store, result } = await setup();
+    act(() => store.autoPlaceProjects(true));
+    const projects = result.current.placements[0];
+    act(() => {
+      store.updateProjectsSelection(projects.id, "projects/default/first.md");
+      result.current.addWidget("desktop");
+    });
+    const before = result.current.toolView;
+    act(() => store.updateProjectsSelection(projects.id, "projects/default/second.md"));
+    expect(result.current.toolView).toEqual({ ...before, unreadIds: [projects.id] });
+  });
+
   it("selects the right neighbor on close, then the left, and preserves selection on background close", async () => {
     const { result } = await setup();
     act(() => {
