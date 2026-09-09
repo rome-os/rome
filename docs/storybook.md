@@ -50,7 +50,7 @@ does not use mock handlers, fetch overrides, or request guards.
 
 `/dev/connections` stays out of Storybook because it loads application data and owns selected-connection
 state. The connection stories pass typed `ConnectionCard` fixtures directly to the production
-`ConnectionDetailDialog`. Their initial render does not start a setup; connection actions retain their
+`ConnectionDetailDialog`. Their initial render does not start a setup. Connection actions retain their
 production behavior and belong to application-flow coverage.
 
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
