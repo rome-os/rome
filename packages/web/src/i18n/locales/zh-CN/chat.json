@@ -55,9 +55,7 @@
     "unavailableBody": "链接可能已被撤销或失效。"
   },
   "timeline": {
-    "label": "提问时间线",
-    "hide": "隐藏时间线",
-    "show": "显示时间线"
+    "label": "提问时间线"
   },
   "jumpToLatest": "回到最新消息",
   "roles": {
