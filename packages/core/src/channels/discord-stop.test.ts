@@ -25,12 +25,12 @@ describe("Discord stop command", () => {
   it("routes native /stop through chat control before the guardian-only config gate", async () => {
     const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
     const chatStop: ChatStopHandler = stop;
-    const isGuardian = rs.fn(async () => false);
+    const resolveDiscordPerson = rs.fn(async () => null);
     const adapter = new DiscordAdapter({
       botToken: "token",
       connectionId: "connection:discord",
       chatStop,
-      isGuardian,
+      resolveDiscordPerson,
     });
     const deferReply = rs.fn(async () => undefined);
     const editReply = rs.fn(async () => undefined);
@@ -55,6 +55,6 @@ describe("Discord stop command", () => {
       senderId: "user-1",
     });
     expect(editReply).toHaveBeenCalledWith({ content: "Stopped." });
-    expect(isGuardian).not.toHaveBeenCalled();
+    expect(resolveDiscordPerson).not.toHaveBeenCalled();
   });
 });
