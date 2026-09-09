@@ -38,7 +38,8 @@
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "../../scripts/test-env.sh rstest"
   },
   "dependencies": {
     "@rsbuild/plugin-react": "^2.0.0",
@@ -53,9 +54,11 @@
     "yaml": "^2.8.0"
   },
   "devDependencies": {
+    "@rstest/core": "^0.11.11",
     "@types/node": "^25.2.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
