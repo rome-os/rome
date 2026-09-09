@@ -9,7 +9,8 @@ Storybook serves self-contained design demonstrations without a Rome backend. It
 3. Run `pnpm storybook` from the repository root.
 4. Open a page from [Pages](#pages).
 
-The default port is 6006. Use `pnpm storybook --port 6007` for a second instance.
+The default port is 6006. Use `pnpm storybook --port 6046` for an explicit local instance.
+Start `pnpm storybook --port 6047` for a second instance at the same time.
 An occupied port fails with an error instead of selecting another port or prompting.
 The local development command uses `--no-open` to prevent automatic browser launch while retaining interactive prompts.
 For CI, add `--ci` explicitly with `pnpm storybook --ci`.
@@ -18,14 +19,14 @@ For CI, add `--ci` explicitly with `pnpm storybook --ci`.
 
 Each story imports its existing page directly. The pages have one implementation.
 
-| Existing development URL | Source | Stable story ID |
-| --- | --- | --- |
-| `/dev/styleguide` | `src/pages/dev/StyleGuidePage.tsx` | [`dev-design-styleguide--default`](http://localhost:6006/?path=/story/dev-design-styleguide--default) |
-| `/dev/typography` | `src/pages/dev/TypographyPage.tsx` | [`dev-design-typography--default`](http://localhost:6006/?path=/story/dev-design-typography--default) |
-| `/dev/gallery` | `src/pages/dev/gallery/ComponentGalleryPage.tsx` | [`dev-design-gallery--default`](http://localhost:6006/?path=/story/dev-design-gallery--default) |
-| `/dev/mdx` | `src/pages/dev/mdx/MdxDocsPage.tsx` | [`dev-design-mdx--default`](http://localhost:6006/?path=/story/dev-design-mdx--default) |
+| Existing development URL | Source | Manager link | Iframe link |
+| --- | --- | --- | --- |
+| `/dev/styleguide` | `src/pages/dev/StyleGuidePage.tsx` | [`dev-design-styleguide--default`](http://localhost:6006/?path=/story/dev-design-styleguide--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) |
+| `/dev/typography` | `src/pages/dev/TypographyPage.tsx` | [`dev-design-typography--default`](http://localhost:6006/?path=/story/dev-design-typography--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-typography--default&viewMode=story) |
+| `/dev/gallery` | `src/pages/dev/gallery/ComponentGalleryPage.tsx` | [`dev-design-gallery--default`](http://localhost:6006/?path=/story/dev-design-gallery--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-gallery--default&viewMode=story) |
+| `/dev/mdx` | `src/pages/dev/mdx/MdxDocsPage.tsx` | [`dev-design-mdx--default`](http://localhost:6006/?path=/story/dev-design-mdx--default) | [iframe](http://localhost:6006/iframe.html?id=dev-design-mdx--default&viewMode=story) |
 
-The [style guide iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) omits the manager UI. Replace the port in these links when you start another instance.
+The iframe link omits the manager UI. Replace the port in these links when you start another instance.
 
 ## Retained development routes
 
@@ -39,6 +40,8 @@ Storybook provides parallel design demonstrations. It does not replace runtime d
 
 Each story imports a production renderer and passes typed fixtures or callbacks. The initial render
 does not use mock handlers, fetch overrides, or request guards.
+Storybook uses the preview browser's detected locale. In a browser check, set the locale before
+asserting translated text. Otherwise, assert a role, fixture identity, or local control label.
 
 | Source component | Fixture and state | Story ID | Iframe |
 | --- | --- | --- | --- |
@@ -47,6 +50,9 @@ does not use mock handlers, fetch overrides, or request guards.
 | `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` resolved question | [`dev-chat-blocks--resolved-question`](http://localhost:6006/?path=/story/dev-chat-blocks--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story) |
 | `ConnectionDetailDialog` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
 | `ConnectionDetailDialog` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram bot, unconnected | [`dev-connections-slot-card--unconnected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--unconnected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--unconnected-bot&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram bot, connected | [`dev-connections-slot-card--connected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--connected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--connected-bot&viewMode=story) |
+| `ConnectionSlotCard` | typed Telegram session, available to add | [`dev-connections-slot-card--add-session`](http://localhost:6006/?path=/story/dev-connections-slot-card--add-session) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story) |
 
 `/dev/connections` stays out of Storybook because it loads application data and owns selected-connection
 state. The connection stories pass typed `ConnectionCard` fixtures directly to the production
@@ -56,18 +62,79 @@ production behavior and belong to application-flow coverage.
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
 
+## Agent workflow
+
+Start Storybook before connecting an agent. The official `@storybook/addon-mcp` exposes a local
+Streamable HTTP endpoint at `http://127.0.0.1:<port>/mcp`. It does not change an agent's settings.
+
+The repository tracks project-scoped connections for Codex, Claude Code, Cursor, and VS Code. Run
+`pnpm storybook --port 6046` before opening an agent client. Each configuration points to the
+loopback endpoint and keeps the client's normal tool-approval flow.
+
+| Client | Project configuration | Server name |
+| --- | --- | --- |
+| Codex | `.codex/config.toml` | `rome_storybook` |
+| Claude Code | `.mcp.json` | `rome-storybook` |
+| Cursor | `.cursor/mcp.json` | `rome-storybook` |
+| VS Code | `.vscode/mcp.json` | `romeStorybook` |
+
+Codex loads `.codex/config.toml` only for a trusted project. Start a new Codex task after changing
+that file because an existing task retains its tool catalog.
+
+Do not add automatic approval to a tracked configuration. If an unattended local run needs it, add
+the approval policy to the user's own configuration after verifying that this checkout started the
+loopback endpoint.
+
+The endpoint page at `http://127.0.0.1:6046/mcp` shows enabled toolsets. The current local setup
+exposes `stories-preview`, `get-storybook-story-instructions`, `stories-changed`,
+`stories-find-by-component`, `docs-list`, `docs-show`, and `docs-show-story`.
+
+Before creating or changing a `*.stories.*` file, call `get-storybook-story-instructions`.
+Use `docs-list` to discover the current story IDs. Use `docs-show` or `docs-show-story` for the
+generated documentation. Use `stories-find-by-component` with a source path to map an edited
+component to its story. After a visual edit, call `stories-changed`, then use `stories-preview`
+to return the matching manager link.
+
+The manifest covers the current page and fixture stories. It is not a complete props catalog for
+published packages. The `test-run` MCP tool stays disabled because this repository does not install
+`@storybook/addon-vitest`. Run the existing Playwright command instead. A direct project MCP client
+does not receive `review-create` without Storybook's experimental review feature, which this
+repository does not enable. Return the manager and iframe links from [Pages](#pages) for review.
+
+`stories-changed` follows Storybook's module graph and Git state. A changed preview or configuration
+file can be unreachable from a story. A browser-check file is also unreachable because it has no
+visual import. For a renderer, use `stories-find-by-component` instead of inventing a story ID.
+Run an unreachable browser check directly.
+
+### Clean local exercise
+
+1. In a clean worktree, run `pnpm storybook --port 6046`.
+2. Call `get-storybook-story-instructions`, then discover `dev-design-styleguide--default` with `docs-list`.
+3. If MCP is unavailable, use its source and links in [Pages](#pages).
+4. Open the [style guide iframe](http://localhost:6046/iframe.html?id=dev-design-styleguide--default&viewMode=story) and confirm the `Design System — Styleguide` heading.
+5. Make a temporary source edit in `packages/web/src/pages/dev/StyleGuidePage.tsx`. Confirm HMR updates the open iframe, then restore the source.
+6. Run `STORYBOOK_PORT=6046 pnpm --filter rome-web test:storybook`.
+7. Return the [style guide manager link](http://localhost:6046/?path=/story/dev-design-styleguide--default) and iframe link. Replace `6046` with the active port.
+
+The same workflow works without MCP. Run `pnpm storybook --port 6047` for a concurrent second
+instance. Both commands keep Storybook's exact-port behavior.
+
 ## Browser checks
 
 Run `pnpm --filter rome-web test:storybook` to start Storybook and check the direct iframe stories.
 Set `STORYBOOK_PORT` to use another development port. Set `STORYBOOK_BASE_URL` to check a running
-static build instead. The check observes initial-render requests and fails for `/api` or another service
-origin. It does not intercept or rewrite requests.
+static build instead. The check covers the selected design story and network-free component states.
+It observes initial-render requests and fails for `/api` or another service origin. It does not
+intercept or rewrite requests.
+
+Storybook disables lazy compilation. Its dynamic-import proxy can race HMR during a cold CI render.
+Keep it disabled unless the Playwright container check passes with the builder version in this repository.
 
 ## Build and check
 
 1. Run `pnpm build:storybook` in the devShell.
-2. Serve the output with `python3 -m http.server 6008 --bind 127.0.0.1 --directory storybook-static`.
-3. Open a page from [Pages](#pages), replacing port `6006` with `6008`.
+2. Serve the output with `python3 -m http.server 6048 --bind 127.0.0.1 --directory storybook-static`.
+3. Open a page from [Pages](#pages), replacing port `6006` with `6048`.
 4. Refresh the page to check the direct link.
 
 The build writes only to the root `storybook-static` directory. The dashboard output stays in `packages/web/dist`.

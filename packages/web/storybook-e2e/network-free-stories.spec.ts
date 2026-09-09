@@ -15,6 +15,18 @@ function watchServiceRequests(page: import("@playwright/test").Page) {
 test("network-free stories stay isolated and issue no service requests", async ({ page }) => {
   const requests = watchServiceRequests(page);
 
+  await page.goto("/?path=/story/dev-design-styleguide--default");
+  const styleGuide = page.frameLocator("#storybook-preview-iframe");
+  await expect(
+    styleGuide.getByRole("heading", { name: "Design System — Styleguide" }),
+  ).toBeVisible();
+  await expect(styleGuide.getByRole("heading", { name: "Semantic tokens" })).toHaveCount(1);
+  await page.getByRole("switch", { name: "compareModes" }).press("Space");
+  await expect(
+    styleGuide.getByText("Light and dark specimens are shown together for comparison."),
+  ).toBeVisible();
+  await expect(styleGuide.getByRole("heading", { name: "Semantic tokens" })).toHaveCount(2);
+
   await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
   const warm = page.getByRole("button", { name: "Warm" });
   await expect(warm).toHaveAttribute("aria-pressed", "false");
@@ -37,6 +49,16 @@ test("network-free stories stay isolated and issue no service requests", async (
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await expect(page.getByText("This connection lets your agent", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-slot-card--unconnected-bot&viewMode=story");
+  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-slot-card--connected-bot&viewMode=story");
+  await expect(page.getByText("@rome_bot", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
+
+  await page.goto("/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story");
+  await expect(page.getByRole("button", { name: "Add session" })).toBeVisible();
 
   await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Warm" })).toHaveAttribute("aria-pressed", "false");

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm build:kit && rsbuild dev",
     "dev:mock": "pnpm build:kit && rsbuild dev --config mock/rsbuild.config.ts",
-    "storybook": "storybook dev --port 6006 --exact-port --no-open",
+    "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open",
     "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
     "build": "tsc --noEmit && rsbuild build",
@@ -65,6 +65,7 @@
     "@rsbuild/plugin-react": "^2.0.0",
     "@rsbuild/plugin-svgr": "^2.0.2",
     "@rstest/core": "^0.11.11",
+    "@storybook/addon-mcp": "10.6.0",
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
