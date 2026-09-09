@@ -43,7 +43,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
         <span className="truncate text-ui text-foreground">{row.displayName}</span>
         <span className="flex min-w-0 items-center gap-2 text-aux text-muted-foreground">
           {row.latest && (
-            <span className="text-subtle-foreground" title={row.latest.source}>
+            <span className="shrink-0 text-subtle-foreground" title={row.latest.source}>
               <ChannelGlyph channel={row.latest.source} />
             </span>
           )}
@@ -56,7 +56,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
           )}
         </span>
       </span>
-      <span className="justify-self-end font-mono text-badge tabular-nums text-subtle-foreground">
+      <span className="justify-self-end whitespace-nowrap text-right font-mono text-badge tabular-nums text-subtle-foreground sm:w-20">
         {timeAgo(t, row.latest?.timestamp ?? null)}
       </span>
     </>
