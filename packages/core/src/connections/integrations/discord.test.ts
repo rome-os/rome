@@ -63,6 +63,9 @@ rs.mock("../../channels/discord.js", () => ({
       fakeState.lastConfig = config;
     }
     onMessage(): void {}
+    async directConversationFor(userId: string): Promise<string> {
+      return `dm-${userId}`;
+    }
     async start(): Promise<void> {
       if (fakeState.startError) throw fakeState.startError;
     }
@@ -187,6 +190,9 @@ describe("discord descriptor shape", () => {
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
     const h = buildTalker();
+    await expect(h.talker.feature("directMessaging")?.conversationFor("alice")).resolves.toBe(
+      "dm-alice",
+    );
     h.start();
     const inboundMedia = h.talker.feature("inboundMedia");
     const message = {

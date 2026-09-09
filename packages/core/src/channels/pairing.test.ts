@@ -5,7 +5,7 @@ import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { approvals, persons, channelMappings } from "../db/schema.js";
 import { pairingPayload } from "@rome/api-types/approvals";
-import { createPairingAdmission } from "./pairing.js";
+import { createPairingAdmission, notifyPairingResolution } from "./pairing.js";
 import { eq } from "drizzle-orm";
 
 describe("channel pairing approvals", () => {
@@ -27,6 +27,54 @@ describe("channel pairing approvals", () => {
       .run();
   });
   afterEach(() => testDb.close());
+
+  it.each([
+    "telegram",
+    "discord",
+    "feishu",
+  ] as const)("%s privately notifies a group requester after Web approval without undoing approval on delivery failure", async (channel) => {
+    const send = rs.fn<TalkRouter["send"]>(async (_connection, conversationId) => ({
+      messageId: "sent",
+      conversationId,
+    }));
+    const conversationFor = rs.fn(async () => "private-chat" as ConversationId);
+    const feature = rs.fn(() => ({ conversationFor }));
+    const router = { send, feature } as unknown as TalkRouter;
+    const admit = createPairingAdmission({
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db),
+    });
+    await admit(
+      "connection",
+      channel,
+      {
+        senderId: "123",
+        conversationId: "group" as ConversationId,
+        messageId: "request",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(),
+        thread: { kind: "group" },
+        addressing: "mention",
+      },
+      router,
+    );
+    const request = (await repo.findPending())[0];
+    expect(pairingPayload(request)?.conversationId).toBeUndefined();
+    const result = await repo.resolvePending(request.id, "approve", "owner");
+    if (result.outcome !== "resolved") throw new Error("Approval failed");
+    send.mockClear();
+    await notifyPairingResolution(router, result.approval);
+    expect(feature).toHaveBeenCalledWith("connection", "directMessaging");
+    expect(conversationFor).toHaveBeenCalledWith("123");
+    expect(send).toHaveBeenCalledWith("connection", "private-chat", {
+      text: "Your account is paired with Rome. Please send your original message again.",
+    });
+    send.mockRejectedValueOnce(new Error("Private messages disabled"));
+    await expect(notifyPairingResolution(router, result.approval)).resolves.toBeUndefined();
+    expect((await repo.findById(request.id))?.status).toBe("approved");
+    expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
+  });
 
   it("reuses a pending identity, limits guidance, and retains codes across repository restarts", async () => {
     const first = repo.requestPairing(identity)!;

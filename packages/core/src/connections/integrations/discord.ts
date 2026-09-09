@@ -373,6 +373,12 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 },
               };
               const features: Partial<TalkFeatureMap> = {
+                directMessaging: {
+                  conversationFor: async (userId) =>
+                    (await adapter.directConversationFor(
+                      userId,
+                    )) as import("@rome-os/app-runtime").ConversationId,
+                },
                 history,
                 inboundMedia,
                 activity,

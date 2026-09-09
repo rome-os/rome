@@ -181,9 +181,11 @@ export class FeishuAdapter implements ProviderAdapter {
     if (!message.text) return;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
-    const cfg = await this.getChannelConfig(threadId);
     const opts = message.replyToMessageId
-      ? { replyTo: message.replyToMessageId, replyInThread: cfg.autoThread ?? true }
+      ? {
+          replyTo: message.replyToMessageId,
+          replyInThread: (await this.getChannelConfig(threadId)).autoThread ?? true,
+        }
       : undefined;
 
     try {

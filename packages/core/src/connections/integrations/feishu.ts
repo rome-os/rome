@@ -50,7 +50,12 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import { directoryPage, toInboundMessage, toMessageReceipt } from "./talk-features.js";
+import {
+  addressIsConversationFeature,
+  directoryPage,
+  toInboundMessage,
+  toMessageReceipt,
+} from "./talk-features.js";
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -538,7 +543,11 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                   };
                 },
               };
-              const features: Partial<TalkFeatureMap> = { activity, directory };
+              const features: Partial<TalkFeatureMap> = {
+                directMessaging: addressIsConversationFeature(),
+                activity,
+                directory,
+              };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },
           };

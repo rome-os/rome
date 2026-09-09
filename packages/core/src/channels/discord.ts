@@ -1314,6 +1314,10 @@ export class DiscordAdapter implements ProviderAdapter {
     log.info("bot stopped");
   }
 
+  async directConversationFor(channelUserId: string): Promise<string> {
+    return (await this.client.users.createDM(channelUserId)).id;
+  }
+
   async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
