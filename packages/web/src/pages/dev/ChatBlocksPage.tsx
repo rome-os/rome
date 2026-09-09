@@ -18,7 +18,7 @@
 
 import type { StreamBlock } from "@/lib/chat-types";
 import { interactionResultKey } from "@/components/chat/chat-view";
-import { renderSingleBlock } from "@/components/chat/blocks/render";
+import { renderSingleBlock, type RenderBlockOptions } from "@/components/chat/blocks/render";
 
 /** Specimens are inert data; submissions have nowhere to go on this page. */
 const noop = () => {};
@@ -46,7 +46,7 @@ interface Specimen {
   result?: Record<string, unknown>;
 }
 
-const SPECIMENS: Specimen[] = [
+export const CHAT_BLOCK_SPECIMENS: Specimen[] = [
   {
     id: "question-card-compact",
     title: "QuestionCard — compact options",
@@ -132,7 +132,7 @@ export default function ChatBlocksGalleryPage() {
             render identically on every load — this page is in the layout-invariant sweep.
           </p>
         </div>
-        {SPECIMENS.map((specimen) => (
+        {CHAT_BLOCK_SPECIMENS.map((specimen) => (
           <SpecimenFrame key={specimen.id} specimen={specimen} />
         ))}
       </div>
@@ -146,10 +146,39 @@ export default function ChatBlocksGalleryPage() {
  * one row only if the column is wide enough to hold them, and that shared row is
  * what the geometry assertions measure.
  */
-function SpecimenFrame({ specimen }: { specimen: Specimen }) {
-  const key = interactionResultKey(SESSION_ID, specimen.block.toolUseId ?? "");
-  const results = specimen.result ? new Map([[key, specimen.result]]) : undefined;
+type SubmitAppComponent = NonNullable<RenderBlockOptions["onSubmitAppComponent"]>;
+type DismissAppComponent = NonNullable<RenderBlockOptions["onDismissAppComponent"]>;
 
+export interface ChatBlockPreviewProps {
+  block: StreamBlock;
+  result?: Record<string, unknown>;
+  sessionId: string;
+  onSubmitAppComponent: SubmitAppComponent;
+  onDismissAppComponent: DismissAppComponent;
+}
+
+/** Renders a StreamBlock through the transcript's production dispatcher. */
+export function ChatBlockPreview({
+  block,
+  result,
+  sessionId,
+  onSubmitAppComponent,
+  onDismissAppComponent,
+}: ChatBlockPreviewProps) {
+  const results =
+    result && block.toolUseId
+      ? new Map([[interactionResultKey(sessionId, block.toolUseId), result]])
+      : undefined;
+
+  return renderSingleBlock(block, block.toolUseId ?? "chat-block-preview", {
+    sessionId,
+    interactionResults: results,
+    onSubmitAppComponent,
+    onDismissAppComponent,
+  });
+}
+
+function SpecimenFrame({ specimen }: { specimen: Specimen }) {
   return (
     <section className="space-y-2">
       <div>
@@ -157,12 +186,13 @@ function SpecimenFrame({ specimen }: { specimen: Specimen }) {
         <p className="max-w-2xl text-body text-muted-foreground">{specimen.note}</p>
       </div>
       <div className="w-full max-w-2xl">
-        {renderSingleBlock(specimen.block, specimen.id, {
-          sessionId: SESSION_ID,
-          interactionResults: results,
-          onSubmitAppComponent: noop,
-          onDismissAppComponent: noop,
-        })}
+        <ChatBlockPreview
+          block={specimen.block}
+          result={specimen.result}
+          sessionId={SESSION_ID}
+          onSubmitAppComponent={noop}
+          onDismissAppComponent={noop}
+        />
       </div>
     </section>
   );

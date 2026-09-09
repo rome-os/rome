@@ -18,6 +18,32 @@ The stable story ID is `dev-design-styleguide--default`.
 The [direct iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) omits the manager UI.
 Replace the port in either link when you start another instance.
 
+## Network-free component states
+
+Each story imports a production renderer and passes typed fixtures or callbacks. The stories do not
+load API clients, mock handlers, fetch overrides, or request guards.
+
+| Source component | Fixture and state | Story ID | Iframe |
+| --- | --- | --- | --- |
+| `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` compact question | [`dev-chat-blocks--compact-question`](http://localhost:6006/?path=/story/dev-chat-blocks--compact-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story) |
+| `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` stacked question | [`dev-chat-blocks--stacked-question`](http://localhost:6006/?path=/story/dev-chat-blocks--stacked-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--stacked-question&viewMode=story) |
+| `ChatBlockPreview` → `renderSingleBlock` | `StreamBlock` resolved question | [`dev-chat-blocks--resolved-question`](http://localhost:6006/?path=/story/dev-chat-blocks--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story) |
+| `ConnectionSlotCard` | typed GitHub slot, not connected | [`dev-connections-slot-card--not-connected`](http://localhost:6006/?path=/story/dev-connections-slot-card--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--not-connected&viewMode=story) |
+| `ConnectionSlotCard` | typed GitHub slot, connected | [`dev-connections-slot-card--connected`](http://localhost:6006/?path=/story/dev-connections-slot-card--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--connected&viewMode=story) |
+
+`/dev/connections` stays out of Storybook. It mounts connection ceremonies and replaces the global
+fetch function to block their service requests. The connection stories mount only `ConnectionSlotCard`.
+
+`/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
+the auth query cache, and service-backed submit or setup flows.
+
+## Browser checks
+
+Run `pnpm --filter rome-web test:storybook` to start Storybook and check the direct iframe stories.
+Set `STORYBOOK_PORT` to use another development port. Set `STORYBOOK_BASE_URL` to check a running
+static build instead. The check observes requests and fails for `/api` or another service origin. It
+does not intercept or rewrite requests.
+
 ## Build and check
 
 1. Run `pnpm build:storybook` in the devShell.
