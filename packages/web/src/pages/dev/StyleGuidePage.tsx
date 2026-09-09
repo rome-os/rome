@@ -4,9 +4,8 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 import type { ResolvedTheme } from "@/lib/theme";
 
-// Comparison columns scope semantic tokens to each mode. Tailwind `dark:`
-// utilities still match a dark ancestor, so use the single-mode view to verify
-// component variants. The shadow specimen inherits the host's semantic tokens.
+// Compare semantic tokens side by side. Verify Tailwind `dark:` variants in
+// single-mode view because they also match the document's dark ancestor.
 
 type TokenGroup = { name: string; tokens: string[] };
 
