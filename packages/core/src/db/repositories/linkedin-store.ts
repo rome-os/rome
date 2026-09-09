@@ -12,6 +12,7 @@ import type {
   LinkedInMessageInput,
   LinkedInParticipantInput,
   LinkedInParticipantRow,
+  LinkedInReplyTarget,
   LinkedInSyncSink,
   LinkedInThreadCursor,
   LinkedInThreadInput,
@@ -121,15 +122,32 @@ function chunked<T>(items: T[], size: number): T[][] {
  * reads serve the poller's watermarks, the address book's fold over mirrored
  * accounts, and the history talk feature.
  *
- * Nothing here hands a thread or its messages to a reader as a thread. The
- * dashboard reads LinkedIn through the person contract like every other
- * channel, so every read out of this mirror is addressed by account —
- * {@link LinkedInStoreRepository.listParticipants}, scoped by
- * {@link DIRECT_THREADS}. A thread-shaped read here would have no caller but a
- * thread-shaped surface, and there is none.
+ * Reply targets require complete membership and an explicit direct-conversation verdict.
  */
 export class LinkedInStoreRepository implements LinkedInSyncSink {
   constructor(private db: DrizzleDb) {}
+
+  async findReplyTarget(
+    by: { participantId: string } | { threadId: string },
+  ): Promise<LinkedInReplyTarget | null> {
+    const scope =
+      "participantId" in by
+        ? sql`p.participant_id = ${by.participantId}`
+        : sql`t.thread_id = ${by.threadId}`;
+    const rows = await this.db.all<LinkedInReplyTarget>(sql`
+      SELECT t.thread_id AS threadId, t.thread_url AS threadUrl,
+        p.participant_id AS participantId, owner.participant_id AS selfParticipantId
+      FROM linkedin_threads t
+      JOIN linkedin_thread_participants tp ON tp.thread_id = t.thread_id
+      JOIN linkedin_participants p ON p.participant_id = tp.participant_id AND p.is_self = 0
+      JOIN linkedin_thread_participants self ON self.thread_id = t.thread_id
+      JOIN linkedin_participants owner ON owner.participant_id = self.participant_id AND owner.is_self = 1
+      WHERE ${scope} AND t.is_group = 0 AND t.participants_last_read_at IS NOT NULL
+        AND p.type = 'member' AND owner.type = 'member'
+        AND (SELECT count(*) FROM linkedin_thread_participants members WHERE members.thread_id = t.thread_id) = 2
+      LIMIT 2`);
+    return rows.length === 1 ? rows[0]! : null;
+  }
 
   async upsertThreads(threads: LinkedInThreadInput[]): Promise<void> {
     if (threads.length === 0) return;

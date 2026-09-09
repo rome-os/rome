@@ -72,6 +72,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   metadata.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
+- `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
+  With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Without `--send`, it only verifies the destination.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across

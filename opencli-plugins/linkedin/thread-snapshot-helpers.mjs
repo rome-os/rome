@@ -558,6 +558,7 @@ export async function fetchLinkedInThreadApi(apiUrl, csrf) {
     }
     const response = await fetch(url.toString(), {
       credentials: "include",
+      cache: "no-store",
       headers: {
         "csrf-token": csrf,
         accept: "application/vnd.linkedin.normalized+json+2.1",

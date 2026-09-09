@@ -41,6 +41,7 @@ import {
 import { talkConnections } from "./connections-store";
 import { memoryProfilePath } from "./memory-files";
 import {
+  LI_ARVIND_MEMBER,
   accountTimeline,
   nameForAccount,
   nextPersonId,
@@ -69,23 +70,9 @@ import {
  * `accountPresentation`, and no /api/people route addresses the sentinel.
  */
 
-/**
- * Whether Rome can send on a channel, as the real read answers it.
- *
- * Production asks the live connection in two steps, and this asks the same two
- * against the fixture ledger. No connection for the channel is `not-connected`
- * — the ledger is `./connections-store.ts`, so revoking a grant on the
- * Connections page relocks talk and this read notices, the way the real one
- * does. A connection whose talker does not do direct messaging is
- * `unsupported`, which in the first cut is every channel but the two.
- *
- * `no-conversation` is unreachable here, as it is on those two channels in
- * production: their address already names the conversation. A channel that
- * keys threads separately would answer it, and the dashboard renders it —
- * `../../src/pages/people/send-copy.ts` carries the copy for all three.
- */
-function sendState(channel: string): AccountSendState {
+function sendState({ channel, channelUserId }: AccountRef): AccountSendState {
   if (talkConnections(channel).length === 0) return "not-connected";
+  if (channel === "linkedin") return channelUserId === LI_ARVIND_MEMBER ? "yes" : "no-conversation";
   return channel === "whatsapp" || channel === "telegram" ? "yes" : "unsupported";
 }
 
@@ -101,7 +88,7 @@ function personResource(person: PersonFixture): PersonResource {
       channel: a.channel,
       channelUserId: a.channelUserId,
       displayName: nameForAccount(a.channel, a.channelUserId),
-      send: sendState(a.channel),
+      send: sendState(a),
       // The account's own head, not the person's: the person's newest entry
       // names a channel and not an address, so it cannot say which of two
       // accounts on one channel was the recent one.
@@ -634,7 +621,7 @@ export const peopleHandlers = [
 
     // The same state the person read answered with, so a client that raced a
     // disconnect renders the reason it would already have shown.
-    const send = sendState(parsed.request.channel);
+    const send = sendState(parsed.request);
     if (send !== "yes") {
       return HttpResponse.json({ error: refusalMessage(send), send } satisfies SendRefusal, {
         status: 409,

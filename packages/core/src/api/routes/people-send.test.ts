@@ -96,9 +96,6 @@ describe("People send API", () => {
   });
 
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
-    // A talker with no `directMessaging` feature is exactly LinkedIn: it
-    // mirrors an inbox it cannot write to, and says so rather than throwing
-    // when someone tries.
     const readOnly = { ...deps, talkRouter: { ...deps.talkRouter, feature: () => null } };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));
 

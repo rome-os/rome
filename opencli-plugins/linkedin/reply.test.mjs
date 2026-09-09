@@ -1,0 +1,362 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import vm from "node:vm";
+import { getRegistry } from "@jackwener/opencli/registry";
+import { parseThreadMessagePayloads } from "./thread-snapshot-helpers.mjs";
+import {
+  UNKNOWN_REPLY_OUTCOME,
+  confirmReplyReceipt,
+  parseReplyReceipt,
+  postLinkedInReply,
+  verifiedReplyTarget,
+} from "./reply-helpers.mjs";
+import "./reply.js";
+
+const threadId = "2-target==";
+const threadUrl = `https://www.linkedin.com/messaging/thread/${threadId}/`;
+const recipientId = "ACoAARecipient";
+const selfId = "ACoAAOwner";
+const mailboxUrn = `urn:li:fsd_profile:${selfId}`;
+const conversationUrn = `urn:li:msg_conversation:(${mailboxUrn},${threadId})`;
+const sender = `urn:li:msg_messagingParticipant:${mailboxUrn}`;
+const recipient = `urn:li:msg_messagingParticipant:urn:li:fsd_profile:${recipientId}`;
+const expected = { threadId, threadUrl, recipientId, selfId };
+const text = "Hello 👋\n\n  Thanks for the details.";
+const originToken = "12345678-1234-4123-8123-123456789012";
+const conversationApi =
+  "https://www.linkedin.com/voyager/api/voyagerMessagingGraphQL/graphql?queryId=messengerConversations.abcdef&variables=(mailboxUrn:urn%3Ali%3Afsd_profile%3Aowner)";
+const messageApi = `https://www.linkedin.com/voyager/api/voyagerMessagingGraphQL/graphql?queryId=messengerMessages.abcdef&variables=${encodeURIComponent(`(conversationUrn:${conversationUrn})`)}`;
+
+function payload() {
+  return {
+    __opencli: { conversation_participant_refs_complete: true },
+    included: [
+      {
+        $type: "com.linkedin.messenger.Conversation",
+        entityUrn: conversationUrn,
+        backendUrn: `urn:li:messagingThread:${threadId}`,
+        groupChat: false,
+        "*conversationParticipants": [sender, recipient],
+      },
+      ...[
+        [sender, "SELF"],
+        [recipient, "DISTANCE_1"],
+      ].map(([entityUrn, distance]) => ({
+        $type: "com.linkedin.messenger.MessagingParticipant",
+        entityUrn,
+        participantType: { member: { firstName: { text: "Member" }, distance } },
+      })),
+    ],
+  };
+}
+function message(overrides = {}) {
+  return {
+    $type: "com.linkedin.messenger.Message",
+    entityUrn: "urn:li:msg_message:(owner,sent-123)",
+    backendUrn: "urn:li:messagingMessage:sent-123",
+    "*conversation": conversationUrn,
+    backendConversationUrn: `urn:li:messagingThread:${threadId}`,
+    "*sender": sender,
+    body: { text },
+    deliveredAt: 1789000000000,
+    originToken,
+    ...overrides,
+  };
+}
+
+test("destination verification requires complete direct membership and both account ids", () => {
+  assert.deepEqual(verifiedReplyTarget(payload(), expected), { conversationUrn, mailboxUrn });
+  for (const mutate of [
+    (p) => {
+      p.__opencli.conversation_participant_refs_complete = false;
+    },
+    (p) => {
+      p.included[0].groupChat = true;
+    },
+    (p) => {
+      delete p.included[0].groupChat;
+    },
+    (p) => {
+      p.included[0]["*conversationParticipants"].push("another-member");
+    },
+    (p) => {
+      p.included[1].participantType.member.distance = "DISTANCE_1";
+    },
+    (p) => {
+      p.included[0].entityUrn = `urn:li:msg_conversation:(other,${threadId})`;
+    },
+  ]) {
+    const p = payload();
+    mutate(p);
+    assert.throws(() => verifiedReplyTarget(p, expected));
+  }
+  assert.throws(() => verifiedReplyTarget(payload(), { ...expected, recipientId: "ACoAAOther" }));
+  assert.throws(() => verifiedReplyTarget(payload(), { ...expected, selfId: "ACoAAOther" }));
+  assert.throws(() => verifiedReplyTarget(null, expected));
+});
+
+test("a reply receipt and a later snapshot use the same provider id", () => {
+  const receipt = parseReplyReceipt({ data: { value: message() } }, payload(), {
+    ...expected,
+    originToken,
+  });
+  const [mirrored] = parseThreadMessagePayloads(
+    [{ included: [...payload().included, message()] }],
+    { ...expected, limit: 20 },
+  );
+  assert.equal(receipt.message_id, mirrored.message_id);
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(receipt.status, "sent");
+});
+
+for (const [label, token] of [
+  ["missing", undefined],
+  ["null", null],
+  ["empty", ""],
+  ["mismatched", "another-send"],
+]) {
+  test(`receipt parsing treats ${label} origin tokens as unknown outcomes`, () => {
+    const response = JSON.parse(
+      JSON.stringify({ data: { value: message({ originToken: token }) } }),
+    );
+    assert.throws(() => parseReplyReceipt(response, payload(), { ...expected, originToken }), {
+      message: UNKNOWN_REPLY_OUTCOME,
+    });
+  });
+}
+
+test("receipt parsing rejects unknown, unrelated, inbound, or incomplete results", () => {
+  for (const value of [
+    {},
+    { status: "sent" },
+    message({ backendUrn: undefined }),
+    message({ "*sender": recipient }),
+    message({ deliveredAt: null }),
+    message({ backendConversationUrn: "urn:li:messagingThread:other", "*conversation": "other" }),
+  ]) {
+    assert.throws(
+      () => parseReplyReceipt({ value }, payload(), { ...expected, originToken }),
+      /outcome is unknown/,
+    );
+  }
+});
+
+test("receipt confirmation reads history after a partial creation response", async () => {
+  let reads = 0;
+  const receipt = await confirmReplyReceipt(
+    { value: {} },
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => {
+        reads++;
+        return {
+          included: [
+            message({ originToken: null, backendUrn: "urn:li:messagingMessage:older" }),
+            message(),
+          ],
+        };
+      },
+      wait: async () => assert.fail("The first history read confirmed the reply"),
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(reads, 1);
+});
+
+test("receipt confirmation retries reads until the exact origin token appears", async () => {
+  let reads = 0;
+  let waits = 0;
+  const receipt = await confirmReplyReceipt(
+    null,
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => {
+        reads++;
+        if (reads === 1) throw new Error("temporary read failure");
+        return { included: [message({ originToken: reads === 2 ? "another-send" : originToken })] };
+      },
+      wait: async () => {
+        waits++;
+      },
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(reads, 3);
+  assert.equal(waits, 2);
+});
+
+test("receipt confirmation stays unknown when history only contains other send attempts", async () => {
+  let reads = 0;
+  await assert.rejects(
+    confirmReplyReceipt(
+      null,
+      payload(),
+      { ...expected, originToken },
+      {
+        readHistory: async () => {
+          reads++;
+          return { included: [message({ originToken: "another-send" })] };
+        },
+        wait: async () => {},
+      },
+    ),
+    { message: UNKNOWN_REPLY_OUTCOME },
+  );
+  assert.equal(reads, 3);
+});
+
+test("a complete receipt needs no additional history read", async () => {
+  const receipt = await confirmReplyReceipt(
+    { value: message() },
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => assert.fail("Receipt already confirmed"),
+      wait: async () => assert.fail("Receipt already confirmed"),
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+});
+
+test("the browser write makes exactly one scoped POST and preserves the message", async () => {
+  const calls = [];
+  const result = await vm.runInNewContext(`(${postLinkedInReply.toString()})(...args)`, {
+    URL,
+    location: new URL(threadUrl),
+    args: ["csrf", { conversationUrn, mailboxUrn }, text, originToken, "tracking", threadUrl],
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true, status: 201, json: async () => ({ value: message() }) };
+    },
+  });
+  assert.ok(result.json);
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].url,
+    "https://www.linkedin.com/voyager/api/voyagerMessagingDashMessengerMessages?action=createMessage",
+  );
+  assert.equal(calls[0].options.credentials, "include");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    message: {
+      body: { attributes: [], text },
+      renderContentUnions: [],
+      conversationUrn,
+      originToken,
+    },
+    mailboxUrn,
+    trackingId: "tracking",
+    dedupeByClientGeneratedToken: false,
+  });
+});
+
+test("navigation changes block the POST, and unknown outcomes never trigger a second POST", async () => {
+  for (const mode of ["navigation", "timeout", "server-error", "auth", "rejected"]) {
+    let calls = 0;
+    const result = await vm.runInNewContext(`(${postLinkedInReply.toString()})(...args)`, {
+      URL,
+      location: new URL(mode === "navigation" ? "https://www.linkedin.com/feed/" : threadUrl),
+      args: ["csrf", { conversationUrn, mailboxUrn }, text, originToken, "tracking", threadUrl],
+      fetch: async () => {
+        calls++;
+        if (mode === "timeout") throw new Error("timeout");
+        return { ok: false, status: mode === "auth" ? 401 : mode === "rejected" ? 422 : 503 };
+      },
+    });
+    assert.equal(calls, mode === "navigation" ? 0 : 1);
+    if (mode === "timeout" || mode === "server-error") assert.equal(result.uncertain, true);
+    if (mode === "auth") assert.equal(result.auth_required, true);
+    if (mode === "rejected" || mode === "navigation") assert.ok(result.error);
+  }
+});
+
+function fakePage({ conversation = payload(), outcome = null, history = null } = {}) {
+  const writes = [];
+  return {
+    writes,
+    goto: async () => {},
+    wait: async () => {},
+    getCookies: async () => [{ name: "JSESSIONID", value: '"csrf"' }],
+    evaluate: async (fn, ...args) => {
+      if (fn.name === "inspectLinkedInThreadPage")
+        return {
+          current_url: threadUrl,
+          initial_url: messageApi,
+          conversation_urls: [conversationApi],
+        };
+      if (fn.name === "fetchLinkedInConversationApi") return { json: conversation };
+      if (fn.name === "fetchLinkedInThreadApi") {
+        return {
+          json:
+            typeof history === "function" ? history(writes[0]?.[3]) : (history ?? { included: [] }),
+        };
+      }
+      if (fn.name === "postLinkedInReply") {
+        writes.push(args);
+        if (outcome instanceof Error) throw outcome;
+        return outcome ?? { json: { value: message({ originToken: args[3] }) } };
+      }
+      throw new Error(`Unexpected function ${fn.name}`);
+    },
+  };
+}
+const args = {
+  "thread-url": threadUrl,
+  "expected-recipient": recipientId,
+  "expected-self": selfId,
+  message: text,
+};
+
+test("the command defaults to verifying only and requires --send for the one write", async () => {
+  const command = getRegistry().get("linkedin/reply");
+  assert.equal(command.access, "write");
+  const page = fakePage();
+  assert.equal((await command.func(page, args))[0].status, "verified_dry_run");
+  assert.equal(page.writes.length, 0);
+  const [receipt] = await command.func(page, { ...args, send: true });
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(page.writes.length, 1);
+  assert.equal(page.writes[0][2], text);
+  assert.equal(page.writes[0][4].length, 16);
+});
+
+test("the command refuses unverified recipients and reports uncertain outcomes without retrying", async () => {
+  const command = getRegistry().get("linkedin/reply");
+  const wrong = fakePage();
+  await assert.rejects(
+    command.func(wrong, { ...args, "expected-recipient": "ACoAAOther", send: true }),
+  );
+  assert.equal(wrong.writes.length, 0);
+  const unknown = fakePage({ outcome: { uncertain: true } });
+  await assert.rejects(command.func(unknown, { ...args, send: true }), /outcome is unknown/);
+  assert.equal(unknown.writes.length, 1);
+});
+
+test("the command reports a missing receipt token as unknown without sending again", async () => {
+  const command = getRegistry().get("linkedin/reply");
+  const page = fakePage({
+    outcome: JSON.parse(JSON.stringify({ json: { value: message({ originToken: undefined }) } })),
+  });
+  await assert.rejects(command.func(page, { ...args, send: true }), {
+    message: UNKNOWN_REPLY_OUTCOME,
+  });
+  assert.equal(page.writes.length, 1);
+});
+
+for (const [label, outcome] of [
+  ["partial response", { json: { value: {} } }],
+  ["lost response", new Error("browser response lost")],
+]) {
+  test(`the command confirms a ${label} from history without sending again`, async () => {
+    const page = fakePage({
+      outcome,
+      history: (token) => ({ included: [message({ originToken: token })] }),
+    });
+    const [receipt] = await getRegistry()
+      .get("linkedin/reply")
+      .func(page, { ...args, send: true });
+    assert.equal(receipt.message_id, "sent-123");
+    assert.equal(page.writes.length, 1);
+  });
+}

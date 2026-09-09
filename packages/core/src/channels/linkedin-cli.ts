@@ -1,21 +1,15 @@
 // The opencli boundary for the LinkedIn channel: one process runner plus the
 // parsers/classifiers for the commands the channel consumes (`whoami`,
-// `inbox`, `thread-snapshot`, `thread-participants`). opencli drives Rome's
+// `inbox`, `thread-snapshot`, `thread-participants`, `reply`). opencli drives Rome's
 // server-side Chrome over CDP, and the LinkedIn session lives in that browser's
 // profile — Rome never holds a LinkedIn credential; it holds the right to use
 // the logged-in browser.
 //
-// Every command wrapped here is a read. Rome wrapped `linkedin safe-send` too,
-// for the People page's LinkedIn composer; that composer is gone and nothing
-// else sends, so the wrapper went with it. The opencli command is untouched
-// and still reachable from a shell — what Rome no longer has is a LinkedIn
-// send path a dashboard request can reach.
-//
 // Error taxonomy mirrors connections/errors.ts: an auth wall / logged-out
 // session is `OpencliAuthError` (the caller maps it to CredentialRejected);
 // everything else — CDP down, timeout, unparseable output — is
-// `OpencliCommandError` (transient; retried on the next poll, never touching
-// grant state).
+// `OpencliCommandError`. Polls retry transient failures. Replies require an
+// explicit retry, because a lost response can follow a successful send.
 
 import { execFile } from "node:child_process";
 import { z } from "zod";
@@ -303,6 +297,52 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
     subject: row.subject ?? null,
     reactionCount: row.reaction_count ?? null,
   }));
+}
+
+/** A reply receipt must carry the same provider id as the history mirror. */
+export function parseLinkedInReply(
+  result: OpencliResult,
+  threadId: string,
+): LinkedInSnapshotMessage {
+  if (result.code === null) {
+    throw new OpencliCommandError(
+      "linkedin reply",
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = parseJsonOutput("linkedin reply", result);
+  } catch (error) {
+    if (error instanceof OpencliAuthError || result.code !== 0) throw error;
+    throw new OpencliCommandError(
+      "linkedin reply",
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  }
+  const parsed = z
+    .array(
+      snapshotRowSchema.extend({
+        status: z.literal("sent"),
+        sender_is_self: z.literal(true),
+      }),
+    )
+    .length(1)
+    .safeParse(raw);
+  if (!parsed.success || parsed.data[0]?.thread_id !== threadId) {
+    throw new OpencliCommandError(
+      "linkedin reply",
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  }
+  const [message] = parseThreadSnapshot(result);
+  if (!message?.sentAt) {
+    throw new OpencliCommandError(
+      "linkedin reply",
+      "Send outcome is unknown. Check LinkedIn before retrying.",
+    );
+  }
+  return message;
 }
 
 // ── thread-participants ───────────────────────────────────────────────────
