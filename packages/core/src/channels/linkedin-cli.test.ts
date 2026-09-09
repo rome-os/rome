@@ -3,6 +3,7 @@ import {
   OpencliAuthError,
   OpencliCommandError,
   parseInbox,
+  parseLinkedInReply,
   parseThreadParticipants,
   parseThreadSnapshot,
   parseWhoami,
@@ -13,6 +14,47 @@ import {
 function ok(stdout: string): OpencliResult {
   return { code: 0, stdout, stderr: "" };
 }
+
+describe("parseLinkedInReply", () => {
+  const receipt = {
+    status: "sent",
+    thread_id: "thread",
+    message_id: "provider-id",
+    sender_is_self: true,
+    sent_at: "2026-09-09T12:00:00Z",
+  };
+
+  it("requires a sent message with a provider id on the requested thread", () => {
+    expect(parseLinkedInReply(ok(JSON.stringify([receipt])), "thread")).toMatchObject({
+      messageId: "provider-id",
+      threadId: "thread",
+      senderIsSelf: true,
+    });
+    for (const row of [
+      { ...receipt, status: "verified_dry_run" },
+      { ...receipt, thread_id: "other" },
+      { ...receipt, message_id: "" },
+      { ...receipt, sender_is_self: false },
+      { ...receipt, sent_at: "invalid" },
+    ]) {
+      expect(() => parseLinkedInReply(ok(JSON.stringify([row])), "thread")).toThrow(
+        "outcome is unknown",
+      );
+    }
+  });
+
+  it("reports killed commands and malformed output as unknown, while preserving auth failures", () => {
+    expect(() =>
+      parseLinkedInReply({ code: null, stdout: "", stderr: "timeout" }, "thread"),
+    ).toThrow("Check LinkedIn before retrying");
+    expect(() => parseLinkedInReply(ok("invalid JSON"), "thread")).toThrow(
+      "Check LinkedIn before retrying",
+    );
+    expect(() =>
+      parseLinkedInReply({ code: 1, stdout: "", stderr: "auth_required" }, "thread"),
+    ).toThrow(OpencliAuthError);
+  });
+});
 
 describe("parseWhoami", () => {
   it("returns the account of a signed-in session", () => {

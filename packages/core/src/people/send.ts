@@ -15,8 +15,7 @@
 //
 // Whether a channel can be sent to at all is the channel's own declaration:
 // `talk.feature("directMessaging")`. A talker that does not offer it cannot be
-// written to from here, which is how LinkedIn's mirrored inbox stays readable
-// without a read-only flag threaded through anything.
+// written to from here, without a read-only flag threaded through anything.
 
 import type { ConversationId, TalkRouter } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";

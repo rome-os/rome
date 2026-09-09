@@ -141,9 +141,8 @@
     },
     "refusal": {
       "notConnected": "{{channel}} 未连接，Rome 无法从这里发送。请在设置中连接。",
-      "noConversation": "Rome 与他们还没有 {{channel}} 会话，因此无处可发。任一方先开口后即可建立。",
+      "noConversation": "Rome 无法确定此账号的 {{channel}} 私聊会话。请打开 {{channel}} 回复。",
       "unsupported": {
-        "linkedin": "Rome 只能读取 {{channel}}，无法写入。请直接在 {{channel}} 上回复。",
         "default": "Rome 还不支持在 {{channel}} 上发送。"
       }
     }

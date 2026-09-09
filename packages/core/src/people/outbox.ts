@@ -170,6 +170,11 @@ export async function retrySend(
     await deps.outboxRepo.refused(row.id, error);
     return wire({ ...row, state: "failed", error });
   }
+  if (resolution.target.conversationId !== row.conversationId) {
+    const error = "The account's conversation changed. Discard this reply and compose a new one.";
+    await deps.outboxRepo.refused(row.id, error);
+    return wire({ ...row, state: "failed", error });
+  }
   return attempt(deps, row, resolution.target);
 }
 
@@ -299,6 +304,7 @@ function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
   if (messageId === null) return [];
   const sessionId = channelConversationId(row.channel, row.conversationId);
   return [
+    `${row.conversationId}:${messageId}`,
     ...new Set(addresses.map((address) => `${address}:${messageId}`)),
     `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
   ];

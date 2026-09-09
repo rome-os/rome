@@ -141,9 +141,8 @@
     },
     "refusal": {
       "notConnected": "{{channel}} isn't connected, so Rome can't send there. Connect it in Settings.",
-      "noConversation": "Rome has no {{channel}} conversation with them yet, so there is nowhere to send. It opens once either of you writes first.",
+      "noConversation": "Rome could not identify a direct {{channel}} conversation for this account. Open {{channel}} to reply.",
       "unsupported": {
-        "linkedin": "Rome reads {{channel}} but cannot write to it. Reply from {{channel}} itself.",
         "default": "Rome cannot send on {{channel}} yet."
       }
     }
