@@ -27,6 +27,21 @@ Replace the port in either link when you start another instance.
 
 The build writes only to the root `storybook-static` directory. The dashboard output stays in `packages/web/dist`.
 
+## Diagnostic previews
+
+The diagnostic previews render without the dashboard entry or a Rome backend.
+
+| Development route | Page source | Story ID |
+| --- | --- | --- |
+| `/dev/connections` | [`ConnectionGalleryPage.tsx`](../packages/web/src/pages/dev/ConnectionGalleryPage.tsx) | [`dev-previews-connections--default`](http://localhost:6006/?path=/story/dev-previews-connections--default) |
+| `/dev/chat-blocks` | [`ChatBlocksPage.tsx`](../packages/web/src/pages/dev/ChatBlocksPage.tsx) | [`dev-previews-chat-blocks--default`](http://localhost:6006/?path=/story/dev-previews-chat-blocks--default) |
+| `/dev/login` | [`LoginPreviewPage.tsx`](../packages/web/src/pages/dev/LoginPreviewPage.tsx) | [`dev-previews-login--default`](http://localhost:6006/?path=/story/dev-previews-login--default) |
+| `/dev/onboard` | [`OnboardPreviewPage.tsx`](../packages/web/src/pages/dev/OnboardPreviewPage.tsx) | [`dev-previews-onboarding--default`](http://localhost:6006/?path=/story/dev-previews-onboarding--default) |
+
+The `/dev` routes remain available. [`dev-routes.ts`](../packages/web/src/pages/dev/dev-routes.ts) feeds the development index and `App.tsx`. [`layout-invariants.spec.ts`](../packages/web/e2e/layout-invariants.spec.ts) also visits the connections and chat-blocks routes.
+
+`BootstrapPreview` keeps each auth preview's query seed local. The preview fetch guard answers only the onboarding reads and rejects every other `/api` request. Run `pnpm --filter rome-web test:storybook:previews` to switch the previews on port 6026 and check that no service request escapes.
+
 ## Source and theme wiring
 
 [`StyleGuide.stories.tsx`](../packages/web/.storybook/StyleGuide.stories.tsx) imports the page directly.

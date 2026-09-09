@@ -1,6 +1,8 @@
 import type { Preview } from "storybook-react-rsbuild";
 import { useLayoutEffect, type ReactNode } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider, useTheme } from "../src/hooks/use-theme";
+import "../src/i18n";
 import {
   applyTheme,
   applyThemeName,
@@ -10,6 +12,7 @@ import {
   resolveTheme,
   type ThemePreference,
 } from "../src/lib/theme";
+import "./preview-api";
 import "../src/globals.css";
 
 injectThemeCss();
@@ -45,15 +48,17 @@ const preview: Preview = {
   decorators: [
     (Story, { globals }) => (
       <ThemeProvider>
-        <ColorMode
-          mode={
-            globals.colorMode === "light" || globals.colorMode === "dark"
-              ? globals.colorMode
-              : "system"
-          }
-        >
-          <Story />
-        </ColorMode>
+        <MemoryRouter>
+          <ColorMode
+            mode={
+              globals.colorMode === "light" || globals.colorMode === "dark"
+                ? globals.colorMode
+                : "system"
+            }
+          >
+            <Story />
+          </ColorMode>
+        </MemoryRouter>
       </ThemeProvider>
     ),
   ],
