@@ -50,7 +50,7 @@ pnpm dev:all          # Rome container + obs singleton + Traefik singleton
 
 ## Running processes
 
-For the standalone style guide, run `pnpm storybook`. Startup, source HMR, static builds, and browser checks are in [Storybook](docs/storybook.md).
+For standalone design pages, run `pnpm storybook`. Startup, source HMR, static builds, and browser checks are in [Storybook](docs/storybook.md).
 
 `pnpm dev:all` is the single entry point. It calls `scripts/dev-up.sh`, which:
 
