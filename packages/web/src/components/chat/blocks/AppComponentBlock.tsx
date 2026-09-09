@@ -142,7 +142,11 @@ export function AppComponentBlock({
         });
         // Inline components bypass RomeAppHost (the URL stays on /chat), so
         // this mount path reports its own app open.
-        trackAppOpen(appId, "inline");
+        trackAppOpen(
+          appId,
+          "inline",
+          bootstrap.caller && "email" in bootstrap.caller ? bootstrap.caller.email : undefined,
+        );
       } catch (err) {
         if (!disposed) setError(err instanceof Error ? err.message : String(err));
       }

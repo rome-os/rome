@@ -106,8 +106,16 @@ export type AppOpenSurface = "embedded" | "full" | "inline";
 // AppComponentBlock (inline chat components bypass RomeAppHost), so every app
 // open is one event regardless of surface. Custom names are rome_-prefixed to
 // avoid GA/Firebase auto-collected semantics.
-export function trackAppOpen(appId: string, surface: AppOpenSurface): void {
-  trackEvent("rome_app_open", { app_id: appId, surface });
+export function trackAppOpen(
+  appId: string,
+  surface: AppOpenSurface,
+  visitorEmail?: string | null,
+): void {
+  trackEvent("rome_app_open", {
+    app_id: appId,
+    surface,
+    visitor_email: visitorEmail?.trim() || "guest",
+  });
 }
 
 // Widget renders are counted from the PARENT window when the host mounts the
