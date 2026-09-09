@@ -45,4 +45,4 @@ Pairing admission creates requests for private messages, messages directed at th
 
 Each connection permits at most 20 pending pairing requests and 100 new requests in a rolling 24-hour window. Repeated messages can still reuse an existing request at either limit. Deleting a connection or revoking a Talk grant supersedes its pending requests and invalidates their codes. Revoking an unrelated grant preserves pending requests. A guardian rejection retains its original cooldown.
 
-Approval listing includes pending requests and the latest 100 resolved pairing records by default. Earlier pairing history is paged with `pairingHistoryOffset`. Activity provides the full history; Connections shows only active pending requests and links to Activity. Pagination preserves all stored audit records.
+Approval listing includes pending requests and the latest 100 resolved pairing records by default. Earlier pairing history is paged with `pairingHistoryOffset`. Activity provides the full history. Connections shows only active pending requests and links to Activity. Pagination preserves all stored audit records.
