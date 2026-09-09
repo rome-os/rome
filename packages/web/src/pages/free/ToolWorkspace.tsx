@@ -50,13 +50,16 @@ function ToolTab({ widget, label, icon, active, unread, onClose }: ToolTabProps)
   }, [active]);
 
   return (
-    <div ref={tabRef} className="relative flex h-10 shrink-0 items-center gap-1">
+    <div
+      ref={tabRef}
+      className={`relative flex h-9 shrink-0 items-center gap-1 rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+    >
       <TabsTrigger
         value={widget.id}
         role="tab"
         aria-selected={active}
         title={label}
-        className="max-w-48 gap-2 group-data-horizontal/tabs:after:bottom-0"
+        className="h-full max-w-48 gap-2 after:hidden"
         onKeyDown={(event) => {
           if (event.key === "Delete") {
             event.preventDefault();
