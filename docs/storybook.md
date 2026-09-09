@@ -67,42 +67,23 @@ the auth query cache, and service-backed submit or setup flows.
 Start Storybook before connecting an agent. The official `@storybook/addon-mcp` exposes a local
 Streamable HTTP endpoint at `http://127.0.0.1:<port>/mcp`. It does not change an agent's settings.
 
-For Codex, add this entry to a trusted project's local `.codex/config.toml`. Do not add it to a
-user or workstation configuration, and do not commit the file for this workflow.
+The repository tracks project-scoped connections for Codex, Claude Code, Cursor, and VS Code. Run
+`pnpm storybook --port 6046` before opening an agent client. Each configuration points to the
+loopback endpoint and keeps the client's normal tool-approval flow.
 
-```toml
-[mcp_servers.rome_storybook]
-url = "http://127.0.0.1:6046/mcp"
-```
+| Client | Project configuration | Server name |
+| --- | --- | --- |
+| Codex | `.codex/config.toml` | `rome_storybook` |
+| Claude Code | `.mcp.json` | `rome-storybook` |
+| Cursor | `.cursor/mcp.json` | `rome-storybook` |
+| VS Code | `.vscode/mcp.json` | `romeStorybook` |
 
-Codex asks for approval before an MCP call by default. If an unattended run uses the loopback
-Storybook instance started by this checkout, replace the minimal table with this allowlisted table.
-Do not use the approval setting for a remote or untrusted endpoint.
+Codex loads `.codex/config.toml` only for a trusted project. Start a new Codex task after changing
+that file because an existing task retains its tool catalog.
 
-```toml
-[mcp_servers.rome_storybook]
-url = "http://127.0.0.1:6046/mcp"
-enabled_tools = [
-  "stories-preview",
-  "get-storybook-story-instructions",
-  "stories-changed",
-  "stories-find-by-component",
-  "docs-list",
-  "docs-show",
-  "docs-show-story",
-]
-default_tools_approval_mode = "approve"
-```
-
-Start a new Codex task after changing the project MCP configuration. An existing task retains its
-tool catalog.
-
-For another MCP client, use its project-scoped connection flow. The Storybook helper can create a
-project-scoped entry when the client supports it:
-
-```bash
-npx mcp-add --type http --url "http://127.0.0.1:6046/mcp" --scope project
-```
+Do not add automatic approval to a tracked configuration. If an unattended local run needs it, add
+the approval policy to the user's own configuration after verifying that this checkout started the
+loopback endpoint.
 
 The endpoint page at `http://127.0.0.1:6046/mcp` shows enabled toolsets. The current local setup
 exposes `stories-preview`, `get-storybook-story-instructions`, `stories-changed`,
