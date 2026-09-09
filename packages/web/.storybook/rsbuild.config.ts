@@ -1,7 +1,7 @@
 import { defineConfig } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 import { fileURLToPath } from "node:url";
-import remarkGfm from "remark-gfm";
+import { createMdxRspackRule } from "../mdx-rspack-rule.js";
 import { sourceAliases } from "./source-aliases.js";
 
 export default defineConfig({
@@ -16,12 +16,7 @@ export default defineConfig({
   tools: {
     rspack: {
       module: {
-        rules: [
-          {
-            test: /\.mdx$/,
-            use: [{ loader: "@mdx-js/loader", options: { remarkPlugins: [remarkGfm] } }],
-          },
-        ],
+        rules: [createMdxRspackRule()],
       },
       resolve: { extensionAlias: { ".js": [".ts", ".tsx", ".js"] } },
     },

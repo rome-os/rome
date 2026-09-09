@@ -1,9 +1,9 @@
 import { defineConfig, loadEnv } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 import { pluginSvgr } from "@rsbuild/plugin-svgr";
-import remarkGfm from "remark-gfm";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { createMdxRspackRule } from "./mdx-rspack-rule.js";
 
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const srcDir = fileURLToPath(new URL("./src", import.meta.url));
@@ -68,14 +68,7 @@ export default defineConfig({
     },
     rspack: {
       module: {
-        rules: [
-          {
-            test: /\.mdx$/,
-            // remark-gfm buys the table syntax a design doc needs for its
-            // rule/reason columns; plain MDX would render the pipes as text.
-            use: [{ loader: "@mdx-js/loader", options: { remarkPlugins: [remarkGfm] } }],
-          },
-        ],
+        rules: [createMdxRspackRule()],
       },
     },
   },

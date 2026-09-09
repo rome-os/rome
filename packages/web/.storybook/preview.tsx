@@ -16,11 +16,11 @@ injectThemeCss();
 applyThemeName(readStoredThemeName());
 applyTheme(resolveTheme(readStoredPreference()));
 
-function ColorMode({ mode, children }: { mode: ThemePreference; children: ReactNode }) {
-  const { preference, setPreference } = useTheme();
+export function ColorMode({ mode, children }: { mode: ThemePreference; children: ReactNode }) {
+  const { setPreference } = useTheme();
   useLayoutEffect(() => {
-    if (preference !== mode) setPreference(mode);
-  }, [mode, preference, setPreference]);
+    setPreference(mode);
+  }, [mode, setPreference]);
   return children;
 }
 

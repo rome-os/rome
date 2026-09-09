@@ -76,7 +76,7 @@ Published package exports stay unchanged.
 Theme context lives in a separate module so changing palette definitions does not recreate its identity during HMR.
 Shared UI CSS registers its component sources through `@source`, and the preview uses the dashboard PostCSS configuration.
 
-Storybook has its own Rsbuild configuration and entry points. Its MDX rule matches the dashboard's design-document compiler without loading the dashboard configuration.
+Storybook has its own Rsbuild configuration and entry points. Both configurations consume the same pure MDX rule fragment without loading the dashboard configuration.
 It does not load the dashboard entry, authentication gate, analytics initialization, backend proxy, or mock entry.
 The pages require no API fixtures.
 Storybook configuration and story wrappers live outside the dashboard source tree.
