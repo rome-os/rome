@@ -1,4 +1,5 @@
 import { copyFileSync, existsSync, globSync, mkdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { loadConfig, mergeRslibConfig, type LibConfig, type RslibConfig } from "@rslib/core";
 import { pluginReact } from "@rsbuild/plugin-react";
@@ -6,6 +7,12 @@ import tailwindPostcss from "@tailwindcss/postcss";
 import { generateEntry } from "./generateEntry.js";
 import { loadAppYaml, type LoadedAppYaml } from "./loadAppYaml.js";
 import { RomeAppManifestPlugin } from "./manifestPlugin.js";
+
+const require = createRequire(import.meta.url);
+const sdkReactAliases = {
+  react: dirname(require.resolve("react/package.json")),
+  "react-dom": dirname(require.resolve("react-dom/package.json")),
+};
 
 export interface BuildContextOptions {
   cwd: string;
@@ -101,6 +108,12 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
       },
     },
     plugins: [pluginReact()],
+    // Apps render through the SDK-owned React/React DOM pair. Resolving both
+    // packages from the same dependency tree prevents pnpm consumers from
+    // bundling an app React alongside a different SDK renderer version.
+    resolve: {
+      alias: sdkReactAliases,
+    },
     tools: {
       postcss: (_config: unknown, utils: { addPlugins: (plugins: unknown[]) => void }) => {
         utils.addPlugins([tailwindPostcss()]);
