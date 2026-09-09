@@ -17,10 +17,6 @@ const DIAGRAM_LABEL = '[data-streamdown="mermaid-block"] > :first-child';
 const DIAGRAM_ACTIONS = '[data-streamdown="mermaid-block-actions"]';
 const DIAGRAM_CANVAS = '[data-streamdown="mermaid-block"] > :last-child';
 const ZOOM_STACK = '[data-streamdown="mermaid"] :has(> button[title="Zoom in"])';
-const CHAT_BLOCK = "[data-chat-code-block]";
-const CHAT_CODE_BLOCK = '[data-chat-code-block="code"]';
-const CHAT_DIAGRAM_BLOCK = '[data-chat-code-block="mermaid"]';
-const CHAT_BLOCK_BODY = "[data-chat-code-block-body]";
 
 /** Every floating part, on both fences. */
 const CHROME = [CODE_LABEL, DIAGRAM_LABEL, CODE_ACTIONS, DIAGRAM_ACTIONS, ZOOM_STACK];
@@ -67,25 +63,6 @@ const hoverCapable = media("hover: hover");
 const withoutHoverCapable = markdownCss.replace(hoverCapable, "");
 
 describe("Markdown fenced-block chrome", () => {
-  it("keeps a wrapped chat fence in the Markdown block rhythm at any nesting depth", () => {
-    expect(rule(`.rome-markdown ${CHAT_CODE_BLOCK}`)).toContain(
-      "margin-block: var(--markdown-code-block-space-block);",
-    );
-    expect(rule(`.rome-markdown ${CHAT_DIAGRAM_BLOCK}`)).toContain(
-      "margin-block: var(--markdown-media-space-block);",
-    );
-    expect(rule(".rome-markdown", CHAT_BLOCK, "+ *")).toContain("margin-block-start: 0;");
-    expect(
-      rule(`.rome-markdown ${CHAT_BLOCK_BODY} > :is(${CODE_CARD}, ${DIAGRAM_CARD})`),
-    ).toContain("margin-block: 0;");
-  });
-
-  it("hides the card's language label when the chat toggle already carries it", () => {
-    expect(rule(".rome-markdown", CHAT_BLOCK, CODE_LABEL, DIAGRAM_LABEL)).toContain(
-      "display: none;",
-    );
-  });
-
   it("frames a code fence once — the card keeps the tint, the body goes flush", () => {
     const body = rule(".rome-markdown", CODE_BODY);
 

@@ -5,18 +5,32 @@ import Markdown from "@/components/chat/ChatMarkdown";
 const COMPACT_TEXT_COLLAPSED_MAX_HEIGHT = 240;
 const COMPACT_TEXT_FADE_MASK = "linear-gradient(to bottom, black 70%, transparent 100%)";
 
-export function TextBlock({ content, compact = false }: { content: string; compact?: boolean }) {
+export function TextBlock({
+  content,
+  compact = false,
+  disclosureStateKey,
+}: {
+  content: string;
+  compact?: boolean;
+  disclosureStateKey?: string;
+}) {
   if (!compact) {
     return (
-      <Markdown className="text-foreground" compact={false}>
+      <Markdown className="text-foreground" compact={false} disclosureStateKey={disclosureStateKey}>
         {content}
       </Markdown>
     );
   }
-  return <CompactTextBlock content={content} />;
+  return <CompactTextBlock content={content} disclosureStateKey={disclosureStateKey} />;
 }
 
-export function CompactTextBlock({ content }: { content: string }) {
+export function CompactTextBlock({
+  content,
+  disclosureStateKey,
+}: {
+  content: string;
+  disclosureStateKey?: string;
+}) {
   const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -67,7 +81,7 @@ export function CompactTextBlock({ content }: { content: string }) {
             : undefined
         }
       >
-        <Markdown className="text-foreground" compact>
+        <Markdown className="text-foreground" compact disclosureStateKey={disclosureStateKey}>
           {content}
         </Markdown>
       </div>

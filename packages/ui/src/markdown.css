@@ -167,20 +167,6 @@
   margin-block: var(--markdown-code-block-space-block);
 }
 
-.rome-markdown [data-chat-code-block="code"] {
-  margin-block: var(--markdown-code-block-space-block);
-}
-
-.rome-markdown [data-chat-code-block="mermaid"] {
-  margin-block: var(--markdown-media-space-block);
-}
-
-.rome-markdown
-  [data-chat-code-block-body]
-  > :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
-  margin-block: 0;
-}
-
 .rome-markdown > [data-streamdown="blockquote"] {
   margin-block: var(--markdown-blockquote-space-block);
 }
@@ -213,8 +199,7 @@
       [data-streamdown="horizontal-rule"],
       [data-streamdown="image-wrapper"],
       [data-streamdown="mermaid-block"],
-      [data-streamdown="mermaid"],
-      [data-chat-code-block]
+      [data-streamdown="mermaid"]
     )
   + * {
   margin-block-start: 0;
@@ -317,15 +302,6 @@
 
 .rome-markdown [data-streamdown="mermaid-block"] > :last-child {
   border-radius: inherit;
-}
-
-.rome-markdown
-  [data-chat-code-block]
-  :is(
-    [data-streamdown="code-block-header"],
-    [data-streamdown="mermaid-block"] > :first-child
-  ) {
-  display: none;
 }
 
 /* The band. Both parts sit in the row's last two columns and both stick, so

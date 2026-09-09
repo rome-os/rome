@@ -1,11 +1,39 @@
-import { cloneElement, isValidElement, useId, useState, type ComponentProps } from "react";
+import {
+  cloneElement,
+  createContext,
+  isValidElement,
+  useContext,
+  useId,
+  useState,
+  type ComponentProps,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRightIcon } from "@radix-ui/react-icons";
 import { Button } from "@/components/ui/button";
 
-export function ChatCodeBlock({ children }: ComponentProps<"pre">) {
+// The live preview and persisted transcript mount different Markdown trees.
+// MessageList owns this map so the replacement can recover the same fence state.
+export const ChatCodeBlockStateContext = createContext<Map<string, boolean> | null>(null);
+export const ChatCodeBlockScopeContext = createContext<string | null>(null);
+
+interface MarkdownNode {
+  position?: { start?: { offset?: number } };
+}
+
+type ChatCodeBlockProps = ComponentProps<"pre"> & { node?: MarkdownNode };
+
+export function ChatCodeBlock({ children, node }: ChatCodeBlockProps) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(true);
+  const disclosureState = useContext(ChatCodeBlockStateContext);
+  const disclosureScope = useContext(ChatCodeBlockScopeContext);
+  const fenceOffset = node?.position?.start?.offset;
+  const disclosureKey =
+    disclosureScope !== null && fenceOffset !== undefined
+      ? `${disclosureScope}:${fenceOffset}`
+      : null;
+  const [open, setOpen] = useState(() =>
+    disclosureKey === null ? true : (disclosureState?.get(disclosureKey) ?? true),
+  );
   const bodyId = useId();
   const code = isValidElement<{ className?: string; "data-block"?: string }>(children)
     ? children
@@ -23,7 +51,13 @@ export function ChatCodeBlock({ children }: ComponentProps<"pre">) {
         className="w-full text-muted-foreground"
         aria-expanded={open}
         aria-controls={bodyId}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            const next = !value;
+            if (disclosureKey !== null) disclosureState?.set(disclosureKey, next);
+            return next;
+          })
+        }
       >
         <ChevronRightIcon aria-hidden="true" className={open ? "rotate-90" : ""} />
         <span className="truncate">{label}</span>
