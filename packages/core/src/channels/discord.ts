@@ -1187,6 +1187,10 @@ export class DiscordAdapter implements ProviderAdapter {
       const sub = interaction.options.getSubcommand(false);
       const focused = interaction.options.getFocused(true);
       if (subGroup !== "agent" || sub !== "set" || focused.name !== "name") return;
+      if (!(await this.canConfigure(interaction.user.id, interaction.commandName))) {
+        await interaction.respond([]);
+        return;
+      }
 
       const all = this.listAgents?.() ?? [];
       // Hide "main" from typeahead — it's the default; if the guardian wants

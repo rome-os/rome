@@ -6,7 +6,7 @@ import type {
   ConversationSettingsControl,
   ConversationSettingsSnapshot,
 } from "@rome-os/app-runtime";
-import type { ChatInputCommandInteraction } from "discord.js";
+import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
 import { buildDiscordSlashCommands, DiscordAdapter } from "./discord.js";
 
 const CONNECTION_ID = "connection:discord";
@@ -95,6 +95,32 @@ async function runCommand(
       handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void>;
     }
   ).handleSlashCommand(interaction);
+}
+
+function makeAutocompleteInteraction(userId: string) {
+  const respond = rs.fn(async () => undefined);
+  const interaction = {
+    commandName: "channel",
+    user: { id: userId },
+    options: {
+      getSubcommandGroup: () => "agent",
+      getSubcommand: () => "set",
+      getFocused: () => ({ name: "name", value: "" }),
+    },
+    respond,
+  } as unknown as AutocompleteInteraction;
+  return { interaction, respond };
+}
+
+async function runAutocomplete(
+  adapter: DiscordAdapter,
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  await (
+    adapter as unknown as {
+      handleAutocomplete(interaction: AutocompleteInteraction): Promise<void>;
+    }
+  ).handleAutocomplete(interaction);
 }
 
 afterEach(() => {
@@ -217,5 +243,23 @@ describe("Discord configuration command authorization", () => {
       },
     });
     expect(warn.mock.calls.at(-1)?.[0]).not.toContain("credential-must-not-appear");
+  });
+
+  it("does not expose agent autocomplete choices to an unlinked Discord user", async () => {
+    const resolveDiscordPerson = rs.fn(async () => null);
+    const listAgents = rs.fn(() => ["main", "private-agent"]);
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      resolveDiscordPerson,
+      listAgents,
+    });
+    const { interaction, respond } = makeAutocompleteInteraction(UNLINKED_ID);
+
+    await runAutocomplete(adapter, interaction);
+
+    expect(resolveDiscordPerson).toHaveBeenCalledWith(UNLINKED_ID);
+    expect(listAgents).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith([]);
   });
 });
