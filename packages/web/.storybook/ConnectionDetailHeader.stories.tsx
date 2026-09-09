@@ -1,10 +1,7 @@
 import type { Meta, StoryObj } from "storybook-react-rsbuild";
-import i18n from "../src/i18n";
-import { ConnectionBrandBadge } from "../src/components/brand-icons/connection-badges";
-import { ConnectionSlotCard, SoleSlotScope } from "../src/components/connection-slot-card";
-import { ConnectionDetailHeader } from "../src/components/ConnectionDetail";
-import { Button } from "../src/components/ui/button";
-import { Dialog, DialogBody } from "../src/components/ui/dialog";
+import { MemoryRouter } from "react-router-dom";
+import "../src/i18n";
+import { ConnectionDetailDialog } from "../src/components/ConnectionDetail";
 import type { ConnectionCard } from "../src/lib/connection-cards";
 
 const notConnected: ConnectionCard = {
@@ -41,46 +38,29 @@ const connected: ConnectionCard = {
 
 const meta = {
   title: "Dev/Connections/Channel status",
-  component: ConnectionDetailHeader,
+  component: ConnectionDetailDialog,
   parameters: { layout: "padded" },
-  args: { onClose: () => undefined },
-  argTypes: { card: { control: false }, onClose: { control: false } },
-  render: (args) => {
-    const slot = args.card.slots[0];
-    const isConnected = slot.state !== "unauthorized";
-
-    return (
-      <Dialog open onClose={args.onClose} size="lg">
-        <ConnectionDetailHeader {...args} />
-        <DialogBody>
-          <SoleSlotScope>
-            <ConnectionSlotCard
-              service={args.card.service}
-              slot={slot}
-              state={isConnected ? "connected" : "unconnected"}
-              role="primary"
-              icon={<ConnectionBrandBadge connection={args.card.service} />}
-              identityTitle={isConnected ? slot.identity : null}
-              action={
-                isConnected ? (
-                  <Button variant="destructive" size="sm" onClick={() => undefined}>
-                    {i18n.t("common.disconnect", { ns: "settings" })}
-                  </Button>
-                ) : undefined
-              }
-            >
-              {!isConnected && (
-                <Button onClick={() => undefined}>
-                  {i18n.t("common.connect", { ns: "settings" })}
-                </Button>
-              )}
-            </ConnectionSlotCard>
-          </SoleSlotScope>
-        </DialogBody>
-      </Dialog>
-    );
+  args: {
+    composio: null,
+    onClose: () => undefined,
+    onRefresh: () => undefined,
+    onFlash: () => undefined,
   },
-} satisfies Meta<typeof ConnectionDetailHeader>;
+  argTypes: {
+    card: { control: false },
+    composio: { control: false },
+    onClose: { control: false },
+    onRefresh: { control: false },
+    onFlash: { control: false },
+  },
+  decorators: [
+    (Story) => (
+      <MemoryRouter>
+        <Story />
+      </MemoryRouter>
+    ),
+  ],
+} satisfies Meta<typeof ConnectionDetailDialog>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
