@@ -1,12 +1,13 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
+import { CompactTextBlock } from "./blocks/TextBlock";
 import ChatMarkdown from "./ChatMarkdown";
 
 const i18n = createInstance();
@@ -30,6 +31,64 @@ function Message({ text }: { text: string }) {
 }
 
 describe("ChatMarkdown collapsible blocks", () => {
+  it("re-measures compact text when an inner block collapses", () => {
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    const observers: TestResizeObserver[] = [];
+
+    class TestResizeObserver implements ResizeObserver {
+      readonly targets = new Set<Element>();
+
+      constructor(private readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+
+      unobserve(target: Element) {
+        this.targets.delete(target);
+      }
+
+      disconnect() {
+        this.targets.clear();
+      }
+
+      resize(target: Element, width: number) {
+        if (!this.targets.has(target)) return;
+        this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this);
+      }
+    }
+
+    globalThis.ResizeObserver = TestResizeObserver;
+    try {
+      const { container } = render(
+        <I18nextProvider i18n={i18n}>
+          <ThemeProvider>
+            <MemoryRouter>
+              <CompactTextBlock content={"```\nlong code\n```"} />
+            </MemoryRouter>
+          </ThemeProvider>
+        </I18nextProvider>,
+      );
+      const compact = container.querySelector(".overflow-hidden") as HTMLDivElement;
+      const markdown = compact.querySelector(".rome-markdown") as HTMLDivElement;
+      Object.defineProperty(compact, "scrollHeight", {
+        configurable: true,
+        get: () => (compact.querySelector('[data-streamdown="code-block"]') ? 400 : 100),
+      });
+
+      act(() => observers.forEach((observer) => observer.resize(compact, 100)));
+      expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "Code" }));
+      act(() => observers.forEach((observer) => observer.resize(markdown, 100)));
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    } finally {
+      globalThis.ResizeObserver = OriginalResizeObserver;
+    }
+  });
+
   it("includes the visible language in the toggle's accessible name", () => {
     render(<Message text={"```js\nconst one = 1;\n```"} />);
 

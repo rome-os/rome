@@ -67,11 +67,11 @@ const hoverCapable = media("hover: hover");
 const withoutHoverCapable = markdownCss.replace(hoverCapable, "");
 
 describe("Markdown fenced-block chrome", () => {
-  it("keeps a wrapped chat fence in the Markdown block rhythm", () => {
-    expect(rule(`.rome-markdown > ${CHAT_CODE_BLOCK}`)).toContain(
+  it("keeps a wrapped chat fence in the Markdown block rhythm at any nesting depth", () => {
+    expect(rule(`.rome-markdown ${CHAT_CODE_BLOCK}`)).toContain(
       "margin-block: var(--markdown-code-block-space-block);",
     );
-    expect(rule(`.rome-markdown > ${CHAT_DIAGRAM_BLOCK}`)).toContain(
+    expect(rule(`.rome-markdown ${CHAT_DIAGRAM_BLOCK}`)).toContain(
       "margin-block: var(--markdown-media-space-block);",
     );
     expect(rule(".rome-markdown", CHAT_BLOCK, "+ *")).toContain("margin-block-start: 0;");

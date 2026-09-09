@@ -25,20 +25,28 @@ export function CompactTextBlock({ content }: { content: string }) {
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
+    const markdown = el.firstElementChild;
     const measure = () => setOverflowing(el.scrollHeight > COMPACT_TEXT_COLLAPSED_MAX_HEIGHT + 1);
     measure();
-    // We watch width only — the observed element's height also changes when
-    // the user toggles expand/collapse, but that doesn't affect wrap and we
-    // don't want to re-measure for it. Width changes (drawer reflow at a
-    // responsive breakpoint) do alter wrapped-line height, so re-measure then.
+    // The container's own height follows the outer expand control, so only its
+    // width is relevant. The Markdown child's height tracks inner disclosures
+    // even while the container is capped at its collapsed maximum.
     let lastWidth = el.getBoundingClientRect().width;
     const ro = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width === undefined || width === lastWidth) return;
-      lastWidth = width;
-      measure();
+      let contentChanged = false;
+      for (const entry of entries) {
+        if (entry.target === markdown) {
+          contentChanged = true;
+          continue;
+        }
+        if (entry.target !== el || entry.contentRect.width === lastWidth) continue;
+        lastWidth = entry.contentRect.width;
+        contentChanged = true;
+      }
+      if (contentChanged) measure();
     });
     ro.observe(el);
+    if (markdown) ro.observe(markdown);
     return () => ro.disconnect();
   }, [content]);
 

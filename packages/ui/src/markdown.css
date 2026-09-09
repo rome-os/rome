@@ -167,11 +167,11 @@
   margin-block: var(--markdown-code-block-space-block);
 }
 
-.rome-markdown > [data-chat-code-block="code"] {
+.rome-markdown [data-chat-code-block="code"] {
   margin-block: var(--markdown-code-block-space-block);
 }
 
-.rome-markdown > [data-chat-code-block="mermaid"] {
+.rome-markdown [data-chat-code-block="mermaid"] {
   margin-block: var(--markdown-media-space-block);
 }
 
