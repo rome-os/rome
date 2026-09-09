@@ -1,6 +1,6 @@
 # Storybook
 
-Storybook serves design demonstration pages without a Rome backend. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
+Storybook serves self-contained design demonstrations without a Rome backend. The four stories make no service requests. Runtime diagnostic tools and application flows remain in `/dev` and E2E. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
 
 ## Start
 
@@ -27,15 +27,13 @@ Each story imports its existing page directly. The pages have one implementation
 
 The [style guide iframe](http://localhost:6006/iframe.html?id=dev-design-styleguide--default&viewMode=story) omits the manager UI. Replace the port in these links when you start another instance.
 
-The adjacent `/dev/connections`, `/dev/chat-blocks`, `/dev/login`, and `/dev/onboard` pages are separate migration candidates. This Storybook surface does not select them.
-
 ## Retained development routes
 
-The four `/dev` routes stay registered in `dev-routes.ts` and stay linked from `DevIndexPage.tsx`.
+The four `/dev` routes stay registered by default in `dev-routes.ts` and stay linked from `DevIndexPage.tsx`.
 `App.tsx` maps that registry to the development routes.
 `layout-invariants.spec.ts` opens `/dev/styleguide` and `/dev/typography`.
 `glyph-size.spec.ts` and `control-size-vocabulary.spec.ts` open `/dev/gallery`.
-Keep the routes until those callers move to stable Storybook links.
+Storybook provides parallel design demonstrations. It does not replace runtime diagnostic tools or application flows.
 
 ## Build and check
 
