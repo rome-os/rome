@@ -39,7 +39,7 @@ const fakeState: {
     name: string;
     guildId: string;
     guildName: string;
-    type: "text" | "thread";
+    type: "text" | "news" | "thread" | "forum";
     parentId?: string;
   }>;
 } = {
@@ -267,6 +267,71 @@ describe("discord descriptor shape", () => {
     });
     expect(second?.conversations.map((entry) => entry.ref.conversationId)).toEqual(["channel-2"]);
     expect(second?.nextCursor).toBeUndefined();
+  });
+
+  it("treats category members as settings owners and only threads as children", async () => {
+    fakeState.channels = [
+      {
+        id: "text-1",
+        name: "general",
+        guildId: "guild-1",
+        guildName: "Rome",
+        type: "text",
+        parentId: "category-1",
+      },
+      {
+        id: "news-1",
+        name: "announcements",
+        guildId: "guild-1",
+        guildName: "Rome",
+        type: "news",
+        parentId: "category-1",
+      },
+      {
+        id: "forum-1",
+        name: "support",
+        guildId: "guild-1",
+        guildName: "Rome",
+        type: "forum",
+        parentId: "category-1",
+      },
+      {
+        id: "thread-1",
+        name: "launch",
+        guildId: "guild-1",
+        guildName: "Rome",
+        type: "thread",
+        parentId: "text-1",
+      },
+    ];
+    const directory = buildTalker().talker.feature("directory");
+
+    const settingsOwners = await directory?.listConversations({ limit: 10 });
+    expect(settingsOwners?.conversations).toEqual([
+      expect.objectContaining({
+        ref: { connectionId: "discord-test", conversationId: "news-1" },
+        kind: "channel",
+      }),
+      expect.objectContaining({
+        ref: { connectionId: "discord-test", conversationId: "text-1" },
+        kind: "channel",
+      }),
+      expect.objectContaining({
+        ref: { connectionId: "discord-test", conversationId: "forum-1" },
+        kind: "channel",
+      }),
+    ]);
+    for (const conversation of settingsOwners?.conversations ?? []) {
+      expect(conversation).not.toHaveProperty("parent");
+    }
+
+    const withThreads = await directory?.listConversations({ limit: 10, includeTopics: true });
+    expect(withThreads?.conversations.find(({ ref }) => ref.conversationId === "thread-1")).toEqual(
+      expect.objectContaining({
+        kind: "topic",
+        parent: { connectionId: "discord-test", conversationId: "text-1" },
+      }),
+    );
   });
 
   it("exposes Discord REST through Act", async () => {

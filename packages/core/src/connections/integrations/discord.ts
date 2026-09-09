@@ -480,7 +480,9 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                       kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
                       displayName: channel.name,
                       containerName: channel.guildName,
-                      ...(channel.parentId
+                      // Discord also uses parentId for a channel's category.
+                      // Only native threads inherit conversation settings.
+                      ...(channel.type === "thread" && channel.parentId
                         ? {
                             parent: {
                               connectionId: kit.connectionId,
