@@ -1,6 +1,6 @@
 # Storybook
 
-Storybook serves self-contained design demonstrations without a Rome backend. The four stories make no service requests. Runtime diagnostic tools and application flows remain in `/dev` and E2E. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
+Storybook serves self-contained design demonstrations without a Rome backend. Its page stories make no service requests. Runtime diagnostic tools and application flows remain in `/dev` and E2E. The dashboard stays on Rsbuild, and unit tests stay on Rstest.
 
 ## Start
 
