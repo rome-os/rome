@@ -1,10 +1,20 @@
 import type { Preview } from "storybook-react-rsbuild";
 import { useLayoutEffect, type ReactNode } from "react";
 import { ThemeProvider, useTheme } from "../src/hooks/use-theme";
-import { injectThemeCss, readStoredPreference, type ThemePreference } from "../src/lib/theme";
+import {
+  applyTheme,
+  applyThemeName,
+  injectThemeCss,
+  readStoredPreference,
+  readStoredThemeName,
+  resolveTheme,
+  type ThemePreference,
+} from "../src/lib/theme";
 import "../src/globals.css";
 
 injectThemeCss();
+applyThemeName(readStoredThemeName());
+applyTheme(resolveTheme(readStoredPreference()));
 
 function ColorMode({ mode, children }: { mode: ThemePreference; children: ReactNode }) {
   const { preference, setPreference } = useTheme();
