@@ -5,6 +5,7 @@ import { getRegistry } from "@jackwener/opencli/registry";
 import { parseThreadMessagePayloads } from "./thread-snapshot-helpers.mjs";
 import {
   UNKNOWN_REPLY_OUTCOME,
+  confirmReplyReceipt,
   parseReplyReceipt,
   postLinkedInReply,
   verifiedReplyTarget,
@@ -24,6 +25,7 @@ const text = "Hello 👋\n\n  Thanks for the details.";
 const originToken = "12345678-1234-4123-8123-123456789012";
 const conversationApi =
   "https://www.linkedin.com/voyager/api/voyagerMessagingGraphQL/graphql?queryId=messengerConversations.abcdef&variables=(mailboxUrn:urn%3Ali%3Afsd_profile%3Aowner)";
+const messageApi = `https://www.linkedin.com/voyager/api/voyagerMessagingGraphQL/graphql?queryId=messengerMessages.abcdef&variables=${encodeURIComponent(`(conversationUrn:${conversationUrn})`)}`;
 
 function payload() {
   return {
@@ -139,6 +141,85 @@ test("receipt parsing rejects unknown, unrelated, inbound, or incomplete results
   }
 });
 
+test("receipt confirmation reads history after a partial creation response", async () => {
+  let reads = 0;
+  const receipt = await confirmReplyReceipt(
+    { value: {} },
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => {
+        reads++;
+        return {
+          included: [
+            message({ originToken: null, backendUrn: "urn:li:messagingMessage:older" }),
+            message(),
+          ],
+        };
+      },
+      wait: async () => assert.fail("The first history read confirmed the reply"),
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(reads, 1);
+});
+
+test("receipt confirmation retries reads until the exact origin token appears", async () => {
+  let reads = 0;
+  let waits = 0;
+  const receipt = await confirmReplyReceipt(
+    null,
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => {
+        reads++;
+        if (reads === 1) throw new Error("temporary read failure");
+        return { included: [message({ originToken: reads === 2 ? "another-send" : originToken })] };
+      },
+      wait: async () => {
+        waits++;
+      },
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+  assert.equal(reads, 3);
+  assert.equal(waits, 2);
+});
+
+test("receipt confirmation stays unknown when history only contains other send attempts", async () => {
+  let reads = 0;
+  await assert.rejects(
+    confirmReplyReceipt(
+      null,
+      payload(),
+      { ...expected, originToken },
+      {
+        readHistory: async () => {
+          reads++;
+          return { included: [message({ originToken: "another-send" })] };
+        },
+        wait: async () => {},
+      },
+    ),
+    { message: UNKNOWN_REPLY_OUTCOME },
+  );
+  assert.equal(reads, 3);
+});
+
+test("a complete receipt needs no additional history read", async () => {
+  const receipt = await confirmReplyReceipt(
+    { value: message() },
+    payload(),
+    { ...expected, originToken },
+    {
+      readHistory: async () => assert.fail("Receipt already confirmed"),
+      wait: async () => assert.fail("Receipt already confirmed"),
+    },
+  );
+  assert.equal(receipt.message_id, "sent-123");
+});
+
 test("the browser write makes exactly one scoped POST and preserves the message", async () => {
   const calls = [];
   const result = await vm.runInNewContext(`(${postLinkedInReply.toString()})(...args)`, {
@@ -190,7 +271,7 @@ test("navigation changes block the POST, and unknown outcomes never trigger a se
   }
 });
 
-function fakePage({ conversation = payload(), outcome = null } = {}) {
+function fakePage({ conversation = payload(), outcome = null, history = null } = {}) {
   const writes = [];
   return {
     writes,
@@ -201,12 +282,19 @@ function fakePage({ conversation = payload(), outcome = null } = {}) {
       if (fn.name === "inspectLinkedInThreadPage")
         return {
           current_url: threadUrl,
-          initial_url: "found",
+          initial_url: messageApi,
           conversation_urls: [conversationApi],
         };
       if (fn.name === "fetchLinkedInConversationApi") return { json: conversation };
+      if (fn.name === "fetchLinkedInThreadApi") {
+        return {
+          json:
+            typeof history === "function" ? history(writes[0]?.[3]) : (history ?? { included: [] }),
+        };
+      }
       if (fn.name === "postLinkedInReply") {
         writes.push(args);
+        if (outcome instanceof Error) throw outcome;
         return outcome ?? { json: { value: message({ originToken: args[3] }) } };
       }
       throw new Error(`Unexpected function ${fn.name}`);
@@ -255,3 +343,20 @@ test("the command reports a missing receipt token as unknown without sending aga
   });
   assert.equal(page.writes.length, 1);
 });
+
+for (const [label, outcome] of [
+  ["partial response", { json: { value: {} } }],
+  ["lost response", new Error("browser response lost")],
+]) {
+  test(`the command confirms a ${label} from history without sending again`, async () => {
+    const page = fakePage({
+      outcome,
+      history: (token) => ({ included: [message({ originToken: token })] }),
+    });
+    const [receipt] = await getRegistry()
+      .get("linkedin/reply")
+      .func(page, { ...args, send: true });
+    assert.equal(receipt.message_id, "sent-123");
+    assert.equal(page.writes.length, 1);
+  });
+}

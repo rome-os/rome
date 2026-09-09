@@ -4,6 +4,7 @@ import { cli, Strategy } from "@jackwener/opencli/registry";
 import {
   LINKEDIN_DOMAIN,
   fetchFirstConversationPayload,
+  fetchThreadPayload,
   openThread,
   readThreadCsrf,
   requireCurrentThread,
@@ -13,7 +14,7 @@ import {
 import { linkedInThreadId, unwrapThreadBrowserResult } from "./thread-snapshot-helpers.mjs";
 import {
   UNKNOWN_REPLY_OUTCOME,
-  parseReplyReceipt,
+  confirmReplyReceipt,
   postLinkedInReply,
   verifiedReplyTarget,
 } from "./reply-helpers.mjs";
@@ -84,7 +85,7 @@ cli({
         ),
       );
     } catch {
-      throw new CommandExecutionError(UNKNOWN_REPLY_OUTCOME);
+      result = { uncertain: true };
     }
     if (result?.auth_required)
       throw new AuthRequiredError(
@@ -92,9 +93,18 @@ cli({
         "LinkedIn reply requires an active signed-in LinkedIn browser session.",
       );
     if (result?.error) throw new CommandExecutionError(result.error);
-    if (!result?.json || result.uncertain) throw new CommandExecutionError(UNKNOWN_REPLY_OUTCOME);
     try {
-      return [parseReplyReceipt(result.json, payload, { threadId, threadUrl, originToken })];
+      return [
+        await confirmReplyReceipt(
+          result?.json,
+          payload,
+          { threadId, threadUrl, originToken },
+          {
+            readHistory: () => fetchThreadPayload(page, probe.initial_url, csrf, threadId, "reply"),
+            wait: () => page.wait(1),
+          },
+        ),
+      ];
     } catch {
       throw new CommandExecutionError(UNKNOWN_REPLY_OUTCOME);
     }

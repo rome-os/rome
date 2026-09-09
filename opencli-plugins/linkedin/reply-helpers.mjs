@@ -107,3 +107,18 @@ export function parseReplyReceipt(json, payload, { threadId, threadUrl, originTo
   }
   return { ...rows[0], status: "sent" };
 }
+
+export async function confirmReplyReceipt(json, payload, expected, { readHistory, wait }) {
+  try {
+    return parseReplyReceipt(json, payload, expected);
+  } catch {}
+
+  // A lost or partial response can follow a successful send. Re-read, never re-send.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return parseReplyReceipt(await readHistory(), payload, expected);
+    } catch {}
+    if (attempt < 2) await wait();
+  }
+  throw new Error(UNKNOWN_REPLY_OUTCOME);
+}
