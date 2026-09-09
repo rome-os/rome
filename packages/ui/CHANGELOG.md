@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.6](https://github.com/rome-os/rome/compare/ui-v0.2.5...ui-v0.2.6) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ui:** key SegmentedControl selection on aria-checked ([#264](https://github.com/rome-os/rome/issues/264)) ([#265](https://github.com/rome-os/rome/issues/265)) ([b66d473](https://github.com/rome-os/rome/commit/b66d473cce6b47383acb5d0ad50b24ad1f0ba4b5))
+
 ## [0.2.5](https://github.com/rome-os/rome/compare/ui-v0.2.4...ui-v0.2.5) (2026-09-05)
 
 

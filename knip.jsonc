@@ -125,7 +125,10 @@
       // The expo plugin evaluates app.config.js, which reads a native build
       // variable that is absent outside an EAS build.
       "expo": false,
-      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"]
+      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"],
+      // app.json registers expo-notifications as an Expo native config plugin;
+      // no JavaScript import reaches that build-time registration.
+      "ignoreDependencies": ["expo-notifications"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
@@ -145,6 +148,21 @@
     // rather than being reported. Deriving the entries from each manifest is
     // tracked separately.
     "rome_apps/*": {
+      "entry": [
+        "src/web/App.tsx",
+        "src/api/index.ts",
+        "src/actions/*/index.ts",
+        "src/hooks/*/index.ts",
+        "src/skills/**",
+        "src/**/*.test.{ts,tsx}",
+        "scripts/**",
+        "rslib.config.mjs"
+      ]
+    },
+    "rome_apps/showcases": {
+      // The `rome build` script compiles styles.css, whose Tailwind `@plugin`
+      // directive loads this package without a JavaScript import.
+      "ignoreDependencies": ["@tailwindcss/typography"],
       "entry": [
         "src/web/App.tsx",
         "src/api/index.ts",
