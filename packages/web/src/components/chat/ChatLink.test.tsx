@@ -123,7 +123,7 @@ describe("ChatLink", () => {
     renderInWorkspace(<ChatLink href="/apps/calendar">calendar</ChatLink>, { store, bus });
     fireEvent.click(screen.getByText("calendar"));
 
-    expect(autoPlaceApp).toHaveBeenCalledWith("calendar", undefined, undefined);
+    expect(autoPlaceApp).toHaveBeenCalledWith("calendar", undefined, undefined, true);
   });
 
   it("preserves the in-app sub-route for a deep /apps link", () => {
@@ -133,7 +133,7 @@ describe("ChatLink", () => {
     renderInWorkspace(<ChatLink href="/apps/calendar/week/2024-06">cal</ChatLink>, { store, bus });
     fireEvent.click(screen.getByText("cal"));
 
-    expect(autoPlaceApp).toHaveBeenCalledWith("calendar", "week/2024-06", undefined);
+    expect(autoPlaceApp).toHaveBeenCalledWith("calendar", "week/2024-06", undefined, true);
   });
 
   it("preserves query params for an /apps link", () => {
@@ -146,10 +146,15 @@ describe("ChatLink", () => {
     });
     fireEvent.click(screen.getByText("go"));
 
-    expect(autoPlaceApp).toHaveBeenCalledWith("connector", undefined, {
-      connector: "gmail",
-      status: "ok",
-    });
+    expect(autoPlaceApp).toHaveBeenCalledWith(
+      "connector",
+      undefined,
+      {
+        connector: "gmail",
+        status: "ok",
+      },
+      true,
+    );
   });
 
   it("leaves the /apps index page to react-router (no app tile)", () => {

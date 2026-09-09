@@ -16,6 +16,7 @@ import {
 
 const t = (key: string) => key;
 const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
+const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
@@ -36,7 +37,12 @@ rs.mock("@/pages/free/workspace-event-bus", () => ({
 
 rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: rs.fn(),
-  useFreeCells: () => ({ addWidget: rs.fn(), placements: [] }),
+  useFreeCells: () => ({
+    addWidget: rs.fn(),
+    placements: [],
+    toolView: { activeId: null, collapsed: appsPanel.collapsed, unreadIds: [] },
+    setToolsCollapsed: appsPanel.setCollapsed,
+  }),
 }));
 
 // Mutable so a test can put the viewport away from the tail; reset in beforeEach.
@@ -174,6 +180,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
   mockUseSessionIdentity.mockReturnValue({
     sessionName: null,
@@ -191,6 +198,22 @@ afterEach(() => {
 });
 
 describe("Chat agent identity", () => {
+  it("always offers Show apps, including an empty or already expanded panel", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await user.click(screen.getByRole("button", { name: "chat.expandTools" }));
+    expect(appsPanel.setCollapsed).toHaveBeenCalledWith(false);
+    appsPanel.collapsed = false;
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByRole("button", { name: "chat.expandTools" }).getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
   it("shows the session model in the chat header", () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "A conversation",

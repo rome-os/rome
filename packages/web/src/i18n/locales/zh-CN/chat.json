@@ -16,8 +16,6 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
-    "add": "添加小组件",
-    "addShort": "加组件",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",

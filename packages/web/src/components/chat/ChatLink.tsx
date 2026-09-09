@@ -125,7 +125,7 @@ export function ChatLink(props: MarkdownLinkProps) {
       return (
         <WorkspaceLink
           {...props}
-          onActivate={() => autoPlaceApp(resolveAppToOpen(app.appId), app.route, app.params)}
+          onActivate={() => autoPlaceApp(resolveAppToOpen(app.appId), app.route, app.params, true)}
         />
       );
     }

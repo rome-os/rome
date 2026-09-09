@@ -16,8 +16,6 @@
   },
   "navbar": {
     "sessionModel": "Session model: {{model}}",
-    "add": "Add widget",
-    "addShort": "Add widget",
     "more": "More actions",
     "pin": "Pin chat",
     "unpin": "Unpin chat",
