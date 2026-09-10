@@ -76,3 +76,33 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
     expect(caddyfile).toContain("root * /custom/web/dist");
   });
 });
+
+describe("generateCaddyfile app document routes", () => {
+  it("proxies /apps and /full/apps documents to Hono in open mode, after the asset handlers", () => {
+    const caddyfile = generateCaddyfile(openConfig);
+    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/*");
+    const appDocsAt = caddyfile.indexOf("handle @appDocs {");
+    const missingAssetsAt = caddyfile.indexOf("handle @missingSpaAssets {");
+    const fallbackAt = caddyfile.lastIndexOf("try_files {path} /index.html");
+    expect(appDocsAt).toBeGreaterThan(missingAssetsAt);
+    expect(appDocsAt).toBeLessThan(fallbackAt);
+    const body = caddyfile.split("handle @appDocs {")[1].split("}")[0];
+    expect(body).toContain("reverse_proxy 127.0.0.1:");
+    expect(body).not.toContain("forward_auth");
+  });
+
+  it("proxies allowlisted app documents to Hono in public-access mode", () => {
+    const caddyfile = generateCaddyfile(publicConfig);
+    const block = caddyfile.split("handle /full/apps/morning-brief/* {")[1].split("}")[0];
+    expect(block).toContain("reverse_proxy 127.0.0.1:");
+    expect(block).not.toContain("rewrite * /index.html");
+    // Cloud-email apps share the same shell delivery.
+    const cloudEmail = generateCaddyfile({
+      enableAccessControl: true,
+      allowedApps: [],
+      cloudEmailAccess: { "night-brief": ["a@b.co"] },
+    });
+    const emailBlock = cloudEmail.split("handle /apps/night-brief {")[1].split("}")[0];
+    expect(emailBlock).toContain("reverse_proxy 127.0.0.1:");
+  });
+});

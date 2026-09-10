@@ -48,13 +48,6 @@ export function generateCaddyfile(config: PublicAccessConfig): string {
 \t# reverse_proxy still upgrades the original request) lets the upgrade through.
 \theader_up -Connection
 }`;
-  const spaShell = `
-root * ${webRoot}
-rewrite * /index.html
-encode zstd gzip
-header Cache-Control "no-cache"
-file_server
-`.trim();
   // Boot-written runtime browser config. An explicit handle in
   // BOTH modes: the content changes across container boots so it must never get
   // the immutable-asset cache header, and in public-access mode the fallback
@@ -86,6 +79,9 @@ handle /${RUNTIME_CONFIG_FILENAME} {
     //     Unknown paths fall back to `index.html` for the client router.
     //     Hono keeps its own copy for loopback/tailnet callers that reach
     //     `:4141` without going via Caddy.
+    //   - `@appDocs` (`/apps/*`, `/full/apps/*`) is the shell too, but served
+    //     by Hono so the social meta can be swapped per app. Public, no
+    //     forward_auth: the shell was public from disk already.
     //
     // WebSocket-bearing paths (`/ws/*`, `/desktop-proxy*`) are split out
     // because \`forward_auth\` forwards Upgrade/Connection headers verbatim
@@ -122,6 +118,10 @@ handle @spaAssets {
 handle @missingSpaAssets {
 \trespond 404
 }
+@appDocs path /apps /apps/* /full/apps /full/apps/*
+handle @appDocs {
+\t${proxy}
+}
 handle {
 \troot * ${webRoot}
 \ttry_files {path} /index.html
@@ -132,8 +132,8 @@ handle {
 `.trim();
   } else {
     // Public-access mode: the public edge exposes only an allowlisted set
-    // of apps + a gateway landing page. Allowlisted app shells are served from
-    // the same SPA `dist` bundle; their `/api/*` paths are proxied to Hono.
+    // of apps + a gateway landing page. Allowlisted app shells are proxied to
+    // Hono for per-app social meta, same as their `/api/*` paths.
     const publicAppBlocks = normalized.allowedApps
       .map((appId) => {
         const appIdSegment = encodeURIComponent(appId);
@@ -154,16 +154,16 @@ handle /app-assets/${appIdSegment}/* {
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)} {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getFullAppHref(appId)} {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getFullAppHref(appId)}/* {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 `.trim();
       })
@@ -198,16 +198,16 @@ ${indent(forwardAuth, 1)}
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)} {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getFullAppHref(appId)} {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 handle ${getFullAppHref(appId)}/* {
-${indent(spaShell, 1)}
+\t${proxy}
 }
 `.trim();
       })
