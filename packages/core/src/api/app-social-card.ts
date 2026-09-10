@@ -1,4 +1,6 @@
 import type { AppCatalog } from "../apps/catalog.js";
+import type { OgImageStore } from "../apps/og/store.js";
+import { appIdToPathSegment } from "../apps/packaging/app-id.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
 import type { SocialCard } from "../lib/social-meta.js";
@@ -20,6 +22,7 @@ export function getRoutedAppId(pathname: string): string | null {
 
 export interface AppSocialCardDeps {
   appCatalog: Pick<AppCatalog, "get">;
+  ogImageStore: Pick<OgImageStore, "stat">;
 }
 
 function isResolvedWebApp(
@@ -38,10 +41,14 @@ function isResolvedWebApp(
  * not for an installed app with a frontend (the shell then keeps its static
  * card). Mirrors the SPA's own `getRoutedAppId` in packages/web, minus its
  * reserved-id guard (`store`, `inbox`, …), which only affects client
- * routing — an unmatched id here just keeps the static card. Leaves
- * `imageUrl` unset, so the render keeps the shell's own og:image.
+ * routing — an unmatched id here just keeps the static card. imageUrl
+ * points at the generated card when one exists; otherwise it is left
+ * unset so the render keeps the shell's own og:image.
  */
-export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): SocialCard | null {
+export async function buildAppSocialCard(
+  deps: AppSocialCardDeps,
+  request: Request,
+): Promise<SocialCard | null> {
   const pathname = new URL(request.url).pathname;
   const appId = getRoutedAppId(pathname);
   if (appId === null) return null;
@@ -51,9 +58,17 @@ export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): S
   // Echoes the requested host on purpose: the crawler already holds this
   // URL; getInstanceOrigin would break loopback/tailnet previews.
   const { origin } = getExternalRequestOrigin(request);
+  // The card image is auxiliary: any lookup failure just means "no image yet"
+  // and the shell keeps its static og:image.
+  const image = await deps.ogImageStore.stat(appId).catch(() => null);
   return {
     title: view.displayName,
     description: view.manifest.description,
     url: `${origin}${pathname}`,
+    ...(image
+      ? {
+          imageUrl: `${origin}/app-og/${appIdToPathSegment(appId)}.png?v=${Math.floor(image.mtimeMs)}`,
+        }
+      : {}),
   };
 }

@@ -62,6 +62,7 @@ import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
+import { appOgRoutes } from "./routes/app-og.js";
 import { appStoreRoutes } from "./routes/app-store.js";
 import { showcasePresetRoutes } from "./routes/showcase-presets.js";
 import { shareRoutes } from "./routes/share.js";
@@ -98,6 +99,9 @@ export function buildApp(
 
   // Built web assets for installed apps, served at /app-assets/:appId/:version/*.
   app.route("/", appAssetsRoutes(deps));
+
+  // Social card image per installed app, at /app-og/<appId>.png (public).
+  app.route("/", appOgRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
@@ -203,13 +207,17 @@ export function buildApp(
   return { app, webchatRuntime };
 }
 
-function mountSpa(app: Hono, webRoot: string, deps: Pick<ApiDeps, "appCatalog">): void {
+function mountSpa(
+  app: Hono,
+  webRoot: string,
+  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
+): void {
   // App document routes get the shell with per-app social meta. Registered
   // before `serveStatic` so the static handler never answers them, and
   // `no-cache` because Caddy set that on the shell before this path existed —
   // a cached shell points at bundle hashes the next image upgrade removes.
-  const appDocument = (c: Context) => {
-    const card = buildAppSocialCard(deps, c.req.raw);
+  const appDocument = async (c: Context) => {
+    const card = await buildAppSocialCard(deps, c.req.raw);
     return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
       "Cache-Control": "no-cache",
     });

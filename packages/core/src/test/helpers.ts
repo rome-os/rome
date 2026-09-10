@@ -40,6 +40,7 @@ import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
+import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
 import type {
   ConversationId,
@@ -583,6 +584,8 @@ export async function buildTestDeps(
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
 
+  const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
+
   return {
     talkRouter,
     conversationSettings: emptyConversationSettings,
@@ -619,6 +622,7 @@ export async function buildTestDeps(
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,
+    ogImageStore,
     appManager,
     romeCloudListings,
     appStore,

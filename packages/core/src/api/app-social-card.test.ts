@@ -38,24 +38,53 @@ describe("getRoutedAppId", () => {
 });
 
 describe("buildAppSocialCard", () => {
-  it("builds a card for an installed app with a web bundle", () => {
-    const card = buildAppSocialCard(
-      { appCatalog: catalogWith({ reddit }) },
-      req("/full/apps/reddit"),
-    );
+  const storeWith = (mtimeMs: number | null) => ({
+    stat: async () => (mtimeMs === null ? null : { mtimeMs }),
+  });
+
+  it("points at the generated image when one exists", async () => {
+    const deps = { appCatalog: catalogWith({ reddit }), ogImageStore: storeWith(1757400000123.4) };
+    const card = await buildAppSocialCard(deps, req("/full/apps/reddit"));
     expect(card).toEqual({
       title: "Reddit Radar",
       description: "Watches subreddits",
       url: "https://jessie.romeos.cc/full/apps/reddit",
+      imageUrl: "https://jessie.romeos.cc/app-og/reddit.png?v=1757400000123",
     });
   });
 
-  it("returns null for unknown apps, non-app paths, and apps without a frontend", () => {
+  it("leaves imageUrl unset before the first render so the shell's og:image is kept", async () => {
+    const deps = { appCatalog: catalogWith({ reddit }), ogImageStore: storeWith(null) };
+    const card = await buildAppSocialCard(deps, req("/apps/reddit"));
+    expect(card).toEqual({
+      title: "Reddit Radar",
+      description: "Watches subreddits",
+      url: "https://jessie.romeos.cc/apps/reddit",
+    });
+    expect(card).not.toHaveProperty("imageUrl");
+  });
+
+  it("returns null for unknown apps, non-app paths, and apps without a frontend", async () => {
     const deps = {
       appCatalog: catalogWith({ reddit, headless: { ...reddit, appId: "headless", web: null } }),
+      ogImageStore: storeWith(null),
     };
-    expect(buildAppSocialCard(deps, req("/apps/nope"))).toBeNull();
-    expect(buildAppSocialCard(deps, req("/dashboard"))).toBeNull();
-    expect(buildAppSocialCard(deps, req("/apps/headless"))).toBeNull();
+    expect(await buildAppSocialCard(deps, req("/apps/nope"))).toBeNull();
+    expect(await buildAppSocialCard(deps, req("/dashboard"))).toBeNull();
+    expect(await buildAppSocialCard(deps, req("/apps/headless"))).toBeNull();
+  });
+
+  it("omits imageUrl when the image lookup fails", async () => {
+    const deps = {
+      appCatalog: catalogWith({ reddit }),
+      ogImageStore: {
+        stat: async () => {
+          throw new Error("EACCES");
+        },
+      },
+    };
+    const card = await buildAppSocialCard(deps, req("/full/apps/reddit"));
+    expect(card?.title).toBe("Reddit Radar");
+    expect(card).not.toHaveProperty("imageUrl");
   });
 });

@@ -179,6 +179,8 @@ import {
 import { importChannelSettings } from "./connections/settings-import.js";
 import { reconcileProviderAccounts } from "./connections/providers-import.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
+import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
+import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./apps/api.js";
@@ -380,6 +382,15 @@ async function main() {
   appCatalog.subscribe(
     createRuntimeStatusSubscriber(appCatalog, {
       onError: (err) => appsLog.warn("runtime-status write failed", { error: err.message }),
+    }),
+  );
+  // Social card image per installed web app. Registered before boot() so the
+  // replay covers apps installed while the daemon was down.
+  const ogImageStore = createOgImageStore();
+  appCatalog.subscribe(
+    createAppOgImageSubscriber({
+      store: ogImageStore,
+      host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
     }),
   );
   // Adopts any pre-existing on-disk state (legacy deployment.yaml entries,
@@ -1262,6 +1273,7 @@ async function main() {
       actionRegistry,
       agentLoader,
       skillCatalog,
+      ogImageStore,
       db,
       settingsRepo,
       appKeysRepo,
