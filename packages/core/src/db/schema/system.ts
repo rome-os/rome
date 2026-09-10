@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
+import type { OutboxMessage } from "@rome/api-types/people";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
   APPROVAL_EXECUTION_STATES,
@@ -183,6 +184,17 @@ export const outboundMessages = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
+);
+
+/** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
+export const outboundSendReceipts = sqliteTable(
+  "outbound_send_receipts",
+  {
+    id: text("id").primaryKey(),
+    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
 );
 
 export const waChats = sqliteTable("wa_chats", {

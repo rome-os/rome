@@ -1215,8 +1215,8 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
-  /** Optional UUID v4 for this send. While its row exists, repeating the same
-   * id, account, and text returns that row without sending again. */
+  /** Optional UUID v4 for this send. Repeating the same id, account, and text
+   * returns its recorded response until 24 hours after outbox removal. */
   id?: string;
   channel: string;
   channelUserId: string;
@@ -1263,6 +1263,9 @@ export function matchesSendRequest(message: OutboxMessage, request: SendMessageR
     message.text === request.text
   );
 }
+
+/** Receipt lifetime after delivery cleanup or explicit discard, in milliseconds. */
+export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /** Long enough for anything a person types, short enough that no adapter has to
  *  defend itself against a megabyte. Channels with tighter limits of their own

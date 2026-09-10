@@ -7,6 +7,7 @@ import {
   isAssignableBondLevel,
   latestDynamic,
   matchesSendRequest,
+  SEND_IDEMPOTENCY_RETENTION_MS,
   parseAccountCursor,
   parseAccountState,
   parseStreamCursor,
@@ -243,7 +244,22 @@ interface OutboxRow extends OutboxMessage {
 }
 
 const outbox: OutboxRow[] = [];
-const sendRequests = new Map<string, OutboxRow>();
+const sendReceipts = new Map<string, { response: OutboxMessage; expiresAt: number }>();
+
+function pruneSendReceipts(now: number) {
+  for (const [id, receipt] of sendReceipts) {
+    if (receipt.expiresAt <= now) sendReceipts.delete(id);
+  }
+}
+
+function retireRow(row: OutboxRow, now: number) {
+  pruneSendReceipts(now);
+  sendReceipts.set(row.id, {
+    response: outboxMessage(row),
+    expiresAt: now + SEND_IDEMPOTENCY_RETENTION_MS,
+  });
+  outbox.splice(outbox.indexOf(row), 1);
+}
 
 /** How long the channel takes to accept a message, and how long after that it
  *  surfaces in the store the timeline reads. */
@@ -359,7 +375,6 @@ function openRow(account: AccountRef, text: string, id: string = crypto.randomUU
     attempts: 1,
   };
   outbox.push(row);
-  sendRequests.set(id, row);
   return row;
 }
 
@@ -424,7 +439,7 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
   for (let i = outbox.length - 1; i >= 0; i -= 1) {
     const row = outbox[i]!;
     if (held(row) && row.state === "unconfirmed" && row.ref !== null && arrived.has(row.ref)) {
-      outbox.splice(i, 1);
+      retireRow(row, now);
     }
   }
 
@@ -622,10 +637,14 @@ export const peopleHandlers = [
       );
     }
 
-    const existing = parsed.request.id ? sendRequests.get(parsed.request.id) : undefined;
+    pruneSendReceipts(Date.now());
+    const active = outbox.find((row) => row.id === parsed.request.id);
+    const existing = active
+      ? outboxMessage(active)
+      : sendReceipts.get(parsed.request.id ?? "")?.response;
     if (existing) {
       return matchesSendRequest(existing, parsed.request)
-        ? HttpResponse.json(outboxMessage(existing), { status: 202 })
+        ? HttpResponse.json(existing, { status: 202 })
         : HttpResponse.json(
             { error: "That send id belongs to a different message" },
             { status: 409 },
@@ -685,8 +704,7 @@ export const peopleHandlers = [
     if (!person) return notFound("person");
     const row = rowOf(person, String(params.messageId));
     if (!row || !isDismissableRow(row, Date.now())) return notTheirs();
-    outbox.splice(outbox.indexOf(row), 1);
-    sendRequests.delete(row.id);
+    retireRow(row, Date.now());
     return new HttpResponse(null, { status: 204 });
   }),
 

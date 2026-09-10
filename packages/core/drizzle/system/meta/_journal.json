@@ -435,6 +435,13 @@
       "when": 1788402301789,
       "tag": "0062_gorgeous_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1789017483838,
+      "tag": "0063_equal_tigra",
+      "breakpoints": true
     }
   ]
 }

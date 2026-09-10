@@ -109,7 +109,8 @@ The outbox holds messages Rome has been asked to send and has not yet seen arriv
 - An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
 - A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
 - A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.
-- A client may name a send with a UUID before the request returns. That id joins its local sending row to the server outbox. While the row exists, repeating the same id, account, and text returns that row without sending again.
+- A client may name a send with a UUID before the request returns. That id joins its local sending row to the server outbox. Repeating the same id, account, and text returns its recorded response without sending again.
+- Removing an outbox row saves its response in a separate receipt in the same transaction. Receipts survive restarts and expire 24 hours after delivery cleanup or explicit discard. New sends and outbox removals prune expired receipts. After expiry, the same id can start a new send.
 
 **Not to be confused with:**
 
