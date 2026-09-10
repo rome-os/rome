@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -71,28 +70,46 @@ func (s *Server) execute(ctx context.Context, job *activeJob) {
 	}
 	o := &output{remaining: s.config.MaxOutputBytes}
 	job.output = o
-	cmd := exec.CommandContext(ctx, "/bin/"+r.Request.Interpreter, "-s")
+	alive, lifetime, err := os.Pipe()
+	if err != nil {
+		s.finishLocked(job, ctx, err, nil, o)
+		s.mu.Unlock()
+		return
+	}
+	defer lifetime.Close()
+	cmd := exec.Command("/proc/self/exe", "--supervise", r.Request.Interpreter)
+	cmd.ExtraFiles = []*os.File{alive, s.executionLease}
 	cmd.Dir = work
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=" + work, "TMPDIR=" + work, "LANG=C.UTF-8", "LC_ALL=C.UTF-8"}
 	cmd.Stdin = strings.NewReader(r.Request.Script)
 	cmd.Stdout = stream{output: o}
 	cmd.Stderr = stream{output: o, stderr: true}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	// Descendants can inherit output pipes after the shell exits. Bound their
-	// drain time independently of the script deadline.
+	// With no CommandContext, WaitDelay bounds output drain only after supervisor
+	// exit. A deadline must close liveness, never kill the supervisor during cleanup.
 	cmd.WaitDelay = 250 * time.Millisecond
-	err = cmd.Start()
+	err = ctx.Err()
+	if err == nil {
+		err = cmd.Start()
+	}
+	alive.Close()
 	s.mu.Unlock()
 	if err == nil {
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				lifetime.Close()
+			case <-finished:
+			}
+		}()
 		err = cmd.Wait()
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		close(finished)
+		if errors.Is(err, exec.ErrWaitDelay) {
+			o.mu.Lock()
+			o.truncated = true
+			o.mu.Unlock()
+			err = nil
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

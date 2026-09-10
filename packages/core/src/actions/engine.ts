@@ -160,6 +160,12 @@ export interface ApprovalCreatedEvent {
   channelContext?: ThreadContext;
 }
 
+export interface InterruptedAction {
+  actionName: string;
+  executionId: string;
+  rootExecutionId: string;
+}
+
 interface ActionEngineOptions {
   processRole?: "main" | "worker";
   /**
@@ -191,6 +197,11 @@ interface ActionEngineOptions {
   clock?: Clock;
   /** Worker-side transport for nested cancellable actions. */
   actionSubprocessRunner?: ActionSubprocessRunner;
+  /** Main-only recovery for effects that outlive a lost worker. A returned result prevents automatic exception retries. */
+  onWorkerInterrupted?: (
+    invocation: InterruptedAction,
+    error: Error,
+  ) => Promise<ActionResult | undefined>;
   /** Main-only process factory. Worker engines intentionally receive none. */
   actionWorkerFork?: (entryPath: string, options: ForkOptions) => ChildProcess;
 }
@@ -251,6 +262,7 @@ interface ActionWorkerProcess {
   pooled: boolean;
   generation: number;
   retireAfterRun: boolean;
+  cancelRequested?: boolean;
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
@@ -279,6 +291,7 @@ export class ActionEngine {
   private actionWorkerCoordinator: ActionWorkerCoordinator | null = null;
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
+  private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
   private workerWarmPoolSize: number;
@@ -303,6 +316,7 @@ export class ActionEngine {
     this.journalRepo = journalRepo ?? null;
     this.processRole = options?.processRole ?? "worker";
     this.onApprovalCreated = options?.onApprovalCreated;
+    this.onWorkerInterrupted = options?.onWorkerInterrupted;
     this.clock = options?.clock ?? systemClock;
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
@@ -467,6 +481,7 @@ export class ActionEngine {
       await this.executionsRepo!.markCancelRequested(rootExecutionId);
     }
 
+    active.worker.cancelRequested = true;
     this.sendCancelSignal(active.worker.child, "SIGTERM");
     this.actionWorkerCoordinator?.cancelRoot(rootExecutionId);
     if (active.cancelTimer) this.clock.clearTimeout(active.cancelTimer);
@@ -868,40 +883,74 @@ export class ActionEngine {
       }
       return result;
     } catch (err) {
-      if (err instanceof ActionCancelledError) {
-        if (this.hasExecutionCancelSupport()) {
-          await this.executionsRepo!.markRootCancelled(
+      const recovered = await this.recoverWorkerInterruption(
+        { actionName: name, executionId, rootExecutionId },
+        err,
+      );
+      const failureMessage =
+        recovered?.status === "error"
+          ? recovered.error
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      try {
+        if (err instanceof ActionCancelledError) {
+          if (this.hasExecutionCancelSupport()) {
+            await this.executionsRepo!.markRootCancelled(
+              rootExecutionId,
+              this.clock.now(),
+              err.message,
+            );
+          }
+        } else if (isRoot && mode === "subprocess" && this.hasExecutionRootErrorSupport()) {
+          await this.executionsRepo!.markRootErrored(
             rootExecutionId,
             this.clock.now(),
-            err.message,
+            failureMessage,
           );
+          await this.executionsRepo!.update(executionId, {
+            durationMs: this.clock.now().getTime() - startedAt.getTime(),
+          });
+        } else {
+          await this.recordExecutionCompletion({
+            executionId,
+            rootExecutionId,
+            actionName: name,
+            actionType: action.config.type,
+            status: "error",
+            args,
+            error: failureMessage,
+            initiator,
+            actor,
+            parentId,
+            startedAt,
+          });
         }
-      } else if (isRoot && mode === "subprocess" && this.hasExecutionRootErrorSupport()) {
-        await this.executionsRepo!.markRootErrored(
-          rootExecutionId,
-          this.clock.now(),
-          err instanceof Error ? err.message : String(err),
-        );
-        await this.executionsRepo!.update(executionId, {
-          durationMs: this.clock.now().getTime() - startedAt.getTime(),
-        });
-      } else {
-        await this.recordExecutionCompletion({
+      } catch (persistenceError) {
+        if (!recovered) throw persistenceError;
+        // Losing the execution log must not turn an uncertain external effect into a retry.
+        log.error("failed to persist interrupted action", {
           executionId,
-          rootExecutionId,
-          actionName: name,
-          actionType: action.config.type,
-          status: "error",
-          args,
-          error: err instanceof Error ? err.message : String(err),
-          initiator,
-          actor,
-          parentId,
-          startedAt,
+          error: String(persistenceError),
         });
       }
+      if (recovered) return recovered;
       throw err;
     }
+  }
+
+  private async recoverWorkerInterruption(
+    invocation: InterruptedAction,
+    error: unknown,
+  ): Promise<ActionResult | undefined> {
+    if (
+      this.processRole !== "main" ||
+      !(error instanceof Error) ||
+      error.name !== "ActionWorkerExitError"
+    ) {
+      return undefined;
+    }
+    return this.onWorkerInterrupted?.(invocation, error);
   }
 
   private async executeInCurrentProcess(
@@ -1037,13 +1086,23 @@ export class ActionEngine {
       { executionId, rootExecutionId, isRoot: false },
       payload,
       observer,
-    ).finally(() => {
-      if (cancelTimer) this.clock.clearTimeout(cancelTimer);
-    });
+    )
+      .catch(async (error: unknown) => {
+        const recovered = await this.recoverWorkerInterruption(
+          { actionName: payload.actionName, executionId, rootExecutionId },
+          error,
+        );
+        if (recovered) return recovered;
+        throw error;
+      })
+      .finally(() => {
+        if (cancelTimer) this.clock.clearTimeout(cancelTimer);
+      });
 
     return {
       result,
       cancel: () => {
+        worker.cancelRequested = true;
         this.sendCancelSignal(worker.child, "SIGTERM");
         if (cancelTimer) this.clock.clearTimeout(cancelTimer);
         cancelTimer = this.clock.setTimeout(() => {
@@ -1146,6 +1205,7 @@ export class ActionEngine {
     observer?: ActionRunObserver,
     actionEventObserver?: ActionInvocationObserver,
   ): Promise<ActionResult> {
+    worker.cancelRequested = false;
     return new Promise<ActionResult>((resolve, reject) => {
       const finish = (options: { reusable: boolean }) => {
         if (invocation.isRoot && this.processRole === "main") {
@@ -1205,7 +1265,7 @@ export class ActionEngine {
         settled = true;
         cleanupListeners();
         finish({ reusable: false });
-        if (signal || code === 130 || code === 143) {
+        if (worker.cancelRequested && (signal || code === 130 || code === 143)) {
           reject(new ActionCancelledError("Cancelled by user"));
           return;
         }

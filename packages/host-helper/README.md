@@ -87,8 +87,9 @@ mounts a root script can create. Do not delete job records to recover capacity:
 doing so discards deduplication history. Replace the host identity and retire
 the old target when provisioning a fresh job store.
 
-An interrupted nonterminal job becomes `unknown` after helper recovery. The
-helper never restarts its script. Root scripts can escape ordinary process
+A job supervisor kills and reaps ordinary process-group descendants when the
+helper dies. Recovery waits for that cleanup before accepting jobs. An interrupted
+nonterminal job becomes `unknown`, and the helper never restarts its script. Root scripts can escape ordinary process
 cleanup or create persistent services, so cancellation is not rollback.
 
 ## Releases

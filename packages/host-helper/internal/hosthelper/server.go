@@ -24,26 +24,29 @@ type activeJob struct {
 }
 
 type Server struct {
-	config  Config
-	version string
-	logger  *slog.Logger
+	syncStateDir func(string) error
+	config       Config
+	version      string
+	logger       *slog.Logger
 	// mu guards jobs, active, closing, and fault. Persistence and process launch
 	// share this lock so cancellation and duplicate submission cannot cross intent.
 	// Snapshot reads take output.mu after mu. Output writers never take mu.
-	mu        sync.Mutex
-	jobs      map[string]struct{}
-	active    *activeJob
-	uncertain *record
-	closing   bool
-	fault     bool
-	workers   sync.WaitGroup
-	locks     []*os.File
-	listener  *net.UnixListener
-	http      *http.Server
-	closeOnce sync.Once
+	mu             sync.Mutex
+	jobs           map[string]struct{}
+	active         *activeJob
+	uncertain      *record
+	closing        bool
+	fault          bool
+	workers        sync.WaitGroup
+	locks          []*os.File
+	executionLease *os.File
+	listener       *net.UnixListener
+	http           *http.Server
+	closeOnce      sync.Once
 }
 
-// New locks durable state and the socket directory until Close. Call Serve once.
+// New holds state and socket locks until Close. It waits for surviving job
+// cleanup before recovery. Call Serve once.
 func New(config Config, version string, logger *slog.Logger) (_ *Server, err error) {
 	config.defaults()
 	if err = config.validate(); err != nil {
@@ -52,7 +55,7 @@ func New(config Config, version string, logger *slog.Logger) (_ *Server, err err
 	if logger == nil {
 		logger = slog.New(slog.NewJSONHandler(io.Discard, nil))
 	}
-	s := &Server{config: config, version: version, logger: logger, jobs: map[string]struct{}{}}
+	s := &Server{syncStateDir: syncDir, config: config, version: version, logger: logger, jobs: map[string]struct{}{}}
 	defer func() {
 		if err != nil {
 			for _, lock := range s.locks {
@@ -68,6 +71,13 @@ func New(config Config, version string, logger *slog.Logger) (_ *Server, err err
 		return nil, err
 	}
 	s.locks = append(s.locks, lock)
+	// The daemon lock excludes another live server. A surviving supervisor keeps
+	// executionLease until its process group is killed and reaped, before recovery.
+	s.executionLease, err = lockFileMode(filepath.Join(config.StateDir, ".execution.lock"), syscall.LOCK_EX)
+	if err != nil {
+		return nil, err
+	}
+	s.locks = append(s.locks, s.executionLease)
 	if err = privateDir(filepath.Join(config.StateDir, "jobs"), 0700); err != nil {
 		return nil, err
 	}
@@ -292,6 +302,10 @@ func (s *Server) submit(w http.ResponseWriter, req *http.Request) {
 	// Reserve the ID even if fsync fails after rename. No uncertain intent may run.
 	s.jobs[request.RequestID] = struct{}{}
 	if err = s.save(r); err != nil {
+		now := time.Now().UTC()
+		r.Snapshot.Status = "unknown"
+		r.Snapshot.FinishedAt = &now
+		s.uncertain = r
 		s.storageFault()
 		apiError(w, 503, "state_unavailable", "could not persist job intent")
 		return

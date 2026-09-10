@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,11 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMain(m *testing.M) {
+	RunSupervisor()
+	os.Exit(m.Run())
+}
 
 func testConfig(t *testing.T) Config {
 	t.Helper()
@@ -504,6 +510,11 @@ func TestCrashDaemonProcess(t *testing.T) {
 }
 
 func TestAbruptDaemonDeathRecoversUnknown(t *testing.T) {
+	t.Run("cleanup without restart", func(t *testing.T) { testAbruptDaemonDeath(t, false) })
+	t.Run("recovery waits for cleanup", func(t *testing.T) { testAbruptDaemonDeath(t, true) })
+}
+
+func testAbruptDaemonDeath(t *testing.T, pauseSupervisor bool) {
 	c := testConfig(t)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	b, _ := json.Marshal(c)
@@ -512,9 +523,8 @@ func TestAbruptDaemonDeathRecoversUnknown(t *testing.T) {
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashDaemonProcess$")
 	cmd.Env = append(os.Environ(), "ROME_HELPER_CRASH_TEST_CONFIG="+configPath)
-	var log bytes.Buffer
-	cmd.Stdout = &log
-	cmd.Stderr = &log
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -536,12 +546,16 @@ func TestAbruptDaemonDeathRecoversUnknown(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	pidFile := filepath.Join(t.TempDir(), "pid")
-	r := request("crash", "printf '%s' $$ > '"+pidFile+"'; sleep 20")
+	r := request("crash", "sleep 20 & printf '%s %s' $$ $! > '"+pidFile+"'; wait")
 	submit(t, client, r)
-	var pid int
+	var pid, childPID int
 	for {
 		if data, err := os.ReadFile(pidFile); err == nil {
-			pid, _ = strconv.Atoi(string(data))
+			pids := strings.Fields(string(data))
+			if len(pids) == 2 {
+				pid, _ = strconv.Atoi(pids[0])
+				childPID, _ = strconv.Atoi(pids[1])
+			}
 			if pid > 0 {
 				break
 			}
@@ -552,14 +566,71 @@ func TestAbruptDaemonDeathRecoversUnknown(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	defer syscall.Kill(-pid, syscall.SIGKILL)
+	var supervisorPID int
+	if pauseSupervisor {
+		data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		supervisorPID, err = strconv.Atoi(strings.Fields(string(data))[3])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Kill(supervisorPID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		defer syscall.Kill(supervisorPID, syscall.SIGCONT)
+	}
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
 	cmd.Wait()
-	// A crashed daemon cannot attest the root script stopped. The test owns and
-	// kills this process group independently before inspecting durable recovery.
-	syscall.Kill(-pid, syscall.SIGKILL)
+	if pauseSupervisor {
+		type result struct {
+			server *Server
+			err    error
+		}
+		recovered := make(chan result, 1)
+		go func() { server, err := New(c, "test", nil); recovered <- result{server, err} }()
+		var got result
+		returned := false
+		select {
+		case got = <-recovered:
+			returned = true
+			t.Error("recovery returned before supervisor cleanup")
+		case <-time.After(100 * time.Millisecond):
+		}
+		syscall.Kill(supervisorPID, syscall.SIGCONT)
+		if !returned {
+			select {
+			case got = <-recovered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("recovery remained blocked after cleanup")
+			}
+		}
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		got.server.Close()
+	} else {
+		deadline := time.Now().Add(2 * time.Second)
+		for syscall.Kill(pid, 0) == nil || syscall.Kill(childPID, 0) == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("ordinary children survive daemon death without restart")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	_, restarted := startServer(t, c)
+	for _, process := range []int{pid, childPID} {
+		if err := syscall.Kill(process, 0); err == nil {
+			t.Fatalf("job process %d survives daemon death and recovery", process)
+		}
+	}
+	submit(t, restarted, request("after-crash", "true"))
+	if got := waitJob(t, restarted, "after-crash"); got.Status != "succeeded" {
+		t.Fatalf("%+v", got)
+	}
 	if got := waitJob(t, restarted, r.RequestID); got.Status != "unknown" {
 		t.Fatalf("%+v", got)
 	}
@@ -568,5 +639,96 @@ func TestAbruptDaemonDeathRecoversUnknown(t *testing.T) {
 	}
 	if got := waitJob(t, restarted, r.RequestID); got.Status != "unknown" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestFailedInitialDirectorySyncReturnsUnknown(t *testing.T) {
+	c := testConfig(t)
+	s, client := startServer(t, c)
+	s.mu.Lock()
+	s.syncStateDir = func(string) error { return errors.New("injected post-rename fsync failure") }
+	s.mu.Unlock()
+	marker := filepath.Join(t.TempDir(), "executed")
+	r := request("uncertain-intent", "touch '"+marker+"'")
+	if status, _ := call(t, client, "POST", "/v1/jobs", r); status != 503 {
+		t.Fatal(status)
+	}
+	persisted, err := s.read(r.RequestID)
+	if err != nil || persisted.Snapshot.Status != "queued" {
+		t.Fatalf("post-rename record: %+v %v", persisted, err)
+	}
+	for _, method := range []string{"GET", "POST"} {
+		path := "/v1/jobs/" + r.RequestID
+		var body any
+		if method == "POST" {
+			path = "/v1/jobs"
+			body = r
+		}
+		status, data := call(t, client, method, path, body)
+		var got Snapshot
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if status != 200 || got.Status != "unknown" || got.FinishedAt == nil {
+			t.Fatalf("%s: %d %s", method, status, data)
+		}
+	}
+	if status, _ := call(t, client, "POST", "/v1/jobs", request("next", "true")); status != 503 {
+		t.Fatal(status)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("uncertain intent executed: %v", err)
+	}
+	s.Close()
+	_, client = startServer(t, c)
+	if got := waitJob(t, client, r.RequestID); got.Status != "unknown" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestEscapedServiceDoesNotBlockJobs(t *testing.T) {
+	for _, redirected := range []bool{true, false} {
+		for _, exitCode := range []int{0, 17} {
+			t.Run(strconv.FormatBool(redirected)+"/exit-"+strconv.Itoa(exitCode), func(t *testing.T) {
+				_, client := startServer(t, testConfig(t))
+				pidFile := filepath.Join(t.TempDir(), "service-pid")
+				redirect := ""
+				if redirected {
+					redirect = " >/dev/null 2>&1"
+				}
+				script := "setsid sh -c 'echo $$ > " + pidFile + "; exec sleep 20'" + redirect + " & while [ ! -s " + pidFile + " ]; do sleep 0.01; done; printf done; exit " + strconv.Itoa(exitCode)
+				submit(t, client, request("service", script))
+				deadline := time.Now().Add(2 * time.Second)
+				var pid int
+				for pid == 0 {
+					if data, err := os.ReadFile(pidFile); err == nil {
+						pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("escaped service did not start")
+					}
+					time.Sleep(time.Millisecond)
+				}
+				defer syscall.Kill(-pid, syscall.SIGKILL)
+				got := waitJob(t, client, "service")
+				status := "succeeded"
+				if exitCode != 0 {
+					status = "failed"
+				}
+				if got.Stdout != "done" || got.Status != status || got.ExitCode == nil || *got.ExitCode != exitCode {
+					t.Fatalf("%+v", got)
+				}
+				if !redirected && exitCode == 0 && !got.Truncated {
+					t.Fatalf("forced output drain not reported: %+v", got)
+				}
+				submit(t, client, request("next-service", "true"))
+				if got := waitJob(t, client, "next-service"); got.Status != "succeeded" {
+					t.Fatalf("%+v", got)
+				}
+				if err := syscall.Kill(pid, 0); err != nil {
+					t.Fatalf("escaped service was killed: %v", err)
+				}
+			})
+		}
 	}
 }

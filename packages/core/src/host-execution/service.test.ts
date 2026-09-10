@@ -202,6 +202,46 @@ describe("HostExecutionService over HTTP Unix socket", () => {
     expect(requests).toEqual(["GET /v1/capabilities", "POST /v1/jobs", `GET /v1/jobs/${jobId}`]);
   });
 
+  it.each([
+    "busy",
+    "retention_limit",
+    "unavailable",
+  ])("preserves the explicit %s rejection without reconciling an unaccepted job", async (code) => {
+    const requests: string[] = [];
+    const { service } = await helper((request, response) => {
+      requests.push(`${request.method} ${request.url}`);
+      if (request.url === "/v1/capabilities") return json(response, capabilities);
+      if (request.method === "POST") {
+        return json(response, { error: code, message: "Request was not accepted" }, 503);
+      }
+      json(response, { error: "not_found", message: "Job not found" }, 404);
+    });
+    await expect(start(service)).rejects.toMatchObject({
+      message: `Host helper ${code}: Request was not accepted`,
+      code,
+      jobId: undefined,
+    });
+    expect(requests).toEqual(["GET /v1/capabilities", "POST /v1/jobs"]);
+  });
+
+  it("reconciles a persistence failure that may have reserved the request ID", async () => {
+    const requests: string[] = [];
+    const { service } = await helper((request, response) => {
+      requests.push(`${request.method} ${request.url}`);
+      if (request.url === "/v1/capabilities") return json(response, capabilities);
+      if (request.method === "POST") {
+        return json(
+          response,
+          { error: "state_unavailable", message: "Directory sync failed" },
+          503,
+        );
+      }
+      json(response, { ...completed, status: "unknown", exitCode: null });
+    });
+    await expect(start(service)).resolves.toMatchObject({ id: jobId, status: "unknown" });
+    expect(requests).toEqual(["GET /v1/capabilities", "POST /v1/jobs", `GET /v1/jobs/${jobId}`]);
+  });
+
   it("returns the lookup ID when both submission and reconciliation are uncertain", async () => {
     let posts = 0;
     const { service } = await helper((request, response) => {

@@ -15,6 +15,7 @@ import (
 var version = "dev"
 
 func main() {
+	hosthelper.RunSupervisor()
 	configPath := flag.String("config", "/etc/rome-host/config.json", "protected host config file")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()

@@ -23,6 +23,8 @@ system action → Core client → local socket → host helper → privileged pr
 - Socket access delegates host authority to the trusted runtime. Action visibility and Rome approvals do not isolate other code in the same container.
 - A Linux VM and the computer running that VM are different hosts. The helper never silently changes the execution target.
 - Job acceptance is durable before process creation. A reused identity cannot start another process, including after helper recovery.
+- The main runtime preserves host job references across action worker loss. Worker failure cannot silently become a new host submission.
+- Helper recovery waits for interrupted managed processes to stop before accepting another job. Cleanup survives the daemon process.
 - Job output is bounded and remains in protected job records. General audit logs carry metadata without script contents or output.
 - The installer keeps state and protocol compatibility across helper and Rome upgrades. A rollback cannot erase accepted job identities.
 

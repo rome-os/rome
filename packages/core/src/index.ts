@@ -113,6 +113,7 @@ import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
 import { HostExecutionService } from "./host-execution/service.js";
+import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
@@ -459,6 +460,7 @@ async function main() {
     executionJournalRepo,
     {
       processRole: "main",
+      onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {

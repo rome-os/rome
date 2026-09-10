@@ -15,13 +15,14 @@ export const executeRootScriptInputSchema = z.strictObject({
     ),
   reason: z.string().trim().min(1).max(2_000).describe("Why this host-root operation is needed."),
   timeoutSeconds: z.number().int().min(1).max(600).default(60),
+  __triggerPayload: z.unknown().optional(),
 });
 
 export function createAction(config: ActionConfig, deps: HostExecutionDeps): Action {
   return defineAction({
     config,
     schema: executeRootScriptInputSchema,
-    execute: async (input) => {
+    execute: async ({ __triggerPayload: _triggerPayload, ...input }) => {
       if (!deps.hostExecution) {
         return { status: "error", error: "Host execution is unavailable in this Rome runtime." };
       }

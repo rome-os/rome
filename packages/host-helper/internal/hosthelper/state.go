@@ -75,12 +75,16 @@ func newRecord(r Request) *record {
 }
 
 func lockFile(path string) (*os.File, error) {
+	return lockFileMode(path, syscall.LOCK_EX|syscall.LOCK_NB)
+}
+
+func lockFileMode(path string, mode int) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
 	if err = protectedFile(path); err == nil {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		err = syscall.Flock(int(f.Fd()), mode)
 	}
 	if err != nil {
 		f.Close()
@@ -157,7 +161,7 @@ func (s *Server) save(r *record) error {
 	if err = os.Rename(f.Name(), s.recordPath(r.Request.RequestID)); err != nil {
 		return err
 	}
-	return syncDir(dir)
+	return s.syncStateDir(dir)
 }
 
 func syncDir(path string) error {

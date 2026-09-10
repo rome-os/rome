@@ -6,6 +6,7 @@ import { actionExecutionContext } from "../actions/context.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("host-execution");
+const admissionRejections = new Set(["busy", "retention_limit", "unavailable"]);
 const jobIdSchema = z
   .string()
   .min(1)
@@ -62,6 +63,7 @@ class HostResponseError extends HostExecutionError {
   constructor(
     message: string,
     readonly statusCode: number,
+    readonly code: string,
   ) {
     super(message);
   }
@@ -111,8 +113,14 @@ export class HostExecutionService {
         scriptSha256,
       );
     } catch (error) {
-      if (error instanceof HostResponseError && error.statusCode < 500) throw error;
-      // A dropped POST response can follow durable acceptance. GET is the only automatic recovery request.
+      if (
+        error instanceof HostResponseError &&
+        (error.statusCode < 500 ||
+          (error.statusCode === 503 && admissionRejections.has(error.code)))
+      ) {
+        throw error;
+      }
+      // A transport or persistence failure can follow durable acceptance. GET is the only recovery request.
       try {
         snapshot = this.parseJob(
           await this.send("GET", `/v1/jobs/${jobId}`),
@@ -241,7 +249,11 @@ export class HostExecutionService {
               if (status < 200 || status >= 300) {
                 const error = z.object({ error: z.string(), message: z.string() }).parse(parsed);
                 reject(
-                  new HostResponseError(`Host helper ${error.error}: ${error.message}`, status),
+                  new HostResponseError(
+                    `Host helper ${error.error}: ${error.message}`,
+                    status,
+                    error.error,
+                  ),
                 );
               } else {
                 resolve(parsed);
