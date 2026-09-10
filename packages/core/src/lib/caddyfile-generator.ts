@@ -155,6 +155,9 @@ handle /api/app-api/${appIdSegment}/* {
 handle /app-assets/${appIdSegment}/* {
 \t${proxy}
 }
+handle /app-og/${appIdSegment}.png {
+\t${proxy}
+}
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
 \t${proxy}
@@ -203,6 +206,9 @@ handle /app-assets/${appIdSegment}/* {
 ${indent(forwardAuth, 1)}
 \t${proxy}
 }
+handle /app-og/${appIdSegment}.png {
+\t${proxy}
+}
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
 \t${proxy}
@@ -226,9 +232,6 @@ handle ${getFullAppHref(appId)}/* {
 root * ${webRoot}
 @publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
 handle @publicApi {
-\t${proxy}
-}
-handle /app-og/* {
 \t${proxy}
 }
 ${runtimeConfigHandle}

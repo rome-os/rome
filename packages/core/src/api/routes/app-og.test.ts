@@ -3,18 +3,24 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { createOgImageStore } from "../../apps/og/store.js";
+import { createOgImageStore, type OgImageStore } from "../../apps/og/store.js";
+import type { ApiDeps } from "../deps.js";
 import { appOgRoutes } from "./app-og.js";
 
 describe("GET /app-og/:appId.png", () => {
   let root: string;
   let app: Hono;
+  let ogImageStore: OgImageStore;
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "rome-app-og-"));
-    const ogImageStore = createOgImageStore(root);
+    ogImageStore = createOgImageStore(root);
     await ogImageStore.write("reddit", Buffer.from("png-bytes"));
     await ogImageStore.write("@acme/radar", Buffer.from("scoped"));
-    app = new Hono().route("/", appOgRoutes({ ogImageStore }));
+    const appCatalog = {
+      get: (id: string) =>
+        id === "reddit" || id === "@acme/radar" ? ({ appId: id } as never) : null,
+    } as ApiDeps["appCatalog"];
+    app = new Hono().route("/", appOgRoutes({ ogImageStore, appCatalog }));
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
@@ -39,5 +45,10 @@ describe("GET /app-og/:appId.png", () => {
     expect((await app.request("/app-og/Bad%20Id.png")).status).toBe(404);
     expect((await app.request("/app-og/reddit.jpg")).status).toBe(404);
     expect((await app.request("/app-og/reddit/extra.png")).status).toBe(404);
+  });
+
+  it("404s for a card whose app is no longer in the catalog", async () => {
+    await ogImageStore.write("ghost", Buffer.from("orphan"));
+    expect((await app.request("/app-og/ghost.png")).status).toBe(404);
   });
 });

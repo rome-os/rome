@@ -117,13 +117,20 @@ describe("generateCaddyfile social card images", () => {
     );
   });
 
-  it("exposes /app-og globally in public-access mode, before the gateway fallback", () => {
-    const caddyfile = generateCaddyfile(publicConfig);
-    const handleAt = caddyfile.indexOf("handle /app-og/* {");
-    expect(handleAt).toBeGreaterThan(-1);
-    expect(handleAt).toBeLessThan(caddyfile.indexOf("rewrite * /gateway.html"));
-    const body = caddyfile.split("handle /app-og/* {")[1].split("}")[0];
-    expect(body).toContain("reverse_proxy 127.0.0.1:");
-    expect(body).not.toContain("forward_auth");
+  it("exposes cards only for allowlisted and cloud-email apps in public-access mode", () => {
+    const caddyfile = generateCaddyfile({
+      enableAccessControl: true,
+      allowedApps: ["morning-brief", "@foo/bar"],
+      cloudEmailAccess: { "night-brief": ["a@b.co"] },
+    });
+    expect(caddyfile).not.toContain("handle /app-og/* {");
+    for (const seg of ["morning-brief", "%40foo%2Fbar", "night-brief"]) {
+      const block = caddyfile.split(`handle /app-og/${seg}.png {`)[1]?.split("}")[0] ?? "";
+      expect(block).toContain("reverse_proxy 127.0.0.1:");
+      expect(block).not.toContain("forward_auth");
+    }
+    expect(caddyfile.indexOf("handle /app-og/morning-brief.png {")).toBeLessThan(
+      caddyfile.indexOf("rewrite * /gateway.html"),
+    );
   });
 });
