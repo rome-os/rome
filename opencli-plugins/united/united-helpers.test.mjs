@@ -17,7 +17,7 @@ import {
 const fixture = (name) =>
   JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
 const args = { from: "SFO", to: "IAH", depart: "2026-11-13", return: "2026-11-15" };
-const search = (extra = {}) => normalizeSearch({ ...args, ...extra }, "2026-09-10");
+const search = (extra = {}) => normalizeSearch({ ...args, ...extra });
 const results = (mode, extra = {}, data = fixture(mode)) =>
   normalizeResults(
     data,
@@ -56,7 +56,6 @@ for (const invalid of [
   { from: "SFO&t=LAX" },
   { depart: "2026-02-30" },
   { depart: "2026-9-12" },
-  { depart: "2024-02-29" },
   { return: "2026-11-12" },
   { return: "" },
   { adults: 0 },
@@ -82,10 +81,8 @@ for (const invalid of [
 
 test("accepts leap days and a same-day return", () => {
   assert.equal(
-    normalizeSearch(
-      { from: "SFO", to: "LAX", depart: "2028-02-29", return: "2028-02-29" },
-      "2026-09-10",
-    ).returnDate,
+    normalizeSearch({ from: "SFO", to: "LAX", depart: "2028-02-29", return: "2028-02-29" })
+      .returnDate,
     "2028-02-29",
   );
 });
@@ -278,4 +275,16 @@ test("rejects bare numeric options and non-boolean flags", () => {
     { "exclude-mixed-cabin": "false" },
   ])
     assert.throws(() => search(invalid));
+});
+
+test("leaves origin-local date availability to United across UTC midnight", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-14T02:00:00Z") });
+  assert.equal(new Date().toISOString().slice(0, 10), "2026-11-14");
+  const requested = normalizeSearch({ from: "SFO", to: "IAH", depart: "2026-11-13" });
+  assert.equal(requested.depart, "2026-11-13");
+  assert.equal(new URL(buildSearchUrl(requested)).searchParams.get("d"), "2026-11-13");
+});
+
+test("leaves even an old valid date to United instead of guessing an airport timezone", () => {
+  assert.equal(search({ depart: "2024-02-29" }).depart, "2024-02-29");
 });

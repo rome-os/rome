@@ -10,8 +10,10 @@ cli({
   description: "Search United cash fares or MileagePlus awards (outbound choices for round trips)",
   example: "opencli united flights SFO IAH 2026-11-13 --miles --stops nonstop -f json",
   domain: "united.com",
-  strategy: Strategy.PUBLIC,
+  strategy: Strategy.COOKIE,
   browser: true,
+  siteSession: "persistent",
+  navigateBefore: false,
   args: [
     {
       name: "from",

@@ -47,7 +47,7 @@ function choice(value, name, values) {
   return value;
 }
 
-export function normalizeSearch(args, today = new Date().toISOString().slice(0, 10)) {
+export function normalizeSearch(args) {
   const airport = (value, name) => {
     const code = String(value || "")
       .trim()
@@ -61,7 +61,7 @@ export function normalizeSearch(args, today = new Date().toISOString().slice(0, 
   if (from === to) throw new Error("from and to must be different airports");
   const depart = date(args.depart, "depart");
   const returnDate = args.return === undefined ? null : date(args.return, "return");
-  if (depart < today) throw new Error("depart must not be in the past");
+  // Departure dates are origin-local. United validates bookability without a guessed airport timezone.
   if (returnDate && returnDate < depart) throw new Error("return must be on or after depart");
   if (args.miles !== undefined && typeof args.miles !== "boolean")
     throw new Error("miles must be a boolean flag");

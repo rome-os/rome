@@ -5,10 +5,14 @@ import { loadUnitedFlights, UnitedLoginRequiredError } from "./united-browser.mj
 import { buildSearchUrl, normalizeSearch } from "./united-helpers.mjs";
 
 const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/miles.json", import.meta.url)));
-const search = normalizeSearch(
-  { from: "SFO", to: "IAH", depart: "2026-11-13", return: "2026-11-15", miles: true, timeout: 5 },
-  "2026-09-10",
-);
+const search = normalizeSearch({
+  from: "SFO",
+  to: "IAH",
+  depart: "2026-11-13",
+  return: "2026-11-15",
+  miles: true,
+  timeout: 5,
+});
 function browser(states) {
   let index = 0;
   let time = 0;
@@ -32,7 +36,12 @@ function browser(states) {
 test("waits for loading, expands all flights, and requires stable complete results", async () => {
   const data = fixture();
   const pending = { ...data, rows: [], loading: true };
-  const partial = { ...data, show_all: true, displayed: [35, 80] };
+  const partial = {
+    ...data,
+    rows: data.rows.slice(0, 2),
+    show_all: true,
+    displayed: [2, data.rows.length],
+  };
   const b = browser([pending, partial, data, data]);
   assert.deepEqual(await loadUnitedFlights(b.page, search, b.options), data);
   assert.deepEqual(b.calls.slice(0, 2), [
@@ -80,4 +89,60 @@ test("United service errors fail immediately instead of timing out or reporting 
   const b = browser([{ ...fixture(), rows: [], service_error: true }]);
   await assert.rejects(loadUnitedFlights(b.page, search, b.options), /Retry later/);
   assert.equal(b.calls.filter((c) => c[1] === "readUnitedPage").length, 1);
+});
+
+test("waits through 2/5 -> 2 -> 2 -> 5 when the total disappears during expansion", async () => {
+  const data = fixture();
+  assert.equal(data.rows.length, 5);
+  const partial = { ...data, rows: data.rows.slice(0, 2) };
+  const b = browser([
+    { ...partial, show_all: true, displayed: [2, 5] },
+    partial,
+    partial,
+    data,
+    data,
+  ]);
+  const result = await loadUnitedFlights(b.page, search, b.options);
+  assert.equal(result.rows.length, 5);
+  assert.equal(b.calls.filter((c) => c[1] === "readUnitedPage").length, 5);
+});
+
+test("does not accept a vanished or reduced counter while visible rows remain incomplete", async () => {
+  const data = fixture();
+  const partial = { ...data, rows: data.rows.slice(0, 2) };
+  for (const displayed of [[], [2, 2], [5, 5]]) {
+    const b = browser([
+      { ...partial, show_all: true, displayed: [2, 5] },
+      { ...partial, displayed },
+    ]);
+    await assert.rejects(loadUnitedFlights(b.page, search, b.options), /No partial prices/);
+  }
+});
+
+test("retains totals observed while the result list is still loading", async () => {
+  const data = fixture();
+  const partial = { ...data, rows: data.rows.slice(0, 2) };
+  const b = browser([{ ...partial, loading: true, displayed: [2, 5] }, partial]);
+  await assert.rejects(loadUnitedFlights(b.page, search, b.options), /No partial prices/);
+});
+
+test("expansion without any total cannot return an unproven stable subset", async () => {
+  const data = fixture();
+  const b = browser([{ ...data, show_all: true }, data]);
+  await assert.rejects(loadUnitedFlights(b.page, search, b.options), /No partial prices/);
+});
+
+test("complete counterless lists that need no expansion still succeed", async () => {
+  const data = fixture();
+  const b = browser([data, data]);
+  assert.deepEqual(await loadUnitedFlights(b.page, search, b.options), data);
+});
+
+test("a transient no-results state cannot erase a known total", async () => {
+  const data = fixture();
+  const b = browser([
+    { ...data, show_all: true, displayed: [2, 5] },
+    { ...data, rows: [], no_results: true },
+  ]);
+  await assert.rejects(loadUnitedFlights(b.page, search, b.options), /No partial prices/);
 });

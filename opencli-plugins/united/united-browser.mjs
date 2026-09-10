@@ -23,8 +23,12 @@ export async function loadUnitedFlights(page, search, { now = Date.now } = {}) {
   const deadline = now() + search.timeout * 1000;
   let previous = "";
   let expanded = false;
+  let expectedTotal = null;
   while (now() <= deadline) {
     const data = await page.evaluate(readUnitedPage);
+    const total = data.displayed[1];
+    // The counter can disappear during expansion. Its highest total remains the completion bound.
+    if (Number.isInteger(total) && total > 0) expectedTotal = Math.max(expectedTotal ?? 0, total);
     if (data.challenge)
       throw new Error("United served an access challenge. Clear it in the browser, then retry");
     if (data.service_error) throw new Error("United could not complete this search. Retry later");
@@ -35,17 +39,20 @@ export async function loadUnitedFlights(page, search, { now = Date.now } = {}) {
     }
     if (!data.loading && (data.rows.length || data.no_results)) {
       assertSearchPage(data, search);
-      if (data.no_results && !data.rows.length) return data;
+      if (data.no_results && !data.rows.length && expectedTotal === null && !expanded) return data;
       if (data.show_all && !expanded) {
         expanded = await page.evaluate(expandAllFlights);
         previous = "";
       } else {
-        const [shown, total] = data.displayed;
-        const complete = !data.show_all && (!total || shown >= total || data.rows.length >= total);
-        const signature = JSON.stringify(data.rows);
+        const complete =
+          !data.show_all &&
+          (expectedTotal !== null ? data.rows.length >= expectedTotal : !expanded);
+        const signature = complete ? JSON.stringify(data.rows) : "";
         if (complete && signature === previous) return data;
         previous = signature;
       }
+    } else {
+      previous = "";
     }
     await page.wait({ time: 1 });
   }

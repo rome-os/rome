@@ -67,11 +67,16 @@ Cabin filters apply to the displayed columns, not to seat assignments. Economy P
 - Only flights departing on the requested date are returned. United can include departures on the following day in the same result list.
 
 The reader expands **Show all flights** before filtering, sorting, or applying `--limit`.
+It retains the highest reported total if the counter disappears during expansion. Visible flight rows must reach that total before results can complete.
+Expansion without a reported total fails rather than treating a stable partial list as complete.
 For awards, price sorting uses miles first and cash taxes second. It does not convert miles to money.
 Calendar suggestions and duplicate desktop/mobile fare elements never become additional flight rows.
 `flight_numbers` is empty when the collapsed connecting itinerary does not display its flight numbers. `flight_details` preserves the rendered itinerary text.
 
 ## Browser requirements and failures
+
+The command uses a persistent, cookie-backed United site session so award searches reuse the browser tab.
+Cash search remains available without signing in. The adapter owns navigation and checks the displayed sign-in wall rather than requiring authentication for every cash request.
 
 Use United in English, United States, USD. The command rejects a different locale or currency rather than guessing how to parse prices.
 United requires a MileagePlus sign-in to show award results. Sign in through the browser before using `--miles`.
@@ -81,6 +86,9 @@ The command does not read cookies, credentials, browser storage, authentication 
 A sign-in wall raises OpenCLI `AUTH_REQUIRED`. It never falls back from miles to money.
 An access challenge, changed search conditions, unreadable fare, or incomplete result load raises an error instead of returning partial prices.
 A confirmed no-flight result or an empty filter match returns no rows.
+
+Dates use the origin airport’s local calendar. The command validates their format and order, and United decides whether they are bookable.
+It does not compare a departure date against the machine’s UTC date.
 
 Multi-city searches, child/infant travelers, other currencies, fare selection, and booking are outside this command.
 
@@ -93,11 +101,14 @@ opencli validate united/flights
 
 `fixtures/cash.json` and `fixtures/miles.json` contain flight-only DOM reader snapshots captured on 2026-09-10.
 They cover cash round-trip totals, current award discounts, mixed cabins, unavailable awards, and overnight flights.
-They contain no account identifiers or authentication data. The unit suite needs only Node.js and runs in CI.
+They contain no account identifiers or authentication data. `fixtures/responsive.html` tests hidden flight rows and fare cells in both responsive layouts.
+The DOM tests reuse the `jsdom` development dependency declared by `packages/web`. Install the workspace dependencies before running the suite.
+CI runs the plugin’s test script after the workspace install.
 
 `united-page.mjs` runs inside the page and must remain self-contained.
 United uses separate cash and award layouts. Both expose flight rows and fare cells through ARIA grid roles.
 The reader uses those roles and stable class-name fragments, not generated CSS suffixes.
+It excludes hidden rows and fare cells without excluding flights below the viewport.
 Current prices come from the miles and money containers. Hidden unavailable cards can contain a zero-mile node.
 A fare label comes from its column header, with the card's own cabin title as the fallback.
 

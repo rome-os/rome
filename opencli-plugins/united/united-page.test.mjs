@@ -16,6 +16,7 @@ function read({ body = "", dialogs = [], alerts = [] } = {}) {
   };
   return vm.runInNewContext(`(${readUnitedPage.toString()})()`, {
     document,
+    getComputedStyle: () => ({ visibility: "visible" }),
     location: { href: "https://www.united.com/en/us/fsr/choose-flights" },
   });
 }
@@ -47,7 +48,11 @@ test("reader separates an unloaded page, explicit no flights, and a provider err
 
 test("reader detects a visible sign-in wall, not an ordinary sign-in link or hidden dialog", () => {
   assert.equal(read({ body: "Sign in" }).login_required, false);
-  const dialog = { innerText: "Email or MileagePlus number", getClientRects: () => [] };
+  const dialog = {
+    innerText: "Email or MileagePlus number",
+    getClientRects: () => [],
+    closest: () => null,
+  };
   assert.equal(read({ dialogs: [dialog] }).login_required, false);
   dialog.getClientRects = () => [{}];
   assert.equal(read({ dialogs: [dialog] }).login_required, true);

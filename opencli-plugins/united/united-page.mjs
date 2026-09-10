@@ -3,15 +3,24 @@ export function readUnitedPage() {
   const text = (element) => (element?.textContent || "").replace(/\s+/g, " ").trim();
   const get = (element, selector) => text(element.querySelector(selector));
   const body = document.body?.innerText || "";
-  const visible = (element) => !!element.getClientRects().length;
-  const flightRows = [...document.querySelectorAll('[role="row"]')].filter((element) =>
-    element.querySelector('[class*="FlightInfoBlock-styles__departTime--"]'),
+  const visible = (element) => {
+    const visibility = getComputedStyle(element).visibility;
+    return (
+      !!element.getClientRects().length &&
+      visibility !== "hidden" &&
+      visibility !== "collapse" &&
+      !element.closest('[hidden], [aria-hidden="true"]')
+    );
+  };
+  const flightRows = [...document.querySelectorAll('[role="row"]')].filter(
+    (element) =>
+      visible(element) && element.querySelector('[class*="FlightInfoBlock-styles__departTime--"]'),
   );
   const priceMode = [...document.querySelectorAll("select")].find((element) =>
     [...element.options].some((option) => option.value === "miles"),
   );
   const rows = flightRows.map((row) => {
-    const info = row.querySelector('[role="gridcell"]');
+    const info = [...row.querySelectorAll('[role="gridcell"]')].find(visible);
     const time = (name) =>
       get(row, `[class*="FlightInfoBlock-styles__${name}Time--"] [class*="__time--"]`);
     const dateNote = (name) =>
@@ -29,24 +38,26 @@ export function readUnitedPage() {
       destination: airport("arrival"),
       duration_text: get(row, '[class*="FlightInfoBlock-styles__duration--"]'),
       flight_text: info?.innerText || "",
-      fares: [...row.querySelectorAll('[role="gridcell"][aria-describedby]')].map((cell) => ({
-        product_id: cell.getAttribute("aria-describedby"),
-        product:
-          text(document.getElementById(cell.getAttribute("aria-describedby"))) ||
-          get(cell, '[class*="PriceCard-styles__cabinTitle--"]'),
-        miles_text: get(
-          cell,
-          '[class*="PriceCard-styles__milesContainer--"] [class*="PriceCard-styles__priceValue--"]',
-        ),
-        money_text: get(
-          cell,
-          '[class*="PriceCard-styles__moneyContainer--"] [class*="PriceCard-styles__priceValue--"]',
-        ),
-        cabin: get(cell, '[class*="PriceCard-styles__cabinDescription--"]'),
-        award_type: get(cell, '[class*="PriceCard-styles__discountLabel--"]'),
-        discount: get(cell, '[data-test-id="strikeThroughTag"]'),
-        text: cell.innerText || "",
-      })),
+      fares: [...row.querySelectorAll('[role="gridcell"][aria-describedby]')]
+        .filter(visible)
+        .map((cell) => ({
+          product_id: cell.getAttribute("aria-describedby"),
+          product:
+            text(document.getElementById(cell.getAttribute("aria-describedby"))) ||
+            get(cell, '[class*="PriceCard-styles__cabinTitle--"]'),
+          miles_text: get(
+            cell,
+            '[class*="PriceCard-styles__milesContainer--"] [class*="PriceCard-styles__priceValue--"]',
+          ),
+          money_text: get(
+            cell,
+            '[class*="PriceCard-styles__moneyContainer--"] [class*="PriceCard-styles__priceValue--"]',
+          ),
+          cabin: get(cell, '[class*="PriceCard-styles__cabinDescription--"]'),
+          award_type: get(cell, '[class*="PriceCard-styles__discountLabel--"]'),
+          discount: get(cell, '[data-test-id="strikeThroughTag"]'),
+          text: cell.innerText || "",
+        })),
     };
   });
   const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
