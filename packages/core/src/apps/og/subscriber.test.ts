@@ -109,4 +109,53 @@ describe("createAppOgImageSubscriber", () => {
     await tick();
     expect(await store.stat("reddit")).toBeNull();
   });
+
+  it("discards a render that finishes after the app was removed", async () => {
+    const store = createOgImageStore(root);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: null,
+      generate: async () => {
+        await gate;
+        return Buffer.from("stale");
+      },
+    });
+    await handler({ appId: "reddit", change: "added", current: resolvedApp() });
+    await handler({ appId: "reddit", change: "removed", current: null });
+    release();
+    await tick();
+    expect(await store.stat("reddit")).toBeNull();
+  });
+
+  it("keeps the newest render when an older one finishes last", async () => {
+    const store = createOgImageStore(root);
+    const gates: Array<() => void> = [];
+    let n = 0;
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: null,
+      generate: async () => {
+        const mine = ++n;
+        await new Promise<void>((r) => gates.push(r));
+        return Buffer.from(`render-${mine}`);
+      },
+    });
+    await handler({ appId: "reddit", change: "added", current: resolvedApp() });
+    await handler({
+      appId: "reddit",
+      change: "changed",
+      current: resolvedApp({ updatedAt: "2026-09-02T00:00:00.000Z" }),
+    });
+    await tick();
+    expect(gates).toHaveLength(2);
+    gates[1](); // newest finishes first
+    await tick();
+    gates[0](); // stale one finishes last
+    await tick();
+    expect((await store.read("reddit"))?.toString()).toBe("render-2");
+  });
 });

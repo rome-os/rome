@@ -73,4 +73,18 @@ describe("buildAppSocialCard", () => {
     expect(await buildAppSocialCard(deps, req("/dashboard"))).toBeNull();
     expect(await buildAppSocialCard(deps, req("/apps/headless"))).toBeNull();
   });
+
+  it("omits imageUrl when the image lookup fails", async () => {
+    const deps = {
+      appCatalog: catalogWith({ reddit }),
+      ogImageStore: {
+        stat: async () => {
+          throw new Error("EACCES");
+        },
+      },
+    };
+    const card = await buildAppSocialCard(deps, req("/full/apps/reddit"));
+    expect(card?.title).toBe("Reddit Radar");
+    expect(card).not.toHaveProperty("imageUrl");
+  });
 });

@@ -59,12 +59,27 @@ function isResolvedWebApp(view: CatalogEvent["current"]): view is ResolvedApp {
  * Fires on install, upgrade, enable and every boot (the catalog replays each
  * entry); the mtime check makes the replay a no-op. Never awaits the render
  * (`fireEvent` runs handlers serially and boot must not wait on resvg); the
- * uninstall cleanup is awaited because it is a single unlink.
+ * uninstall cleanup is awaited because it is a single unlink. A per-app epoch
+ * discards a render that finishes after a later event for the same app has
+ * already started, so a slow render can neither overwrite a newer card nor
+ * recreate one after uninstall.
  */
 export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): SubscriberHandler {
   const generate = opts.generate ?? generateOgImage;
 
+  // Every event for an app bumps its epoch; a render that finishes under an
+  // older epoch than the one it started with is stale and is discarded, so a
+  // slow render can neither overwrite a newer card nor recreate one after
+  // uninstall.
+  const epochs = new Map<string, number>();
+  const bump = (appId: string) => {
+    const next = (epochs.get(appId) ?? 0) + 1;
+    epochs.set(appId, next);
+    return next;
+  };
+
   return function appOgImageSubscriber(event: CatalogEvent) {
+    const epoch = bump(event.appId);
     if (event.change === "removed") {
       // Cheap and deterministic, so awaited; only the resvg render below is
       // fire-and-forget.
@@ -80,6 +95,7 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
       if (existing && existing.mtimeMs > Date.parse(app.updatedAt)) return;
       const link = opts.host ? `${opts.host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
       const png = await generate(app, link);
+      if (epochs.get(app.appId) !== epoch) return;
       await opts.store.write(app.appId, png);
       log.info("rendered social card image", { appId: app.appId });
     })().catch((err: unknown) => {

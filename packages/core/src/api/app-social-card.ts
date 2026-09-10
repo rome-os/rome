@@ -58,7 +58,9 @@ export async function buildAppSocialCard(
   // Echoes the requested host on purpose: the crawler already holds this
   // URL; getInstanceOrigin would break loopback/tailnet previews.
   const { origin } = getExternalRequestOrigin(request);
-  const image = await deps.ogImageStore.stat(appId);
+  // The card image is auxiliary: any lookup failure just means "no image yet"
+  // and the shell keeps its static og:image.
+  const image = await deps.ogImageStore.stat(appId).catch(() => null);
   return {
     title: view.displayName,
     description: view.manifest.description,
