@@ -85,14 +85,14 @@ async function buildTestHost() {
   } as unknown as AppCatalog;
   const deps: ApiDeps = { ...(await buildTestDeps(testDb.db)), appCatalog: catalog };
   const config: ApiConfig = { port: 0, host: "127.0.0.1", webRoot };
-  return buildApp(deps, config).app;
+  return { app: buildApp(deps, config).app, deps };
 }
 
 const HEADERS = { host: "jessie.romeos.cc", "x-forwarded-proto": "https" };
 
 describe("app document routes through buildApp", () => {
   it("swaps the shell's social meta for a routed app on /full/apps/:id", async () => {
-    const app = await buildTestHost();
+    const { app } = await buildTestHost();
     const res = await app.request("/full/apps/reddit", { headers: HEADERS });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-cache");
@@ -109,7 +109,7 @@ describe("app document routes through buildApp", () => {
   });
 
   it("swaps meta for embedded /apps/:id sub-paths too", async () => {
-    const app = await buildTestHost();
+    const { app } = await buildTestHost();
     const res = await app.request("/apps/reddit/posts/1", { headers: HEADERS });
     const body = await res.text();
     expect(body).toContain(
@@ -118,7 +118,7 @@ describe("app document routes through buildApp", () => {
   });
 
   it("keeps the static shell for an unknown app and for non-app SPA routes", async () => {
-    const app = await buildTestHost();
+    const { app } = await buildTestHost();
     for (const routePath of ["/full/apps/nope", "/dashboard"]) {
       const res = await app.request(routePath, { headers: HEADERS });
       expect(res.status).toBe(200);
@@ -131,9 +131,22 @@ describe("app document routes through buildApp", () => {
   });
 
   it("still serves static assets ahead of the SPA fallback", async () => {
-    const app = await buildTestHost();
+    const { app } = await buildTestHost();
     const res = await app.request("/icon.svg", { headers: HEADERS });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("<svg></svg>");
+  });
+
+  it("points the social meta at the generated card once one has been rendered", async () => {
+    const { app, deps } = await buildTestHost();
+    await deps.ogImageStore.write("reddit", Buffer.from("png"));
+    const res = await app.request("/full/apps/reddit", { headers: HEADERS });
+    const body = await res.text();
+    expect(body).toContain(
+      '<meta property="og:image" content="https://jessie.romeos.cc/app-og/reddit.png?v=',
+    );
+    expect(body).toContain(
+      '<meta name="twitter:image" content="https://jessie.romeos.cc/app-og/reddit.png?v=',
+    );
   });
 });

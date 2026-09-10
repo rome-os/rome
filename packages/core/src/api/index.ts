@@ -207,13 +207,17 @@ export function buildApp(
   return { app, webchatRuntime };
 }
 
-function mountSpa(app: Hono, webRoot: string, deps: Pick<ApiDeps, "appCatalog">): void {
+function mountSpa(
+  app: Hono,
+  webRoot: string,
+  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
+): void {
   // App document routes get the shell with per-app social meta. Registered
   // before `serveStatic` so the static handler never answers them, and
   // `no-cache` because Caddy set that on the shell before this path existed —
   // a cached shell points at bundle hashes the next image upgrade removes.
-  const appDocument = (c: Context) => {
-    const card = buildAppSocialCard(deps, c.req.raw);
+  const appDocument = async (c: Context) => {
+    const card = await buildAppSocialCard(deps, c.req.raw);
     return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
       "Cache-Control": "no-cache",
     });
