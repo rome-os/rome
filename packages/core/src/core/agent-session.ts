@@ -56,6 +56,7 @@ import {
   type ModelResolutionErrorPayload,
   type ModelResolver,
 } from "./model-resolver.js";
+import { resolveAgentModelRequest } from "./agent-model-selection.js";
 import {
   resolveWebchatLargeModelSelection,
   type ModelSelectionId,
@@ -280,10 +281,7 @@ export interface AgentTurnHandle {
 
 export interface SendTurnOptions {
   /**
-   * OTel span links to attach to the per-turn `agent:*` root span. Used by
-   * the webchat HTTP handler to tie a turn back to its originating POST
-   * request without making the POST a parent (the POST span ends long
-   * before the turn does).
+   * OTel span links to attach a turn back to its originating request.
    */
   links?: Link[];
   /** Turn-scoped parent ref used when this turn is launched as a subagent. */
@@ -801,10 +799,8 @@ async function openSession(
   const romeSessionId = requestedRomeSessionId;
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
-  // The session model pin: the concrete model that produced this
-  // session's history. Authoritative for resume and every later turn —
-  // resolution precedence is explicit guardian selection → pin → agent tier.
-  // Legacy rows (model NULL) have no pin and resolve by tier.
+  // The session model pin records the model that produced this history.
+  // Precedence: docs/architecture/agent-model-selection.md.
   const sessionPin =
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
@@ -816,11 +812,6 @@ async function openSession(
     init.resumeSessionId && !sessionPin
       ? resolveSelectionFromChannelThreadKey(key.channelThreadKey)
       : undefined;
-  // Resolution precedence: explicit guardian selection → pin → tier.
-  // A restored selection is an explicit selection, so it always wins — the old
-  // provider-mismatch guard that dropped it on resume is gone: a
-  // legacy row that switches providers via its selection now follows the single
-  // precedence rule instead of being pinned back to the stored provider's tier.
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
   if (isNewSession && !init.preparedSessionId) {
@@ -1130,7 +1121,7 @@ async function openSession(
           },
           createRoutine: async (createArgs) => {
             const result = await deps.actionEngine.run("create_routine", createArgs, {
-              initiator: `agent:${key.agentName}`,
+              initiator: "system:handback-validate",
               sessionId: refs.sessionId,
               agentName: key.agentName,
               channelThreadKey: key.channelThreadKey,
@@ -1559,13 +1550,8 @@ async function openSession(
       isNewSession: true,
     });
   } else {
-    // Precedence: explicit guardian selection → session pin → agent
-    // tier. A pinned resume requests exactly the pinned model and fails closed
-    // (structured ModelResolutionError) when it cannot run — no substitution.
     initialResolution = await deps.modelResolver.getModelProvider(
-      !selectionId && sessionPin
-        ? { exact: sessionPin }
-        : { tier: config.tier, selectionId, providerId: config.providerId },
+      resolveAgentModelRequest(config, selectionId, sessionPin),
     );
     modelSession = await openModelSession(
       initialResolution,
@@ -1631,6 +1617,7 @@ interface ImplArgs {
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
   isNewSession: boolean;
   /** Subagent sessions get no thread-context block (they get no contextSuffix today either). */
+  isNewSession: boolean;
   isSubagent: boolean;
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
@@ -1715,7 +1702,7 @@ function toolResultSuspendsTurn(output: unknown): boolean {
   if (Array.isArray(value)) {
     const textBlock = value.find(
       (block): block is { type: "text"; text: string } =>
-        isRecord(block) && block.type === "text" && typeof block.text === "string",
+        isRecord(block) && block.type === "text" && typeof block.content === "string",
     );
     value = textBlock?.text;
   }
@@ -1983,19 +1970,8 @@ class AgentSessionImpl implements AgentSession {
 
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
-    // Precedence: explicit guardian selection → session pin → agent
-    // tier. Once a pin exists, every turn requests exactly the pinned model:
-    // entitlement/setting changes no longer swap an ongoing session's backend,
-    // and a pin that cannot run fails the turn with the structured
-    // ModelResolutionError instead of silently substituting a model.
     const resolution = await this.deps.modelResolver.getModelProvider(
-      !this.selectionId && this.sessionPin
-        ? { exact: this.sessionPin }
-        : {
-            tier: this.config.tier,
-            selectionId: this.selectionId,
-            providerId: this.config.providerId,
-          },
+      resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
     );
     if (
       this.modelSessionAvailable &&
@@ -2041,7 +2017,7 @@ class AgentSessionImpl implements AgentSession {
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
-          // sendTurn allocates the sink before sendUserInput.
+          // sendTurn allocates the sink before the drain loop starts.
           log.warn("agent session received event with no active turn", {
             type: msg.type,
             sessionId: this.sessionId,
@@ -2099,7 +2075,7 @@ class AgentSessionImpl implements AgentSession {
         await this.deps.sessionManager.touchSession(this.sessionId);
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
-          sink.pendingSubagentToolUses.set(msg.id, msg);
+          sink.pendingSubagentUses.set(msg.id, msg);
           this.maybePublishSubagentStart(sink, msg.id);
           continue;
         }
