@@ -88,6 +88,7 @@ describe("generateCaddyfile app document routes", () => {
     expect(appDocsAt).toBeLessThan(fallbackAt);
     const body = caddyfile.split("handle @appDocs {")[1].split("}")[0];
     expect(body).toContain("reverse_proxy 127.0.0.1:");
+    expect(body).toContain("encode zstd gzip");
     expect(body).not.toContain("forward_auth");
   });
 
@@ -95,6 +96,7 @@ describe("generateCaddyfile app document routes", () => {
     const caddyfile = generateCaddyfile(publicConfig);
     const block = caddyfile.split("handle /full/apps/morning-brief/* {")[1].split("}")[0];
     expect(block).toContain("reverse_proxy 127.0.0.1:");
+    expect(block).toContain("encode zstd gzip");
     expect(block).not.toContain("rewrite * /index.html");
     // Cloud-email apps share the same shell delivery.
     const cloudEmail = generateCaddyfile({

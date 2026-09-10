@@ -134,5 +134,6 @@ describe("app document routes through buildApp", () => {
     const app = await buildTestHost();
     const res = await app.request("/icon.svg", { headers: HEADERS });
     expect(res.status).toBe(200);
+    expect(await res.text()).toBe("<svg></svg>");
   });
 });

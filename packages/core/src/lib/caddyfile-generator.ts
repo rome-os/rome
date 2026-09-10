@@ -120,6 +120,7 @@ handle @missingSpaAssets {
 }
 @appDocs path /apps /apps/* /full/apps /full/apps/*
 handle @appDocs {
+\tencode zstd gzip
 \t${proxy}
 }
 handle {
@@ -154,15 +155,19 @@ handle /app-assets/${appIdSegment}/* {
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)} {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getFullAppHref(appId)} {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getFullAppHref(appId)}/* {
+\tencode zstd gzip
 \t${proxy}
 }
 `.trim();
@@ -198,15 +203,19 @@ ${indent(forwardAuth, 1)}
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)} {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getFullAppHref(appId)} {
+\tencode zstd gzip
 \t${proxy}
 }
 handle ${getFullAppHref(appId)}/* {
+\tencode zstd gzip
 \t${proxy}
 }
 `.trim();
