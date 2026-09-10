@@ -25,7 +25,7 @@ export function createOgImageStore(
     async write(appId, png) {
       await mkdir(rootDir, { recursive: true });
       const target = path(appId);
-      const tmp = `${target}.${process.pid}.tmp`;
+      const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
       await writeFile(tmp, png);
       await rename(tmp, target); // atomic swap; concurrent writers: last one wins
     },

@@ -7,8 +7,8 @@ const SVG =
   '<text x="96" y="300" font-family="sans-serif" font-size="64">Hello 你好</text></svg>';
 
 describe("svgToPng", () => {
-  it("renders a 1200x630 PNG", () => {
-    const png = svgToPng(SVG);
+  it("renders a 1200x630 PNG", async () => {
+    const png = await svgToPng(SVG);
     // PNG signature
     expect(Array.from(png.subarray(0, 8))).toEqual([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
