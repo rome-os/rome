@@ -68,11 +68,13 @@ export interface PeopleWrites {
    * carries which of the ways the channel could not be written to, so a send
    * that raced a disconnect renders the reason the composer would already have
    * shown.
+   * `onAccepted` receives the server row before the refreshed reads settle.
    */
   say(
     personId: string,
     account: AccountRef,
     text: string,
+    options?: { id?: string; onAccepted?: (message: OutboxMessage) => void },
   ): Promise<WriteOutcome<OutboxMessage, SendRefusal>>;
   /**
    * Try a failed send again, under its own outbox id.
@@ -153,8 +155,16 @@ export function usePeopleWrites(): PeopleWrites {
       restore: (account) => settling(() => restoreAccount(ref(account), t)),
       merge: (into, from) => settling(() => mergePeople(into, from, t)),
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
-      say: (personId, account, text) =>
-        settling(() => sendMessage(personId, { ...ref(account), text }, t)),
+      say: (personId, account, text, options) =>
+        settling(async () => {
+          const outcome = await sendMessage(
+            personId,
+            { ...ref(account), text, ...(options?.id ? { id: options.id } : {}) },
+            t,
+          );
+          if (outcome.ok) options?.onAccepted?.(outcome.value);
+          return outcome;
+        }),
       retry: (personId, messageId) => resettling(() => retrySend(personId, messageId, t)),
       discard: (personId, messageId) => resettling(() => discardSend(personId, messageId, t)),
     };

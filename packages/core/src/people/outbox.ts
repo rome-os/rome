@@ -10,12 +10,13 @@
 // forget to call and no state the two reads can disagree about: an outbox row
 // is exactly a send whose entry is not there yet.
 
-import type { OutboxMessage, OutboxState } from "@rome/api-types/people";
+import { matchesSendRequest, type OutboxMessage } from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
 import type { MessageAccount, Messages } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
+import { outboxMessage as wire } from "../db/repositories/outbox.js";
 import {
   resolveSendTarget,
   sendToTarget,
@@ -70,7 +71,10 @@ export interface OutboxDeps extends SendDeps {
   webchatRepo: Conversations;
 }
 
-export type SendResult = { ok: true; message: OutboxMessage } | { ok: false; send: RefusedState };
+export type SendResult =
+  | { ok: true; message: OutboxMessage }
+  | { ok: false; send: RefusedState }
+  | { ok: false; error: string };
 
 /**
  * Send to one account, and answer with the outbox row it became.
@@ -85,16 +89,28 @@ export async function sendToAccount(
   deps: OutboxDeps,
   account: { channel: string; channelUserId: string },
   text: string,
+  id?: string,
 ): Promise<SendResult> {
+  const replay = (message: OutboxMessage): SendResult =>
+    matchesSendRequest(message, { ...account, text })
+      ? { ok: true, message }
+      : { ok: false, error: "That send id belongs to a different message" };
+  if (id) {
+    const existing = await deps.outboxRepo.findSend(id);
+    if (existing) return replay(existing);
+  }
   const resolution = await resolveSendTarget(deps, account);
   if (!resolution.ok) return { ok: false, send: resolution.send };
 
-  const row = await deps.outboxRepo.open({
+  const input = {
     channel: account.channel,
     channelUserId: account.channelUserId,
     conversationId: resolution.target.conversationId,
     text,
-  });
+  };
+  const claimed = id ? await deps.outboxRepo.openOnce({ ...input, id }) : null;
+  if (claimed && !claimed.created) return replay(claimed.message);
+  const row = claimed?.row ?? (await deps.outboxRepo.open(input));
 
   return { ok: true, message: await attempt(deps, row, resolution.target) };
 }
@@ -318,17 +334,4 @@ function addressesOf(accounts: readonly MessageAccount[], row: OutboxRow): reado
       candidate.channel === row.channel && candidate.addresses.includes(row.channelUserId),
   );
   return account?.addresses ?? [row.channelUserId];
-}
-
-function wire(row: OutboxRow): OutboxMessage {
-  return {
-    id: row.id,
-    channel: row.channel,
-    channelUserId: row.channelUserId,
-    text: row.text,
-    timestamp: Math.floor(row.createdAt.getTime() / 1000),
-    state: row.state as OutboxState,
-    ref: row.providerMessageId ? `${row.conversationId}:${row.providerMessageId}` : null,
-    error: row.error,
-  };
 }

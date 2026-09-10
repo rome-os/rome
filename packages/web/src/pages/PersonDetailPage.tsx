@@ -166,7 +166,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
           />
         </div>
 
-        <PersonConversation person={person} />
+        <PersonConversation key={person.id} person={person} />
       </PageBody>
     </PageShell>
   );

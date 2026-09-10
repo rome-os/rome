@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "@rstest/core";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import type {
@@ -12,6 +12,8 @@ import type {
 import { peopleRoutes } from "./people.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
+import { OutboxRepository } from "../../db/repositories/outbox.js";
+import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 
 // Sending to a person, and the outbox a send lives in until it arrives.
 //
@@ -28,6 +30,9 @@ describe("People send API", () => {
   let deps: TestDeps;
   let app: Hono;
   let personId: string;
+  afterEach(() => {
+    rs.useRealTimers();
+  });
 
   beforeEach(async () => {
     testDb = createTestDb();
@@ -95,6 +100,41 @@ describe("People send API", () => {
     expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
   });
 
+  it("claims a client send id once across concurrent requests", async () => {
+    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
+    const responses = await Promise.all([send(body), send(body)]);
+    expect(responses.map((response) => response.status)).toEqual([202, 202]);
+    for (const response of responses) {
+      expect(await response.json()).toMatchObject({ id: body.id, text: "hello" });
+    }
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect((await send(body)).status).toBe(202);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+  });
+
+  it("refuses reuse of a send id for different text or another account", async () => {
+    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
+    expect((await send(body)).status).toBe(202);
+    expect((await send({ ...body, text: "different" })).status).toBe(409);
+    const anotherPerson = await deps.personMappingRepo.create({
+      displayName: "Another target",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: OTHER_TG }],
+    });
+    expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+  });
+
+  it("validates a supplied send id before contacting the provider", async () => {
+    for (const id of [null, 7, "", "not-a-uuid"]) {
+      expect(
+        (await send({ id, channel: "telegram", channelUserId: TG, text: "hello" })).status,
+      ).toBe(400);
+    }
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
+  });
+
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
     const readOnly = { ...deps, talkRouter: { ...deps.talkRouter, feature: () => null } };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));
@@ -127,6 +167,83 @@ describe("People send API", () => {
 
     // Nothing was told the send had arrived. The read noticed.
     expect(await outbox()).toEqual([]);
+  });
+
+  it("replays a delivered send after outbox cleanup and repository recreation", async () => {
+    const body = {
+      id: crypto.randomUUID(),
+      channel: "telegram",
+      channelUserId: TG,
+      text: "landed once",
+    };
+    const response = await send(body);
+    const original = await response.json();
+    const row = (await deps.outboxRepo.find(body.id))!;
+    expect(await outbox()).toEqual([]);
+    expect(await deps.outboxRepo.find(body.id)).toBeNull();
+
+    deps.outboxRepo = new OutboxRepository(testDb.db);
+    app = new Hono().route("/", peopleRoutes(deps));
+    const replayed = await send(body);
+    expect(replayed.status).toBe(202);
+    expect(await replayed.json()).toEqual(original);
+    expect(await deps.outboxRepo.openOnce({ ...body, conversationId: row.conversationId })).toEqual(
+      {
+        created: false,
+        message: original,
+      },
+    );
+    expect(await deps.outboxRepo.find(body.id)).toBeNull();
+    expect(await outbox()).toEqual([]);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect((await timeline()).entries.filter((entry) => entry.body === body.text)).toHaveLength(1);
+    expect((await send({ ...body, text: "different message" })).status).toBe(409);
+  });
+
+  it("retains a receipt for 24 hours after cleanup, then permits a new send", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    const startedAt = Date.now();
+    rs.setSystemTime(startedAt);
+    const body = {
+      id: crypto.randomUUID(),
+      channel: "telegram",
+      channelUserId: TG,
+      text: "receipt expiry",
+    };
+    const original = await (await send(body)).json();
+    const removedAt = startedAt + 10_000;
+    rs.setSystemTime(removedAt);
+    expect(await outbox()).toEqual([]);
+
+    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
+    expect(await (await send(body)).json()).toEqual(original);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+
+    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
+    expect(await deps.outboxRepo.findSend(body.id)).toBeNull();
+    expect((await send(body)).status).toBe(202);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(2);
+  });
+
+  it("retains a discarded send's response without retrying the provider", async () => {
+    const provider = rs
+      .spyOn(deps.channelPortMap.get("telegram")!, "sendMessage")
+      .mockRejectedValue(new Error("refused"));
+    const body = {
+      id: crypto.randomUUID(),
+      channel: "telegram",
+      channelUserId: TG,
+      text: "discarded",
+    };
+    const original = await (await send(body)).json();
+    const discarded = await app.request(`/people/${personId}/outbox/${body.id}`, {
+      method: "DELETE",
+    });
+    expect(discarded.status).toBe(204);
+    expect(await deps.outboxRepo.find(body.id)).toBeNull();
+    expect(await (await send(body)).json()).toEqual(original);
+    expect(await outbox()).toEqual([]);
+    expect(provider).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a refused send in the outbox, and retries it under its own id", async () => {
