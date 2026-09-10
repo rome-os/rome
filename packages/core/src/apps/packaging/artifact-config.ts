@@ -7,7 +7,7 @@ const FavorRequirementSchema = z
   .object({
     amount: z.number().int().positive(),
     title: z.string().min(1),
-    summary: z.string().min(1),
+    summary: z.string().min(1).optional(),
     displayFields: z
       .array(
         z
