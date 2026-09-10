@@ -47,9 +47,19 @@ export class OutboxRepository {
     conversationId: string;
     text: string;
   }): Promise<OutboxRow> {
+    return (await this.openOnce({ ...input, id: uuid() })).row;
+  }
+
+  /** The insert claims an id atomically. Only its winner may call the provider. */
+  async openOnce(input: {
+    id: string;
+    channel: string;
+    channelUserId: string;
+    conversationId: string;
+    text: string;
+  }): Promise<{ row: OutboxRow; created: boolean }> {
     const now = new Date();
     const row = {
-      id: uuid(),
       ...input,
       state: "sending" as const,
       providerMessageId: null,
@@ -57,8 +67,15 @@ export class OutboxRepository {
       createdAt: now,
       updatedAt: now,
     };
-    await this.db.insert(outboundMessages).values(row);
-    return row;
+    const inserted = await this.db
+      .insert(outboundMessages)
+      .values(row)
+      .onConflictDoNothing({ target: outboundMessages.id })
+      .returning();
+    if (inserted.length > 0) return { row, created: true };
+    const existing = await this.find(input.id);
+    if (!existing) throw new Error("Outbox row disappeared after its id was claimed");
+    return { row: existing, created: false };
   }
 
   /** The channel took it and named it. Not "delivered" — that is decided by

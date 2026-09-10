@@ -95,6 +95,41 @@ describe("People send API", () => {
     expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
   });
 
+  it("claims a client send id once across concurrent requests", async () => {
+    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
+    const responses = await Promise.all([send(body), send(body)]);
+    expect(responses.map((response) => response.status)).toEqual([202, 202]);
+    for (const response of responses) {
+      expect(await response.json()).toMatchObject({ id: body.id, text: "hello" });
+    }
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect((await send(body)).status).toBe(202);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+  });
+
+  it("refuses reuse of a send id for different text or another account", async () => {
+    const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
+    expect((await send(body)).status).toBe(202);
+    expect((await send({ ...body, text: "different" })).status).toBe(409);
+    const anotherPerson = await deps.personMappingRepo.create({
+      displayName: "Another target",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: OTHER_TG }],
+    });
+    expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+  });
+
+  it("validates a supplied send id before contacting the provider", async () => {
+    for (const id of [null, 7, "", "not-a-uuid"]) {
+      expect(
+        (await send({ id, channel: "telegram", channelUserId: TG, text: "hello" })).status,
+      ).toBe(400);
+    }
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
+  });
+
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
     const readOnly = { ...deps, talkRouter: { ...deps.talkRouter, feature: () => null } };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));

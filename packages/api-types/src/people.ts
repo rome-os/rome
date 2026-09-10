@@ -1215,6 +1215,9 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
+  /** Optional UUID v4 for this send. While its row exists, repeating the same
+   * id, account, and text returns that row without sending again. */
+  id?: string;
   channel: string;
   channelUserId: string;
   text: string;
@@ -1225,6 +1228,13 @@ export function parseSendMessageRequest(
 ): { request: SendMessageRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
+  if (
+    raw.id !== undefined &&
+    (typeof raw.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id))
+  ) {
+    return { error: "id must be a UUID v4" };
+  }
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
@@ -1235,7 +1245,23 @@ export function parseSendMessageRequest(
   if (text.length > SEND_MESSAGE_MAX_LENGTH) {
     return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
   }
-  return { request: { channel, channelUserId, text } };
+  return {
+    request: {
+      ...(raw.id === undefined ? {} : { id: raw.id as string }),
+      channel,
+      channelUserId,
+      text,
+    },
+  };
+}
+
+/** A repeated send id may only refer to its original account and text. */
+export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
+  return (
+    message.channel === request.channel &&
+    message.channelUserId === request.channelUserId &&
+    message.text === request.text
+  );
 }
 
 /** Long enough for anything a person types, short enough that no adapter has to
