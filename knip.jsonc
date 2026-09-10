@@ -32,19 +32,11 @@
   // here on the strength of the mobile dependency reintroduces the finding.
   "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo"],
 
-  // Severity decides the exit code: only `error` counts, `warn` prints and
-  // passes. The export rules are `warn` because a barrel that re-exports a
-  // package's public API for apps and SDK consumers is indistinguishable, to
-  // knip, from one nothing reads. Promote them once those barrels are pruned.
-  //
-  // `pnpm lint:deadcode` passes `--max-issues N`, where N is the count of
-  // `error` findings on the day this landed. package.json carries N and is the
-  // only place that does, so lowering it is a single edit. N is a ceiling on
-  // the aggregate, not a per-finding baseline: one finding past N fails, so
-  // dead code added on its own blocks a PR, but a PR that adds one finding and
-  // removes another still totals N and passes, and a deletion that does not
-  // lower N leaves headroom for the next one. Comparing findings by identity
-  // against a checked-in baseline is the fix, tracked separately.
+  // Severity decides the exit code: `error` fails the command, while `warn`
+  // prints and passes. The export rules are `warn` because a barrel that
+  // re-exports a package's public API for apps and SDK consumers is
+  // indistinguishable, to knip, from one nothing reads. Promote them once
+  // those barrels are pruned.
   // Nothing is suppressed: `pnpm lint:deadcode:report` prints every category
   // including the warnings.
   "rules": {
@@ -96,6 +88,7 @@
       "rstest": false,
       "entry": [
         "src/**/*.test.{ts,tsx}",
+        ".storybook/*.test.{ts,tsx}",
         "src/test/setup.ts",
         "rstest.config.mts",
         ".storybook/rsbuild.config.ts",
