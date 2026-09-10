@@ -12,6 +12,7 @@ Browse by domain:
 - [`messaging.md`](messaging.md) — Messages, Conversations, Channels, Policies, Sentinel, Approvals. *How messages flow in and how the system decides what to do with them.*
 - [`apps.md`](apps.md) — Rome Apps (incl. ids, SDKs, caller identity, lockfile, install sources, app store, handles, app data, hooks). *The extensibility surface.*
 - [`actions.md`](actions.md) — Actions, Action results, Suspensions, Actor. *The primary unit of executable behavior, its result envelope, and the session identity accountable for it.*
+- [`host-execution.md`](host-execution.md) — Host jobs. *Privileged scripts whose lifetime belongs to the host service outside Rome.*
 - [`skills.md`](skills.md) — Skills. *Instructional documents that teach agents how to perform tasks.*
 - [`data.md`](data.md) — Memory, Projects, Routines, Database. *Where state and knowledge live.*
 

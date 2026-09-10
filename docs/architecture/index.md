@@ -14,4 +14,5 @@ Browse by surface:
 - [`channels.md`](channels.md) — The server-owned setup protocol every channel connects through, and the rules that keep the connect flow generic.
 - [`notification-delivery.md`](notification-delivery.md) — How mobile push travels from an instance through the central Rome Cloud broker to the platform push service (APNs for iOS, FCM for Android), and the account-scoping, content-enforcement, and delivery invariants that hold.
 - [`desktop-runtime.md`](desktop-runtime.md) — How the macOS desktop shell hosts the Rome backend in a Linux VM, and the network/signing invariants the provider must satisfy.
+- [`host-execution.md`](host-execution.md) — How system actions delegate privileged jobs to a Linux host service and preserve its authorization boundary.
 - [`observability.md`](observability.md) — The OTEL → Collector → ClickHouse pipeline, required telemetry attributes, and the dev-vs-prod topology split.

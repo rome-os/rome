@@ -15,6 +15,8 @@ const CONFIG_ENV_KEYS = [
   "POSTGRES_CONNECTION_STRING",
   "SENTINEL_REVIEW_INTERVAL_MINUTES",
   "ROME_ACTION_MAX_WORKERS",
+  "ROME_HOST_EXECUTION_SOCKET",
+  "ROME_HOST_EXECUTION_ENABLED",
   "WEB_PORT",
   "WEB_HOST",
   "INTERNAL_API_PORT",
@@ -33,6 +35,24 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
+  it("disables host execution and leaves its socket unset by default", () => {
+    expect(loadConfig()).toMatchObject({ hostExecutionEnabled: false });
+    expect(loadConfig().hostExecutionSocket).toBeUndefined();
+  });
+
+  it("requires explicit host execution enablement and an absolute socket path", () => {
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "true");
+    rs.stubEnv("ROME_HOST_EXECUTION_SOCKET", "/run/rome-host/control.sock");
+    expect(loadConfig()).toMatchObject({
+      hostExecutionEnabled: true,
+      hostExecutionSocket: "/run/rome-host/control.sock",
+    });
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "yes");
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "false");
+    rs.stubEnv("ROME_HOST_EXECUTION_SOCKET", "https://host.example");
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
   it("parses valid env and returns typed config", () => {
     rs.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test-key");
 

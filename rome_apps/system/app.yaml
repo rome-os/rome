@@ -22,8 +22,10 @@ actions:
   - actions/delete-routine
   - actions/conversation-settings-manage
   - actions/email-inbound
+  - actions/execute-root-script
   - actions/fetch-channel-history
   - actions/generate-image
+  - actions/manage-root-script
   - actions/publish-event
   - actions/search-event-catalog
   - actions/search-routine

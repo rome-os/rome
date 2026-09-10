@@ -1,0 +1,111 @@
+name: Host helper
+
+on:
+  pull_request:
+    paths:
+      - packages/host-helper/**
+      - scripts/host-helper/**
+      - .github/workflows/host-helper.yml
+  push:
+    branches: [main]
+    paths:
+      - packages/host-helper/**
+      - scripts/host-helper/**
+      - .github/workflows/host-helper.yml
+    tags: ['host-helper-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Bare release version, such as 0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-helper-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - name: Check format, tests, and vet
+        working-directory: packages/host-helper
+        run: |
+          test -z "$(gofmt -l .)"
+          go test -race -count=1 ./...
+          go vet ./...
+      - name: Exercise root host and nonroot container over shared socket
+        run: bash scripts/host-helper/smoke.sh
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/host-helper-v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.7'
+          cache: false
+      - name: Require a merged commit and validate version
+        id: release
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${REF_NAME#host-helper-v}"
+          fi
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Version must be a bare major.minor.patch semver' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build Linux binaries and checksums
+        working-directory: packages/host-helper
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$RELEASE_VERSION" \
+              -o "dist/rome-hostd-linux-$arch" ./cmd/rome-hostd
+          done
+          cd dist
+          sha256sum rome-hostd-linux-* > SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: host-helper-${{ steps.release.outputs.version }}
+          path: packages/host-helper/dist/*
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          gh release create "host-helper-v$RELEASE_VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "Host helper $RELEASE_VERSION" \
+            --notes "Linux root host helper. Verify the matching SHA256SUMS before installation." \
+            packages/host-helper/dist/rome-hostd-linux-amd64 \
+            packages/host-helper/dist/rome-hostd-linux-arm64 \
+            packages/host-helper/dist/SHA256SUMS

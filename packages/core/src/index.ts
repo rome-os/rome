@@ -112,6 +112,7 @@ import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
+import { HostExecutionService } from "./host-execution/service.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
@@ -790,12 +791,23 @@ async function main() {
       ],
     }),
   };
+  const hostExecution = new HostExecutionService({
+    socketPath: config.hostExecutionSocket,
+    enabled: config.hostExecutionEnabled,
+  });
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
     appCatalog,
     appActionDeps,
-    { db, actionEngine, routinesRepo, repositories: appRuntimeRepositories, favorService },
+    {
+      db,
+      actionEngine,
+      routinesRepo,
+      repositories: appRuntimeRepositories,
+      favorService,
+      hostExecution,
+    },
   );
 
   appCatalog.subscribe(
@@ -805,6 +817,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      hostExecution,
     }),
   );
   appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {

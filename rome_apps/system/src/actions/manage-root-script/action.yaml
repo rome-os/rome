@@ -1,0 +1,13 @@
+name: manage_root_script
+type: system
+description: >-
+  Inspect the durable status and bounded output of a hosting-vm root script job, or request
+  cancellation of its managed process group. Use the job ID returned by execute_root_script.
+  Works after the originating Rome action exits or root execution is disabled.
+  Cancellation is best effort because unrestricted root scripts can escape the process group.
+  An unknown outcome requires inspection of host state before another submission.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: write
+cancellable: false
