@@ -281,7 +281,10 @@ export interface AgentTurnHandle {
 
 export interface SendTurnOptions {
   /**
-   * OTel span links to attach a turn back to its originating request.
+   * OTel span links to attach to the per-turn `agent:*` root span. Used by
+   * the webchat HTTP handler to tie a turn back to its originating POST
+   * request without making the POST a parent (the POST span ends long
+   * before the turn does).
    */
   links?: Link[];
   /** Turn-scoped parent ref used when this turn is launched as a subagent. */
@@ -800,7 +803,7 @@ async function openSession(
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
-  // Precedence: docs/architecture/agent-model-selection.md.
+  // Precedence: docs/concepts/sessions.md#model-pin.
   const sessionPin =
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
@@ -896,7 +899,7 @@ async function openSession(
   const allowList = config.actions ?? [];
   const findPermittedAction = (name: string): Action | undefined => {
     const requestedAction = deps.actionRegistry.get(name);
-    if (!requestedAction) return undefined;
+    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
     return deps.actionRegistry
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
@@ -940,8 +943,8 @@ async function openSession(
 
   // Re-bind into the current turn's OTel context so `action:*` spans land
   // under the agent span even when the SDK invokes this callback async.
-  // The original `context.with(turnCtx, sendUserInput)` block has long
-  // since returned by the time MCP tool callbacks fire.
+  // The original `context.with(turnCtx, sendUserInput)` block is no longer
+  // active by the time MCP tool callbacks fire.
   const inCurrentTurnCtx = <T>(fn: () => T): T => {
     const ctx = impl.currentTurnCtxRef ?? context.active();
     return context.with(ctx, fn);
@@ -1017,7 +1020,7 @@ async function openSession(
             };
           }
           // Webchat: the chat client mounts the component off this tool_result
-          // (the drain loop snapshots a pending_interaction card keyed by
+          // (the drain loop persists a pending_interaction card keyed by
           // toolUseId). The guardian's outcome arrives as a new turn, so tell the
           // agent to stop here rather than treating the directive as data.
           return {
@@ -1044,7 +1047,7 @@ async function openSession(
                 `anything else:\n\n${promptText}`,
             };
           }
-          // Webchat: the drain loop snapshots a handoff card keyed by toolUseId and
+          // Webchat: the drain loop persists a handoff card keyed by toolUseId and
           // mints the child session. The handoff mounts no surface itself — the
           // summoned agent brings one up via `show_app`. handback/handbackHint ride
           // on the tool_result so the drain loop can stamp the child session's
@@ -1121,7 +1124,7 @@ async function openSession(
           },
           createRoutine: async (createArgs) => {
             const result = await deps.actionEngine.run("create_routine", createArgs, {
-              initiator: "system:handback-validate",
+              initiator: `agent:${key.agentName}`,
               sessionId: refs.sessionId,
               agentName: key.agentName,
               channelThreadKey: key.channelThreadKey,
@@ -1617,7 +1620,6 @@ interface ImplArgs {
   /** Whether the underlying SDK session was freshly minted (vs resumed). */
   isNewSession: boolean;
   /** Subagent sessions get no thread-context block (they get no contextSuffix today either). */
-  isNewSession: boolean;
   isSubagent: boolean;
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
@@ -1649,7 +1651,7 @@ interface TurnSink {
    * it at. Drained at terminal time by `translateTurnSpans` to emit
    * `tool` spans + thinking/text events under `model.turn`. Includes blocks
    * the sink itself drops (e.g. subagent tool_results) so per-tool spans
-   * are still reconstructed for subagent dispatch from the parent's view.
+   * are reconstructed for subagent dispatch from the parent's view.
    */
   blocks: CapturedBlock[];
   /** Captured at turn start; used as the floor for tool startedAt values. */
@@ -1702,7 +1704,7 @@ function toolResultSuspendsTurn(output: unknown): boolean {
   if (Array.isArray(value)) {
     const textBlock = value.find(
       (block): block is { type: "text"; text: string } =>
-        isRecord(block) && block.type === "text" && typeof block.content === "string",
+        isRecord(block) && block.type === "text" && typeof block.text === "string",
     );
     value = textBlock?.text;
   }
@@ -2017,7 +2019,7 @@ class AgentSessionImpl implements AgentSession {
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
-          // sendTurn allocates the sink before the drain loop starts.
+          // sendTurn allocates the sink before sendUserInput.
           log.warn("agent session received event with no active turn", {
             type: msg.type,
             sessionId: this.sessionId,
@@ -2075,7 +2077,7 @@ class AgentSessionImpl implements AgentSession {
         await this.deps.sessionManager.touchSession(this.sessionId);
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
-          sink.pendingSubagentUses.set(msg.id, msg);
+          sink.pendingSubagentToolUses.set(msg.id, msg);
           this.maybePublishSubagentStart(sink, msg.id);
           continue;
         }
@@ -3461,7 +3463,7 @@ function buildSubagentTools(
 function buildLifecycleOutput(
   terminal: StreamAgentMessage | undefined,
   status: AgentTurnStatus,
-  stopReason: string | undefined,
+  stopReason?: string,
 ): AgentTurnOutput {
   if (terminal?.type === "result") {
     return {
