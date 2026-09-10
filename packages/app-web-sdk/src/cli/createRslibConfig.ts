@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, globSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, globSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { loadConfig, mergeRslibConfig, type LibConfig, type RslibConfig } from "@rslib/core";
 import { pluginReact } from "@rsbuild/plugin-react";
@@ -6,6 +7,39 @@ import tailwindPostcss from "@tailwindcss/postcss";
 import { generateEntry } from "./generateEntry.js";
 import { loadAppYaml, type LoadedAppYaml } from "./loadAppYaml.js";
 import { RomeAppManifestPlugin } from "./manifestPlugin.js";
+
+const require = createRequire(import.meta.url);
+
+type PackageResolver = (specifier: string) => string;
+
+export function resolveSdkReactAliases(resolvePackage: PackageResolver = require.resolve): {
+  react: string;
+  "react-dom": string;
+} {
+  const reactPackagePath = resolvePackage("react/package.json");
+  const reactDomPackagePath = resolvePackage("react-dom/package.json");
+  const reactVersion = readPackageVersion(reactPackagePath, "react");
+  const reactDomVersion = readPackageVersion(reactDomPackagePath, "react-dom");
+
+  if (reactVersion !== reactDomVersion) {
+    throw new Error(
+      `rome: the app web SDK must resolve matching React packages, found react@${reactVersion} and react-dom@${reactDomVersion}`,
+    );
+  }
+
+  return {
+    react: dirname(reactPackagePath),
+    "react-dom": dirname(reactDomPackagePath),
+  };
+}
+
+function readPackageVersion(packagePath: string, packageName: string): string {
+  const metadata = JSON.parse(readFileSync(packagePath, "utf8")) as { version?: unknown };
+  if (typeof metadata.version !== "string" || metadata.version.length === 0) {
+    throw new Error(`rome: ${packageName} package metadata does not declare a version`);
+  }
+  return metadata.version;
+}
 
 export interface BuildContextOptions {
   cwd: string;
@@ -101,6 +135,12 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
       },
     },
     plugins: [pluginReact()],
+    // Apps render through the SDK-owned React/React DOM pair. Resolving both
+    // packages from the same dependency tree prevents pnpm consumers from
+    // bundling an app React alongside a different SDK renderer version.
+    resolve: {
+      alias: resolveSdkReactAliases(),
+    },
     tools: {
       postcss: (_config: unknown, utils: { addPlugins: (plugins: unknown[]) => void }) => {
         utils.addPlugins([tailwindPostcss()]);
