@@ -112,6 +112,17 @@ describe("People send API", () => {
     expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
   });
 
+  it("delivers identical messages when they have distinct send ids", async () => {
+    const body = { channel: "telegram", channelUserId: TG, text: "ok" };
+    const responses = await Promise.all([
+      send({ ...body, id: crypto.randomUUID() }),
+      send({ ...body, id: crypto.randomUUID() }),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([202, 202]);
+    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(2);
+  });
+
   it("refuses reuse of a send id for different text or another account", async () => {
     const body = { id: crypto.randomUUID(), channel: "telegram", channelUserId: TG, text: "hello" };
     expect((await send(body)).status).toBe(202);

@@ -1215,8 +1215,10 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
-  /** Optional UUID v4 for this send. Repeating the same id, account, and text
-   * returns its recorded response until 24 hours after outbox removal. */
+  /** Optional UUID v4 idempotency key. A client creates one for each composed
+   * message and reuses it only when repeating that request. The same id,
+   * account, and text returns its recorded response until 24 hours after
+   * outbox removal. */
   id?: string;
   channel: string;
   channelUserId: string;
