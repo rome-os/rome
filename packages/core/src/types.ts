@@ -33,22 +33,22 @@ export interface AgentConfig {
   name: string;
   description: string;
   /**
-   * Provider-agnostic capability tier. ModelResolver maps this to a provider
-   * and concrete model. The legacy `model:
-   * opus|sonnet|haiku` YAML field is accepted by the loader and normalized to
-   * `large|medium|small` for back-compat.
+   * Provider-agnostic capability tier. Required unless modelId is set.
+   * The loader normalizes legacy model: opus|sonnet|haiku to this field.
    */
-  tier: "large" | "medium" | "small";
+  tier?: "large" | "medium" | "small";
+  /**
+   * Exact provider model ID. Requires providerId and excludes tier.
+   * Resolution uses this ID without tier mapping or automatic substitution.
+   */
+  modelId?: string;
   /** Provider-agnostic reasoning effort. Defaults to `high` when omitted in YAML. */
   reasoningEffort: ReasoningEffort;
   /**
-   * Optional provider pin (yaml `provider: anthropic|openai`). When set,
-   * ModelResolver only considers this provider for the agent's sessions —
-   * `tier` still picks the concrete model within it — and resolution fails
-   * with ModelResolutionError instead of falling back to another provider
-   * when the pinned one is disconnected or out of quota. For agents whose
-   * behavior depends on a provider-specific capability (e.g. Codex's
-   * embedded image generation).
+   * Optional provider pin (yaml `provider: anthropic|openai`). Required for
+   * modelId. With tier, restricts model resolution to this provider.
+   * An unavailable pinned provider fails with ModelResolutionError instead
+   * of falling back to another provider.
    */
   providerId?: "anthropic" | "openai";
   systemPromptPrefix: string;
