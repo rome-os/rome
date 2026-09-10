@@ -16,7 +16,7 @@ function cssFiles(directory) {
   while (queue.length > 0) {
     const current = queue.pop();
     for (const entry of readdirSync(current, { withFileTypes: true })) {
-      if (entry.isDirectory() && !["dist", "node_modules"].includes(entry.name)) {
+      if (entry.isDirectory() && !["dist", "dist-mock", "node_modules"].includes(entry.name)) {
         queue.push(join(current, entry.name));
       } else if (entry.isFile() && entry.name.endsWith(".css")) {
         files.push(join(current, entry.name));

@@ -12,6 +12,7 @@
     "dev": "pnpm build:apps && pnpm --filter @rome/core dev",
     "start:web": "pnpm --filter rome-web dev",
     "start:web:mock": "pnpm --filter rome-web dev:mock",
+    "build:web:mock": "pnpm --filter rome-web build:mock",
     "storybook": "pnpm --filter rome-web storybook",
     "build:storybook": "pnpm --filter rome-web build:storybook",
     "desktop:image:local": "pnpm --filter rome-desktop image:local",
