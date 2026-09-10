@@ -158,4 +158,27 @@ describe("createAppOgImageSubscriber", () => {
     await tick();
     expect((await store.read("reddit"))?.toString()).toBe("render-2");
   });
+
+  it("does not recreate the card when removal arrives while a write is queued", async () => {
+    const store = createOgImageStore(root);
+    let releaseGenerate!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseGenerate = r;
+    });
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: null,
+      generate: async () => {
+        await gate;
+        return Buffer.from("late");
+      },
+    });
+    await handler({ appId: "reddit", change: "added", current: resolvedApp() });
+    releaseGenerate();
+    // Let the render reach the queue, then remove before its write can commit.
+    await Promise.resolve();
+    await handler({ appId: "reddit", change: "removed", current: null });
+    await tick();
+    expect(await store.stat("reddit")).toBeNull();
+  });
 });

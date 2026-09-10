@@ -70,12 +70,22 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
   // Every event for an app bumps its epoch; a render that finishes under an
   // older epoch than the one it started with is stale and is discarded, so a
   // slow render can neither overwrite a newer card nor recreate one after
-  // uninstall.
+  // uninstall. The epoch alone isn't enough, though: `store.write` is two
+  // async steps (writeFile + rename), so a removal or a newer write could
+  // still land between the check and the rename. Per-app `queues` serialize
+  // every write and removal for an app so only one runs at a time, and a
+  // write re-checks the epoch once it holds the queue.
   const epochs = new Map<string, number>();
   const bump = (appId: string) => {
     const next = (epochs.get(appId) ?? 0) + 1;
     epochs.set(appId, next);
     return next;
+  };
+  const queues = new Map<string, Promise<void>>();
+  const enqueue = (appId: string, task: () => Promise<void>): Promise<void> => {
+    const run = (queues.get(appId) ?? Promise.resolve()).then(task, task);
+    queues.set(appId, run);
+    return run;
   };
 
   return function appOgImageSubscriber(event: CatalogEvent) {
@@ -83,7 +93,7 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
     if (event.change === "removed") {
       // Cheap and deterministic, so awaited; only the resvg render below is
       // fire-and-forget.
-      return opts.store.remove(event.appId).catch((err: unknown) => {
+      return enqueue(event.appId, () => opts.store.remove(event.appId)).catch((err: unknown) => {
         log.warn("failed to remove social card image", { appId: event.appId, error: String(err) });
       });
     }
@@ -95,9 +105,11 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
       if (existing && existing.mtimeMs > Date.parse(app.updatedAt)) return;
       const link = opts.host ? `${opts.host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
       const png = await generate(app, link);
-      if (epochs.get(app.appId) !== epoch) return;
-      await opts.store.write(app.appId, png);
-      log.info("rendered social card image", { appId: app.appId });
+      await enqueue(app.appId, async () => {
+        if (epochs.get(app.appId) !== epoch) return;
+        await opts.store.write(app.appId, png);
+        log.info("rendered social card image", { appId: app.appId });
+      });
     })().catch((err: unknown) => {
       log.warn("social card image generation failed", {
         appId: app.appId,
