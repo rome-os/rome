@@ -67,7 +67,9 @@
          1200x630 asset of their own and copying one here would be a second
          place to forget. It is datestamped, and rome-cloud renames it on every
          swap so caches refetch, which makes this a link that a swap over there
-         breaks. A dead image costs the picture, not the card.
+         breaks. A dead image costs the picture, not the card. The same URL is
+         DEFAULT_SOCIAL_IMAGE_URL in packages/core/src/lib/social-meta.ts;
+         change both.
 
          Each tag stays on ONE line even where that runs long. Rsbuild drops a
          `<meta>` split across lines from the emitted HTML — the two description

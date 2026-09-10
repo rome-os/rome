@@ -63,4 +63,9 @@ describe("renderSocialMeta", () => {
     const noMarkers = "<html><head><title>Rome</title></head></html>";
     expect(renderSocialMeta(noMarkers, card)).toBe(noMarkers);
   });
+
+  it("treats a title containing $-patterns as literal text, not a replacement pattern", () => {
+    const html = renderSocialMeta(SHELL, { ...card, title: "Cost $& Co" });
+    expect(html).toContain("<title>Cost $&amp; Co</title>");
+  });
 });

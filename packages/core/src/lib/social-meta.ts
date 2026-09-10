@@ -64,5 +64,5 @@ export function renderSocialMeta(indexHtml: string, card: SocialCard | null): st
   const before = indexHtml.slice(0, start + START_MARKER.length);
   const after = indexHtml.slice(end);
   const withBlock = `${before}\n${socialTags(card)}\n    ${after}`;
-  return withBlock.replace(TITLE_RE, `<title>${escapeHtml(card.title)}</title>`);
+  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(card.title)}</title>`);
 }

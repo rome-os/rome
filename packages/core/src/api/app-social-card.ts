@@ -36,7 +36,9 @@ function isResolvedWebApp(
 /**
  * The social card for an app document request, or null when the request is
  * not for an installed app with a frontend (the shell then keeps its static
- * card). Mirrors the SPA's own `getRoutedAppId` in packages/web.
+ * card). Mirrors the SPA's own `getRoutedAppId` in packages/web, minus its
+ * reserved-id guard (`store`, `inbox`, …), which only affects client
+ * routing — an unmatched id here just keeps the static card.
  */
 export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): SocialCard | null {
   const pathname = new URL(request.url).pathname;
@@ -45,6 +47,8 @@ export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): S
   const view = deps.appCatalog.get(appId);
   if (!isResolvedWebApp(view)) return null;
 
+  // Echoes the requested host on purpose: the crawler already holds this
+  // URL; getInstanceOrigin would break loopback/tailnet previews.
   const { origin } = getExternalRequestOrigin(request);
   return {
     title: view.displayName,
