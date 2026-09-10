@@ -99,6 +99,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Test United OpenCLI plugin
+        run: scripts/test-env.sh node --test opencli-plugins/united/*.test.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm lint:prose
