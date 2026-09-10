@@ -7,7 +7,7 @@ const FavorRequirementSchema = z
   .object({
     amount: z.number().int().positive(),
     title: z.string().min(1),
-    summary: z.string().min(1).optional(),
+    summary: z.string().min(1),
     displayFields: z
       .array(
         z
@@ -85,7 +85,11 @@ export const AgentConfigSchema = z
     description: z.string().min(1),
     tier: z.enum(TIER_VALUES).optional(),
     model: z.enum(["opus", "sonnet", "haiku"]).optional(),
-    modelId: z.string().min(1).regex(/^\S+$/u, "Model ID must not contain whitespace").optional(),
+    modelId: z
+      .string()
+      .min(1)
+      .refine((value) => !/\s/u.test(value), "Model ID must not contain whitespace")
+      .optional(),
     reasoningEffort: z.enum(REASONING_EFFORT_VALUES).default(DEFAULT_REASONING_EFFORT),
     provider: z.enum(PROVIDER_VALUES).optional(),
     systemPromptPrefix: z.string().min(1),
