@@ -1,4 +1,4 @@
-// Model selection contract: docs/architecture/agent-model-selection.md.
+// Model selection contract: docs/concepts/sessions.md#model-pin.
 
 import type { AgentConfig } from "../types.js";
 import type { ExactModelResolutionRequest, ModelResolutionRequest } from "./model-resolver.js";
