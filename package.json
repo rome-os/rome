@@ -12,6 +12,7 @@
     "dev": "pnpm build:apps && pnpm --filter @rome/core dev",
     "start:web": "pnpm --filter rome-web dev",
     "start:web:mock": "pnpm --filter rome-web dev:mock",
+    "build:web:mock": "pnpm --filter rome-web build:mock",
     "storybook": "pnpm --filter rome-web storybook",
     "build:storybook": "pnpm --filter rome-web build:storybook",
     "desktop:image:local": "pnpm --filter rome-desktop image:local",
@@ -31,7 +32,7 @@
     "lint:sh": "scripts/lint-shell.sh",
     "lint:prose": "node scripts/check-prose.mjs",
     "lint:agents": "tsx scripts/check-agents-symlinks.ts",
-    "lint:deadcode": "knip --no-config-hints --max-issues 20",
+    "lint:deadcode": "knip --no-config-hints",
     "lint:deadcode:report": "knip --no-exit-code",
     "typecheck:lint-agents": "tsc -p tsconfig.lint-agents.json",
     "format": "biome format --write .",
@@ -92,7 +93,8 @@
     "lint-staged": "^17.0.8",
     "postcss-value-parser": "^4.2.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "4.130.0"
   },
   "lint-staged": {
     "*": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"

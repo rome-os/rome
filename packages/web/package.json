@@ -9,6 +9,7 @@
     "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open",
     "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
+    "build:mock": "pnpm build:kit && tsc --noEmit && rsbuild build --config mock/rsbuild.static.config.ts",
     "build": "tsc --noEmit && rsbuild build",
     "typecheck": "tsc --noEmit",
     "preview": "rsbuild preview",

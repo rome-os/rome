@@ -16,6 +16,7 @@ import {
   resolveModuleEntryPath,
 } from "./module-loader.js";
 import type { FavorService } from "../favors/types.js";
+import type { HostExecutionService } from "../host-execution/service.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -85,6 +86,7 @@ interface AppActionServices {
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  hostExecution?: HostExecutionService;
 }
 
 interface AppLookup {
@@ -113,6 +115,9 @@ function createAppActionRuntimeDeps(
 
   return {
     ...deps,
+    ...(record.metadata.ownerId === "system" && services.hostExecution
+      ? { hostExecution: services.hostExecution }
+      : {}),
     appContext: createRomeAppContext(app, {
       catalog,
       db: services.db,
@@ -231,13 +236,7 @@ export function createAppActionsSubscriber(
   actionRegistry: ActionRegistryImpl,
   catalog: AppCatalog,
   deps: Record<string, unknown>,
-  services: {
-    db: DrizzleDb;
-    actionEngine: ActionEngine;
-    routinesRepo?: RoutinesRepository;
-    repositories: AppRuntimeRepositories;
-    favorService?: FavorService;
-  },
+  services: AppActionServices,
 ): SubscriberHandler {
   return async function appActionsSubscriber(event: CatalogEvent) {
     actionRegistry.unregisterOwnedBy("app", event.appId);

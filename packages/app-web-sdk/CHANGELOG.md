@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.3](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.2...app-web-sdk-v0.3.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **app-web-sdk:** resolve app renderer from the SDK ([#301](https://github.com/rome-os/rome/issues/301)) ([ff0a3fe](https://github.com/rome-os/rome/commit/ff0a3fe024fc1ad80f5765df5df4465b8e7e672a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.2.2 to ^0.2.7
+
 ## [0.3.2](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.1...app-web-sdk-v0.3.2) (2026-09-09)
 
 

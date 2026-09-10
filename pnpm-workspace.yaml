@@ -31,6 +31,7 @@ allowBuilds:
   node-pty: true
   protobufjs: true
   sharp: true
+  workerd: true
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
@@ -43,6 +44,7 @@ allowBuilds:
 
 overrides:
   "@rsbuild/core": "2.2.3"
+  "@whiskeysockets/baileys>sharp": "0.34.5"
   react: "19.2.6"
   react-dom: "19.2.6"
   "@types/react": "19.2.15"
