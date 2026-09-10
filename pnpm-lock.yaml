@@ -1074,15 +1074,30 @@ importers:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
     devDependencies:
+      '@mozilla/readability':
+        specifier: ^0.6.0
+        version: 0.6.0
+      '@types/jsdom':
+        specifier: ^28.0.3
+        version: 28.0.3
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      '@types/turndown':
+        specifier: ^5.0.6
+        version: 5.0.6
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
+      jsdom:
+        specifier: ^29.1.1
+        version: 29.1.1
+      turndown:
+        specifier: ^7.2.4
+        version: 7.2.4
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
