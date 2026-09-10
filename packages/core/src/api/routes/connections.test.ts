@@ -504,18 +504,24 @@ describe("connection pairing teardown", () => {
     "talk",
     "unrelated",
     "rollback",
+    "talk-rollback",
   ])("%s teardown preserves only requests that still have Talk authorization", async (teardown) => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const ledger = new DrizzleGrantLedger(db);
     const registry = new ConnectionRegistry({ ledger });
     const fixture = makeTwoGrant();
+    fixture.descriptor.service = "discord";
     registry.register(fixture.descriptor);
-    const conn = await registry.connect("fake-discord");
+    const conn = await registry.connect("discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     await registry.importCredential(conn.id, "user", fixture.userCredential());
     const personMappingRepo = new PersonMappingRepository(db);
-    await personMappingRepo.create({ displayName: "Guardian", bondLevel: "guardian" });
+    await personMappingRepo.create({
+      displayName: "Guardian",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "discord", channelUserId: "paired" }],
+    });
     const approvalsRepo = new ApprovalsRepository(db, () => Buffer.alloc(32, 1));
     const input = {
       connectionId: conn.id,
@@ -531,7 +537,7 @@ describe("connection pairing teardown", () => {
       channelUserId: "other",
     })!;
     const app = makeApp(registry, personMappingRepo, { db, approvalsRepo });
-    if (teardown === "rollback") {
+    if (teardown.endsWith("rollback")) {
       rs.spyOn(personMappingRepo, "writeDeleteGuardianChannelMappings").mockImplementation(() => {
         throw new Error("cleanup failed");
       });
@@ -539,15 +545,18 @@ describe("connection pairing teardown", () => {
     const suffix =
       teardown === "connection" || teardown === "rollback"
         ? ""
-        : `/grants/${teardown === "talk" ? "bot" : "user"}`;
+        : `/grants/${teardown.startsWith("talk") ? "bot" : "user"}`;
     const response = await app.request(`/connections/${conn.id}${suffix}`, {
       method: "DELETE",
       headers: SAME_ORIGIN,
     });
-    if (teardown === "rollback") {
+    if (teardown.endsWith("rollback")) {
       expect(response.status).toBe(500);
       expect(await ledger.listConnections()).toHaveLength(1);
       expect(registry.get(conn.id).auth.grants().bot).toBe("authorized");
+      expect((await ledger.getGrant(conn.id, "bot"))?.credential).toBeDefined();
+      expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
+      expect(await personMappingRepo.findByChannelUser("discord", "paired")).not.toBeNull();
       expect((await approvalsRepo.findById(request.approval.id))?.status).toBe("pending");
       return;
     }
@@ -566,7 +575,8 @@ describe("connection pairing teardown", () => {
     ).toBe("already_resolved");
     expect(approvalsRepo.verifyPairing({ ...input, code }).outcome).toBe("invalid_code");
     expect(await personMappingRepo.findByChannelUser("discord", "requester")).toBeNull();
-    const reconnected = teardown === "connection" ? await registry.connect("fake-discord") : conn;
+    expect(await personMappingRepo.findByChannelUser("discord", "paired")).toBeNull();
+    const reconnected = teardown === "connection" ? await registry.connect("discord") : conn;
     await registry.importCredential(reconnected.id, "bot", fixture.botCredential());
     const fresh = approvalsRepo.requestPairing({ ...input, connectionId: reconnected.id });
     expect(fresh?.approval.id).toBeDefined();

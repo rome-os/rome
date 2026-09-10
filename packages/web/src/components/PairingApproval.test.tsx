@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import type { Approval } from "@/pages/ActivityPage";
@@ -118,6 +119,57 @@ describe("shared pairing approvals", () => {
     expect(activity.queryByText(code)).toBeNull();
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(activity.getByText(/verified-owner/)).toBeTruthy();
+    client.clear();
+  });
+
+  it("shows the conflict even after the request leaves Connections", async () => {
+    const error = "This account is already linked. Pairing was not approved.";
+    const notify = rs.spyOn(toast, "error").mockImplementation(() => "test-toast");
+    let resolved = false;
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).endsWith("/resolve")) {
+        resolved = true;
+        return Response.json({ error }, { status: 409 });
+      }
+      if (String(input).endsWith("/code")) return Response.json({ code: "RP-0123ABCD" });
+      return Response.json(
+        resolved
+          ? []
+          : [
+              {
+                id: "conflict",
+                type: "person_mapping",
+                status: "pending",
+                createdAt: new Date().toISOString(),
+                payload: {
+                  action: "channel_pairing",
+                  channel: "telegram",
+                  connectionId: "bot",
+                  channelUserId: "alice",
+                  displayName: "Alice",
+                  expiresAt: Date.now() + 600_000,
+                  failedAttempts: 0,
+                  lastGuidanceAt: Date.now(),
+                },
+              },
+            ],
+      );
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <PairingApprovals />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }),
+    );
+    await screen.findByText(/No pending pairing requests/);
+    expect(notify).toHaveBeenCalledWith(error);
+    expect(screen.queryByRole("dialog")).toBeNull();
     client.clear();
   });
 

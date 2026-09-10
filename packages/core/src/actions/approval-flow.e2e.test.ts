@@ -411,7 +411,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       // Act: the guardian approves over HTTP.
       const approveRes = await app.request(`/api/approvals/${approvalId}/approve`, {
         method: "POST",
-        headers,
+        headers: { ...headers, "sec-fetch-site": "same-origin" },
       });
       expect(approveRes.status).toBe(202);
 

@@ -1,5 +1,7 @@
+import { pairingPayload } from "@rome/api-types/approvals";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { notifyPairingResolution } from "../../channels/pairing.js";
 import { createLogger } from "../../logger.js";
@@ -24,6 +26,12 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
   }
 
   const approval = resolveResult.approval;
+  if (pairingPayload(approval)?.resolution === "account_linked") {
+    return c.json(
+      { error: "This account is already linked. Pairing was not approved.", approval },
+      409,
+    );
+  }
   await notifyPairingResolution(deps.talkRouter, approval);
   if (action === "approve" && approval.type === "action_execution") {
     approvalHandler.onApproved(approvalId).catch((err) => {
@@ -71,6 +79,11 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
   app.use("/approvals/*", async (c, next) => {
     if ((await currentSessionActor())?.kind !== "guardian")
       return c.json({ error: "Guardian authentication required" }, 403);
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
+      !isSameOriginMutationRequest(c.req.raw)
+    )
+      return c.json({ error: "Cross-site requests are not allowed." }, 403);
     await next();
   });
   app.use("/approvals", async (c, next) => {

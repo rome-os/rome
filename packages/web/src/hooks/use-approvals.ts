@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { pairingPayload, PAIRING_HISTORY_PAGE_SIZE } from "@rome/api-types/approvals";
 import { useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -41,6 +42,7 @@ export function useResolveApproval() {
         json: { action },
         fallback: t("pairing.resolveFailed"),
       }),
+    onError: (error) => toast.error(error.message),
     onSettled: () => client.invalidateQueries({ queryKey: APPROVALS_QUERY_KEY }),
   });
 }
