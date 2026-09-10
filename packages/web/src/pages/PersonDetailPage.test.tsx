@@ -1106,12 +1106,7 @@ describe("PersonDetailPage, sending", () => {
     renderPage("arvind");
 
     await screen.findByRole("heading", { name: "Arvind Srivastav" });
-    // The reason the server declared, in this locale's words — no sentence
-    // crossed the wire. LinkedIn's is its own: it is an inbox Rome mirrors and
-    // cannot write to, which is not the same as a channel it has yet to learn.
-    expect(
-      screen.getByText("Rome reads LinkedIn but cannot write to it. Reply from LinkedIn itself."),
-    ).toBeTruthy();
+    expect(screen.getByText("Rome cannot send on LinkedIn yet.")).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Message text" })).toBeNull();
     // And the history stays readable.
     expect(await screen.findByText("the landlord replies fast")).toBeTruthy();

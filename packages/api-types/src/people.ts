@@ -770,13 +770,8 @@ export interface LinkedAccount {
  * - `not-connected` — no live connection for the channel. The guardian fixes
  *   this in Settings.
  * - `unsupported` — the connection is live but does not do direct messaging.
- *   LinkedIn mirrors an inbox it cannot write to; a channel Rome has not
- *   taught to send reads the same way. Why is a fact about the channel rather
- *   than about this account, so the copy is keyed on the channel name and no
- *   reason string crosses the wire — the dashboard localizes it, the same way
- *   it already localizes every channel's own label.
- * - `no-conversation` — the channel sends, but has no thread that reaches this
- *   account yet, and could not open one. Per account, and recoverable.
+ * - `no-conversation` — the channel cannot identify a direct conversation for
+ *   this account. This includes missing or ambiguous threads.
  */
 export type AccountSendState = "yes" | "not-connected" | "unsupported" | "no-conversation";
 

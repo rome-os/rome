@@ -64,6 +64,35 @@
   --tw-prose-td-borders: var(--border);
 }
 
+/* Chat owns its collapsible wrapper around the shared Markdown cards. Keep the
+   wrapper in prose rhythm, while the nested card and duplicate label go flat. */
+.rome-markdown [data-chat-code-block="code"] {
+  margin-block: var(--markdown-code-block-space-block);
+}
+
+.rome-markdown [data-chat-code-block="mermaid"] {
+  margin-block: var(--markdown-media-space-block);
+}
+
+.rome-markdown
+  [data-chat-code-block-body]
+  > :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
+  margin-block: 0;
+}
+
+.rome-markdown > [data-chat-code-block] + * {
+  margin-block-start: 0;
+}
+
+.rome-markdown
+  [data-chat-code-block]
+  :is(
+    [data-streamdown="code-block-header"],
+    [data-streamdown="mermaid-block"] > :first-child
+  ) {
+  display: none;
+}
+
 @keyframes rome-activity-pulse {
 
   0%,

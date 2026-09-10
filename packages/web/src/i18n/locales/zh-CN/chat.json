@@ -1,4 +1,8 @@
 {
+  "markdown": {
+    "code": "代码",
+    "mermaid": "Mermaid 图表"
+  },
   "title": "Rome",
   "inputState": {
     "queued": "等待加入对话",
@@ -16,8 +20,6 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
-    "add": "添加小组件",
-    "addShort": "加组件",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",
@@ -55,9 +57,7 @@
     "unavailableBody": "链接可能已被撤销或失效。"
   },
   "timeline": {
-    "label": "提问时间线",
-    "hide": "隐藏时间线",
-    "show": "显示时间线"
+    "label": "提问时间线"
   },
   "jumpToLatest": "回到最新消息",
   "roles": {

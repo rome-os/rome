@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-web-sdk",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Web runtime and CLI SDK for Rome apps",
   "repository": {
     "type": "git",
@@ -38,27 +38,27 @@
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "../../scripts/test-env.sh rstest"
   },
   "dependencies": {
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^1.0.0",
     "@tailwindcss/postcss": "^4.1.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "tailwind-merge": "^3.6.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
     "tailwindcss": "^4.1.0",
     "tar": "^7.5.13",
     "tw-animate-css": "^1.3.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {
+    "@rstest/core": "^0.11.11",
     "@types/node": "^25.2.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {

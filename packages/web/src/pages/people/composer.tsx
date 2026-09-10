@@ -180,7 +180,7 @@ function refusalText(
   send: RefusedSendState,
   channel: string,
 ): string {
-  return t(sendRefusalKey(send, channel), { channel: channelLabel(t, channel) });
+  return t(sendRefusalKey(send), { channel: channelLabel(t, channel) });
 }
 
 /** One chip's worth of target: the channel's glyph and name, and the handle.

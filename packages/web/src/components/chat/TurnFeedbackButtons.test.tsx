@@ -51,7 +51,12 @@ describe("TurnFeedbackButtons", () => {
     fireEvent.click(screen.getByRole("button", { name: "message.feedback.submit" }));
 
     await waitFor(() => {
-      expect(autoPlaceApp).toHaveBeenCalledWith("sessions", "feedback-fork-session");
+      expect(autoPlaceApp).toHaveBeenCalledWith(
+        "sessions",
+        "feedback-fork-session",
+        undefined,
+        true,
+      );
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/chat/sessions/chat-session/turns/turn-1/feedback",

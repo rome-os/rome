@@ -37,11 +37,113 @@ export type WidgetSeed =
     };
 
 const STORAGE_PREFIX = "rome:free-layout:";
-export const STRIP_ITEM_MIN_WIDTH = 320;
 
 let listeners: Array<() => void> = [];
 let snapshot: WidgetPlacement[] = [];
 let activeSessionId: string | null = null;
+const layoutRevisions = new Map<string | null, number>();
+
+export interface ToolView {
+  activeId: string | null;
+  collapsed: boolean;
+  unreadIds: string[];
+}
+
+let toolView: ToolView = { activeId: null, collapsed: true, unreadIds: [] };
+const VIEW_PREFIX = "rome:tool-view:";
+
+function readToolView(sessionId: string | null, layout: WidgetPlacement[]): ToolView {
+  const fallback: ToolView = {
+    activeId: [...layout].sort((a, b) => a.order - b.order)[0]?.id ?? null,
+    collapsed: layout.length === 0,
+    unreadIds: [],
+  };
+  if (!sessionId) return fallback;
+  try {
+    const saved = JSON.parse(localStorage.getItem(`${VIEW_PREFIX}${sessionId}`) ?? "null");
+    if (!saved || typeof saved.collapsed !== "boolean") return fallback;
+    return {
+      activeId: layout.some((p) => p.id === saved.activeId) ? saved.activeId : fallback.activeId,
+      collapsed: saved.collapsed,
+      unreadIds: Array.isArray(saved.unreadIds)
+        ? layout.filter((p) => saved.unreadIds.includes(p.id)).map((p) => p.id)
+        : [],
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveToolView(next: ToolView) {
+  toolView = next;
+  if (activeSessionId) {
+    try {
+      localStorage.setItem(`${VIEW_PREFIX}${activeSessionId}`, JSON.stringify(next));
+    } catch {}
+  }
+}
+
+export function selectTool(id: string) {
+  if (!snapshot.some((p) => p.id === id)) return;
+  saveToolView({
+    activeId: id,
+    collapsed: false,
+    unreadIds: toolView.unreadIds.filter((x) => x !== id),
+  });
+  notify();
+}
+
+export function setToolsCollapsed(collapsed: boolean) {
+  if (!collapsed && toolView.activeId) {
+    selectTool(toolView.activeId);
+    return;
+  }
+  saveToolView({ ...toolView, collapsed });
+  notify();
+}
+
+function reconcileToolView(next: WidgetPlacement[]) {
+  const sorted = [...next].sort((a, b) => a.order - b.order);
+  const old = [...snapshot].sort((a, b) => a.order - b.order);
+  const oldActive = old.find((p) => p.id === toolView.activeId);
+  // App navigation replaces its mount id. Keep that tab selected by matching
+  // its identity and position, including layouts with duplicate app views.
+  const replacement =
+    oldActive &&
+    sorted.find(
+      (p) =>
+        p.type === oldActive.type &&
+        p.targetId === oldActive.targetId &&
+        p.order === oldActive.order,
+    );
+  const activeId =
+    sorted.find((p) => p.id === toolView.activeId)?.id ??
+    replacement?.id ??
+    sorted[
+      Math.min(
+        Math.max(
+          0,
+          old.findIndex((p) => p.id === toolView.activeId),
+        ),
+        sorted.length - 1,
+      )
+    ]?.id ??
+    null;
+  const unread = new Set(toolView.unreadIds);
+  for (const p of next) {
+    const previous = snapshot.find((previous) => previous.id === p.id);
+    if (!previous || (p.type === "projects" && p.selectedPath !== previous.selectedPath)) {
+      unread.add(p.id);
+    }
+  }
+  saveToolView({
+    activeId,
+    collapsed: toolView.collapsed,
+    unreadIds: next
+      .filter((p) => unread.has(p.id) && (toolView.collapsed || p.id !== activeId))
+      .map((p) => p.id),
+  });
+}
 
 function storageKey(sessionId: string): string {
   return `${STORAGE_PREFIX}${sessionId}`;
@@ -71,6 +173,8 @@ function notify() {
 }
 
 function persist(next: WidgetPlacement[]) {
+  layoutRevisions.set(activeSessionId, (layoutRevisions.get(activeSessionId) ?? 0) + 1);
+  reconcileToolView(next);
   snapshot = next;
   writeStorage(activeSessionId, next);
   notify();
@@ -109,13 +213,24 @@ function nextOrder(placements: WidgetPlacement[]): number {
   return placements.reduce((max, p) => Math.max(max, p.order), 0) + 1;
 }
 
-export function autoPlaceProjects(): string | null {
+export function autoPlaceProjects(activate = false): string | null {
   const current = getSnapshot();
   const existing = current.find((p) => p.type === "projects");
-  if (existing) return existing.id;
+  if (existing) {
+    if (activate) selectTool(existing.id);
+    else if (
+      (toolView.collapsed || toolView.activeId !== existing.id) &&
+      !toolView.unreadIds.includes(existing.id)
+    ) {
+      saveToolView({ ...toolView, unreadIds: [...toolView.unreadIds, existing.id] });
+      notify();
+    }
+    return existing.id;
+  }
 
   const id = genId();
   persist([...current, { id, type: "projects", order: nextOrder(current) }]);
+  if (activate) selectTool(id);
   return id;
 }
 
@@ -127,10 +242,14 @@ export function autoPlaceProjects(): string | null {
 export function placeChatWidget(sessionId: string): string {
   const current = getSnapshot();
   const existing = current.find((p) => p.type === "chat" && p.targetId === sessionId);
-  if (existing) return existing.id;
+  if (existing) {
+    selectTool(existing.id);
+    return existing.id;
+  }
 
   const id = genId();
   persist([...current, { id, type: "chat", targetId: sessionId, order: nextOrder(current) }]);
+  selectTool(id);
   return id;
 }
 
@@ -138,6 +257,7 @@ export function autoPlaceApp(
   appId: string,
   route?: string,
   params?: Record<string, string | number | boolean>,
+  activate = false,
 ): string {
   let current = getSnapshot();
 
@@ -163,6 +283,7 @@ export function autoPlaceApp(
       ...(params !== undefined ? { params } : {}),
     },
   ]);
+  if (activate) selectTool(id);
   return id;
 }
 
@@ -234,6 +355,13 @@ export function placeWidgetsIfSessionActive(
 ): boolean {
   if (activeSessionId !== sessionId) return false;
   placeWidgets(widgets);
+  const last = widgets[widgets.length - 1];
+  const placed =
+    last &&
+    snapshot.find(
+      (p) => p.type === last.type && (last.type !== "app" || p.targetId === last.appId),
+    );
+  if (placed) selectTool(placed.id);
   return true;
 }
 
@@ -310,23 +438,8 @@ export function updateProjectsSelection(placementId: string, selectedPath: strin
   );
 }
 
-export function reorderPlacements(
-  placements: WidgetPlacement[],
-  activeId: string,
-  overId: string,
-): WidgetPlacement[] | null {
-  const sorted = [...placements].sort((a, b) => a.order - b.order);
-  const oldIndex = sorted.findIndex((p) => p.id === activeId);
-  const newIndex = sorted.findIndex((p) => p.id === overId);
-  if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return null;
-
-  const [moved] = sorted.splice(oldIndex, 1);
-  sorted.splice(newIndex, 0, moved);
-
-  return sorted.map((p, i) => ({ ...p, order: i + 1 }));
-}
-
 export function setActiveSession(sessionId: string | null) {
+  if (activeSessionId === sessionId) return;
   const previousSessionId = activeSessionId;
   // Carry over draft-mode layout when the user moves from "no session" to
   // a freshly created one. The widgets they placed before hitting send
@@ -351,10 +464,12 @@ export function setActiveSession(sessionId: string | null) {
     return;
   }
   snapshot = readStorage(sessionId);
+  toolView = readToolView(sessionId, snapshot);
   notify();
 }
 
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
+  const revision = layoutRevisions.get(sessionId);
   try {
     const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {
       credentials: "include",
@@ -363,9 +478,12 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
     const data = (await res.json()) as { layout?: unknown };
     if (!Array.isArray(data.layout)) return;
     const layout = data.layout as WidgetPlacement[];
+    // A delayed load must not erase tools opened or closed since it started.
+    if (layoutRevisions.get(sessionId) !== revision) return;
     writeStorage(sessionId, layout);
     if (sessionId === activeSessionId) {
       snapshot = layout;
+      toolView = readToolView(sessionId, layout);
       notify();
     }
   } catch {
@@ -375,21 +493,34 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
 
 export function useFreeCells() {
   const placements = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const view = useSyncExternalStore(subscribe, getToolView, getToolView);
 
   const addWidget = useCallback((type: WidgetType, targetId?: string) => {
     const current = getSnapshot();
-    persist([...current, { id: genId(), type, targetId, order: nextOrder(current) }]);
+    const existing = current.find((p) => p.type === type && p.targetId === targetId);
+    if (existing) {
+      selectTool(existing.id);
+      return;
+    }
+    const id = genId();
+    persist([...current, { id, type, targetId, order: nextOrder(current) }]);
+    selectTool(id);
   }, []);
 
   const removeWidget = useCallback((id: string) => {
     persist(getSnapshot().filter((p) => p.id !== id));
   }, []);
 
-  const moveWidget = useCallback((activeId: string, overId: string) => {
-    const current = getSnapshot();
-    const result = reorderPlacements(current, activeId, overId);
-    if (result) persist(result);
-  }, []);
+  return {
+    placements,
+    addWidget,
+    removeWidget,
+    toolView: view,
+    selectTool,
+    setToolsCollapsed,
+  };
+}
 
-  return { placements, addWidget, removeWidget, moveWidget };
+function getToolView() {
+  return toolView;
 }

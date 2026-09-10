@@ -439,6 +439,7 @@ jobs:
             exit 1
           fi
       - run: pnpm --filter rome-web test:layout
+      - run: pnpm --filter rome-web test:storybook
       - run: pnpm --filter rome-web test:desktop-vnc
       - uses: actions/upload-artifact@v4
         if: failure()

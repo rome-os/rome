@@ -104,7 +104,18 @@ export interface LinkedInHistoryMessage {
   subject: string | null;
 }
 
+export interface LinkedInReplyTarget {
+  threadId: string;
+  threadUrl: string;
+  participantId: string;
+  selfParticipantId: string;
+}
+
 export interface LinkedInSyncSink {
+  /** Returns one verified direct thread, or null for absent or ambiguous membership. */
+  findReplyTarget?(
+    by: { participantId: string } | { threadId: string },
+  ): Promise<LinkedInReplyTarget | null>;
   upsertThreads(threads: LinkedInThreadInput[]): Promise<void>;
   upsertMessages(messages: LinkedInMessageInput[]): Promise<void>;
   /** Watermarks for the given threads (absent threads are omitted). */

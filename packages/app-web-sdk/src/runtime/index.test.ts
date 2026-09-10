@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// @rstest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 import {
   fetchAppApi,
@@ -26,19 +28,19 @@ const bootstrap: RomeAppBootstrap = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal("window", {
+  rs.stubGlobal("window", {
     __ROME_APP_BOOTSTRAP__: bootstrap,
   } as Window & typeof globalThis);
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  rs.unstubAllGlobals();
 });
 
 describe("fetchAppApi", () => {
   it("preserves query params instead of encoding them into the path", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     await fetchAppApi("repos?limit=50&cursor=abc");
 
@@ -49,8 +51,8 @@ describe("fetchAppApi", () => {
   });
 
   it("keeps behavior for plain paths without query params", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     await fetchAppApi("repos");
 
@@ -58,8 +60,8 @@ describe("fetchAppApi", () => {
   });
 
   it("supports query-only paths", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     await fetchAppApi("?limit=50&cursor=abc");
 
@@ -70,8 +72,8 @@ describe("fetchAppApi", () => {
   });
 
   it("normalizes query strings via URLSearchParams encoding", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = rs.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    rs.stubGlobal("fetch", fetchMock);
 
     await fetchAppApi("repos?q=hello world&tag=a+b&emoji=🦊");
 
@@ -108,7 +110,7 @@ describe("isPreview", () => {
   });
 
   it("is true when the shell mode is preview", () => {
-    vi.stubGlobal("window", {
+    rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: {
         ...bootstrap,
         shell: { ...bootstrap.shell, mode: "preview" },
@@ -118,15 +120,15 @@ describe("isPreview", () => {
   });
 
   it("defaults to false before bootstrap is available", () => {
-    vi.stubGlobal("window", {} as Window & typeof globalThis);
+    rs.stubGlobal("window", {} as Window & typeof globalThis);
     expect(isPreview()).toBe(false);
   });
 });
 
 describe("navigateRome", () => {
   function stubNavHost() {
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal("window", {
+    const dispatchEvent = rs.fn();
+    rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
       location: { origin: "http://localhost" },
@@ -135,9 +137,9 @@ describe("navigateRome", () => {
   }
 
   function stubIframeNavHost() {
-    const dispatchEvent = vi.fn();
-    const postMessage = vi.fn();
-    vi.stubGlobal("window", {
+    const dispatchEvent = rs.fn();
+    const postMessage = rs.fn();
+    rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
       parent: { postMessage },
@@ -147,7 +149,7 @@ describe("navigateRome", () => {
   }
 
   function dispatchedNavigateDetail(
-    dispatchEvent: ReturnType<typeof vi.fn>,
+    dispatchEvent: ReturnType<typeof rs.fn>,
   ): { path?: string; state?: unknown } | undefined {
     const event = dispatchEvent.mock.calls
       .map(([evt]) => evt as CustomEvent<{ path?: string; state?: unknown }>)
@@ -155,7 +157,7 @@ describe("navigateRome", () => {
     return event?.detail;
   }
 
-  function dispatchedPath(dispatchEvent: ReturnType<typeof vi.fn>): string | undefined {
+  function dispatchedPath(dispatchEvent: ReturnType<typeof rs.fn>): string | undefined {
     return dispatchedNavigateDetail(dispatchEvent)?.path;
   }
 
@@ -334,8 +336,8 @@ describe("navigateRome", () => {
 
 describe("startChat", () => {
   function stubChatHost() {
-    const dispatchEvent = vi.fn();
-    vi.stubGlobal("window", {
+    const dispatchEvent = rs.fn();
+    rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
     } as unknown as Window & typeof globalThis);
@@ -343,9 +345,9 @@ describe("startChat", () => {
   }
 
   function stubIframeChatHost() {
-    const dispatchEvent = vi.fn();
-    const postMessage = vi.fn();
-    vi.stubGlobal("window", {
+    const dispatchEvent = rs.fn();
+    const postMessage = rs.fn();
+    rs.stubGlobal("window", {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
       parent: { postMessage },
@@ -355,11 +357,11 @@ describe("startChat", () => {
   }
 
   function mockChatFetch() {
-    const fetchMock = vi
+    const fetchMock = rs
       .fn()
       .mockResolvedValueOnce(Response.json({ id: "session-123" }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
 
@@ -404,12 +406,12 @@ describe("startChat", () => {
 
   it("stores widget layout before posting the first turn, then navigates from the top window", async () => {
     const { dispatchEvent } = stubChatHost();
-    const fetchMock = vi
+    const fetchMock = rs
       .fn()
       .mockResolvedValueOnce(Response.json({ id: "session-123" }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     await startChat({
       message: "Start with context",
@@ -460,12 +462,12 @@ describe("startChat", () => {
 
   it("stores widget layout and forwards navigation to the parent when started inside an iframe", async () => {
     const { postMessage } = stubIframeChatHost();
-    const fetchMock = vi
+    const fetchMock = rs
       .fn()
       .mockResolvedValueOnce(Response.json({ id: "session-123" }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     await startChat({
       message: "Start with context",
@@ -504,7 +506,7 @@ describe("startChat", () => {
   it("navigates only after the first-turn POST settles, so the chat page's history fetch sees the user message", async () => {
     const { dispatchEvent } = stubChatHost();
     let resolveTurnPost!: (res: Response) => void;
-    const fetchMock = vi
+    const fetchMock = rs
       .fn()
       .mockResolvedValueOnce(Response.json({ id: "session-123" }))
       .mockReturnValueOnce(
@@ -512,10 +514,10 @@ describe("startChat", () => {
           resolveTurnPost = resolve;
         }),
       );
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const pending = startChat({ message: "Start here" });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await rs.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
     const navigated = () =>
       dispatchEvent.mock.calls.some(([evt]) => (evt as CustomEvent).type === "rome:host-navigate");
@@ -528,11 +530,11 @@ describe("startChat", () => {
 
   it("still navigates when the first-turn POST fails", async () => {
     const { dispatchEvent } = stubChatHost();
-    const fetchMock = vi
+    const fetchMock = rs
       .fn()
       .mockResolvedValueOnce(Response.json({ id: "session-123" }))
       .mockRejectedValueOnce(new Error("network down"));
-    vi.stubGlobal("fetch", fetchMock);
+    rs.stubGlobal("fetch", fetchMock);
 
     const { sessionId } = await startChat({ message: "Start here" });
 

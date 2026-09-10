@@ -165,15 +165,7 @@ export function ConnectionDetailDialog({
     <Dialog open={card !== null} onClose={onClose} size="lg">
       {card && (
         <>
-          <DialogHeader onClose={onClose}>
-            <div className="flex items-center gap-3">
-              <ConnectionBrandBadge connection={card.service} />
-              <div className="min-w-0 flex-1">
-                <DialogTitle className="text-body">{card.label}</DialogTitle>
-                <StatusIndicator card={card} className="mt-1" />
-              </div>
-            </div>
-          </DialogHeader>
+          <ConnectionDetailHeader card={card} onClose={onClose} />
           <DialogBody>
             <ConnectionDetailBody
               card={card}
@@ -185,5 +177,25 @@ export function ConnectionDetailDialog({
         </>
       )}
     </Dialog>
+  );
+}
+
+export function ConnectionDetailHeader({
+  card,
+  onClose,
+}: {
+  card: ConnectionCard;
+  onClose: () => void;
+}) {
+  return (
+    <DialogHeader onClose={onClose}>
+      <div className="flex items-center gap-3">
+        <ConnectionBrandBadge connection={card.service} />
+        <div className="min-w-0 flex-1">
+          <DialogTitle className="text-body">{card.label}</DialogTitle>
+          <StatusIndicator card={card} className="mt-1" />
+        </div>
+      </div>
+    </DialogHeader>
   );
 }

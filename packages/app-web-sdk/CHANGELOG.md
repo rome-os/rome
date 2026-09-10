@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.2](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.1...app-web-sdk-v0.3.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **app-web-sdk:** drop unused styling dependencies ([#307](https://github.com/rome-os/rome/issues/307)) ([51646ee](https://github.com/rome-os/rome/commit/51646eebda470d698e4db678af63db140a059948)), closes [#283](https://github.com/rome-os/rome/issues/283)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.2.2 to ^0.2.6
+
 ## [0.3.1](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.0...app-web-sdk-v0.3.1) (2026-09-05)
 
 

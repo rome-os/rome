@@ -27,6 +27,9 @@ export interface RenderBlockOptions {
    * interaction state and routes submissions to the right session in the merged
    * (multi-session) transcript. */
   sessionId?: string;
+  /** Turn that owns the rendered text blocks, used to preserve disclosure state
+   * when a live block is replaced by its persisted transcript representation. */
+  turnId?: string;
   /** Map of `interactionResultKey(sessionId, toolUseId)` → submitted output. */
   interactionResults?: Map<string, Record<string, unknown>>;
   /** Invoked when an inline app component submits its result. */
@@ -50,6 +53,7 @@ export function renderSingleBlock(
     compact = false,
     toolUseInput,
     sessionId,
+    turnId,
     interactionResults,
     onSubmitAppComponent,
     onDismissAppComponent,
@@ -111,18 +115,32 @@ export function renderSingleBlock(
           error={typeof block.error === "object" ? block.error : undefined}
         />
       );
-    case "text":
+    case "text": {
+      const disclosureStateKey =
+        turnId !== undefined && block.blockIx !== undefined
+          ? `${turnId}:${block.blockIx}`
+          : undefined;
       // In-turn narration: give each commentary its own gap so consecutive
       // narration reads as separate utterances under one speaker (not a run-on
       // paragraph). Same text styling as the final answer. The final answer
       // renders bare, as before.
       return block.turnPhase === "commentary" ? (
         <div key={key} className="mb-3">
-          <TextBlock content={block.content ?? ""} compact={compact} />
+          <TextBlock
+            content={block.content ?? ""}
+            compact={compact}
+            disclosureStateKey={disclosureStateKey}
+          />
         </div>
       ) : (
-        <TextBlock key={key} content={block.content ?? ""} compact={compact} />
+        <TextBlock
+          key={key}
+          content={block.content ?? ""}
+          compact={compact}
+          disclosureStateKey={disclosureStateKey}
+        />
       );
+    }
     case "turn_recap":
       return (
         <TurnRecapBlock

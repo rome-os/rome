@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Eye, EyeOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -15,20 +14,8 @@ import {
 // Re-checking is trailing-debounced because a streamed reply can resize the
 // content on every token before the transcript crosses the visibility gate.
 const MEASURE_DEBOUNCE_MS = 150;
-const CONTROL_NODE_GAP_PX = 24;
 
 const EMPTY: TimelineNode[] = [];
-
-// Matches how the sidebar remembers its own collapse (RomeShellLayout).
-const HIDDEN_KEY = "rome-timeline-hidden";
-
-function readHidden(): boolean {
-  try {
-    return localStorage.getItem(HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 export interface ChatTimelineRailProps {
   /** The chat's single scrolling node. */
@@ -55,7 +42,6 @@ export interface ChatTimelineRailProps {
 export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatTimelineRailProps) {
   const { t } = useTranslation("chat");
   const [nodes, setNodes] = useState<TimelineNode[]>(EMPTY);
-  const [hidden, setHidden] = useState(readHidden);
   // The bars are positioned in this element's pixel coordinate space. Measuring
   // the track directly lets the compact step tighten only when the column is
   // truly saturated.
@@ -108,14 +94,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       timer = window.setTimeout(measure, MEASURE_DEBOUNCE_MS);
     };
 
-    // Always measure once, even while hidden: the node count is what decides
-    // whether the show control renders at all, and skipping this would strand a
-    // reader who hid the rail and then reloaded with no way to bring it back.
     measure();
-    // The observer stays active while markers are hidden. The show control is
-    // positioned from the first node, so a resized track must update that node
-    // to keep the control reachable. It also lets an ineligible transcript grow
-    // into a timeline without waiting for another message or a reload.
 
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
@@ -124,7 +103,7 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [scroller, content, questions, hidden]);
+  }, [scroller, content, questions]);
 
   // Clamped rather than reset: questions arrive while the chat runs, and the
   // caret should not jump back to the top each time one does.
@@ -145,16 +124,6 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
     },
     [nodes.length],
   );
-
-  const toggleHidden = useCallback(() => {
-    setHidden((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(HIDDEN_KEY, next ? "1" : "0");
-      } catch {}
-      return next;
-    });
-  }, []);
 
   // The track stays mounted even with nothing to show. `measure` reads its
   // height, so an early return here would leave `trackRef` null, which would
@@ -187,41 +156,8 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
       aria-label={empty ? undefined : t("timeline.label")}
       className="group pointer-events-none absolute inset-y-0 left-0 z-10 hidden w-8 @min-[48rem]/transcript:block"
     >
-      {/* The control and markers share one coordinate space, so the eye follows
-          the compact group instead of staying stranded at the top of the rail. */}
       <div ref={trackRef} data-timeline-track className="absolute top-16 bottom-32 left-0 w-8">
-        {empty ? null : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleHidden}
-                aria-label={hidden ? t("timeline.show") : t("timeline.hide")}
-                aria-expanded={!hidden}
-                style={{ top: nodes[0].topPx - CONTROL_NODE_GAP_PX }}
-                className="pointer-events-auto absolute left-4 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground opacity-30 transition-opacity duration-200 ease-out group-hover:opacity-70 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring motion-reduce:transition-none"
-              >
-                {hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>
-              {hidden ? t("timeline.show") : t("timeline.hide")}
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {/* Hiding slides the markers out to the left and fades them, rather than
-            unmounting them, so the effect runs in both directions. `visibility`
-            carries the safety: it flips discretely at the END of the transition,
-            so the markers stop taking pointer events when they are gone.
-            `aria-hidden` removes them from the accessibility tree at the same
-            time, while the eye remains available to restore them. */}
-        <div
-          data-timeline-markers
-          aria-hidden={hidden}
-          className={`absolute inset-0 transition-[opacity,translate,visibility] duration-200 ease-out motion-reduce:transition-none ${
-            hidden ? "invisible -translate-x-6 opacity-0" : "visible translate-x-0 opacity-100"
-          }`}
-        >
+        <div data-timeline-markers className="absolute inset-0">
           {empty
             ? null
             : nodes.map((node, index) => {
@@ -244,14 +180,13 @@ export function ChatTimelineRail({ scroller, content, questions, onJump }: ChatT
 
                     Focus is styled like hover, so the bar under the caret
                     reads like the one under the cursor. Only the roving marker is
-                    tabbable; hidden markers leave the tab order entirely, so
-                    nothing focusable ever sits inside `aria-hidden`. */}
+                    tabbable. */}
                       <button
                         type="button"
                         ref={(el) => {
                           nodeRefs.current[index] = el;
                         }}
-                        tabIndex={hidden || index !== activeNode ? -1 : 0}
+                        tabIndex={index !== activeNode ? -1 : 0}
                         aria-label={label}
                         onKeyDown={(event) => onNodeKeyDown(event, index)}
                         onFocus={() => setRovingIndex(index)}
