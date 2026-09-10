@@ -39,6 +39,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Verify Wrangler CLI
+        run: pnpm exec wrangler --version
+
       - name: Build static dashboard mock
         run: pnpm build:web:mock
 
