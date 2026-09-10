@@ -66,7 +66,7 @@
     "obs:dashboards": "node infra/observability/dashboards/apply.mjs",
     "test:ci:areas": "scripts/test-env.sh node --test scripts/ci-changed-areas.test.mjs",
     "test:docker-runtime": "scripts/test-env.sh node --test scripts/bundle-docker-core.test.mjs",
-    "test:release:targets": "scripts/test-env.sh node --test scripts/check-publish-targets.test.mjs",
+    "test:release:targets": "scripts/test-env.sh node --test scripts/check-publish-targets.test.mjs scripts/docker/prepare-release.test.mjs",
     "test:obs:dashboards": "scripts/test-env.sh node --test infra/observability/dashboards/*.test.mjs",
     "test:ui:padding": "scripts/test-env.sh node --test scripts/check-padding-scale.test.mjs",
     "test:ui:tokens": "scripts/test-env.sh node --test scripts/check-utility-tokens.test.mjs scripts/tailwind-policy.test.mjs scripts/tailwind-rules/spacing.test.mjs scripts/tailwind-rules/radius.test.mjs",
