@@ -1273,6 +1273,7 @@ async function main() {
       actionRegistry,
       agentLoader,
       skillCatalog,
+      ogImageStore,
       db,
       settingsRepo,
       appKeysRepo,

@@ -62,6 +62,7 @@ import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
+import { appOgRoutes } from "./routes/app-og.js";
 import { appStoreRoutes } from "./routes/app-store.js";
 import { showcasePresetRoutes } from "./routes/showcase-presets.js";
 import { shareRoutes } from "./routes/share.js";
@@ -98,6 +99,9 @@ export function buildApp(
 
   // Built web assets for installed apps, served at /app-assets/:appId/:version/*.
   app.route("/", appAssetsRoutes(deps));
+
+  // Social card image per installed app, at /app-og/<appId>.png (public).
+  app.route("/", appOgRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),

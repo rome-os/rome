@@ -68,11 +68,12 @@ handle /${RUNTIME_CONFIG_FILENAME} {
     // from disk via `file_server`, so Hono is reserved for the agent/API.
     // Only the dynamic surfaces below are proxied:
     //
-    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`) goes through
-    //     `forward_auth` — the verify endpoint (`/api/auth/verify`) reads
-    //     `X-Forwarded-Uri` and gates `/api/*` on a cookie. Non-`/api/*`
-    //     paths (webhooks have their own X-API-Key, app bundles are public)
-    //     get a 204, so this is a pass-through for them.
+    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`, `/app-og/*`)
+    //     goes through `forward_auth` — the verify endpoint
+    //     (`/api/auth/verify`) reads `X-Forwarded-Uri` and gates `/api/*` on
+    //     a cookie. Non-`/api/*` paths (webhooks have their own X-API-Key,
+    //     app bundles and social card images are public) get a 204, so this
+    //     is a pass-through for them.
     //   - SPA routes / static assets are public anyway (verify 204s every
     //     non-`/api/*` path), so serving them from Caddy drops a pointless
     //     double round-trip to Hono with zero change to the auth posture.
@@ -98,7 +99,7 @@ root * ${webRoot}
 handle @wsUpgrade {
 \t${proxy}
 }
-@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/*
+@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/*
 handle @dynamic {
 ${indent(forwardAuth, 1)}
 \t${proxy}
@@ -225,6 +226,9 @@ handle ${getFullAppHref(appId)}/* {
 root * ${webRoot}
 @publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
 handle @publicApi {
+\t${proxy}
+}
+handle /app-og/* {
 \t${proxy}
 }
 ${runtimeConfigHandle}

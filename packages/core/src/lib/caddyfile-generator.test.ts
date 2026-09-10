@@ -108,3 +108,22 @@ describe("generateCaddyfile app document routes", () => {
     expect(emailBlock).toContain("reverse_proxy 127.0.0.1:");
   });
 });
+
+describe("generateCaddyfile social card images", () => {
+  it("proxies /app-og through the dynamic matcher in open mode", () => {
+    const caddyfile = generateCaddyfile(openConfig);
+    expect(caddyfile).toContain(
+      "@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/*",
+    );
+  });
+
+  it("exposes /app-og globally in public-access mode, before the gateway fallback", () => {
+    const caddyfile = generateCaddyfile(publicConfig);
+    const handleAt = caddyfile.indexOf("handle /app-og/* {");
+    expect(handleAt).toBeGreaterThan(-1);
+    expect(handleAt).toBeLessThan(caddyfile.indexOf("rewrite * /gateway.html"));
+    const body = caddyfile.split("handle /app-og/* {")[1].split("}")[0];
+    expect(body).toContain("reverse_proxy 127.0.0.1:");
+    expect(body).not.toContain("forward_auth");
+  });
+});
