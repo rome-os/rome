@@ -1,9 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import {
-  WEBCHAT_LARGE_MODEL_SELECTIONS,
-  type ModelSelectionId,
-} from "./model-selector.js";
+import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 
 const config = { providerId: "openai" as const, modelId: "gpt-5.3-codex-spark" };
 const sessionPin = { providerId: "anthropic" as const, model: "saved-model[1m]" };
@@ -31,15 +28,14 @@ describe("resolveAgentModelRequest", () => {
     });
   });
 
-  it.each(Object.keys(WEBCHAT_LARGE_MODEL_SELECTIONS) as ModelSelectionId[])(
-    "lets explicit selection %s override both the saved and agent pins without a tier",
-    (selectionId) => {
-      const { providerId, model } = WEBCHAT_LARGE_MODEL_SELECTIONS[selectionId];
-      expect(resolveAgentModelRequest(config, selectionId, sessionPin)).toEqual({
-        exact: { providerId, model },
-      });
-    },
-  );
+  it.each(
+    Object.keys(WEBCHAT_LARGE_MODEL_SELECTIONS) as ModelSelectionId[],
+  )("lets explicit selection %s override both the saved and agent pins without a tier", (selectionId) => {
+    const { providerId, model } = WEBCHAT_LARGE_MODEL_SELECTIONS[selectionId];
+    expect(resolveAgentModelRequest(config, selectionId, sessionPin)).toEqual({
+      exact: { providerId, model },
+    });
+  });
 
   it("uses the provider's model ID rather than the WebChat selection slug", () => {
     expect(resolveAgentModelRequest(config, "gpt-5-6-terra")).toEqual({
@@ -61,7 +57,9 @@ describe("resolveAgentModelRequest", () => {
   });
 
   it("rejects invalid programmatic exact configs instead of falling back", () => {
-    expect(() => resolveAgentModelRequest({ modelId: "exact-model" })).toThrow("requires a provider");
+    expect(() => resolveAgentModelRequest({ modelId: "exact-model" })).toThrow(
+      "requires a provider",
+    );
     expect(() => resolveAgentModelRequest({ providerId: "openai", modelId: "" })).toThrow(
       "requires a provider",
     );

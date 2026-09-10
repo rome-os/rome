@@ -32,12 +32,19 @@ describe("agent exact model configuration", () => {
     expect(issuePaths({ modelId: "gpt-5.3-codex-spark" })).toContain("provider");
   });
 
-  it.each(["", " ", " model", "model ", "two models", "model\n", "model\tid", null, 42])(
-    "rejects invalid model ID %j",
-    (modelId) => {
-      expect(issuePaths({ provider: "openai", modelId })).toContain("modelId");
-    },
-  );
+  it.each([
+    "",
+    " ",
+    " model",
+    "model ",
+    "two models",
+    "model\n",
+    "model\tid",
+    null,
+    42,
+  ])("rejects invalid model ID %j", (modelId) => {
+    expect(issuePaths({ provider: "openai", modelId })).toContain("modelId");
+  });
 
   it.each(["mock", "unknown", "", null])("rejects invalid provider %j", (provider) => {
     expect(issuePaths({ provider, modelId: "exact-model" })).toContain("provider");
@@ -48,13 +55,15 @@ describe("agent exact model configuration", () => {
   });
 
   it.each(["opus", "sonnet", "haiku"])("rejects modelId combined with legacy model %s", (model) => {
-    expect(issuePaths({ provider: "anthropic", modelId: "exact-model", model })).toContain("modelId");
+    expect(issuePaths({ provider: "anthropic", modelId: "exact-model", model })).toContain(
+      "modelId",
+    );
   });
 
   it("rejects a meaningless pin on a code-backed agent", () => {
-    expect(
-      issuePaths({ provider: "openai", modelId: "exact-model", codeBacked: true }),
-    ).toContain("modelId");
+    expect(issuePaths({ provider: "openai", modelId: "exact-model", codeBacked: true })).toContain(
+      "modelId",
+    );
   });
 
   it("requires a selection rather than silently defaulting", () => {

@@ -38,16 +38,18 @@ const key = { agentName: AGENT, channelThreadKey: "webchat:model-pin-test" };
 
 function createProvider(id: ProviderId) {
   const calls: ModelRunParams[] = [];
-  const openSession = rs.fn(async (params: ModelSessionParams) =>
-    createSessionFromRun(
+  const openSession = rs.fn(async (params: ModelSessionParams) => {
+    const session = createSessionFromRun(
       id,
       async function* (input): AsyncIterable<AgentMessage> {
         calls.push(input);
         yield { type: "result", content: "done" };
       },
-      { ...params, providerThreadId: params.providerThreadId ?? `native-${params.sessionId}` },
-    ),
-  );
+      params,
+    );
+    session.providerThreadId = params.providerThreadId ?? `native-${params.sessionId}`;
+    return session;
+  });
   const provider: ModelProvider = {
     id,
     displayName: id,
