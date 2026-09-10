@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { DEFAULT_SOCIAL_IMAGE_URL, renderSocialMeta, type SocialCard } from "./social-meta.js";
+import { renderSocialMeta, type SocialCard } from "./social-meta.js";
 
 const SHELL = [
   "<html><head>",
@@ -8,7 +8,7 @@ const SHELL = [
   "    <!-- rome:social:start -->",
   '    <meta property="og:type" content="website" />',
   '    <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />',
-  `    <meta property="og:image" content="${DEFAULT_SOCIAL_IMAGE_URL}" />`,
+  '    <meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />',
   "    <!-- rome:social:end -->",
   '    <script src="/runtime-config.js"></script>',
   "</head><body></body></html>",
@@ -67,5 +67,32 @@ describe("renderSocialMeta", () => {
   it("treats a title containing $-patterns as literal text, not a replacement pattern", () => {
     const html = renderSocialMeta(SHELL, { ...card, title: "Cost $& Co" });
     expect(html).toContain("<title>Cost $&amp; Co</title>");
+  });
+
+  it("keeps the shell's own og:image when the card has no imageUrl", () => {
+    const html = renderSocialMeta(SHELL, { ...card, imageUrl: undefined });
+    expect(html).toContain(
+      '<meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />',
+    );
+    expect(html).toContain(
+      '<meta name="twitter:image" content="https://romeos.cc/public-og-20260825.jpg" />',
+    );
+    expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
+  });
+
+  it("omits image tags when neither the card nor the shell has one", () => {
+    const shellWithoutImage = [
+      "<html><head>",
+      "    <title>Rome</title>",
+      "    <!-- rome:social:start -->",
+      '    <meta property="og:type" content="website" />',
+      '    <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />',
+      "    <!-- rome:social:end -->",
+      "</head><body></body></html>",
+    ].join("\n");
+    const html = renderSocialMeta(shellWithoutImage, { ...card, imageUrl: undefined });
+    expect(html).not.toContain("og:image");
+    expect(html).not.toContain("twitter:image");
+    expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
   });
 });

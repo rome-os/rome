@@ -1,7 +1,7 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
-import { DEFAULT_SOCIAL_IMAGE_URL, type SocialCard } from "../lib/social-meta.js";
+import type { SocialCard } from "../lib/social-meta.js";
 import { decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
 
 const APP_ROUTE_RE = /^\/(?:full\/)?apps\/([^/]+)(?:\/|$)/;
@@ -38,7 +38,8 @@ function isResolvedWebApp(
  * not for an installed app with a frontend (the shell then keeps its static
  * card). Mirrors the SPA's own `getRoutedAppId` in packages/web, minus its
  * reserved-id guard (`store`, `inbox`, …), which only affects client
- * routing — an unmatched id here just keeps the static card.
+ * routing — an unmatched id here just keeps the static card. Leaves
+ * `imageUrl` unset, so the render keeps the shell's own og:image.
  */
 export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): SocialCard | null {
   const pathname = new URL(request.url).pathname;
@@ -54,6 +55,5 @@ export function buildAppSocialCard(deps: AppSocialCardDeps, request: Request): S
     title: view.displayName,
     description: view.manifest.description,
     url: `${origin}${pathname}`,
-    imageUrl: DEFAULT_SOCIAL_IMAGE_URL,
   };
 }

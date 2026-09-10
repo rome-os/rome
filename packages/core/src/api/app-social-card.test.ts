@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@rstest/core";
-import { DEFAULT_SOCIAL_IMAGE_URL } from "../lib/social-meta.js";
 import { buildAppSocialCard, getRoutedAppId } from "./app-social-card.js";
 
 function catalogWith(views: Record<string, unknown>) {
@@ -48,7 +47,6 @@ describe("buildAppSocialCard", () => {
       title: "Reddit Radar",
       description: "Watches subreddits",
       url: "https://jessie.romeos.cc/full/apps/reddit",
-      imageUrl: DEFAULT_SOCIAL_IMAGE_URL,
     });
   });
 
