@@ -154,7 +154,11 @@
     }
   },
   "pairing": {
+    "approving": "批准中…",
+    "rejecting": "拒绝中…",
+    "codeLoadFailed": "无法加载验证码",
     "title": "配对请求",
+    "description": "将聊天平台账号连接到 Rome。批准后，该账号将获得此 Rome 的管理权限，可通过聊天使用和管理 Rome。请仅批准你本人控制的账号。",
     "account": "{{account}} 的配对请求",
     "validity": "有效期 {{duration}}",
     "thisAccount": "此账号",
