@@ -83,6 +83,21 @@ export function wrapText(text: string, budget: number, maxLines: number): string
   return lines;
 }
 
+/**
+ * Cuts `text` at its first sentence terminator, keeping the terminator.
+ * Fullwidth terminators (`。`, `！`, `？`) end a sentence on their own, since
+ * Chinese prose is conventionally written with no space before the next
+ * sentence; ASCII terminators (`.`, `!`, `?`) only count when followed by
+ * whitespace or end-of-string, so "e.g. " cuts but "v1.2" does not. Falls
+ * back to the whole trimmed text when no terminator is found. Purely
+ * mechanical — an abbreviation like "e.g." reads as a sentence end.
+ */
+export function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^(.*?(?:[。！？]|[.!?](?=\s|$)))/s.exec(trimmed);
+  return match ? match[1].trim() : trimmed;
+}
+
 function iconSlot(icon: OgIcon | null): string {
   if (icon === null) {
     // Rome mark as the default app icon, centred in the 96px art box.
@@ -106,8 +121,8 @@ function nameSlot(name: string): string {
 }
 
 function descriptionSlot(description: string): string {
-  const lines = wrapText(description, 56, 2);
-  const baselines = [396, 444];
+  const lines = wrapText(description, 56, 3);
+  const baselines = [396, 444, 492];
   const spans = lines
     .map((line, idx) => `<tspan x="96" y="${baselines[idx]}">${escapeXml(line)}</tspan>`)
     .join("\n    ");

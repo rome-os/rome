@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogEvent, ResolvedApp } from "../state.js";
 import { createOgImageStore } from "./store.js";
-import { createAppOgImageSubscriber } from "./subscriber.js";
+import { cardDescription, createAppOgImageSubscriber } from "./subscriber.js";
 
 function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
   return {
@@ -20,6 +20,23 @@ function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
+
+describe("cardDescription", () => {
+  it("prefers the tagline when present", () => {
+    expect(
+      cardDescription({
+        tagline: "Never miss a good thread",
+        description: "Watches subreddits. Posts a daily digest.",
+      }),
+    ).toBe("Never miss a good thread");
+  });
+
+  it("falls back to the first sentence of the description", () => {
+    expect(cardDescription({ description: "Watches subreddits. Posts a daily digest." })).toBe(
+      "Watches subreddits.",
+    );
+  });
+});
 
 describe("createAppOgImageSubscriber", () => {
   let root: string;

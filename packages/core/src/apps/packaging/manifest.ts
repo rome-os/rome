@@ -111,6 +111,10 @@ export const AppManifestSchema = z
       .min(1)
       .refine((v) => valid(v) !== null, "must be a valid semver version"),
     description: z.string().min(1),
+    // One-line, author-written hook for the app's social share card
+    // (≤ 80 width units — 80 Latin chars or 40 CJK). Card falls back to the
+    // first sentence of `description` when absent.
+    tagline: z.string().min(1).max(160).optional(),
     name: z.string().min(1).optional(),
     icon: z.string().min(1).optional(),
     appRoot: z.string().min(1).optional(),

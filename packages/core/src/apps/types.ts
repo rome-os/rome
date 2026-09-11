@@ -125,6 +125,11 @@ export interface RomeAppManifest {
   id: string;
   version: string;
   description: string;
+  /**
+   * One-line, author-written hook for the app's social share card. Falls
+   * back to the first sentence of `description` when absent.
+   */
+  tagline?: string;
   /** Human-readable App name. Consumed by both Rome Cloud and Rome. */
   name?: string;
   /** Path relative to appRoot to an icon asset (svg/png/webp). */

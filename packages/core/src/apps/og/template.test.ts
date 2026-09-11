@@ -1,6 +1,6 @@
 // packages/core/src/apps/og/template.test.ts
 import { describe, expect, it } from "@rstest/core";
-import { renderOgSvg, wrapText } from "./template.js";
+import { firstSentence, renderOgSvg, wrapText } from "./template.js";
 
 const base = {
   name: "Reddit Radar",
@@ -27,6 +27,50 @@ describe("wrapText", () => {
 
   it("hard-cuts a single word longer than the budget", () => {
     expect(wrapText("abcdefghijkl", 5, 1)).toEqual(["abcd…"]);
+  });
+});
+
+describe("firstSentence", () => {
+  it("cuts at the first English terminator", () => {
+    expect(firstSentence("Watches subreddits. Posts a daily digest.")).toBe("Watches subreddits.");
+  });
+
+  it("cuts at the first Chinese terminator", () => {
+    // Fullwidth terminators end a sentence on their own — Chinese prose is
+    // conventionally written with no space after 。！？, unlike English.
+    expect(firstSentence("自动完成小红书选题调研。每日推送候选笔记。")).toBe(
+      "自动完成小红书选题调研。",
+    );
+  });
+
+  it("cuts at the first Chinese terminator even with no space before the next sentence", () => {
+    expect(firstSentence("自动完成选题调研。你只需要审核。")).toBe("自动完成选题调研。");
+  });
+
+  it("cuts at the first fullwidth terminator in mixed Chinese/English text", () => {
+    expect(firstSentence("Rome 代理来处理。You only review.")).toBe("Rome 代理来处理。");
+  });
+
+  it("cuts at a question mark", () => {
+    expect(firstSentence("Ever lost a tab? This brings it back.")).toBe("Ever lost a tab?");
+  });
+
+  it("returns the whole trimmed text when there is no terminator", () => {
+    expect(firstSentence("  Watches subreddits and posts digests  ")).toBe(
+      "Watches subreddits and posts digests",
+    );
+  });
+
+  it("is fine cutting inside an abbreviation like e.g.", () => {
+    expect(firstSentence("Tracks things, e.g. subreddits and threads.")).toBe(
+      "Tracks things, e.g.",
+    );
+  });
+
+  it("does not cut ASCII terminators without trailing whitespace, e.g. a version number", () => {
+    expect(firstSentence("Runs v1.2 beta of the ingestion pipeline.")).toBe(
+      "Runs v1.2 beta of the ingestion pipeline.",
+    );
   });
 });
 
@@ -64,5 +108,16 @@ describe("renderOgSvg", () => {
   it("omits the link line when there is no host", () => {
     const svg = renderOgSvg({ ...base, link: null });
     expect(svg).not.toContain('y="566"');
+  });
+
+  it("wraps a long description across three lines, third baseline at y=492", () => {
+    const long =
+      "This app watches every subreddit you care about, ranks the best posts of the day, and drops a tidy digest into your inbox each morning without fail.";
+    const svg = renderOgSvg({ ...base, description: long });
+    const spans = svg.match(/<tspan x="96" y="\d+">/g) ?? [];
+    expect(spans).toHaveLength(3);
+    expect(svg).toContain('<tspan x="96" y="396">');
+    expect(svg).toContain('<tspan x="96" y="444">');
+    expect(svg).toContain('<tspan x="96" y="492">');
   });
 });
