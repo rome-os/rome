@@ -24,67 +24,48 @@ export function PendingUploadsList({
   const { t } = useTranslation("chat");
   if (uploads.length === 0) return null;
 
-  const totalBytes = uploads.reduce((total, upload) => total + upload.file.size, 0);
-  let bytesBefore = 0;
+  const percentage =
+    uploadProgress === undefined || uploadProgress === null
+      ? null
+      : Math.round(uploadProgress * 100);
   return (
-    <div className="mb-3 flex flex-wrap gap-2">
-      {uploads.map((upload, index) => {
-        // FormData sends file parts in append order. Translate the request's
-        // byte progress into each file's portion so completed files reach 100%
-        // before the next file starts. Multipart headers are small and are
-        // deliberately excluded from the estimate.
-        const progress =
-          uploadProgress === undefined ||
-          uploadProgress === null ||
-          totalBytes === 0 ||
-          upload.file.size === 0
-            ? uploadProgress
-            : Math.max(
-                0,
-                Math.min(1, (uploadProgress * totalBytes - bytesBefore) / upload.file.size),
-              );
-        bytesBefore += upload.file.size;
-        const percentage = progress == null ? null : Math.round(progress * 100);
-
-        return (
+    <div className="mb-3">
+      <div className="flex flex-wrap gap-2">
+        {uploads.map((upload, index) => (
           <ComposerChip
             key={upload.id}
             prefix={t("composer.filePill", { index: index + 1 })}
             title={upload.file.name}
             onRemove={disabled ? undefined : () => onRemove(upload.id)}
             removeLabel={t("composer.removeFile", { name: upload.file.name })}
-            className={uploadProgress !== undefined ? "relative overflow-hidden" : undefined}
           >
             {upload.file.name}
-            {uploadProgress !== undefined && (
-              <>
-                {percentage !== null && (
-                  <span aria-hidden="true" className="ml-1 tabular-nums text-muted-foreground">
-                    {percentage}%
-                  </span>
-                )}
-                <span
-                  role="progressbar"
-                  aria-label={t("composer.uploadProgress", { name: upload.file.name })}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={percentage ?? undefined}
-                  className="absolute inset-x-0 bottom-0 h-0.5 bg-surface-muted"
-                >
-                  <span
-                    className={
-                      progress === null
-                        ? "block h-full w-full animate-pulse bg-primary"
-                        : "block h-full bg-primary transition-[width]"
-                    }
-                    style={progress === null ? undefined : { width: `${percentage}%` }}
-                  />
-                </span>
-              </>
-            )}
           </ComposerChip>
-        );
-      })}
+        ))}
+      </div>
+      {uploadProgress !== undefined && (
+        <div className="mt-2 flex items-center gap-2 text-aux text-muted-foreground">
+          <span>{t("composer.uploadingFiles")}</span>
+          <span
+            role="progressbar"
+            aria-label={t("composer.uploadProgress")}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percentage ?? undefined}
+            className="h-1 min-w-16 flex-1 overflow-hidden rounded-full bg-surface-muted"
+          >
+            <span
+              className={
+                uploadProgress === null
+                  ? "block h-full w-full animate-pulse bg-primary"
+                  : "block h-full bg-primary transition-[width]"
+              }
+              style={uploadProgress === null ? undefined : { width: `${percentage}%` }}
+            />
+          </span>
+          {percentage !== null && <span className="tabular-nums">{percentage}%</span>}
+        </div>
+      )}
     </div>
   );
 }

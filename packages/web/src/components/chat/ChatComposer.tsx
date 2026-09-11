@@ -402,7 +402,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   }, [newProjectName, t, connectOnCreate]);
 
   const addPendingFiles = useCallback((files: File[]) => {
-    if (files.length === 0) return;
+    // The visible file picker is disabled during an upload, but paste and the
+    // parent drop zones enter through this callback directly. Guard the shared
+    // boundary so a file cannot be added to the tray without belonging to the
+    // multipart request whose progress it displays.
+    if (files.length === 0 || uploadInFlightRef.current) return;
     setPendingUploads((prev) => [
       ...prev,
       ...files.map((file) => ({ id: crypto.randomUUID(), file })),
@@ -440,6 +444,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     () => ({
       focus: () => textareaRef.current?.focus(),
       insertText: (text: string) => {
+        if (uploadInFlightRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
@@ -450,7 +455,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         });
       },
       setAgentMention: (mention: AgentMention | null) => {
-        if (agentMentionLocked) return;
+        if (agentMentionLocked || uploadInFlightRef.current) return;
         // Mirror acceptMention's cleanup: scoping the draft programmatically
         // must also dismiss any open `@` menu, or its stale anchor/query keeps
         // intercepting Enter/arrow keys against the wrong token.
@@ -460,6 +465,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setMentionQuery("");
       },
       setSkillSelection: (skill: SkillSelection | null) => {
+        if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
         setSlashMenuOpen(false);
         setSlashQuery("");
@@ -537,7 +543,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [addPendingFiles, disabled],
   );
 
-  const isComposerBusy = disabled || disabledHint != null;
+  const isComposerBusy = disabled || disabledHint != null || uploadInFlight;
 
   const runSend = useCallback(async () => {
     if (isComposerBusy || uploadInFlightRef.current) return;
@@ -562,9 +568,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       skillName: skill?.name,
     };
 
-    // Optimistically clear so the user sees the input wipe immediately. If
-    // onSend rejects, restore the snapshot so they can retry without
-    // re-typing.
+    // Optimistically clear so the user sees the input wipe immediately. The
+    // composer stays locked while attachments upload; if onSend rejects,
+    // restore the snapshot so it can be retried without re-typing.
     setInputText("");
     if (uploads.length === 0) setPendingUploads([]);
     setDraftSkill(null);
@@ -575,7 +581,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
       }
     } catch {
-      setInputText(text);
+      // Preserve any value inserted programmatically despite the upload lock
+      // rather than overwriting it with the failed turn.
+      setInputText((current) => current || text);
       if (uploads.length === 0) setPendingUploads(uploads);
       setDraftSkill(skill);
     }
@@ -654,6 +662,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (uploadInFlightRef.current) return;
     const value = event.target.value;
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
@@ -938,7 +947,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         <PendingUploadsList
           uploads={pendingUploads}
           onRemove={removePendingUpload}
-          disabled={isComposerBusy || uploadInFlight}
+          disabled={isComposerBusy}
           uploadProgress={uploadInFlight ? uploadProgress : undefined}
         />
         <SlashSkillMenu

@@ -222,7 +222,7 @@
     "removeFile": "移除 {{name}}",
     "filePill": "#文件 {{index}}",
     "uploadingFiles": "正在上传文件…",
-    "uploadProgress": "正在上传 {{name}}",
+    "uploadProgress": "附件上传进度",
     "send": "发送",
     "sendTitle": "发送",
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",

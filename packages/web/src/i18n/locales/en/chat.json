@@ -222,7 +222,7 @@
     "removeFile": "Remove {{name}}",
     "filePill": "#File {{index}}",
     "uploadingFiles": "Uploading files…",
-    "uploadProgress": "Uploading {{name}}",
+    "uploadProgress": "Attachment upload progress",
     "send": "Send",
     "sendTitle": "Send",
     "sendWhileRunningTitle": "Send while agent is working",
