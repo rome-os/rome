@@ -43,7 +43,7 @@ Reach for `coding:app_creation` instead of this skill only when the thing needs 
 | Per-workflow (you edit) | Shell (template ships it; don't touch) |
 | --- | --- |
 | `src/workflow/definition.ts` — the `runWorkflow(input, ctx)` function | `src/workflow/context.ts` — the `WorkflowContext`/`Json` types the app owns |
-| `app.yaml` `description` + web nav labels | `src/actions/run/` — the run action (calls `runWorkflow`) |
+| `app.yaml` `description`, `tagline`, web nav labels | `src/actions/run/` — the run action (calls `runWorkflow`) |
 | `.rome_store/rome_store.yaml` + `README.md` store listing copy | `src/api/index.ts` — the `POST /run` trigger + `GET /runs` history feed |
 | `src/web/App.tsx` `COPY` block (title + run-button copy) | `src/web/App.tsx` body (incl. "Recent runs") + `styles.css` |
 | `src/assets/icon.svg` — replace the placeholder | `src/db/` — the `runs` history table, migrations, and repository |
