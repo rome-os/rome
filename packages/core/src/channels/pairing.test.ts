@@ -191,6 +191,7 @@ describe("channel pairing approvals", () => {
     "discord",
     "feishu",
   ] as const)("%s requires dismissed accounts to pair before admission", async (channel) => {
+    const accountId = channel === "feishu" ? "ou_123" : "123";
     const people = new PersonMappingRepository(testDb.db);
     testDb.db
       .insert(persons)
@@ -202,7 +203,7 @@ describe("channel pairing approvals", () => {
       })
       .onConflictDoNothing()
       .run();
-    await people.addChannelMapping(STRANGER_PERSON_ID, channel, "dismissed", "Alice");
+    await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
     const admit = createPairingAdmission({ approvalsRepo: repo, personMappingRepo: people });
     const send = rs.fn<TalkRouter["send"]>(async () => ({
       messageId: "sent",
@@ -210,7 +211,7 @@ describe("channel pairing approvals", () => {
     }));
     const router = { send } as unknown as TalkRouter;
     const message: InboundMessage = {
-      senderId: "dismissed",
+      senderId: accountId,
       senderDisplayName: "Alice",
       conversationId: "dm" as ConversationId,
       messageId: "request",
@@ -222,7 +223,7 @@ describe("channel pairing approvals", () => {
     expect(await admit("connection", channel, message, router)).toBe(false);
     const request = (await repo.findPending())[0];
     expect(request).toBeDefined();
-    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe(STRANGER_PERSON_ID);
+    expect((await people.findByChannelUser(channel, accountId))?.id).toBe(STRANGER_PERSON_ID);
     expect(await admit("connection", channel, message, router)).toBe(false);
     expect(await repo.findPending()).toHaveLength(1);
     expect(send).toHaveBeenCalledTimes(1);
@@ -232,21 +233,21 @@ describe("channel pairing approvals", () => {
     await expect(repo.resolvePending(request.id, "approve", "owner")).rejects.toThrow();
     testDb.db.run("DROP TRIGGER fail_dismissed_pairing");
     expect((await repo.findById(request.id))?.status).toBe("pending");
-    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe(STRANGER_PERSON_ID);
+    expect((await people.findByChannelUser(channel, accountId))?.id).toBe(STRANGER_PERSON_ID);
     if (channel === "discord") {
       const code = (await repo.pairingCode(request.id))!;
       expect(
         repo.verifyPairing({
           connectionId: "connection",
           channel,
-          channelUserId: "dismissed",
+          channelUserId: accountId,
           code,
         }).outcome,
       ).toBe("resolved");
     } else {
       expect((await repo.resolvePending(request.id, "approve", "owner")).outcome).toBe("resolved");
     }
-    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe("owner");
+    expect((await people.findByChannelUser(channel, accountId))?.id).toBe("owner");
     expect(await admit("connection", channel, message, router)).toBe(true);
   });
 
