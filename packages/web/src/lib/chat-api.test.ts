@@ -49,12 +49,16 @@ describe("postSessionTurn", () => {
       method = "";
       url = "";
       body: Document | XMLHttpRequestBodyInit | null = null;
+      uploadListenersAttachedBeforeOpen = false;
 
       constructor() {
         FakeXMLHttpRequest.current = this;
       }
 
       open(method: string, url: string) {
+        this.uploadListenersAttachedBeforeOpen = Boolean(
+          this.upload.onprogress && this.upload.onload,
+        );
         this.method = method;
         this.url = url;
       }
@@ -89,6 +93,7 @@ describe("postSessionTurn", () => {
     expect(request.method).toBe("POST");
     expect(request.url).toBe("/api/chat/sessions/session-1/turns");
     expect(request.withCredentials).toBe(true);
+    expect(request.uploadListenersAttachedBeforeOpen).toBe(true);
     expect(request.body).toBe(body);
     expect(body.has("inputId")).toBe(true);
   });

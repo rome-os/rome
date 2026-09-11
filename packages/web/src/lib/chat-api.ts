@@ -437,8 +437,9 @@ function postSessionTurnWithProgress(
 ): Promise<PostTurnResult> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `/api/chat/sessions/${sessionId}/turns`);
-    request.withCredentials = true;
+    // Attach upload listeners before open(): despite the spec allowing either
+    // order, browsers have historically required this ordering for upload
+    // events to fire reliably.
     request.upload.onprogress = (event) => {
       onUploadProgress(
         event.lengthComputable && event.total > 0 ? event.loaded / event.total : null,
@@ -448,6 +449,8 @@ function postSessionTurnWithProgress(
     // `load` is the browser's authoritative boundary for a fully transferred
     // request body; response processing may continue after it fires.
     request.upload.onload = () => onUploadProgress(1);
+    request.open("POST", `/api/chat/sessions/${sessionId}/turns`);
+    request.withCredentials = true;
     request.onload = () => {
       resolve(
         parseTurnResponseText(
