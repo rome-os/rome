@@ -58,6 +58,7 @@ The command uses the persistent browser session without reading or changing cook
 It opens a fresh search page, reads rendered fare controls, and allowlists flight data from the matrix and row React components.
 It verifies the route, dates, passenger count, currency, per-person scope, displayed times, and complete row count before returning prices.
 It waits for two matching complete snapshots and retains the largest observed flight count during loading.
+Confirmed searches with no flights return an empty result after two matching snapshots.
 
 Access challenges, provider errors, missing component data, incomplete fare columns, or changed search conditions produce errors instead of partial prices.
 The command does not call private APIs, click fare-selection buttons, add flights to a cart, or book travel.

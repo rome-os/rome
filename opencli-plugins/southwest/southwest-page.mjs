@@ -17,7 +17,15 @@ export function readSouthwestPage() {
     return null;
   };
   const matrix = one(document, ".air-booking-select-price-matrix");
-  const props = component(matrix, ["searchQuery", "details", "availableFlights", "loading"]);
+  const props = component(matrix, ["searchQuery", "availableFlights", "loading"]);
+  // Southwest omits details on its confirmed empty-results matrix.
+  const noResults =
+    props?.hasNoFlightsAvailableError === true &&
+    props.loading === false &&
+    props.availableFlights === 0 &&
+    (Array.isArray(props.details)
+      ? props.details.length === 0
+      : !Object.hasOwn(props, "details") && props.totalResults === 0);
   const fields = [
     "adultPassengersCount",
     "adultsCount",
@@ -110,7 +118,7 @@ export function readSouthwestPage() {
     language: document.documentElement.lang,
     ready: !!props,
     loading: props?.loading ?? true,
-    expected_count: Array.isArray(props?.details) ? props.details.length : null,
+    expected_count: Array.isArray(props?.details) ? props.details.length : noResults ? 0 : null,
     available_count: props?.availableFlights ?? null,
     search,
     route_text: text(matrix && one(matrix, ".price-matrix--airport-codes")),
@@ -134,7 +142,7 @@ export function readSouthwestPage() {
       /log in.*(?:search|view).*(?:points|fares)|sign in.*(?:search|view).*(?:points|fares)/i.test(
         error,
       ),
-    no_results: props?.hasNoFlightsAvailableError === true,
+    no_results: noResults,
     rows,
   };
 }

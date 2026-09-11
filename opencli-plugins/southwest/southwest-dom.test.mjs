@@ -2,20 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { loadSouthwestFlights } from "./southwest-browser.mjs";
 import { readSouthwestPage } from "./southwest-page.mjs";
 import { normalizeResults } from "./southwest-helpers.mjs";
-import { fixture, searchFor } from "./test-fixtures.mjs";
+import { fixture, mockPage, searchFor } from "./test-fixtures.mjs";
 
 // The web test workspace owns jsdom. Southwest has no runtime dependencies.
 const { JSDOM } = createRequire(new URL("../../packages/web/package.json", import.meta.url))(
   "jsdom",
 );
-function makeDom(mode = "points") {
+function makeDom(mode = "points", empty = false) {
   const data = fixture(mode);
-  const dom = new JSDOM(readFileSync(new URL(`./fixtures/${mode}.html`, import.meta.url), "utf8"), {
-    url: data.url,
-    runScripts: "outside-only",
-  });
+  const markup = empty ? "empty" : mode;
+  const dom = new JSDOM(
+    readFileSync(new URL(`./fixtures/${markup}.html`, import.meta.url), "utf8"),
+    {
+      url: data.url,
+      runScripts: "outside-only",
+    },
+  );
   const { window: w } = dom;
   w.HTMLElement.prototype.getClientRects = function () {
     for (let e = this; e; e = e.parentElement)
@@ -43,11 +48,23 @@ function makeDom(mode = "points") {
   const matrix = w.document.querySelector(".air-booking-select-price-matrix");
   attach(matrix, {
     searchQuery: guarded({ ...data.search }),
-    details: data.rows.map(() => ({})),
-    availableFlights: data.available_count,
-    loading: false,
-    hasNoFlightsAvailableError: false,
+    ...(empty
+      ? JSON.parse(readFileSync(new URL("./fixtures/empty-matrix.json", import.meta.url), "utf8"))
+      : {
+          details: data.rows.map(() => ({})),
+          availableFlights: data.available_count,
+          loading: false,
+          hasNoFlightsAvailableError: false,
+        }),
   });
+  if (empty && mode === "cash") {
+    matrix
+      .querySelector('[data-test="currency-options-toggle-item--points"]')
+      .classList.remove("swa-g-selected");
+    matrix
+      .querySelector('[data-test="currency-options-toggle-item--usd"]')
+      .classList.add("swa-g-selected");
+  }
   for (const [i, e] of [...w.document.querySelectorAll(".air-booking-select-detail")].entries()) {
     const r = data.rows[i];
     attach(e, {
@@ -81,6 +98,85 @@ function makeDom(mode = "points") {
 }
 const read = (dom) =>
   JSON.parse(JSON.stringify(dom.window.eval(`(${readSouthwestPage.toString()})()`)));
+for (const mode of ["points", "cash"])
+  test(`returns confirmed empty ${mode} results without a details prop after two DOM reads`, async () => {
+    const dom = makeDom(mode, true);
+    try {
+      const props = dom.window.document.querySelector(".air-booking-select-price-matrix")
+        .__reactFiber$fixture.return.memoizedProps;
+      assert.equal(Object.hasOwn(props, "details"), false);
+      const data = read(dom);
+      assert.equal(data.ready, true);
+      assert.equal(data.loading, false);
+      assert.equal(data.expected_count, 0);
+      assert.equal(data.no_results, true);
+      const page = { ...mockPage([]), evaluate: async () => read(dom) };
+      const search = searchFor(mode);
+      const result = await loadSouthwestFlights(page, search, { now: page.now });
+      assert.deepEqual(normalizeResults(result, search), []);
+      assert.equal(page.now(), 1000);
+    } finally {
+      dom.window.close();
+    }
+  });
+test("accepts confirmed empty matrices that supply an empty details array", () => {
+  const dom = makeDom("points", true);
+  try {
+    const props = dom.window.document.querySelector(".air-booking-select-price-matrix")
+      .__reactFiber$fixture.return.memoizedProps;
+    props.details = [];
+    props.totalResults = 1;
+    assert.deepEqual(normalizeResults(read(dom), searchFor()), []);
+  } finally {
+    dom.window.close();
+  }
+});
+for (const [name, overrides] of [
+  ["still loading", { loading: true }],
+  ["missing empty-state confirmation", { hasNoFlightsAvailableError: undefined }],
+  ["available flights", { availableFlights: 1 }],
+  ["nonzero total results", { totalResults: 1 }],
+  ["missing total results", { totalResults: undefined }],
+  ["malformed details", { details: {} }],
+  ["unrendered flight details", { details: [{}] }],
+])
+  test(`does not return empty results when the matrix has ${name}`, async () => {
+    const dom = makeDom("points", true);
+    try {
+      const props = dom.window.document.querySelector(".air-booking-select-price-matrix")
+        .__reactFiber$fixture.return.memoizedProps;
+      Object.assign(props, overrides);
+      assert.equal(read(dom).no_results, false);
+      const page = { ...mockPage([]), evaluate: async () => read(dom) };
+      await assert.rejects(
+        loadSouthwestFlights(page, searchFor("points", { timeout: 5 }), { now: page.now }),
+        /No partial prices/,
+      );
+    } finally {
+      dom.window.close();
+    }
+  });
+test("does not reuse an empty count after the DOM loses empty-state confirmation", async () => {
+  const dom = makeDom("points", true);
+  try {
+    const props = dom.window.document.querySelector(".air-booking-select-price-matrix")
+      .__reactFiber$fixture.return.memoizedProps;
+    const page = {
+      ...mockPage([]),
+      evaluate: async () => {
+        const data = read(dom);
+        props.totalResults = 1;
+        return data;
+      },
+    };
+    await assert.rejects(
+      loadSouthwestFlights(page, searchFor("points", { timeout: 5 }), { now: page.now }),
+      /No partial prices/,
+    );
+  } finally {
+    dom.window.close();
+  }
+});
 for (const mode of ["points", "cash"])
   test(`reads captured ${mode} markup using self-contained browser code and allowlisted props`, () => {
     const dom = makeDom(mode);
