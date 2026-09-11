@@ -270,11 +270,26 @@ def build_ua_override() -> dict:
     }
 
 
+def auto_attach(session_id: str | None = None) -> None:
+    send(
+        "Target.setAutoAttach",
+        {
+            "autoAttach": True,
+            "waitForDebuggerOnStart": True,
+            "flatten": True,
+        },
+        session_id,
+    )
+
+
 def configure_target(session_id: str, target_info: dict, waiting_for_debugger: bool) -> None:
     target_type = target_info.get("type", "")
     target_id = target_info.get("targetId", "")
 
     try:
+        if target_type in {"page", "iframe"}:
+            # Auto-attach follows one level. Watch each document's children before resuming it.
+            auto_attach(session_id)
         if target_type == "page":
             send("Emulation.setGeolocationOverride", geo_params, session_id)
             send("Emulation.setTimezoneOverride", {"timezoneId": timezone}, session_id)
@@ -293,12 +308,11 @@ def configure_target(session_id: str, target_info: dict, waiting_for_debugger: b
             )
             send("Network.enable", {}, session_id)
             send("Network.setUserAgentOverride", build_ua_override(), session_id)
+        if target_type in {"page", "iframe"}:
             send("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js}, session_id)
+            # Enable the Page agent so registered scripts also run in OOPIF documents.
             send("Page.enable", {}, session_id)
-            log(f"stealth configured for page {target_id}")
-        elif target_type == "iframe":
-            send("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js}, session_id)
-            log(f"stealth configured for iframe {target_id}")
+            log(f"stealth configured for {target_type} {target_id}")
     except Exception as exc:
         log(f"stealth injection failed on {target_type or 'target'} {target_id}: {exc}")
     finally:
@@ -321,15 +335,7 @@ def handle_event(message: dict) -> None:
 
 
 try:
-    # Auto-attach includes existing targets and emits the events that configure them.
-    send(
-        "Target.setAutoAttach",
-        {
-            "autoAttach": True,
-            "waitForDebuggerOnStart": True,
-            "flatten": True,
-        },
-    )
+    auto_attach()
 
     targets = send("Target.getTargets", {}).get("result", {}).get("targetInfos", [])
     if not any(target.get("type") == "page" for target in targets):

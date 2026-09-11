@@ -19,9 +19,9 @@ if (!guardSource) {
   throw new Error("embedded CDP guard not found");
 }
 
-type CdpCommand = { method: string; sessionId?: string };
+type CdpCommand = { method: string; sessionId?: string; params?: Record<string, unknown> };
 
-function runGuard(scenario: "idle" | "command-timeout" | "existing" | "empty") {
+function runGuard(scenario: "idle" | "command-timeout" | "existing" | "empty" | "nested-iframes") {
   const directory = mkdtempSync(join(tmpdir(), "rome-stealth-guard-"));
   const traceFile = join(directory, "commands.json");
   const readyFile = join(directory, "ready");
@@ -155,6 +155,47 @@ describe("rome-apply-cdp-stealth.sh guard lifecycle", () => {
         sessionId: "session-new",
       }),
     );
+    expect(result.stderr).toBe("[stealth] browser CDP connection closed\n");
+  });
+
+  it("configures existing and new nested iframes before resuming their scripts", () => {
+    const result = runGuard("nested-iframes");
+    const frames = [
+      "existing-frame",
+      "existing-nested-frame",
+      "new-frame",
+      "new-nested-frame",
+      "late-nested-frame",
+    ];
+
+    expect(result.ready).toBe(true);
+    for (const frame of frames) {
+      const commands = result.commands.filter(
+        (command) => command.sessionId === `session-${frame}`,
+      );
+      expect(commands).toContainEqual(
+        expect.objectContaining({
+          method: "Target.setAutoAttach",
+          params: { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+        }),
+      );
+      expect(
+        commands.filter((command) => command.method === "Page.addScriptToEvaluateOnNewDocument"),
+      ).toHaveLength(1);
+      expect(commands.filter((command) => command.method === "Page.enable")).toHaveLength(1);
+      expect(result.stdout).toContain(`stealth configured for iframe ${frame}`);
+    }
+
+    for (const target of ["new", "new-frame", "new-nested-frame", "late-nested-frame"]) {
+      const methods = result.commands
+        .filter((command) => command.sessionId === `session-${target}`)
+        .map((command) => command.method);
+      const resumeIndex = methods.indexOf("Runtime.runIfWaitingForDebugger");
+      expect(resumeIndex).toBeGreaterThan(methods.indexOf("Target.setAutoAttach"));
+      expect(resumeIndex).toBeGreaterThan(methods.indexOf("Page.addScriptToEvaluateOnNewDocument"));
+      expect(resumeIndex).toBeGreaterThan(methods.indexOf("Page.enable"));
+    }
+    expect(result.stdout).not.toContain("stealth injection failed");
     expect(result.stderr).toBe("[stealth] browser CDP connection closed\n");
   });
 });
