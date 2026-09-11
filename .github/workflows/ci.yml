@@ -106,6 +106,8 @@ jobs:
         run: pnpm -C opencli-plugins/delta test
       - name: Test United OpenCLI plugin
         run: pnpm -C opencli-plugins/united test
+      - name: Test Southwest OpenCLI plugin
+        run: pnpm -C opencli-plugins/southwest test
       - run: pnpm lint
       - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind

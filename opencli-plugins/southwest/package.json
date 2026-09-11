@@ -1,0 +1,9 @@
+{
+  "name": "rome-opencli-southwest",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "../../scripts/test-env.sh node --test *.test.mjs"
+  }
+}
