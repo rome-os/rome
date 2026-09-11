@@ -2,6 +2,7 @@
 // 1200x630 social card. Fixed layout with four slots (icon, name, description,
 // link); geometry and budgets match jessie_local_rome_study spec §4.4. SVG has
 // no automatic wrapping, so lines are broken here by a width-unit budget.
+import { widthUnits } from "../packaging/width-units.js";
 
 export interface OgIcon {
   mime: "image/svg+xml" | "image/png";
@@ -40,11 +41,7 @@ function escapeXml(value: string): string {
 }
 
 /** Width units: CJK / fullwidth count 2, everything else 1. */
-function units(text: string): number {
-  let total = 0;
-  for (const ch of text) total += (ch.codePointAt(0) ?? 0) > 0x2e7f ? 2 : 1;
-  return total;
-}
+const units = widthUnits;
 
 /**
  * Greedy character wrap that prefers the last space in the line (English
