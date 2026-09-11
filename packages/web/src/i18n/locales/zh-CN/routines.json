@@ -8,8 +8,6 @@
     "total": "总计",
     "active": "已启用",
     "paused": "已暂停",
-    "failingCount": "{{n}} 个失败",
-    "failingAria": "查看 {{n}} 个失败的例程",
     "nextUp": "下一个",
     "noUpcoming": "暂无即将到来的运行",
     "etaOverdue": "已到点"

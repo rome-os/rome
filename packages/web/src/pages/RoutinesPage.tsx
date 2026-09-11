@@ -47,7 +47,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tile } from "@/components/ui/tile";
 import {
-  AlertTriangle,
   AlignLeft,
   Calendar as CalendarIcon,
   Check,
@@ -376,8 +375,6 @@ function StatsBar({ routines }: { routines: Routine[] }) {
     .filter((r) => r.enabled && r.nextRunAt && !isPast(r.nextRunAt))
     .sort((a, b) => new Date(a.nextRunAt!).getTime() - new Date(b.nextRunAt!).getTime())[0];
 
-  // Health (failing vs. healthy) is intentionally NOT shown here — it lives as a
-  // red pill beside the page title, and only when something is actually wrong.
   return (
     <div className="flex flex-col overflow-hidden rounded-12 border border-border bg-surface sm:flex-row sm:items-stretch">
       {/* Stat cells — generously spaced, each label-over-number. */}
@@ -391,35 +388,6 @@ function StatsBar({ routines }: { routines: Routine[] }) {
       <div className="h-px w-full bg-border sm:h-auto sm:w-px" />
       <NextUpBlock routine={nextRoutine} />
     </div>
-  );
-}
-
-// The health pill that sits beside the page title — shown ONLY when one or more
-// routines are failing. A confirmed-healthy state shows nothing at all, so good
-// days carry no badge. Clicking it jumps to the failing-filtered list.
-function HealthPill({ failing, onShowFailing }: { failing: number; onShowFailing: () => void }) {
-  const { t } = useTranslation("routines");
-  if (failing === 0) return null;
-  return (
-    <Button
-      type="button"
-      variant="destructive"
-      // `md`, not `sm`: the pill sits beside the page's `text-title` h1, whose
-      // 24px line box would leave a 28px control reading as an afterthought.
-      size="md"
-      shape="pill"
-      onClick={onShowFailing}
-      aria-label={t("stats.failingAria", { n: failing })}
-      className="group"
-    >
-      <AlertTriangle data-icon="inline-start" aria-hidden />
-      <span className="tabular-nums">{t("stats.failingCount", { n: failing })}</span>
-      <ChevronRight
-        data-icon="inline-end"
-        className="transition-transform group-hover:translate-x-0.5"
-        aria-hidden
-      />
-    </Button>
   );
 }
 
@@ -2172,15 +2140,6 @@ export default function RoutinesPage() {
   // skipped by whichever view the guardian happens to be on.
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
-  // Health surfaces only as a title-side pill, and only when something is wrong.
-  // Both the count and the jump-to-failing action are derived here so the pill
-  // and the list filter read from the same routines.
-  const failing = routines.filter(isFailing).length;
-  const showFailing = () => {
-    setView("table");
-    setTableFilter("failing");
-  };
-
   const readBackendError = async (res: Response, fallbackKey: string): Promise<string> => {
     const data = await res.json().catch(() => ({}));
     return typeof data?.error === "string" && data.error.length > 0 ? data.error : t(fallbackKey);
@@ -2264,7 +2223,6 @@ export default function RoutinesPage() {
         <header className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <h1 className="text-title text-foreground">{t("header.title")}</h1>
-            <HealthPill failing={failing} onShowFailing={showFailing} />
           </div>
           <Button onClick={() => setShowCreate(true)} className="flex-shrink-0">
             <Plus className="size-4" aria-hidden />
