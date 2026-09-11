@@ -67,8 +67,11 @@ cd "$ROOT"
 # Top-level key order does not matter in YAML, so append the line (the
 # leading newline keeps it off a last line that has no trailing newline).
 printf '\ntagline: "REPLACE WITH THE SENTENCE"\n' >> app.yaml
-git add app.yaml && git commit -m "chore: add share-card tagline"
+git add app.yaml && git commit -o app.yaml -m "chore: add share-card tagline"
 ```
+
+`-o app.yaml` commits only that file, so anything the guardian left staged in
+the repo stays out of this commit and the rollback below stays one file.
 
 Then reinstall through the daemon (the same call `app_creation` uses; always
 pass `source` explicitly):
@@ -86,7 +89,7 @@ grep -n '^tagline:' "$ROOT/.rome/artifact/app.yaml"
 If the install fails, roll that app back and continue with the next one:
 
 ```bash
-git -C "$ROOT" checkout HEAD~1 -- app.yaml && git -C "$ROOT" commit -m "chore: revert share-card tagline"
+git -C "$ROOT" checkout HEAD~1 -- app.yaml && git -C "$ROOT" commit -o app.yaml -m "chore: revert share-card tagline"
 ```
 
 The reinstall triggers the card to be redrawn; nothing else is needed.

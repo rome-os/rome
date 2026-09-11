@@ -3,7 +3,10 @@
 // finishes after this hook ships writes a marker into the app's settings,
 // then — only if some enabled source-dir app with a web surface still lacks a
 // `tagline` — summons the coding agent to run the `app_tagline_backfill`
-// skill. Every later turn sees the marker and returns immediately.
+// skill. The marker is final once the run reaches a definite outcome (nothing
+// to do, or the agent returned); a thrown failure leaves it unfinished so a
+// later turn retries, up to `BACKFILL_MAX_ATTEMPTS`. Every later turn sees the
+// finished marker and returns immediately.
 //
 // Bump `BACKFILL_VERSION` to run the backfill again on every instance.
 
@@ -21,13 +24,18 @@ import type {
 
 export const BACKFILL_SETTINGS_KEY = "coding.taglineBackfill";
 export const BACKFILL_VERSION = 1;
+export const BACKFILL_MAX_ATTEMPTS = 3;
 export const BACKFILL_AGENT = "coding";
 export const BACKFILL_SKILL = "coding:app_tagline_backfill";
 
 export interface TaglineBackfillMarker {
   version: number;
   startedAt: string;
+  /** Runs started for this version, including the one in progress. */
+  attempts: number;
+  /** Set only on a definite outcome; absent means retry on the next turn. */
   finishedAt?: string;
+  lastError?: string;
   /** Source roots handed to the agent (absent when nothing needed a tagline). */
   apps?: string[];
   /** The agent's final text, kept for inspection. */
@@ -92,6 +100,12 @@ export function buildBackfillPrompt(roots: string[]): string {
   ].join("\n");
 }
 
+/** Finished for this version, or out of attempts: nothing more to do. */
+function isSettled(marker: TaglineBackfillMarker | null): boolean {
+  if (!marker || marker.version < BACKFILL_VERSION) return false;
+  return marker.finishedAt !== undefined || marker.attempts >= BACKFILL_MAX_ATTEMPTS;
+}
+
 export class TaglineBackfillHook implements AgentTurnFinishedHook {
   private running = false;
 
@@ -102,8 +116,9 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
     this.running = true;
     try {
       const marker = await this.deps.settings.get<TaglineBackfillMarker>(BACKFILL_SETTINGS_KEY);
-      if (marker && marker.version >= BACKFILL_VERSION) return;
-      await this.backfill();
+      if (isSettled(marker)) return;
+      const attempts = marker?.version === BACKFILL_VERSION ? marker.attempts + 1 : 1;
+      await this.backfill(attempts);
     } catch (err) {
       this.deps.logger.warn("tagline backfill failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -113,12 +128,13 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
     }
   }
 
-  private async backfill(): Promise<void> {
-    // Mark first: the backfill runs once whether or not it succeeds. The
-    // manual `/app_tagline_backfill` skill covers anything it leaves behind.
+  private async backfill(attempts: number): Promise<void> {
+    // Record the attempt before doing anything so a crash mid-run still counts
+    // toward the cap. `finishedAt` is only written on a definite outcome.
     const started: TaglineBackfillMarker = {
       version: BACKFILL_VERSION,
       startedAt: new Date().toISOString(),
+      attempts,
     };
     await this.deps.settings.set(BACKFILL_SETTINGS_KEY, started);
 
@@ -132,14 +148,22 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
       return;
     }
 
-    this.deps.logger.info("tagline backfill started", { apps: roots });
+    this.deps.logger.info("tagline backfill started", { apps: roots, attempts });
     let summary = "";
-    for await (const msg of this.deps.agentRunner.run({
-      agentName: BACKFILL_AGENT,
-      prompt: buildBackfillPrompt(roots),
-    })) {
-      if (msg.type === "result") summary = String(msg.content ?? "");
-      if (msg.type === "error") throw new Error(String(msg.error));
+    try {
+      for await (const msg of this.deps.agentRunner.run({
+        agentName: BACKFILL_AGENT,
+        prompt: buildBackfillPrompt(roots),
+      })) {
+        if (msg.type === "result") summary = String(msg.content ?? "");
+        if (msg.type === "error") throw new Error(String(msg.error));
+      }
+    } catch (err) {
+      await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
+        ...started,
+        lastError: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
     }
     await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
       ...started,
