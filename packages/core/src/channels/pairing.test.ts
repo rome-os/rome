@@ -165,7 +165,12 @@ describe("channel pairing approvals", () => {
     });
   });
 
-  it.each(["", "   ", "ou_123", "Feishu User"])("preserves a known name when a reused request supplies %j", async (displayName) => {
+  it.each([
+    "",
+    "   ",
+    "ou_123",
+    "Feishu User",
+  ])("preserves a known name when a reused request supplies %j", async (displayName) => {
     const input = { ...identity, channel: "feishu" as const, channelUserId: "ou_123" };
     const first = repo.requestPairing(input)!;
     repo.requestPairing({ ...input, displayName })!;
@@ -175,7 +180,9 @@ describe("channel pairing approvals", () => {
   it("refreshes a known name when the requesting account is renamed", async () => {
     const first = repo.requestPairing(identity)!;
     repo.requestPairing({ ...identity, displayName: "Alice Smith" });
-    expect(pairingPayload((await repo.findById(first.approval.id))!)?.displayName).toBe("Alice Smith");
+    expect(pairingPayload((await repo.findById(first.approval.id))!)?.displayName).toBe(
+      "Alice Smith",
+    );
   });
 
   it("rejects cross-identity, cross-channel, cross-connection and replayed codes", async () => {
