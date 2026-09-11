@@ -70,6 +70,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY scripts/docker/rome-open-in-server-browser.sh /usr/local/bin/rome-open-in-server-browser
 RUN chmod 0755 /usr/local/bin/rome-open-in-server-browser
 ENV BROWSER=/usr/local/bin/rome-open-in-server-browser
+ENV OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222
 
 RUN curl -fsSL https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" \
     && ln -sf /usr/local/lib/composio/composio /usr/local/bin/composio \

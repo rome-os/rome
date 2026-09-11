@@ -41,6 +41,12 @@ directory is its own standalone plugin rather than one plugin holding `<site>/<c
 
 ## Install points (all idempotent)
 
+Both container images set `OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222`, so OpenCLI uses
+Rome's browser without a shell alias or an extra flag. Codex passes this variable to
+agent subprocesses. Set `OPENCLI_CDP_ENDPOINT` in the container environment to use another
+browser, including deployments with a custom Chrome host or port. Recreate the container
+after changing the image or its environment. An explicit `--cdp-endpoint` overrides the variable.
+
 - **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
