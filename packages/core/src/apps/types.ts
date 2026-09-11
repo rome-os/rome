@@ -126,8 +126,9 @@ export interface RomeAppManifest {
   version: string;
   description: string;
   /**
-   * One-line, author-written hook for the app's social share card. Falls
-   * back to the first sentence of `description` when absent.
+   * One-line, author-written hook for the app's social share card. When
+   * absent the card shows no description at all — there is no fallback to
+   * `description`.
    */
   tagline?: string;
   /** Human-readable App name. Consumed by both Rome Cloud and Rome. */
