@@ -25,7 +25,7 @@ LOCK="$HOME/.rome/${ROME_PROFILE:-default}/apps.lock.json"
 node -e '
   const lock = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   for (const [id, e] of Object.entries(lock.apps)) {
-    if (e.source.mode === "source" && e.enabled && e.state === "installed") console.log(id, e.source.path);
+    if (e.source?.mode === "source" && e.enabled && e.state === "installed") console.log(id, e.source.path);
   }
 ' "$LOCK"
 ```
@@ -46,7 +46,7 @@ done), apps without `web:` (no card), apps that already have a tagline.
 Read `name`, `description`, and `README.md` (if present) under the root.
 Write the tagline by the same rule `app_creation/REFERENCE.md` gives:
 
-- One sentence, at most 80 characters (40 for CJK). No line breaks.
+- One sentence, at most 80 characters (40 for CJK). No line breaks, no double quotes.
 - Lead with what the user gets. No implementation details, jargon, or
   acronyms. Read it like an App Store subtitle.
 - Do not copy `description` — it is written for agents, not people.
@@ -64,16 +64,9 @@ makes. In AUTO mode go straight to step 4.
 
 ```bash
 cd "$ROOT"
-# Insert right after the description. For a block-scalar description (`>-`
-# or `|`), insert after its last indented line instead.
-python3 - "$ROOT/app.yaml" <<'EOF'
-import re, sys
-path = sys.argv[1]; text = open(path).read()
-line = 'tagline: "REPLACE WITH THE SENTENCE"\n'
-m = re.search(r'^description:.*(?:\n[ \t]+.*)*\n', text, re.M)
-text = text[:m.end()] + line + text[m.end():] if m else text + line
-open(path, 'w').write(text)
-EOF
+# Top-level key order does not matter in YAML, so append the line (the
+# leading newline keeps it off a last line that has no trailing newline).
+printf '\ntagline: "REPLACE WITH THE SENTENCE"\n' >> app.yaml
 git add app.yaml && git commit -m "chore: add share-card tagline"
 ```
 
@@ -93,7 +86,7 @@ grep -n '^tagline:' "$ROOT/.rome/artifact/app.yaml"
 If the install fails, roll that app back and continue with the next one:
 
 ```bash
-git -C "$ROOT" revert --no-edit HEAD
+git -C "$ROOT" checkout HEAD~1 -- app.yaml && git -C "$ROOT" commit -m "chore: revert share-card tagline"
 ```
 
 The reinstall triggers the card to be redrawn; nothing else is needed.

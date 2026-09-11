@@ -1,3 +1,12 @@
+// One-shot tagline backfill for apps built on this instance before `tagline`
+// existed (rome#202). Runs once per instance: the first agent turn that
+// finishes after this hook ships writes a marker into the app's settings,
+// then — only if some enabled source-dir app with a web surface still lacks a
+// `tagline` — summons the coding agent to run the `app_tagline_backfill`
+// skill. Every later turn sees the marker and returns immediately.
+//
+// Bump `BACKFILL_VERSION` to run the backfill again on every instance.
+
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -10,20 +19,10 @@ import type {
   Logger,
 } from "@rome-os/app-runtime";
 
-/**
- * One-shot tagline backfill for apps built on this instance before `tagline`
- * existed (rome#202). Runs once per instance: the first agent turn that
- * finishes after this hook ships writes a marker into the app's settings,
- * then — only if some enabled source-dir app with a web surface still lacks a
- * `tagline` — summons the coding agent to run the `app_tagline_backfill`
- * skill. Every later turn sees the marker and returns immediately.
- *
- * Bump `BACKFILL_VERSION` to run the backfill again on every instance.
- */
-export const BACKFILL_SETTINGS_KEY = "tagline-backfill";
+export const BACKFILL_SETTINGS_KEY = "coding.taglineBackfill";
 export const BACKFILL_VERSION = 1;
 export const BACKFILL_AGENT = "coding";
-export const BACKFILL_SKILL_PATH = "rome_apps/coding/src/skills/app_tagline_backfill/SKILL.md";
+export const BACKFILL_SKILL = "coding:app_tagline_backfill";
 
 export interface TaglineBackfillMarker {
   version: number;
@@ -88,7 +87,7 @@ export async function findAppsMissingTagline(lockfilePath: string): Promise<stri
 
 export function buildBackfillPrompt(roots: string[]): string {
   return [
-    `Load the skill at ${BACKFILL_SKILL_PATH} and run it in AUTO mode for these apps (absolute source roots):`,
+    `Read the \`${BACKFILL_SKILL}\` skill with read_skill and run it in AUTO mode for these apps (absolute source roots):`,
     ...roots.map((root) => `- ${root}`),
   ].join("\n");
 }
@@ -100,11 +99,10 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
 
   async onAgentTurnFinished(_event: AgentTurnFinishedEvent): Promise<void> {
     if (this.running) return;
-    const marker = await this.deps.settings.get<TaglineBackfillMarker>(BACKFILL_SETTINGS_KEY);
-    if (marker && marker.version >= BACKFILL_VERSION) return;
-
     this.running = true;
     try {
+      const marker = await this.deps.settings.get<TaglineBackfillMarker>(BACKFILL_SETTINGS_KEY);
+      if (marker && marker.version >= BACKFILL_VERSION) return;
       await this.backfill();
     } catch (err) {
       this.deps.logger.warn("tagline backfill failed", {

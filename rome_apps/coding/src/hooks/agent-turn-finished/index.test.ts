@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { AgentMessage, AgentTurnFinishedEvent, RunParams } from "@rome-os/app-runtime";
 import {
   BACKFILL_SETTINGS_KEY,
-  BACKFILL_SKILL_PATH,
+  BACKFILL_SKILL,
   BACKFILL_VERSION,
   defaultLockfilePath,
   findAppsMissingTagline,
@@ -165,7 +165,9 @@ describe("coding tagline backfill hook", () => {
 
       expect(runner.calls).toHaveLength(1);
       expect(runner.calls[0]?.agentName).toBe("coding");
-      expect(runner.calls[0]?.prompt).toContain(BACKFILL_SKILL_PATH);
+      expect(runner.calls[0]?.prompt).toContain(
+        "`coding:app_tagline_backfill` skill with read_skill",
+      );
       expect(runner.calls[0]?.prompt).toContain("AUTO mode");
       expect(runner.calls[0]?.prompt).toContain(`- ${root}`);
 
