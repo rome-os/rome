@@ -72,7 +72,7 @@ tokens. They require no query client, router, or Rome backend.
 
 [`PairingApproval.tsx`](../packages/web/src/components/PairingApproval.tsx) owns queries, mutations,
 clipboard writes, and navigation composition.
-The presentation adapter maps approval records to component data; the views format dates and UI copy.
+The presentation adapter maps approval records to component data. The views format dates and UI copy.
 Connections and Activity continue to use this shared container.
 
 | Component | States | Example |
