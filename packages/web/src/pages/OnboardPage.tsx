@@ -1,55 +1,43 @@
 import { useEffect, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Dices, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { z } from "zod";
 
-import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FormError,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Stepper } from "@/components/ui/stepper";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
-import { getRandomAgentPreset } from "@/lib/agent-presets";
 
-const ONBOARDING_HIDDEN_AI_PROVIDERS = ["gemini", "grok"] as const;
-
-interface AgentIdentity {
-  name: string;
-  purpose: string;
-}
-
-type Step = "account" | "profile";
-
-function detectTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-  } catch {
-    return "";
-  }
-}
-
+// Local-first setup, and the whole of it: the username and password that lock
+// this Rome to its guardian. Creating the account also finishes setup
+// server-side (the username becomes the display name, the agent gets a preset
+// identity), so the guardian name and the agent name are confirmed in the
+// welcome conversation rather than asked for twice. A cloud box never reaches
+// this page — its sign-in callback creates the seat and finishes setup.
 export default function OnboardPage() {
   const { t } = useTranslation("onboard");
-  // The bootstrap phase decides the first step. `needs-account`
-  // (local-first, no seat yet) opens on the create-account step; everything else
-  // — including every cloud box, whose seat was created by the sign-in callback —
-  // is profile/agent/AI-tools only. Captured at mount so advancing past the
-  // account step (which flips the backend phase to needs-onboarding) doesn't tear
-  // down the stepper mid-flow.
   const { bootstrap } = useAuthStateSnapshot();
-  const [startedAtAccount] = useState(() => bootstrap?.phase === "needs-account");
-  const [step, setStep] = useState<Step>(startedAtAccount ? "account" : "profile");
+  const queryClient = useQueryClient();
+
+  // Repair path for an instance that was signed in but mid-onboarding when this
+  // version landed: there is no profile step left to finish, so mark setup
+  // complete and let the gate route on. Without this the phase would hold at
+  // `needs-onboarding` against a page that only creates accounts.
+  const stranded = bootstrap?.phase === "needs-onboarding";
+  useEffect(() => {
+    if (!stranded) return;
+    void (async () => {
+      await fetch("/api/onboard/complete", { method: "POST", credentials: "include" }).catch(
+        () => {},
+      );
+      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+    })();
+  }, [stranded, queryClient]);
+
+  if (stranded) return null;
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-[calc(3rem+var(--rome-safe-area-bottom))] pt-[calc(3rem+var(--rome-safe-area-top))]">
@@ -58,29 +46,18 @@ export default function OnboardPage() {
           <RomeLogo className="h-7 w-7" aria-hidden />
           <h1 className="text-title">{t("page.title")}</h1>
         </div>
-        <p className="mb-7 text-center text-body text-muted-foreground">
-          {step === "account" ? t("account.tagline") : t("page.tagline")}
-        </p>
-
-        {/* The local account step only exists on the fallback path; cloud
-            onboarding is a single profile step, so no stepper is shown. */}
-        {startedAtAccount && (
-          <Stepper
-            steps={[t("steps.account"), t("steps.profile")]}
-            current={step === "account" ? 0 : 1}
-            className="mb-6"
-          />
-        )}
+        <p className="mb-7 text-center text-body text-muted-foreground">{t("account.tagline")}</p>
         <div className="rounded-12 border border-border bg-surface p-6 shadow-1 sm:p-8">
-          {step === "account" ? <AccountStep onDone={() => setStep("profile")} /> : <ProfileStep />}
+          <AccountStep />
         </div>
       </div>
     </main>
   );
 }
 
-function AccountStep({ onDone }: { onDone: () => void }) {
+function AccountStep() {
   const { t } = useTranslation("onboard");
+  const queryClient = useQueryClient();
   const [serverError, setServerError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
@@ -108,7 +85,10 @@ function AccountStep({ onDone }: { onDone: () => void }) {
           return;
         }
 
-        onDone();
+        // Setup is complete server-side, so refreshing the auth state flips the
+        // phase to `ready` and AuthGate redirects to the welcome app. Navigating
+        // here too would race that redirect.
+        await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
       } catch {
         setServerError(t("account.networkError"));
       }
@@ -210,173 +190,5 @@ function AccountStep({ onDone }: { onDone: () => void }) {
         </form.Subscribe>
       </FieldGroup>
     </form>
-  );
-}
-
-function ProfileStep() {
-  const { t } = useTranslation("onboard");
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const [agent, setAgent] = useState<AgentIdentity>(() => {
-    const preset = getRandomAgentPreset();
-    return { name: preset.name, purpose: preset.purpose };
-  });
-  const [guardianName, setGuardianName] = useState("");
-  const [anyAiConnected, setAnyAiConnected] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  // Bootstrap: load any persisted agent/guardian name.
-  // AuthGate handles the "onboarding already complete" redirect; we deliberately
-  // don't navigate here too, because the two redirect sources race (each
-  // location change aborts AuthGate's in-flight state refresh).
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/onboard/draft", { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const s = data.settings as Record<string, unknown> | undefined;
-        if (s) {
-          setAgent((prev) => ({
-            name: typeof s.agentName === "string" && s.agentName ? s.agentName : prev.name,
-            purpose:
-              typeof s.agentPurpose === "string" && s.agentPurpose ? s.agentPurpose : prev.purpose,
-          }));
-          if (typeof s.guardianName === "string") setGuardianName(s.guardianName);
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, []);
-
-  function rerollAgentName() {
-    const preset = getRandomAgentPreset();
-    setAgent({ name: preset.name, purpose: preset.purpose });
-  }
-
-  async function enterRome() {
-    if (!guardianName.trim() || !anyAiConnected) return;
-
-    setSubmitting(true);
-    setError("");
-    try {
-      const setupRes = await fetch("/api/onboard/setup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profile: {
-            agentName: agent.name || undefined,
-            agentPurpose: agent.purpose || undefined,
-            guardianName: guardianName.trim() || undefined,
-            guardianTimezone: detectTimezone() || undefined,
-          },
-        }),
-      });
-      if (!setupRes.ok) {
-        const data = await setupRes.json().catch(() => ({}));
-        setError(data.error || t("page.errors.profileSaveFailed"));
-        return;
-      }
-      const completeRes = await fetch("/api/onboard/complete", { method: "POST" });
-      if (!completeRes.ok) {
-        const data = await completeRes.json().catch(() => ({}));
-        setError(data.error || t("page.errors.completeFailed"));
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
-      // Land on the welcome-to-rome app in full mode — the first screen of Rome,
-      // shown standalone (no dashboard chrome), which opens the conversational
-      // welcome flow. AuthGate independently redirects /onboard ->
-      // /full/apps/welcome-to-rome once the auth state above flips to
-      // onboardingComplete, so this target MUST match AuthGate's
-      // (resolveAuthRouting in lib/auth-routing.ts): both fire on the same state
-      // change and, if they disagree, race — the loser's destination can win.
-      navigate("/full/apps/welcome-to-rome");
-    } catch {
-      setError(t("page.errors.networkError"));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="space-y-6">
-        <section>
-          <FieldLabel htmlFor="guardianName" className="mb-2">
-            {t("guardian.nameLabel")}
-          </FieldLabel>
-          <Input
-            id="guardianName"
-            value={guardianName}
-            onChange={(e) => setGuardianName(e.target.value)}
-            placeholder={t("guardian.namePlaceholder")}
-            autoComplete="name"
-          />
-          <FieldDescription className="mt-2">{t("guardian.nameHint")}</FieldDescription>
-        </section>
-
-        <section>
-          <FieldLabel htmlFor="agentName" className="mb-2">
-            {t("agent.nameLabel")}
-          </FieldLabel>
-          <div className="flex gap-2">
-            <Input
-              id="agentName"
-              value={agent.name}
-              onChange={(e) => setAgent((prev) => ({ ...prev, name: e.target.value }))}
-              placeholder={t("agent.namePlaceholder")}
-              autoComplete="off"
-              className="flex-1"
-            />
-            <Button
-              variant="outline"
-              size="md"
-              onClick={rerollAgentName}
-              title={t("agent.rerollTitle")}
-              aria-label={t("agent.rerollTitle")}
-            >
-              <Dices className="h-4 w-4" aria-hidden />
-              <span className="hidden sm:inline">{t("agent.reroll")}</span>
-            </Button>
-          </div>
-          <p className="mt-2 text-aux text-subtle-foreground">{t("agent.nameHint")}</p>
-        </section>
-
-        <section>
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-section text-foreground">{t("ai.title")}</h2>
-            <span className="text-aux text-subtle-foreground">{t("ai.pickOneHint")}</span>
-          </div>
-          <AiToolsPanel
-            hiddenProviders={ONBOARDING_HIDDEN_AI_PROVIDERS}
-            showHeader={false}
-            showUsage={false}
-            onConnectedChange={setAnyAiConnected}
-          />
-        </section>
-
-        {error && <p className="text-ui text-destructive-fg">{error}</p>}
-
-        <div className="flex flex-col gap-2 border-t border-border pt-5">
-          <Button
-            size="md"
-            onClick={enterRome}
-            disabled={submitting || !guardianName.trim() || !anyAiConnected}
-            className="w-full touch-target"
-          >
-            {submitting ? t("page.entering") : t("page.enter")}
-          </Button>
-          {!anyAiConnected && (
-            <p className="text-center text-aux text-subtle-foreground">
-              {t("page.enterRequiresAiHint")}
-            </p>
-          )}
-        </div>
-      </div>
-    </>
   );
 }

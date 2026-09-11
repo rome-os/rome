@@ -12,7 +12,9 @@
  *     token at the token leg) and `openid` on an already-enrolled box.
  *   - vanilla instance: callback enrolls (persists the instance token), stamps the
  *     guardian account from the verified id_token, and issues a session. When no
- *     guardian seat exists it is created from the cloud account.
+ *     guardian seat exists it is created from the cloud account, setup finishes
+ *     with defaults (the guardian name from the `name` claim or the email local
+ *     part, a preset agent), and the browser lands on the welcome conversation.
  *   - bound instance: a session is issued for the verified account, and that
  *     account is stamped as the binding (repairing a null/stale recorded owner).
  *     Ownership is enforced server-side at /authorize, so the verified `sub` is the
@@ -24,10 +26,22 @@
  *   - flag off: start and callback both 404.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import jwt from "jsonwebtoken";
+
+// The seat creation writes the guardian's profile notes; keep them out of the
+// runner's real profile.
+rs.mock("../../profile-memory.js", () => ({
+  ensureProfileMemoryInitialized: rs.fn(() => mkdtempSync(join(tmpdir(), "cloud-login-"))),
+}));
+
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
+import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
 import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../lib/auth.js";
 import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
@@ -35,7 +49,7 @@ import {
   INSTANCE_TOKEN_SETTING_KEY,
   setInstanceTokenInMemory,
 } from "../../lib/instance-identity.js";
-import { guardianAuth } from "../../db/schema.js";
+import { guardianAuth, persons, settings } from "../../db/schema.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -50,6 +64,8 @@ const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   testDb.db.delete(guardianAuth).run();
+  testDb.db.delete(persons).run();
+  testDb.db.delete(settings).run();
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
@@ -86,11 +102,13 @@ function signIdToken(opts: {
   key?: KeyObject;
   email?: string;
   picture?: string;
+  name?: string;
 }): string {
   const payload: Record<string, unknown> = {};
   if (opts.nonce) payload.nonce = opts.nonce;
   if (opts.email) payload.email = opts.email;
   if (opts.picture) payload.picture = opts.picture;
+  if (opts.name) payload.name = opts.name;
   return jwt.sign(payload, opts.key ?? KEY.privateKey, {
     algorithm: "ES256",
     keyid: KID,
@@ -349,7 +367,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
   it("creates the guardian seat from the cloud account when none exists", async () => {
     const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
     const romeCloud = fakeRomeCloud((nonce) => ({
-      id_token: signIdToken({ sub: "A", nonce }),
+      id_token: signIdToken({ sub: "A", nonce, email: "alex@example.com" }),
       instance_token: "romeinst_new",
       instance_id: "inst-1",
     }));
@@ -361,14 +379,14 @@ describe("/api/auth/cloud — vanilla instance", () => {
     const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/onboard");
+    expect(res.headers.get("location")).toBe("/full/apps/welcome-to-rome");
     expect(sessionUserId(res)).toBe("A");
 
     expect(await deps.settingsRepo.get<string>(INSTANCE_TOKEN_SETTING_KEY)).toBe("romeinst_new");
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.userId).toBe("A");
     expect(row.accountId).toBe("A");
-    expect(row.onboardingComplete).toBe(false);
+    expect(row.onboardingComplete).toBe(true);
   });
 
   it("fails closed with no cookie when the token leg returns no instance token", async () => {
@@ -487,6 +505,76 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.email).toBe("kept@example.com");
     expect(row.avatarUrl).toBe("https://example.com/kept-avatar.png");
+  });
+});
+
+// A fresh seat finishes setup right in the callback, so the onboarding page is
+// never reached on a cloud-default instance. The profile write is the same
+// shared function `/onboard/setup` uses.
+describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () => {
+  async function signInFresh(claims: { name?: string; email?: string }) {
+    const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce, ...claims }),
+      instance_token: "romeinst_new",
+      instance_id: "inst-1",
+    }));
+    const app = new Hono();
+    app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    return { res, deps };
+  }
+
+  function guardianPerson() {
+    return testDb.db.select().from(persons).where(eq(persons.bondLevel, "guardian")).all();
+  }
+
+  it("writes the name claim as the guardian name and redirects to the welcome app", async () => {
+    const { res, deps } = await signInFresh({ name: "Alex Doe", email: "alex@example.com" });
+
+    expect(res.headers.get("location")).toBe("/full/apps/welcome-to-rome");
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Alex Doe");
+    expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
+  });
+
+  it("falls back to the email local part when the id_token has no name claim", async () => {
+    const { deps } = await signInFresh({ email: "alex.doe@example.com" });
+
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("alex.doe");
+    expect(guardianPerson()).toMatchObject([{ displayName: "alex.doe" }]);
+  });
+
+  it("writes a preset agent name and purpose, and marks onboarding complete", async () => {
+    const { deps } = await signInFresh({ name: "Alex", email: "alex@example.com" });
+
+    const agentName = await deps.settingsRepo.get<string>("agentName");
+    const agentPurpose = await deps.settingsRepo.get<string>("agentPurpose");
+    const preset = AGENT_PRESETS.find((p) => p.name === agentName);
+    expect(preset).toBeDefined();
+    expect(agentPurpose).toBe(preset?.purpose);
+    const [row] = testDb.db.select().from(guardianAuth).all();
+    expect(row.onboardingComplete).toBe(true);
+  });
+
+  it("does not touch the profile of an existing seat", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
+    await deps.settingsRepo.set("guardianName", "Kept");
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce, name: "Someone Else" }),
+    }));
+    const app = new Hono();
+    app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
+
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(res.headers.get("location")).toBe("/?cloud=success");
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Kept");
   });
 });
 

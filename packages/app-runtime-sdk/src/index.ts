@@ -1746,6 +1746,23 @@ export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
   conversations?: ConversationRepository;
+  guardianProfile?: GuardianProfileRepository;
+}
+
+/** The guardian and agent names an app may set on the guardian's behalf. */
+export interface GuardianProfileWrite {
+  guardianName?: string;
+  agentName?: string;
+}
+
+/**
+ * Writes the guardian profile through the host's single setup path: the
+ * guardian person row, the profile notes in memory, and the profile settings.
+ * A field left out keeps its stored value. Rejects a blank guardian name when
+ * none is stored yet.
+ */
+export interface GuardianProfileRepository {
+  write(input: GuardianProfileWrite): Promise<{ ok: boolean }>;
 }
 
 export interface AppSettingsRepository {
