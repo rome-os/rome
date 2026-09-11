@@ -122,7 +122,8 @@ export const AppManifestSchema = z
     // Without it the card shows no description.
     tagline: z
       .string()
-      .min(1)
+      .trim()
+      .min(1, "tagline must not be blank")
       .refine((v) => !/[\r\n]/.test(v), "tagline must be a single line")
       .refine(
         (v) => widthUnits(v) <= TAGLINE_MAX_WIDTH_UNITS,

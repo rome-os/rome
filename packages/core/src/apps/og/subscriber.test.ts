@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogEvent, ResolvedApp } from "../state.js";
 import { createOgImageStore } from "./store.js";
-import { cardDescription, createAppOgImageSubscriber } from "./subscriber.js";
+import { CARD_RENDERER_STAMP, cardDescription, createAppOgImageSubscriber } from "./subscriber.js";
 
 function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
   return {
@@ -77,6 +77,26 @@ describe("createAppOgImageSubscriber", () => {
 
     const stale = new Date("2026-08-01T00:00:00.000Z");
     utimesSync(store.path("reddit"), stale, stale);
+    await handler({ appId: "reddit", change: "changed", current: resolvedApp() });
+    await tick();
+    expect(calls).toBe(1);
+  });
+
+  it("regenerates an image that predates the renderer stamp even when newer than updatedAt", async () => {
+    const store = createOgImageStore(root);
+    let calls = 0;
+    const handler = createAppOgImageSubscriber({
+      store,
+      host: null,
+      generate: async () => {
+        calls += 1;
+        return Buffer.from("png");
+      },
+    });
+    await store.write("reddit", Buffer.from("old-renderer"));
+    const beforeStamp = new Date(CARD_RENDERER_STAMP - 60_000);
+    utimesSync(store.path("reddit"), beforeStamp, beforeStamp);
+    // updatedAt (2026-09-01) is older than the file, so only the stamp forces the render.
     await handler({ appId: "reddit", change: "changed", current: resolvedApp() });
     await tick();
     expect(calls).toBe(1);

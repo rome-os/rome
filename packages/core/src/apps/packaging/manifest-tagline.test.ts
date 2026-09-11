@@ -30,6 +30,13 @@ describe("AppManifestSchema tagline", () => {
     );
   });
 
+  it("trims surrounding whitespace and rejects blank taglines", () => {
+    expect(AppManifestSchema.parse({ ...base, tagline: "  Hello there  " }).tagline).toBe(
+      "Hello there",
+    );
+    expect(() => AppManifestSchema.parse({ ...base, tagline: "   " })).toThrow(/blank/);
+  });
+
   it("rejects multi-line taglines", () => {
     expect(() => AppManifestSchema.parse({ ...base, tagline: "one\ntwo" })).toThrow(/single line/);
     expect(() => AppManifestSchema.parse({ ...base, tagline: "one\r\ntwo" })).toThrow(
