@@ -1,4 +1,5 @@
 import { PersonMappingRepository } from "./person-mapping.js";
+import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
 import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
@@ -129,7 +130,7 @@ export class ApprovalsRepository {
           ),
         )
         .get();
-      if (mapped) return null;
+      if (mapped && mapped.personId !== STRANGER_PERSON_ID) return null;
       const previous = tx
         .select()
         .from(approvals)

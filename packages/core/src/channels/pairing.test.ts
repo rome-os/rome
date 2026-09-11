@@ -7,6 +7,7 @@ import { approvals, persons, channelMappings } from "../db/schema.js";
 import { pairingPayload } from "@rome/api-types/approvals";
 import { createPairingAdmission, notifyPairingResolution } from "./pairing.js";
 import { eq } from "drizzle-orm";
+import { STRANGER_PERSON_ID } from "../constants.js";
 
 describe("channel pairing approvals", () => {
   let testDb: TestDb;
@@ -183,6 +184,70 @@ describe("channel pairing approvals", () => {
     expect(pairingPayload((await repo.findById(first.approval.id))!)?.displayName).toBe(
       "Alice Smith",
     );
+  });
+
+  it.each([
+    "telegram",
+    "discord",
+    "feishu",
+  ] as const)("%s requires dismissed accounts to pair before admission", async (channel) => {
+    const people = new PersonMappingRepository(testDb.db);
+    testDb.db
+      .insert(persons)
+      .values({
+        id: STRANGER_PERSON_ID,
+        displayName: "Stranger",
+        bondLevel: "other",
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .run();
+    await people.addChannelMapping(STRANGER_PERSON_ID, channel, "dismissed", "Alice");
+    const admit = createPairingAdmission({ approvalsRepo: repo, personMappingRepo: people });
+    const send = rs.fn<TalkRouter["send"]>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const router = { send } as unknown as TalkRouter;
+    const message: InboundMessage = {
+      senderId: "dismissed",
+      senderDisplayName: "Alice",
+      conversationId: "dm" as ConversationId,
+      messageId: "request",
+      text: "hello",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "dm" },
+    };
+    expect(await admit("connection", channel, message, router)).toBe(false);
+    const request = (await repo.findPending())[0];
+    expect(request).toBeDefined();
+    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe(STRANGER_PERSON_ID);
+    expect(await admit("connection", channel, message, router)).toBe(false);
+    expect(await repo.findPending()).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    testDb.db.run(
+      "CREATE TRIGGER fail_dismissed_pairing BEFORE UPDATE ON approvals BEGIN SELECT RAISE(ABORT, 'approval failed'); END",
+    );
+    await expect(repo.resolvePending(request.id, "approve", "owner")).rejects.toThrow();
+    testDb.db.run("DROP TRIGGER fail_dismissed_pairing");
+    expect((await repo.findById(request.id))?.status).toBe("pending");
+    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe(STRANGER_PERSON_ID);
+    if (channel === "discord") {
+      const code = (await repo.pairingCode(request.id))!;
+      expect(
+        repo.verifyPairing({
+          connectionId: "connection",
+          channel,
+          channelUserId: "dismissed",
+          code,
+        }).outcome,
+      ).toBe("resolved");
+    } else {
+      expect((await repo.resolvePending(request.id, "approve", "owner")).outcome).toBe("resolved");
+    }
+    expect((await people.findByChannelUser(channel, "dismissed"))?.id).toBe("owner");
+    expect(await admit("connection", channel, message, router)).toBe(true);
   });
 
   it("rejects cross-identity, cross-channel, cross-connection and replayed codes", async () => {

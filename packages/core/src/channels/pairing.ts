@@ -3,6 +3,7 @@ import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals"
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { createLogger } from "../logger.js";
+import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 
 const log = createLogger("channel-pairing");
@@ -98,7 +99,7 @@ export function createPairingAdmission(deps: {
         return false;
       }
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
-      if (person) return true;
+      if (person && person.id !== STRANGER_PERSON_ID) return true;
       if (
         message.thread?.kind !== "dm" &&
         !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")

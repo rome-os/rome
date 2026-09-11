@@ -406,7 +406,7 @@ export class PersonMappingRepository {
         and(eq(channelMappings.channel, channel), eq(channelMappings.channelUserId, channelUserId)),
       )
       .get();
-    if (holder) return false;
+    if (holder && holder.personId !== STRANGER_PERSON_ID) return false;
     const guardian = exec.select().from(persons).where(eq(persons.bondLevel, "guardian")).get();
     if (!guardian) throw new Error("Guardian person is unavailable");
     this.writeChannelMapping(exec, guardian.id, channel, channelUserId, displayName);
