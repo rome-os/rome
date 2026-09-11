@@ -1,0 +1,252 @@
+{
+  "origin": "https://www.aa.com",
+  "path": "/booking/choose-flights/1",
+  "language": "en",
+  "width": 1024,
+  "ready": true,
+  "challenge": false,
+  "login_required": false,
+  "expired": false,
+  "error": "",
+  "no_results": false,
+  "loading": false,
+  "expected_count": 5,
+  "search": {
+    "from": "JFK",
+    "to": "LHR",
+    "depart": "11/13/26",
+    "return_date": "11/20/26",
+    "miles": true,
+    "trip_type": "Round trip",
+    "passengers": [
+      {
+        "type": "adult",
+        "count": 2
+      }
+    ],
+    "header_from": "JFK",
+    "header_to": "LHR",
+    "header_passengers": "2",
+    "direction": "DEPART",
+    "date_label": "Friday, November 13, 2026"
+  },
+  "rows": [
+    {
+      "id": "flight-details-0",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "8:05 AM",
+      "arrival": "8:00 PM",
+      "duration": "6h 55m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "BA 178",
+          "aircraft": "777-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "45K",
+          "addon": "+ $549.03",
+          "scope": "Round trip",
+          "description": "Round trip Main 45K + $549.03 for JFK to LHR, departing at 8:05 AM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-1",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "10:10 AM",
+      "arrival": "10:10 PM",
+      "duration": "7h 0m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 142",
+          "aircraft": "772-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "52.5K",
+          "addon": "+ $222.73",
+          "scope": "Round trip",
+          "description": "Round trip Main 52.5K + $222.73 for JFK to LHR, departing at 10:10 AM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Premium Economy",
+          "amount": "122K",
+          "addon": "+ $1,000.53",
+          "scope": "Round trip",
+          "description": "Round trip Premium Economy 122K + $1,000.53 for JFK to LHR, departing at 10:10 AM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Business",
+          "amount": "407.5K",
+          "addon": "+ $415.13",
+          "scope": "Round trip",
+          "description": "Round trip Business 407.5K + $415.13 for JFK to LHR, departing at 10:10 AM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-2",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "5:50 PM",
+      "arrival": "5:50 AM +1 , Arrives on November 14",
+      "duration": "7h 0m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "BA 180",
+          "aircraft": "777-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "45K",
+          "addon": "+ $549.03",
+          "scope": "Round trip",
+          "description": "Round trip Main 45K + $549.03 for JFK to LHR, departing at 5:50 PM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-4",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "6:25 PM",
+      "arrival": "6:20 AM +1 , Arrives on November 14",
+      "duration": "6h 55m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 100",
+          "aircraft": "77W-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "52.5K",
+          "addon": "+ $222.73",
+          "scope": "Round trip",
+          "description": "Round trip Main 52.5K + $222.73 for JFK to LHR, departing at 6:25 PM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Premium Economy",
+          "amount": "215.5K",
+          "addon": "+ $1,000.53",
+          "scope": "Round trip",
+          "description": "Round trip Premium Economy 215.5K + $1,000.53 for JFK to LHR, departing at 6:25 PM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Business",
+          "amount": "369K",
+          "addon": "+ $415.13",
+          "scope": "Round trip",
+          "description": "Round trip Business 369K + $415.13 for JFK to LHR, departing at 6:25 PM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "379K",
+          "addon": "+ $415.13",
+          "scope": "Round trip",
+          "description": "Round trip First 379K + $415.13 for JFK to LHR, departing at 6:25 PM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-12",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "6:00 AM",
+      "arrival": "12:05 PM +1 , Arrives on November 14",
+      "duration": "25h 5m",
+      "stops": "1 stop, MIA, Miami International",
+      "segments": [
+        {
+          "flight_number": "AA 688",
+          "aircraft": "738-Boeing 737",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 56",
+          "aircraft": "77W-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel, Extended layover, The class of service you searched may not be available on one or more flights",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "52.5K",
+          "addon": "+ $228.33",
+          "scope": "Round trip",
+          "description": "Round trip Main 52.5K + $228.33 for JFK to LHR, departing at 6:00 AM 1 stop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Premium Economy",
+          "amount": "136K",
+          "addon": "+ $1,015.93",
+          "scope": "Round trip",
+          "description": "Round trip Premium Economy 136K + $1,015.93 for JFK to LHR, departing at 6:00 AM 1 stop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "Business",
+          "amount": "168.5K",
+          "addon": "+ $420.73",
+          "scope": "Round trip",
+          "description": "Round trip Business 168.5K + $420.73 for JFK to LHR, departing at 6:00 AM 1 stop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "517.5K",
+          "addon": "+ $420.73",
+          "scope": "Round trip",
+          "description": "Round trip First 517.5K + $420.73 for JFK to LHR, departing at 6:00 AM 1 stop",
+          "unavailable": false
+        }
+      ]
+    }
+  ]
+}

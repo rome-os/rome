@@ -1,0 +1,927 @@
+<html lang="en">
+<head>
+</head>
+<body>
+<app-modify-search>
+<app-modify-search-header>
+<span class="origin">SFO</span>
+<span class="destination"> DFW,</span>
+<span class="passenger-count">1</span>
+</app-modify-search-header>
+<mat-select role="combobox" aria-haspopup="listbox" name="tripType" class="mat-mdc-select ng-untouched ng-pristine ng-valid" aria-labelledby="mat-select-value-0" id="mat-select-0" tabindex="0" aria-expanded="false" aria-required="false" aria-disabled="false" aria-invalid="false">
+<div cdk-overlay-origin="" class="mat-mdc-select-trigger">
+<div class="mat-mdc-select-value" id="mat-select-value-0">
+<span class="mat-mdc-select-value-text">
+<span class="mat-mdc-select-min-line">One way</span>
+</span>
+</div>
+<div class="mat-mdc-select-arrow-wrapper">
+<div class="mat-mdc-select-arrow">
+</div>
+</div>
+</div>
+</mat-select>
+<input type="checkbox" id="redeem-miles" name="redeemMiles" class="ng-untouched ng-pristine ng-valid" value="on">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Departure airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matOriginAirport" name="orig" aria-invalid="false" aria-required="false" value="SFO">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Arrival airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matDestinationAirport" name="dest" aria-invalid="false" aria-required="false" value="DFW">
+<input autocomplete="off" type="text" class="auto-growing-input agc-date-input-has-value agc-date-input-full-date" spellcheck="false" placeholder="mm/dd/yy" id="date-input-first-agc-date-input-0" aria-labelledby="date-accessible-label-first-agc-date-input-0" aria-label="Date, press Enter to open calendar" aria-describedby="date-input-describedby-agc-date-input-0" aria-invalid="false" maxlength="8" style="width: 73px;" value="11/13/26">
+<div data-passengers="[{&quot;type&quot;:&quot;adult&quot;,&quot;count&quot;:1}]">
+</div>
+</app-modify-search>
+<app-depart-return-header-desktop>
+<div class="pad-top-xs hide-for-small-only desktop-only">
+<h2>
+<em>
+<app-depart-return-multicity-text>
+<span id="flight-direction-text">DEPART</span>
+</app-depart-return-multicity-text>
+</em>
+<div class="city-pair"> San Francisco, CA to Dallas/Fort Worth, TX </div>
+</h2>
+<h3 class="date">Friday, November 13, 2026</h3>
+<div class="aa-flight-info">
+<span aria-hidden="true" class="icon-error icon-small">
+</span> American Airlines flights may be listed first. </div>
+</div>
+</app-depart-return-header-desktop>
+<app-results-matrix>
+<div tabindex="-1" class="results-matrix">
+<app-filter-container id="filter-container" tabindex="-1">
+<div class="filter-container">
+<h2 id="flights-by-heading" class="show-for-sr">
+<span>Filter flights by </span>
+<span class="filter-flights-by-stops">Stops, </span>
+</h2>
+<div class="filters-row">
+<div aria-hidden="true" class="filter-by">Filter by:</div>
+<div class="pills">
+<app-filter-stops>
+<div class="pill-container">
+<button type="button" id="btn-stops-filter" class="pill active" aria-haspopup="dialog">
+<div aria-hidden="true" class="pill-text">Stops</div>
+<span class="show-for-sr pill-text">Filter flights by Stops</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-stops>
+<app-filter-airlines>
+<div class="pill-container">
+<button type="button" id="btn-airlines-filter" class="pill inactive" disabled="">
+<div aria-hidden="true" class="pill-text"> American Airlines </div>
+<span class="show-for-sr pill-text">Filter flights by Airlines</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-airlines>
+</div>
+<div class="result-clear">
+<span role="status" aria-live="polite" aria-atomic="true" class="result-count">5 results</span>
+</div>
+<div class="clearfix">
+</div>
+</div>
+</div>
+</app-filter-container>
+<div class="matrix-header">
+<div role="group" aria-label="Sorting options" class="header-row">
+<span id="sort-screen-reader-text" role="status" aria-live="polite" aria-atomic="true" class="show-for-sr">
+</span>
+<div id="sort-by">
+<div id="sort-by-departure">
+<button type="button" id="btn-sort-by-departure">
+<span id="screen-reader-departure" class="show-for-sr"> Sort by depart, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text">Depart</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-arrival">
+<button type="button" id="btn-sort-by-arrival">
+<span id="screen-reader-arrival" class="show-for-sr"> Sort by arrive, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text">Arrive</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-duration">
+<button type="button" id="btn-sort-by-duration">
+<span id="screen-reader-duration" class="show-for-sr"> Sort by duration, not sorted, press to sort short to long </span>
+<div aria-hidden="true" class="sort-text">Duration</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+</div>
+<div class="groups new-product-line">
+<button type="button" class="group-header group-main" id="sort-by-MAIN">
+<span class="show-for-sr" id="screen-reader-MAIN"> Sort by Main Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Main</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-MAIN">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+<button type="button" class="group-header group-main_extra" id="sort-by-MAIN_EXTRA">
+<span class="show-for-sr" id="screen-reader-MAIN_EXTRA"> Sort by Main Extra Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Main Extra</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-MAIN_EXTRA">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+<button type="button" class="group-header group-premium" id="sort-by-PREMIUM">
+<span class="show-for-sr" id="screen-reader-PREMIUM"> Sort by Premium Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Premium</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-PREMIUM">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="results-grid-container">
+<app-slice-details id="slice-details-0">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">SFO</div>
+<div class="time"> 5:35  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">DFW</div>
+<div class="time"> 11:14  <span class="meridiem">AM</span>
+</div>
+</div>
+<div class="duration">3h 39m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for SFO to DFW, departing at 5:35 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 402 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 321-Airbus A321 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:35 AM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:35 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-0-product-groups">
+<button type="button" id="flight-0-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$206</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $206 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-0-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$331</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $331 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-0-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$569</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $569 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-4">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">SFO</div>
+<div class="time"> 6:38  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">DFW</div>
+<div class="time"> 12:18  <span class="meridiem">PM</span>
+</div>
+</div>
+<div class="duration">3h 40m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for SFO to DFW, departing at 6:38 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 3047 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 321-Airbus A321 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 6:38 AM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 6:38 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-4-product-groups">
+<button type="button" id="flight-4-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$301</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $301 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-4-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$409</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $409 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-4-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$816</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $816 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-3">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">SFO</div>
+<div class="time"> 11:23  <span class="meridiem">PM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">DFW</div>
+<div class="time"> 5:00  <span class="meridiem">AM</span>
+<span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration">3h 37m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for SFO to DFW, departing at 11:23 PM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 939 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 321-Airbus A321 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 11:23 PM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 11:23 PM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-3-product-groups">
+<button type="button" id="flight-3-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$206</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $206 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-3-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$331</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $331 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-3-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$569</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $569 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-12">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">SFO</div>
+<div class="time"> 5:50  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">DFW</div>
+<div class="time"> 2:56  <span class="meridiem">PM</span>
+</div>
+</div>
+<div class="duration">7h 6m</div>
+<div class="stops">
+<app-stops-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-stops">1 stop<span class="show-for-sr">, PHX, Phoenix Sky Harbor Intl</span>
+</button>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens 1 stop details for SFO to DFW, departing at 5:50 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">SFO - PHX</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 6206 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> E75-Embraer 175 </span>
+<p class="operational-disclosure">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by SkyWest Airlines as American Eagle </div>
+<p>
+</p>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">PHX - DFW</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 2747 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 32Q-Airbus A321neo </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:50 AM 1 stop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:50 AM 1 stop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+<div class="alerts">
+<span aria-hidden="true" class="icon-warning">
+</span>
+<span class="warning-text"> Extended layover</span>
+</div>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-12-product-groups">
+<button type="button" id="flight-12-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$311</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $311 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-12-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$419</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $419 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-12-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$826</span>
+</app-choose-flights-price-desktop>
+</div>
+<div class="seats-remaining">
+<span class="show-for-sr">, </span>
+<app-label-tag>
+<div class="seats-remaining">
+<span>3 seats left at this price</span>
+</div>
+</app-label-tag>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $826 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-13">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">SFO</div>
+<div class="time"> 5:50  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">DFW</div>
+<div class="time"> 4:20  <span class="meridiem">PM</span>
+</div>
+</div>
+<div class="duration">8h 30m</div>
+<div class="stops">
+<app-stops-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-stops">1 stop<span class="show-for-sr">, PHX, Phoenix Sky Harbor Intl</span>
+</button>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens 1 stop details for SFO to DFW, departing at 5:50 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">SFO - PHX</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 6206 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> E75-Embraer 175 </span>
+<p class="operational-disclosure">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by SkyWest Airlines as American Eagle </div>
+<p>
+</p>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">PHX - DFW</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 1999 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 738-Boeing 737 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:50 AM 1 stop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for SFO to DFW, departing at 5:50 AM 1 stop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+<div class="alerts">
+<span aria-hidden="true" class="icon-warning">
+</span>
+<span class="warning-text"> Extended layover</span>
+</div>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-13-product-groups">
+<button type="button" id="flight-13-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$311</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $311 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-13-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$419</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $419 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-13-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">One way from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$826</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $826 One way, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+</div>
+</div>
+</app-results-matrix>
+</body>
+</html>
