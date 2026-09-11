@@ -257,6 +257,16 @@ The Google plugin adds a browser-backed, read-only flight search command. It acc
 codes, cities, or airport names, supports one-way and round-trip dates, cabin/passenger settings,
 and can filter or sort the returned flight choices without clicking into a booking flow.
 
+For multiple airports, pass comma-separated airport codes on either side, such as `SFO,OAK` and
+`IAH,HOU`. Lists accept up to seven distinct codes per side, ignore case and whitespace, and remove duplicates.
+A comma-separated argument that starts with a three-letter airport code uses list syntax. All entries must be airport codes.
+Single city and airport names remain supported, including city names with commas such as `Paris, France`.
+
+The command selects each airport through the Google Flights multi-airport picker and verifies the committed search after a reload.
+It fails if Google cannot select or retain an airport, rather than returning results for only part of the requested route.
+Google ranks the combined search. Filters, `--sort`, and `--limit` apply across the displayed choices, not separately to each airport pair.
+Each row retains its actual airport pair in `leg_route`. Google may show only a subset of available flights.
+
 One-way searches return complete one-way itinerary choices. For a round-trip search, Google first
 shows **outbound options only** and does not reveal the return choices until an outbound flight is
 selected. Accordingly, each row is labeled `result_type=outbound_option`: every `leg_*` field and
@@ -268,6 +278,9 @@ finalized round-trip itinerary; follow the returned Google Flights URL to select
 opencli google flights SFO LAX 2026-08-10 --return 2026-08-17 --limit 5
 opencli google flights "San Francisco" Tokyo 2026-09-08 --cabin business --sort price -f json
 opencli google flights JFK LHR 2026-10-01 --stops nonstop --max-price 900 --airline "Delta,Virgin"
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --sort price -f json
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --return 2026-10-20 --stops nonstop
+opencli google flights SFO IAH,HOU 2026-10-15 --limit 5
 ```
 
 ### Google Shopping
