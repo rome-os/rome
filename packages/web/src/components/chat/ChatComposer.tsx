@@ -581,9 +581,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
       }
     } catch {
-      // Preserve any value inserted programmatically despite the upload lock
-      // rather than overwriting it with the failed turn.
-      setInputText((current) => current || text);
+      setInputText(text);
       if (uploads.length === 0) setPendingUploads(uploads);
       setDraftSkill(skill);
     }
@@ -865,6 +863,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // name the same specialist.
   const collaborating =
     designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
+  const sendActionLabel = uploadInFlight
+    ? t("composer.uploadingFiles")
+    : isStreaming
+      ? t("composer.sendWhileRunningTitle")
+      : t("composer.sendTitle");
 
   return (
     <>
@@ -1118,20 +1121,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
               }
-              title={
-                uploadInFlight
-                  ? t("composer.uploadingFiles")
-                  : isStreaming
-                    ? t("composer.sendWhileRunningTitle")
-                    : t("composer.sendTitle")
-              }
-              aria-label={
-                uploadInFlight
-                  ? t("composer.uploadingFiles")
-                  : isStreaming
-                    ? t("composer.sendWhileRunningTitle")
-                    : t("composer.sendTitle")
-              }
+              title={sendActionLabel}
+              aria-label={sendActionLabel}
               className="touch-target"
             >
               <ArrowUp aria-hidden />
