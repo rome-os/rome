@@ -64,6 +64,7 @@ name: Coding                     # Display name — Title Case words ("Morning B
 icon: assets/icon.svg            # Optional
 version: 0.2.8                   # Semantic version
 description: Short description
+# tagline: One sentence for the share card   # Optional — uncomment and fill in: ≤ 80 chars (40 CJK), benefit-first, no jargon, like an App Store subtitle. It is the card's only description (no fallback).
 appRoot: dist                    # Optional; defaults to source root if omitted
 includeSource: true              # Optional; publish src/ with the Store bundle
 remix:                            # Rome-managed lineage for a derived app

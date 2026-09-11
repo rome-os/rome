@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
+import type { OutboxMessage } from "@rome/api-types/people";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
   APPROVAL_EXECUTION_STATES,
@@ -185,6 +186,17 @@ export const outboundMessages = sqliteTable(
   (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
 );
 
+/** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
+export const outboundSendReceipts = sqliteTable(
+  "outbound_send_receipts",
+  {
+    id: text("id").primaryKey(),
+    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
+);
+
 export const waChats = sqliteTable("wa_chats", {
   jid: text("jid").primaryKey(),
   name: text("name"),
@@ -303,10 +315,16 @@ export const linkedinParticipants = sqliteTable("linkedin_participants", {
   participantId: text("participant_id").primaryKey(),
   name: text("name"),
   headline: text("headline"),
+  profileUrl: text("profile_url"),
   // 'member' | 'organization' | 'agent' | 'custom', as the snapshot reports it.
   type: text("type"),
   // True for the account owner's own row in a thread's participant list.
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  // Profile freshness is account-scoped rather than thread-scoped: the same
+  // LinkedIn account can appear in many conversations.
+  lastSuccessfulSyncAt: integer("last_successful_sync_at", { mode: "timestamp" }),
+  profileSyncFailureCount: integer("profile_sync_failure_count").notNull().default(0),
+  profileSyncRetryAt: integer("profile_sync_retry_at", { mode: "timestamp" }),
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });

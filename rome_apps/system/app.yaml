@@ -4,6 +4,7 @@ name: System
 icon: assets/icon.svg
 version: 0.2.20
 description: "Core system actions for scheduling, messaging, approvals, app store access, and subagent orchestration. In Rome context, 'store' / 'app store' usually means the Rome App Store. Reach here first for app_store_search (search/read Rome Store listings), app_management (install from the Rome Store with source.mode='appstore', install / uninstall / enable / disable a Rome app, or scaffold a new dev app — first-party apps ship with Rome, so only enable/disable applies to them), send_message (send a message through any registered channel adapter), send_user_message (start or continue a webchat conversation on the guardian's behalf), and generate_image (generate an image from a text prompt via the connected image provider)."
+tagline: "The control room: scheduling, messaging, approvals, and the app store."
 appRoot: dist
 
 web:
@@ -22,8 +23,10 @@ actions:
   - actions/delete-routine
   - actions/conversation-settings-manage
   - actions/email-inbound
+  - actions/execute-root-script
   - actions/fetch-channel-history
   - actions/generate-image
+  - actions/manage-root-script
   - actions/publish-event
   - actions/search-event-catalog
   - actions/search-routine

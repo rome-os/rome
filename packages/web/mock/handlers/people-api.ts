@@ -6,6 +6,8 @@ import {
   countPeople,
   isAssignableBondLevel,
   latestDynamic,
+  matchesSendRequest,
+  SEND_IDEMPOTENCY_RETENTION_MS,
   parseAccountCursor,
   parseAccountState,
   parseStreamCursor,
@@ -242,6 +244,22 @@ interface OutboxRow extends OutboxMessage {
 }
 
 const outbox: OutboxRow[] = [];
+const sendReceipts = new Map<string, { response: OutboxMessage; expiresAt: number }>();
+
+function pruneSendReceipts(now: number) {
+  for (const [id, receipt] of sendReceipts) {
+    if (receipt.expiresAt <= now) sendReceipts.delete(id);
+  }
+}
+
+function retireRow(row: OutboxRow, now: number) {
+  pruneSendReceipts(now);
+  sendReceipts.set(row.id, {
+    response: outboxMessage(row),
+    expiresAt: now + SEND_IDEMPOTENCY_RETENTION_MS,
+  });
+  outbox.splice(outbox.indexOf(row), 1);
+}
 
 /** How long the channel takes to accept a message, and how long after that it
  *  surfaces in the store the timeline reads. */
@@ -343,9 +361,9 @@ function isDismissableRow(row: OutboxRow, now: number): boolean {
   return row.state === "unconfirmed" && now - row.attemptedAt >= STRANDED_AFTER_MS;
 }
 
-function openRow(account: AccountRef, text: string): OutboxRow {
+function openRow(account: AccountRef, text: string, id: string = crypto.randomUUID()): OutboxRow {
   const row: OutboxRow = {
-    id: crypto.randomUUID(),
+    id,
     channel: account.channel,
     channelUserId: account.channelUserId,
     text,
@@ -421,7 +439,7 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
   for (let i = outbox.length - 1; i >= 0; i -= 1) {
     const row = outbox[i]!;
     if (held(row) && row.state === "unconfirmed" && row.ref !== null && arrived.has(row.ref)) {
-      outbox.splice(i, 1);
+      retireRow(row, now);
     }
   }
 
@@ -619,6 +637,20 @@ export const peopleHandlers = [
       );
     }
 
+    pruneSendReceipts(Date.now());
+    const active = outbox.find((row) => row.id === parsed.request.id);
+    const existing = active
+      ? outboxMessage(active)
+      : sendReceipts.get(parsed.request.id ?? "")?.response;
+    if (existing) {
+      return matchesSendRequest(existing, parsed.request)
+        ? HttpResponse.json(existing, { status: 202 })
+        : HttpResponse.json(
+            { error: "That send id belongs to a different message" },
+            { status: 409 },
+          );
+    }
+
     // The same state the person read answered with, so a client that raced a
     // disconnect renders the reason it would already have shown.
     const send = sendState(parsed.request);
@@ -628,9 +660,12 @@ export const peopleHandlers = [
       });
     }
 
-    return HttpResponse.json(outboxMessage(openRow(parsed.request, parsed.request.text)), {
-      status: 202,
-    });
+    return HttpResponse.json(
+      outboxMessage(openRow(parsed.request, parsed.request.text, parsed.request.id)),
+      {
+        status: 202,
+      },
+    );
   }),
 
   /** Every send of this person's still in flight. Unpaged — an outbox long
@@ -669,7 +704,7 @@ export const peopleHandlers = [
     if (!person) return notFound("person");
     const row = rowOf(person, String(params.messageId));
     if (!row || !isDismissableRow(row, Date.now())) return notTheirs();
-    outbox.splice(outbox.indexOf(row), 1);
+    retireRow(row, Date.now());
     return new HttpResponse(null, { status: 204 });
   }),
 

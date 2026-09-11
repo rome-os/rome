@@ -56,6 +56,7 @@ import {
   type ModelResolutionErrorPayload,
   type ModelResolver,
 } from "./model-resolver.js";
+import { resolveAgentModelRequest } from "./agent-model-selection.js";
 import {
   resolveWebchatLargeModelSelection,
   type ModelSelectionId,
@@ -801,10 +802,8 @@ async function openSession(
   const romeSessionId = requestedRomeSessionId;
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
-  // The session model pin: the concrete model that produced this
-  // session's history. Authoritative for resume and every later turn —
-  // resolution precedence is explicit guardian selection → pin → agent tier.
-  // Legacy rows (model NULL) have no pin and resolve by tier.
+  // The session model pin records the model that produced this history.
+  // Precedence: docs/concepts/sessions.md#model-pin.
   const sessionPin =
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
@@ -816,11 +815,6 @@ async function openSession(
     init.resumeSessionId && !sessionPin
       ? resolveSelectionFromChannelThreadKey(key.channelThreadKey)
       : undefined;
-  // Resolution precedence: explicit guardian selection → pin → tier.
-  // A restored selection is an explicit selection, so it always wins — the old
-  // provider-mismatch guard that dropped it on resume is gone: a
-  // legacy row that switches providers via its selection now follows the single
-  // precedence rule instead of being pinned back to the stored provider's tier.
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
   if (isNewSession && !init.preparedSessionId) {
@@ -905,7 +899,7 @@ async function openSession(
   const allowList = config.actions ?? [];
   const findPermittedAction = (name: string): Action | undefined => {
     const requestedAction = deps.actionRegistry.get(name);
-    if (!requestedAction) return undefined;
+    if (!requestedAction) throw new Error(`Unknown action: ${name}`);
     return deps.actionRegistry
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
@@ -949,8 +943,8 @@ async function openSession(
 
   // Re-bind into the current turn's OTel context so `action:*` spans land
   // under the agent span even when the SDK invokes this callback async.
-  // The original `context.with(turnCtx, sendUserInput)` block has long
-  // since returned by the time MCP tool callbacks fire.
+  // The original `context.with(turnCtx, sendUserInput)` block is no longer
+  // active by the time MCP tool callbacks fire.
   const inCurrentTurnCtx = <T>(fn: () => T): T => {
     const ctx = impl.currentTurnCtxRef ?? context.active();
     return context.with(ctx, fn);
@@ -1026,7 +1020,7 @@ async function openSession(
             };
           }
           // Webchat: the chat client mounts the component off this tool_result
-          // (the drain loop snapshots a pending_interaction card keyed by
+          // (the drain loop persists a pending_interaction card keyed by
           // toolUseId). The guardian's outcome arrives as a new turn, so tell the
           // agent to stop here rather than treating the directive as data.
           return {
@@ -1053,7 +1047,7 @@ async function openSession(
                 `anything else:\n\n${promptText}`,
             };
           }
-          // Webchat: the drain loop snapshots a handoff card keyed by toolUseId and
+          // Webchat: the drain loop persists a handoff card keyed by toolUseId and
           // mints the child session. The handoff mounts no surface itself — the
           // summoned agent brings one up via `show_app`. handback/handbackHint ride
           // on the tool_result so the drain loop can stamp the child session's
@@ -1559,13 +1553,8 @@ async function openSession(
       isNewSession: true,
     });
   } else {
-    // Precedence: explicit guardian selection → session pin → agent
-    // tier. A pinned resume requests exactly the pinned model and fails closed
-    // (structured ModelResolutionError) when it cannot run — no substitution.
     initialResolution = await deps.modelResolver.getModelProvider(
-      !selectionId && sessionPin
-        ? { exact: sessionPin }
-        : { tier: config.tier, selectionId, providerId: config.providerId },
+      resolveAgentModelRequest(config, selectionId, sessionPin),
     );
     modelSession = await openModelSession(
       initialResolution,
@@ -1662,7 +1651,7 @@ interface TurnSink {
    * it at. Drained at terminal time by `translateTurnSpans` to emit
    * `tool` spans + thinking/text events under `model.turn`. Includes blocks
    * the sink itself drops (e.g. subagent tool_results) so per-tool spans
-   * are still reconstructed for subagent dispatch from the parent's view.
+   * are reconstructed for subagent dispatch from the parent's view.
    */
   blocks: CapturedBlock[];
   /** Captured at turn start; used as the floor for tool startedAt values. */
@@ -1983,19 +1972,8 @@ class AgentSessionImpl implements AgentSession {
 
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
-    // Precedence: explicit guardian selection → session pin → agent
-    // tier. Once a pin exists, every turn requests exactly the pinned model:
-    // entitlement/setting changes no longer swap an ongoing session's backend,
-    // and a pin that cannot run fails the turn with the structured
-    // ModelResolutionError instead of silently substituting a model.
     const resolution = await this.deps.modelResolver.getModelProvider(
-      !this.selectionId && this.sessionPin
-        ? { exact: this.sessionPin }
-        : {
-            tier: this.config.tier,
-            selectionId: this.selectionId,
-            providerId: this.config.providerId,
-          },
+      resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
     );
     if (
       this.modelSessionAvailable &&
@@ -3485,7 +3463,7 @@ function buildSubagentTools(
 function buildLifecycleOutput(
   terminal: StreamAgentMessage | undefined,
   status: AgentTurnStatus,
-  stopReason: string | undefined,
+  stopReason?: string,
 ): AgentTurnOutput {
   if (terminal?.type === "result") {
     return {

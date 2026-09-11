@@ -1,14 +1,42 @@
 # Agents
 
-An agent is an LLM-backed runtime entity: a named configuration that sets a model tier, a set of builtin tools and callable [actions](actions.md), a system prompt, and optionally the subagents it may delegate to. The runtime assembles the system prompt from the shared agent charter, the agent's own identity, and runtime context.
+An agent is an LLM-backed runtime entity: a named configuration that sets a model tier or an exact model ID, a set of builtin tools and callable [actions](actions.md), a system prompt, and optionally the subagents it may delegate to. The runtime assembles the system prompt from the shared agent charter, the agent's own identity, and runtime context.
 
 **Contracts:**
 
 - An agent definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`, and `main` is reserved for Rome Core. Its `actions` and `allowedSubagents` references use canonical `<app-id>:<local-name>` ids for both same-app and cross-app references.
-- The agent abstraction is provider-agnostic. An agent names a model *tier*, never a concrete model. The runtime maps each tier to a concrete model, and swapping the model provider does not change the agent contract.
-- An agent whose behavior depends on a provider-specific capability may pin a provider. The pin is fail-closed: a pinned agent's sessions resolve only on that provider, and fail with a clear error rather than silently falling back to a provider that lacks the capability.
-- Every agent conversation happens within a [session](sessions.md). There is no session-less agent turn.
+- An agent can remain provider-agnostic by declaring `tier: large|medium|small`. The runtime maps the tier to an available provider and concrete model.
+- An agent whose behavior depends on a provider-specific capability may pin a provider. A provider-pinned tier resolves only on that provider and fails rather than falling back to another provider.
+- An agent that needs a specific model may declare `provider` with `modelId` instead of a tier. Rome requests that exact ID without tier mapping or automatic substitution. The provider and connected account must support the requested model.
+- Every agent conversation happens within a [session](sessions.md). There is no session-less agent turn. Explicit guardian selections and saved session pins take precedence over the agent's configured model.
 - Each subagent has a restricted capability set appropriate to its role. Delegation never widens capabilities.
+
+## Model selection
+
+Use a tier when the app should run across providers. Add `provider: openai` or `provider: anthropic` to restrict tier resolution to one provider. Use `modelId` when a particular provider model is required:
+
+```yaml
+name: fast_coding_agent
+description: Completes coding tasks with a specific model.
+provider: openai
+modelId: gpt-5.3-codex-spark
+reasoningEffort: high
+permissionMode: default
+tools:
+  - Read
+systemPromptPrefix: Complete the requested coding task.
+```
+
+`modelId` is the provider's model ID, not a WebChat selector slug. For example, `gpt-5.6-terra` is a provider ID while `gpt-5-6-terra` is a selector slug. IDs do not need to appear in Rome's WebChat catalog. Rome checks provider availability and known entitlements, and the provider validates IDs it receives. Declaring an ID does not grant access to that model.
+
+**Validation:**
+
+- `modelId` requires `provider: openai|anthropic` and a nonempty string containing no whitespace. Rome preserves the ID rather than trimming or rewriting it.
+- `modelId` cannot be combined with `tier`, legacy `model`, or `codeBacked: true`.
+- Without `modelId`, a tier is required. Legacy `model: opus|sonnet|haiku` remains accepted and normalizes to `large|medium|small`.
+- The same schema validates runtime agent loading and packed-app installation. Older Rome versions that do not recognize `modelId` reject it rather than silently ignoring the pin.
+
+An agent model pin supplies the default for a new session, not an instruction to migrate existing history. Changing the YAML affects new sessions. Existing sessions retain their [session model pin](sessions.md#model-pin) unless the guardian explicitly selects another model.
 
 ## Structured output
 

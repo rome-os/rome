@@ -53,6 +53,14 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 
 ## Rome-owned commands
 
+- `opencli delta flights FROM TO DEPART [--return DATE] [--miles]` — searches Delta cash fares or
+  SkyMiles awards, with separate taxes and card-member offers, cabin and stop filters, and per-passenger prices.
+  See the [Delta command reference](delta/README.md) for examples and browser requirements.
+
+- `opencli united flights FROM TO DEPART [--return DATE] [--miles]` — searches United cash fares or
+  MileagePlus awards with separate taxes, cabin and stop filters, and per-person price scope.
+  See the [United command reference](united/README.md) for examples and browser requirements.
+
 - `opencli chatgpt memory` — opens Personalization > Memory summary in the signed-in ChatGPT
   browser session and returns each learned-memory section with its last-updated label.
 - `opencli chase accept-offers -f json` — accepts every available Chase Offer across all credit

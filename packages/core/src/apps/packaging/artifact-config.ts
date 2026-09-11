@@ -85,6 +85,11 @@ export const AgentConfigSchema = z
     description: z.string().min(1),
     tier: z.enum(TIER_VALUES).optional(),
     model: z.enum(["opus", "sonnet", "haiku"]).optional(),
+    modelId: z
+      .string()
+      .min(1)
+      .refine((value) => !/\s/u.test(value), "Model ID must not contain whitespace")
+      .optional(),
     reasoningEffort: z.enum(REASONING_EFFORT_VALUES).default(DEFAULT_REASONING_EFFORT),
     provider: z.enum(PROVIDER_VALUES).optional(),
     systemPromptPrefix: z.string().min(1),
@@ -112,6 +117,29 @@ export const AgentConfigSchema = z
   })
   .strict()
   .superRefine((raw, ctx) => {
+    if (raw.modelId !== undefined) {
+      if (!raw.provider) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["provider"],
+          message: "Required when modelId is set",
+        });
+      }
+      if (raw.tier !== undefined || raw.model !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelId"],
+          message: "modelId cannot be combined with tier or legacy model",
+        });
+      }
+      if (raw.codeBacked) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelId"],
+          message: "Code-backed agents do not use a modelId",
+        });
+      }
+    }
     if (!raw.outputSchema) return;
     const portabilityIssues = validatePortableOutputSchema(raw.outputSchema);
     for (const issue of portabilityIssues) {
@@ -130,15 +158,15 @@ export const AgentConfigSchema = z
   })
   .transform((raw, ctx) => {
     const tier = raw.tier ?? (raw.model ? LEGACY_MODEL_TO_TIER[raw.model] : undefined);
-    if (!tier) {
+    if (!tier && raw.modelId === undefined) {
       ctx.addIssue({
         code: "custom",
         path: ["tier"],
         message:
-          "Required (either `tier: large|medium|small` or legacy `model: opus|sonnet|haiku`)",
+          "Required (either `tier: large|medium|small`, legacy `model: opus|sonnet|haiku`, or `provider` with `modelId`)",
       });
       return z.NEVER;
     }
     const { model: _legacy, tier: _tier, provider, ...rest } = raw;
-    return { ...rest, tier, ...(provider ? { providerId: provider } : {}) };
+    return { ...rest, ...(tier ? { tier } : {}), ...(provider ? { providerId: provider } : {}) };
   });

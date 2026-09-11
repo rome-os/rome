@@ -180,7 +180,13 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "That account is not linked to this person" }, 400);
     }
 
-    const result = await sendToAccount(deps, parsed.request, parsed.request.text);
+    const result = await sendToAccount(
+      deps,
+      parsed.request,
+      parsed.request.text,
+      parsed.request.id,
+    );
+    if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
     return result.ok
       ? c.json(result.message, 202)
       : c.json(

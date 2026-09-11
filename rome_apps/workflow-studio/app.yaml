@@ -4,6 +4,7 @@ name: Workflows
 icon: assets/icon.svg
 version: 0.1.0
 description: Describe an automation in plain language; approve the short spec, and it's built into a runnable workflow in one conversation.
+tagline: "Describe an automation in plain words and watch it become a workflow."
 appRoot: dist
 
 web:

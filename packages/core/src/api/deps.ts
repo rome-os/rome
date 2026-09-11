@@ -16,6 +16,7 @@ import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import type { AppCatalog } from "../apps/catalog.js";
+import type { OgImageStore } from "../apps/og/store.js";
 import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
@@ -103,6 +104,8 @@ export interface ApiDeps {
   routineRunsRepo: RoutineRunsRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
+  /** Social card PNGs rendered by apps/og/subscriber.ts. */
+  ogImageStore: OgImageStore;
   /** AppManager — sole writer for install/uninstall/setEnabled. */
   appManager: AppManager;
   romeCloudListings: RomeCloudListingClient;

@@ -113,6 +113,8 @@ import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
+import { HostExecutionService } from "./host-execution/service.js";
+import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
@@ -178,6 +180,8 @@ import {
 import { importChannelSettings } from "./connections/settings-import.js";
 import { reconcileProviderAccounts } from "./connections/providers-import.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
+import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
+import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./apps/api.js";
@@ -384,6 +388,15 @@ async function main() {
       onError: (err) => appsLog.warn("runtime-status write failed", { error: err.message }),
     }),
   );
+  // Social card image per installed web app. Registered before boot() so the
+  // replay covers apps installed while the daemon was down.
+  const ogImageStore = createOgImageStore();
+  appCatalog.subscribe(
+    createAppOgImageSubscriber({
+      store: ogImageStore,
+      host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
+    }),
+  );
   // Adopts any pre-existing on-disk state (legacy deployment.yaml entries,
   // stale lockfile) into the v3 lockfile via `discardNonCurrentLockfile` and
   // `runLegacyMigrationIfNeeded`.
@@ -462,6 +475,7 @@ async function main() {
     executionJournalRepo,
     {
       processRole: "main",
+      onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
@@ -794,12 +808,23 @@ async function main() {
       ],
     }),
   };
+  const hostExecution = new HostExecutionService({
+    socketPath: config.hostExecutionSocket,
+    enabled: config.hostExecutionEnabled,
+  });
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
     appCatalog,
     appActionDeps,
-    { db, actionEngine, routinesRepo, repositories: appRuntimeRepositories, favorService },
+    {
+      db,
+      actionEngine,
+      routinesRepo,
+      repositories: appRuntimeRepositories,
+      favorService,
+      hostExecution,
+    },
   );
 
   appCatalog.subscribe(
@@ -809,6 +834,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      hostExecution,
     }),
   );
   appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
@@ -1251,6 +1277,7 @@ async function main() {
       actionRegistry,
       agentLoader,
       skillCatalog,
+      ogImageStore,
       db,
       settingsRepo,
       appKeysRepo,

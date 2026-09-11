@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/rome-os/rome/compare/ui-v0.2.6...ui-v0.2.7) (2026-09-10)
+
+
+### Features
+
+* **web:** make chat code blocks and Mermaid diagrams collapsible ([#277](https://github.com/rome-os/rome/issues/277)) ([66178d4](https://github.com/rome-os/rome/commit/66178d4e2d0baa78b336c1161ca0c76cdeef4618))
+
 ## [0.2.6](https://github.com/rome-os/rome/compare/ui-v0.2.5...ui-v0.2.6) (2026-09-09)
 
 

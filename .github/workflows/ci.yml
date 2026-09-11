@@ -100,6 +100,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Test Delta OpenCLI plugin
+        run: pnpm -C opencli-plugins/delta test
+      - name: Test United OpenCLI plugin
+        run: pnpm -C opencli-plugins/united test
       - run: pnpm lint
       - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind
@@ -107,10 +111,8 @@ jobs:
 
       # Dead-code analysis. Knip resolves the import graph across every
       # workspace, so it needs the full install above and cannot move to a
-      # filtered job. The `--max-issues` count in the script is a ceiling over
-      # the findings that already exist: the step passes at today's total and
-      # fails above it. knip.jsonc explains which rules it covers, what the
-      # ceiling does not catch, and how to lower the number.
+      # filtered job. knip.jsonc documents the runtime-discovered entry points
+      # and why export-shaped rules remain warnings.
       - run: pnpm lint:deadcode
 
       - run: pnpm typecheck

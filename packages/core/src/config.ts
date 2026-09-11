@@ -43,6 +43,12 @@ const configSchema = z.object({
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
 
+  hostExecutionSocket: z.string().startsWith("/").optional(),
+  hostExecutionEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+
   // Every root, delegated, and warm action worker counts against this bound.
   // A bounded default keeps burst traffic from forking unbounded workers;
   // operators can tune it to measured worker RSS.
@@ -134,6 +140,12 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
+  }
+  if (env.ROME_HOST_EXECUTION_SOCKET) {
+    raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;
+  }
+  if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
+    raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
   }
   if (env.LINKEDIN_POLL_MIN_MINUTES) {
     raw.linkedinPollMinMinutes = env.LINKEDIN_POLL_MIN_MINUTES;

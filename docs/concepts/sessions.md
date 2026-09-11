@@ -24,15 +24,17 @@ A session remembers the concrete model that produced its history — the **sessi
 
 **Contracts:**
 
-- A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves by tier until its next successful turn records one.
-- Resolution precedence for a turn is **explicit guardian selection → session pin → agent tier**. An explicit model selection (the webchat model selector) wins over the pin, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
-- A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection or a new session.
-- Forks inherit the live session's model and never write pins. A new session — including a summoned or subagent session on a shared thread — resolves from its own tier, because session lookup is agent-scoped.
+- A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
+- Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
+- A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
+- A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
+- Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
 
 **Not to be confused with:**
 
-- **Provider pin** — an [agent](agents.md) may pin a *provider* for capability reasons. The session model pin records the concrete *model* a session's history was produced by.
-- **Model tier** — the tier is the agent-level default the pin overrides once a turn has run.
+- **Provider pin** — an [agent](agents.md) may pin a *provider* while still letting a tier select the concrete model.
+- **Agent model pin** — `provider` with `modelId` supplies an exact default for a new or unpinned session. The session model pin records the model that produced existing history and takes precedence over that default.
+- **Model tier** — the portable agent-level default the session pin overrides once a turn has run.
 
 ## Agent run
 
@@ -94,7 +96,7 @@ The caller creating the fork chooses one of two modes:
 The caller also chooses how long the fork's provider branch lives:
 
 - **One-shot** (the default) — the provider branch is disposable. It closes when the single turn completes, and nothing can resume it. Recap and turn-feedback forks run this way.
-- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a conversation the guardian can keep talking to. A side chat runs this way.
+- **Continuable** — the caller asks for a provider thread of its own and Rome pins an agent session to it when the turn completes. Later turns resume that thread, so the fork becomes a conversation the guardian can keep talking to.
 
 **Contracts:**
 

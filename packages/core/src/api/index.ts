@@ -1,10 +1,12 @@
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger } from "../logger.js";
+import { renderSocialMeta } from "../lib/social-meta.js";
+import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
@@ -60,6 +62,7 @@ import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
+import { appOgRoutes } from "./routes/app-og.js";
 import { appStoreRoutes } from "./routes/app-store.js";
 import { showcasePresetRoutes } from "./routes/showcase-presets.js";
 import { shareRoutes } from "./routes/share.js";
@@ -96,6 +99,9 @@ export function buildApp(
 
   // Built web assets for installed apps, served at /app-assets/:appId/:version/*.
   app.route("/", appAssetsRoutes(deps));
+
+  // Social card image per installed app, at /app-og/<appId>.png (public).
+  app.route("/", appOgRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
@@ -186,21 +192,39 @@ export function buildApp(
 
   // SPA shell. Hono owns it so loopback callers inside the container
   // (`localhost:4141/dashboard`, in-process Chrome CDP, etc.) can reach
-  // the dashboard without going through Caddy. External traffic does NOT
-  // arrive here: the generated Caddyfile serves the shell + assets straight
-  // from disk via `file_server` and only proxies /api, webhooks, app assets,
-  // and WebSocket upgrades (see lib/caddyfile-generator.ts). Anything that
-  // must reach production browsers therefore has to exist as a file under
-  // webRoot (e.g. the boot-written runtime-config.js); Hono-side
-  // response rewriting here would be invisible outside the container.
+  // the dashboard without going through Caddy. External traffic mostly does
+  // NOT arrive here: the generated Caddyfile serves the shell + assets
+  // straight from disk via `file_server` and proxies only /api, webhooks, app
+  // assets, WebSocket upgrades — and the `/apps/*` + `/full/apps/*` document
+  // paths, which come here so the social meta can be swapped per app (see
+  // lib/caddyfile-generator.ts). Anything else that must reach production
+  // browsers has to exist as a file under webRoot (e.g. the boot-written
+  // runtime-config.js).
   if (config.webRoot && existsSync(join(config.webRoot, "index.html"))) {
-    mountSpa(app, config.webRoot);
+    mountSpa(app, config.webRoot, deps);
   }
 
   return { app, webchatRuntime };
 }
 
-function mountSpa(app: Hono, webRoot: string): void {
+function mountSpa(
+  app: Hono,
+  webRoot: string,
+  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
+): void {
+  // App document routes get the shell with per-app social meta. Registered
+  // before `serveStatic` so the static handler never answers them, and
+  // `no-cache` because Caddy set that on the shell before this path existed —
+  // a cached shell points at bundle hashes the next image upgrade removes.
+  const appDocument = async (c: Context) => {
+    const card = await buildAppSocialCard(deps, c.req.raw);
+    return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
+      "Cache-Control": "no-cache",
+    });
+  };
+  app.get("/apps/*", appDocument);
+  app.get("/full/apps/*", appDocument);
+
   // Serve hashed assets + public files. `serveStatic` calls next() on
   // miss, so unknown paths fall through to the SPA fallback below.
   app.use(
@@ -211,7 +235,7 @@ function mountSpa(app: Hono, webRoot: string): void {
     }),
   );
   // Any non-API, non-static path returns index.html so the SPA router
-  // can handle the route (`/dashboard`, `/login`, `/apps/foo`, …).
+  // can handle the route (`/dashboard`, `/login`, …).
   app.get("/*", (c) => c.html(readIndexHtml(webRoot)));
 }
 
