@@ -114,7 +114,7 @@ export const AppManifestSchema = z
     // One-line, author-written hook for the app's social share card
     // (≤ 80 width units — 80 Latin chars or 40 CJK — is the display rule; the
     // schema only caps length at 160 characters, the template truncates on
-    // width). Card falls back to the first sentence of `description` when absent.
+    // width). Without it the card shows no description.
     tagline: z.string().min(1).max(160).optional(),
     name: z.string().min(1).optional(),
     icon: z.string().min(1).optional(),

@@ -3,11 +3,12 @@ id: __APP_ID__
 name: __APP_NAME__
 version: 0.1.0
 description: __APP_NAME__ app
-# Shown on the app's social share card. One sentence, at most 80 characters
-# (40 for CJK): lead with what the user gets, no jargon — write it like an
-# App Store subtitle, and update it when the app's purpose changes.
-# Fill it in or delete the line; a placeholder tagline is worse than none (the card falls back to the first sentence of description).
-tagline: __APP_NAME__ in one sentence
+# Shown on the app's social share card and as the preview text beside it.
+# One sentence, at most 80 characters (40 for CJK): lead with what the user
+# gets, no jargon — write it like an App Store subtitle. Without it the card
+# shows no description at all, so fill it in and update it when the app's
+# purpose changes.
+# tagline: One sentence for the share card
 icon: assets/icon.svg
 appRoot: dist
 includeSource: true

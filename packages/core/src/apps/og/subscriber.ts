@@ -5,7 +5,7 @@ import { appIdToPathSegment } from "../packaging/app-id.js";
 import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../state.js";
 import { svgToPng } from "./rasterize.js";
 import type { OgImageStore } from "./store.js";
-import { firstSentence, type OgIcon, renderOgSvg } from "./template.js";
+import { type OgIcon, renderOgSvg } from "./template.js";
 
 const log = createLogger("app-og-image");
 
@@ -26,9 +26,9 @@ async function readIcon(app: ResolvedApp): Promise<OgIcon | null> {
   }
 }
 
-/** Card description: the author's tagline, or a mechanical fallback. */
-export function cardDescription(manifest: { tagline?: string; description: string }): string {
-  return manifest.tagline ?? firstSentence(manifest.description);
+/** Card description: the author's tagline, or null when there isn't one. */
+export function cardDescription(manifest: { tagline?: string }): string | null {
+  return manifest.tagline ?? null;
 }
 
 /** Template + rasterizer for one app. */

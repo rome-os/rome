@@ -54,6 +54,7 @@ function buildRedditFixture(): ResolvedApp {
       id: "reddit",
       version: "0.0.1",
       description: 'Watches <subreddits> & "more"',
+      tagline: 'Watches <subreddits> & "more"',
       agents: [],
       actions: [],
       skills: [],

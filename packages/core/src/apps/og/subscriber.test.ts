@@ -22,19 +22,14 @@ function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
 describe("cardDescription", () => {
-  it("prefers the tagline when present", () => {
-    expect(
-      cardDescription({
-        tagline: "Never miss a good thread",
-        description: "Watches subreddits. Posts a daily digest.",
-      }),
-    ).toBe("Never miss a good thread");
+  it("returns the tagline when present", () => {
+    expect(cardDescription({ tagline: "Never miss a good thread" })).toBe(
+      "Never miss a good thread",
+    );
   });
 
-  it("falls back to the first sentence of the description", () => {
-    expect(cardDescription({ description: "Watches subreddits. Posts a daily digest." })).toBe(
-      "Watches subreddits.",
-    );
+  it("returns null when there is no tagline", () => {
+    expect(cardDescription({})).toBeNull();
   });
 });
 

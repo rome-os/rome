@@ -12,7 +12,8 @@ const SHELL_OG_IMAGE_RE = /<meta property="og:image" content="([^"]*)"/;
 
 export interface SocialCard {
   title: string;
-  description: string;
+  /** Omitted → no og:description / twitter:description tags. */
+  description?: string;
   /** Absolute URL of the page being shared. */
   url: string;
   /** Absolute URL of a 1200x630 image; omitted → the shell's own og:image is kept. */
@@ -41,15 +42,16 @@ function resolveImageValue(card: SocialCard, existingBlock: string): string | nu
 
 function socialTags(card: SocialCard, imageValue: string | null): string {
   const t = escapeHtml(card.title);
-  const d = escapeHtml(card.description);
   const u = escapeHtml(card.url);
   const lines = [
     '<meta property="og:type" content="website" />',
     '<meta property="og:site_name" content="Rome" />',
     `<meta property="og:title" content="${t}" />`,
-    `<meta property="og:description" content="${d}" />`,
-    `<meta property="og:url" content="${u}" />`,
   ];
+  if (card.description !== undefined) {
+    lines.push(`<meta property="og:description" content="${escapeHtml(card.description)}" />`);
+  }
+  lines.push(`<meta property="og:url" content="${u}" />`);
   if (imageValue !== null) {
     lines.push(
       `<meta property="og:image" content="${imageValue}" />`,
@@ -60,8 +62,10 @@ function socialTags(card: SocialCard, imageValue: string | null): string {
   lines.push(
     '<meta name="twitter:card" content="summary_large_image" />',
     `<meta name="twitter:title" content="${t}" />`,
-    `<meta name="twitter:description" content="${d}" />`,
   );
+  if (card.description !== undefined) {
+    lines.push(`<meta name="twitter:description" content="${escapeHtml(card.description)}" />`);
+  }
   if (imageValue !== null) {
     lines.push(`<meta name="twitter:image" content="${imageValue}" />`);
   }

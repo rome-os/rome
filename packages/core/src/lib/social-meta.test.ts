@@ -80,6 +80,13 @@ describe("renderSocialMeta", () => {
     expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
   });
 
+  it("omits og:description and twitter:description when the card has no description", () => {
+    const html = renderSocialMeta(SHELL, { ...card, description: undefined });
+    expect(html).not.toContain("og:description");
+    expect(html).not.toContain("twitter:description");
+    expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
+  });
+
   it("omits image tags when neither the card nor the shell has one", () => {
     const shellWithoutImage = [
       "<html><head>",
