@@ -154,14 +154,6 @@ browser_ws="$(printf '%s' "$browser_version_json" | python3 -c "import json, sys
   exit 1
 }
 
-if [[ -z "$CHROME_USER_AGENT" ]]; then
-  CHROME_USER_AGENT="$(printf '%s' "$browser_version_json" | python3 -c "import json, sys; print(json.load(sys.stdin).get('User-Agent', ''))")"
-  if [[ -z "$CHROME_USER_AGENT" ]]; then
-    err "cannot determine browser user agent from ${CDP_BASE}/json/version"
-    exit 1
-  fi
-fi
-
 stealth_js_file="${SCRIPT_DIR}/stealth-inject.js"
 if [[ ! -f "$stealth_js_file" ]]; then
   err "stealth injector not found at ${stealth_js_file}"
@@ -169,7 +161,10 @@ if [[ ! -f "$stealth_js_file" ]]; then
 fi
 
 geo_params="$(get_geo_for_timezone "$TIMEZONE")"
-ua_metadata="$(build_ua_metadata)"
+ua_metadata='{}'
+if [[ -n "$CHROME_USER_AGENT" ]]; then
+  ua_metadata="$(build_ua_metadata)"
+fi
 BROWSER_WS="$browser_ws" \
   STEALTH_JS_FILE="$stealth_js_file" \
   READY_FILE="$READY_FILE" \
@@ -307,7 +302,8 @@ def configure_target(session_id: str, target_info: dict, waiting_for_debugger: b
                 session_id,
             )
             send("Network.enable", {}, session_id)
-            send("Network.setUserAgentOverride", build_ua_override(), session_id)
+            if chrome_user_agent:
+                send("Network.setUserAgentOverride", build_ua_override(), session_id)
         if target_type in {"page", "iframe"}:
             send("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js}, session_id)
             # Enable the Page agent so registered scripts also run in OOPIF documents.

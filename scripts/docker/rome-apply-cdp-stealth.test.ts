@@ -21,7 +21,10 @@ if (!guardSource) {
 
 type CdpCommand = { method: string; sessionId?: string; params?: Record<string, unknown> };
 
-function runGuard(scenario: "idle" | "command-timeout" | "existing" | "empty" | "nested-iframes") {
+function runGuard(
+  scenario: "idle" | "command-timeout" | "existing" | "empty" | "nested-iframes",
+  userAgent = "TestChrome",
+) {
   const directory = mkdtempSync(join(tmpdir(), "rome-stealth-guard-"));
   const traceFile = join(directory, "commands.json");
   const readyFile = join(directory, "ready");
@@ -48,7 +51,7 @@ function runGuard(scenario: "idle" | "command-timeout" | "existing" | "empty" | 
           READY_FILE: readyFile,
           TIMEZONE: "America/Los_Angeles",
           CHROME_LANG: "en-US",
-          CHROME_USER_AGENT: "TestChrome",
+          CHROME_USER_AGENT: userAgent,
           ACCEPT_LANG: "en-US,en;q=0.9",
           STEALTH_LANGUAGES: '["en-US", "en"]',
           UA_METADATA: '{"platform":"Linux"}',
@@ -107,6 +110,27 @@ describe("rome-apply-cdp-stealth.sh UA architecture", () => {
 });
 
 describe("rome-apply-cdp-stealth.sh guard lifecycle", () => {
+  it("keeps native user-agent metadata when no override is configured", () => {
+    const result = runGuard("idle", "");
+
+    expect(result.ready).toBe(true);
+    expect(result.stdout).toContain("stealth configured for page new");
+    expect(
+      result.commands.some((command) => command.method === "Network.setUserAgentOverride"),
+    ).toBe(false);
+  });
+
+  it("applies an explicitly configured user agent", () => {
+    const result = runGuard("existing", "ConfiguredChrome");
+
+    expect(result.commands).toContainEqual(
+      expect.objectContaining({
+        method: "Network.setUserAgentOverride",
+        params: expect.objectContaining({ userAgent: "ConfiguredChrome" }),
+      }),
+    );
+  });
+
   it("handles a new tab after repeated idle timeouts and exits on disconnect", () => {
     const result = runGuard("idle");
 

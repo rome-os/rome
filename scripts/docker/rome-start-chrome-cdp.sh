@@ -281,14 +281,6 @@ start_chrome_instance() {
 
   wait_for_internal_cdp || return 1
 
-  if [[ -z "$CHROME_USER_AGENT" ]]; then
-    CHROME_USER_AGENT="$(curl -sf "http://127.0.0.1:${CHROME_INTERNAL_PORT}/json/version" | python3 -c "import json, sys; print(json.load(sys.stdin).get('User-Agent', ''))")"
-    if [[ -z "$CHROME_USER_AGENT" ]]; then
-      err "could not determine browser user agent from CDP"
-      return 1
-    fi
-  fi
-
   ensure_cdp_proxy
   wait_for_external_cdp || return 1
   start_stealth_guard || return 1
