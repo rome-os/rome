@@ -1,0 +1,6 @@
+{
+  "name": "rome-aa",
+  "description": "American Airlines cash fares and AAdvantage awards with separate taxes",
+  "version": "0.1.0",
+  "opencli": ">=1.8.0"
+}
