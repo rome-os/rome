@@ -61,6 +61,7 @@ export interface LinkedInParticipantInput {
   participantId: string;
   name?: string | null;
   headline?: string | null;
+  profileUrl?: string | null;
   /** `member` | `organization` | `agent` | `custom`. */
   type?: string | null;
   /**
@@ -71,6 +72,21 @@ export interface LinkedInParticipantInput {
    * its own viewer, so the producer can always answer.
    */
   isSelf: boolean;
+}
+
+/** The thread-scoped facts needed to replace authoritative membership. */
+export interface LinkedInThreadParticipantInput {
+  participantId: string;
+  /** Viewer-relative identity; kept current even when profile metadata is cached. */
+  isSelf: boolean;
+}
+
+/** Durable per-profile freshness and retry state. */
+export interface LinkedInParticipantProfileSyncState {
+  participantId: string;
+  lastSuccessfulSyncAt: Date | null;
+  profileSyncFailureCount: number;
+  profileSyncRetryAt: Date | null;
 }
 
 /** One participant of a thread, person-level facts folded in. */
@@ -88,6 +104,9 @@ export interface LinkedInThreadCursor {
   lastMessageAt: Date | null;
   lastMessagePreview: string | null;
   lastSyncedAt: Date | null;
+  /** The last authoritative membership read, or null when only message-derived
+   *  participant data is available. Profile freshness is stored per account. */
+  participantsLastReadAt: Date | null;
 }
 
 /** One mirrored message joined with its thread, for the history talk feature. */
@@ -125,7 +144,7 @@ export interface LinkedInSyncSink {
    *  never "unset what an earlier snapshot learned".
    *
    *  The snapshot's participant count is deliberately absent: how many people
-   *  are on a thread follows from the membership `upsertThreadParticipants`
+   *  are on a thread follows from the authoritative membership replacement
    *  stores, and a scalar copied off the snapshot could only disagree with it. */
   markThreadSynced(
     threadId: string,
@@ -138,17 +157,22 @@ export interface LinkedInSyncSink {
   ): Promise<void>;
   /** Mirrored history, newest last; `threadId: null` spans every thread. */
   fetchHistory?(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]>;
-  /**
-   * Replace a thread's membership with exactly `participants` (an empty array
-   * empties the thread) and record that the membership was read just now.
-   *
-   * Optional, and the poller treats it as a capability probe: a sink that
-   * cannot store membership is never made to pay for the crawl that produces
-   * it.
-   */
-  upsertThreadParticipants?(
+  /** Replace authoritative thread membership without refreshing profile metadata. */
+  replaceThreadParticipantMembership?(
     threadId: string,
-    participants: LinkedInParticipantInput[],
+    participants: LinkedInThreadParticipantInput[],
+  ): Promise<void>;
+  /** Read profile freshness in one durable namespace shared by all threads. */
+  getParticipantProfileSyncStates?(
+    participantIds: string[],
+  ): Promise<Map<string, LinkedInParticipantProfileSyncState>>;
+  /** Persist one successful basic-profile sync and clear its retry state. */
+  upsertParticipantProfile?(participant: LinkedInParticipantInput): Promise<void>;
+  /** Persist a failed profile sync without advancing its last success. */
+  recordParticipantProfileSyncFailure?(
+    participant: LinkedInThreadParticipantInput,
+    failureCount: number,
+    retryAt: Date,
   ): Promise<void>;
   /**
    * Seed participants from messages the sink already holds — no opencli call.

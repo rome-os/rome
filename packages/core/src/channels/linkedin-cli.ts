@@ -237,6 +237,7 @@ const snapshotRowSchema = z.object({
   participant_count: z.number().nullish(),
   message_id: z.string().min(1),
   sent_at: z.string().nullish(),
+  sender_participant_id: z.string().nullish(),
   sender_name: z.string().nullish(),
   sender_type: z.string().nullish(),
   sender_profile_url: z.string().nullish(),
@@ -264,6 +265,7 @@ export interface LinkedInSnapshotMessage {
   participantCount: number | null;
   messageId: string;
   sentAt: Date | null;
+  senderParticipantId: string | null;
   senderName: string | null;
   senderType: string | null;
   senderProfileUrl: string | null;
@@ -288,6 +290,7 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
     participantCount: row.participant_count ?? null,
     messageId: row.message_id,
     sentAt: parseIsoDate(row.sent_at),
+    senderParticipantId: row.sender_participant_id || null,
     senderName: row.sender_name ?? null,
     senderType: row.sender_type ?? null,
     senderProfileUrl: row.sender_profile_url ?? null,

@@ -315,10 +315,16 @@ export const linkedinParticipants = sqliteTable("linkedin_participants", {
   participantId: text("participant_id").primaryKey(),
   name: text("name"),
   headline: text("headline"),
+  profileUrl: text("profile_url"),
   // 'member' | 'organization' | 'agent' | 'custom', as the snapshot reports it.
   type: text("type"),
   // True for the account owner's own row in a thread's participant list.
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  // Profile freshness is account-scoped rather than thread-scoped: the same
+  // LinkedIn account can appear in many conversations.
+  lastSuccessfulSyncAt: integer("last_successful_sync_at", { mode: "timestamp" }),
+  profileSyncFailureCount: integer("profile_sync_failure_count").notNull().default(0),
+  profileSyncRetryAt: integer("profile_sync_retry_at", { mode: "timestamp" }),
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
