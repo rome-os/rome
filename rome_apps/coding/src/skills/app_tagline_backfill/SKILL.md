@@ -62,11 +62,24 @@ makes. In AUTO mode go straight to step 4.
 
 ## Step 4: Write, commit, reinstall, verify — one app at a time
 
+First make sure nobody is mid-edit in that repo. A source install packs the
+whole working tree, so uncommitted changes would be deployed, and the rollback
+below would erase edits to `app.yaml`. Skip a dirty app and report it:
+
 ```bash
 cd "$ROOT"
-# Top-level key order does not matter in YAML, so append the line (the
-# leading newline keeps it off a last line that has no trailing newline).
-printf '\ntagline: "REPLACE WITH THE SENTENCE"\n' >> app.yaml
+git status --porcelain --untracked-files=no   # must print nothing; otherwise skip this app
+```
+
+Then append the line. Top-level key order does not matter in YAML; the quoted
+heredoc keeps apostrophes and other shell characters in the sentence intact,
+and the blank line keeps it off a last line that has no trailing newline.
+
+```bash
+cat >> app.yaml <<'EOF'
+
+tagline: "REPLACE WITH THE SENTENCE"
+EOF
 git add app.yaml && git commit -o app.yaml -m "chore: add share-card tagline"
 ```
 
@@ -97,6 +110,6 @@ The reinstall triggers the card to be redrawn; nothing else is needed.
 ## Step 5: Report
 
 List, in this order: apps updated (id and the tagline written), apps
-skipped (with the reason), apps that failed (with the error and that the
+skipped (with the reason, including "uncommitted changes"), apps that failed (with the error and that the
 commit was reverted). In AUTO mode this report is your final message; the
 hook stores it. In MANUAL mode show it to the guardian.

@@ -114,6 +114,11 @@ describe("coding tagline backfill hook", () => {
     it("treats a missing lockfile as nothing to do", async () => {
       expect(await findAppsMissingTagline(join(tempDir, "nope.json"))).toEqual([]);
     });
+
+    it("throws on a lockfile it cannot parse", async () => {
+      await writeFile(lockfilePath, "{ not json");
+      await expect(findAppsMissingTagline(lockfilePath)).rejects.toThrow();
+    });
   });
 
   describe("onAgentTurnFinished", () => {
@@ -213,6 +218,40 @@ describe("coding tagline backfill hook", () => {
       expect(marker.finishedAt).toBeUndefined();
     });
 
+    it("leaves a recent in-progress marker to the instance that owns it", async () => {
+      const root = await writeApp("todo", "id: todo\nweb:\n  manifest: web/manifest.json\n");
+      await writeLockfile({ todo: sourceEntry(root) });
+      const runner = createRunner();
+      const settings = createSettings({
+        [BACKFILL_SETTINGS_KEY]: {
+          version: BACKFILL_VERSION,
+          startedAt: new Date().toISOString(),
+          attempts: 1,
+        },
+      });
+      const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
+
+      await hook.onAgentTurnFinished(event);
+
+      expect(runner.calls).toHaveLength(0);
+      expect(settings.sets).toHaveLength(0);
+    });
+
+    it("records a failed scan as an attempt without settling", async () => {
+      await writeFile(lockfilePath, "{ not json");
+      const runner = createRunner();
+      const settings = createSettings();
+      const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
+
+      await expect(hook.onAgentTurnFinished(event)).resolves.toBeUndefined();
+
+      expect(runner.calls).toHaveLength(0);
+      const marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
+      expect(marker).toMatchObject({ version: BACKFILL_VERSION, attempts: 1 });
+      expect(marker.lastError).toBeDefined();
+      expect(marker.finishedAt).toBeUndefined();
+    });
+
     it("resumes an interrupted run and finishes once the work is done", async () => {
       const root = await writeApp(
         "ok",
@@ -223,7 +262,7 @@ describe("coding tagline backfill hook", () => {
       const settings = createSettings({
         [BACKFILL_SETTINGS_KEY]: {
           version: BACKFILL_VERSION,
-          startedAt: "2026-01-01T00:00:00Z",
+          startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
           attempts: 1,
         },
       });
