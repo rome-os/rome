@@ -26,14 +26,6 @@ async function readIcon(app: ResolvedApp): Promise<OgIcon | null> {
   }
 }
 
-/**
- * When the card renderer itself last changed (template, fonts, or where the
- * text comes from). A PNG older than this is stale even if it is newer than
- * its app, so the next event re-renders it. Bump the date whenever the card's
- * look or inputs change.
- */
-export const CARD_RENDERER_STAMP = Date.parse("2026-09-11T00:00:00Z");
-
 /** Card description: the author's tagline, or null when there isn't one. */
 export function cardDescription(manifest: { tagline?: string }): string | null {
   return manifest.tagline ?? null;
@@ -115,9 +107,7 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
 
     void (async () => {
       const existing = await opts.store.stat(app.appId);
-      if (existing && existing.mtimeMs > Math.max(Date.parse(app.updatedAt), CARD_RENDERER_STAMP)) {
-        return;
-      }
+      if (existing && existing.mtimeMs > Date.parse(app.updatedAt)) return;
       const link = opts.host ? `${opts.host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
       const png = await generate(app, link);
       await enqueue(app.appId, async () => {
