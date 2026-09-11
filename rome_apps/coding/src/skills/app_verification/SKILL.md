@@ -62,6 +62,23 @@ and its absence means the app was never installed from this source root.
 If the app was changed after the last install, the verification fails: runtime
 behavior would not match source.
 
+### 1b. Share-card tagline
+
+From `<app-root>`:
+
+```sh
+grep -n '^tagline:' app.yaml
+```
+
+The manifest must carry a non-empty `tagline` — it is the only text the
+app's social share card shows and the `og:description` beside it; without one
+the card still renders (icon, name, link) but its description line is empty. A missing, empty, or still-placeholder tagline (the
+scaffold's commented-out example, or "<Name> in one sentence") is a **fail**:
+report "add a one-sentence `tagline` to app.yaml and reinstall" so the creator
+fills it in per [`app_creation/REFERENCE.md`](../app_creation/REFERENCE.md)
+(≤ 80 chars / 40 CJK, benefit-first, like an App Store subtitle). Length and
+line-count are enforced by the installer, so only presence needs checking.
+
 ### 2. Installed app visibility
 
 Visit the running Rome dashboard, using the base URL from the handoff or the
