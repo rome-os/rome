@@ -1,12 +1,16 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
+import {
+  ChatComposer,
+  type ChatComposerProps,
+  type ChatComposerSendControls,
+} from "./ChatComposer";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -225,6 +229,67 @@ describe("composer Enter key", () => {
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0].text).toBe("hello");
+  });
+});
+
+describe("composer attachment uploads", () => {
+  it("shows per-file progress and blocks another send until the upload finishes", async () => {
+    let controls: ChatComposerSendControls | null = null;
+    let resolveSend: (() => void) | null = null;
+    const sendPending = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+    const onSend = rs.fn((_snapshot, nextControls: ChatComposerSendControls) => {
+      controls = nextControls;
+      return sendPending;
+    });
+    const { container } = renderComposer({ onSend });
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("file input not found");
+    const first = new File([new Uint8Array(25)], "first.txt", { type: "text/plain" });
+    const second = new File([new Uint8Array(75)], "second.txt", { type: "text/plain" });
+
+    fireEvent.change(fileInput, { target: { files: [first, second] } });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "inspect these" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(
+      (screen.getByRole("button", { name: "Uploading files…" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Uploading first.txt" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("0");
+
+    if (!controls) throw new Error("send controls not captured");
+    act(() => controls?.onUploadProgress(0.5));
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Uploading first.txt" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("100");
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Uploading second.txt" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("33");
+
+    // The next message may be drafted while bytes are moving, but it cannot be
+    // submitted into the same multipart request.
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "next message" } });
+    expect(
+      (screen.getByRole("button", { name: "Uploading files…" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Uploading files…" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    act(() => resolveSend?.());
+    await waitFor(() => expect(screen.queryByText("first.txt")).toBeNull());
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });
 

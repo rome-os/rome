@@ -357,6 +357,14 @@ export type PostTurnResult =
       reason?: ChatErrorReason;
     };
 
+export interface PostSessionTurnOptions {
+  /**
+   * Reports the fraction of the multipart request body transferred to the
+   * server. `null` means the browser did not expose a computable total.
+   */
+  onUploadProgress?: (progress: number | null) => void;
+}
+
 export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | null> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, { credentials: "include" });
   if (!res.ok) return null;
@@ -376,44 +384,40 @@ export async function postSessionTurnJson(
   return parseTurnResponse(res);
 }
 
-async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
-  if (res.ok) {
+function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTurnResult {
+  if (ok) {
     try {
-      const data = (await res.json()) as CreateTurnResponse;
+      const data = JSON.parse(raw) as CreateTurnResponse;
       return { ok: true, data };
     } catch {
-      return { ok: false, status: res.status, message: "" };
+      return { ok: false, status, message: "" };
     }
   }
   let message = "";
   let code: ChatErrorCode | undefined;
   let provider: ChatErrorProvider | undefined;
   let reason: ChatErrorReason | undefined;
-  try {
-    const raw = (await res.text()).trim();
-    if (raw) {
-      try {
-        const payload = JSON.parse(raw) as {
-          error?: string;
-          message?: string;
-          code?: ChatErrorCode;
-          provider?: ChatErrorProvider;
-          reason?: ChatErrorReason;
-        };
-        message = payload.error ?? payload.message ?? "";
-        code = payload.code;
-        provider = payload.provider;
-        reason = payload.reason;
-      } catch {
-        message = raw.slice(0, 200);
-      }
+  const trimmed = raw.trim();
+  if (trimmed) {
+    try {
+      const payload = JSON.parse(trimmed) as {
+        error?: string;
+        message?: string;
+        code?: ChatErrorCode;
+        provider?: ChatErrorProvider;
+        reason?: ChatErrorReason;
+      };
+      message = payload.error ?? payload.message ?? "";
+      code = payload.code;
+      provider = payload.provider;
+      reason = payload.reason;
+    } catch {
+      message = trimmed.slice(0, 200);
     }
-  } catch {
-    // ignore
   }
   return {
     ok: false,
-    status: res.status,
+    status,
     message,
     ...(code ? { code } : {}),
     ...(provider ? { provider } : {}),
@@ -421,8 +425,53 @@ async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
   };
 }
 
-export async function postSessionTurn(sessionId: string, body: FormData): Promise<PostTurnResult> {
+async function parseTurnResponse(res: Response): Promise<PostTurnResult> {
+  const raw = await res.text().catch(() => "");
+  return parseTurnResponseText(res.status, res.ok, raw);
+}
+
+function postSessionTurnWithProgress(
+  sessionId: string,
+  body: FormData,
+  onUploadProgress: (progress: number | null) => void,
+): Promise<PostTurnResult> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `/api/chat/sessions/${sessionId}/turns`);
+    request.withCredentials = true;
+    request.upload.onprogress = (event) => {
+      onUploadProgress(
+        event.lengthComputable && event.total > 0 ? event.loaded / event.total : null,
+      );
+    };
+    // The last progress event is not guaranteed to report the exact total.
+    // `load` is the browser's authoritative boundary for a fully transferred
+    // request body; response processing may continue after it fires.
+    request.upload.onload = () => onUploadProgress(1);
+    request.onload = () => {
+      resolve(
+        parseTurnResponseText(
+          request.status,
+          request.status >= 200 && request.status < 300,
+          request.responseText,
+        ),
+      );
+    };
+    request.onerror = () => reject(new TypeError("Failed to fetch"));
+    request.onabort = () => reject(new DOMException("The request was aborted", "AbortError"));
+    request.send(body);
+  });
+}
+
+export async function postSessionTurn(
+  sessionId: string,
+  body: FormData,
+  options: PostSessionTurnOptions = {},
+): Promise<PostTurnResult> {
   if (!body.has("inputId")) body.set("inputId", crypto.randomUUID());
+  if (options.onUploadProgress) {
+    return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress);
+  }
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
     method: "POST",
     credentials: "include",
