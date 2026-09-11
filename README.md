@@ -40,16 +40,12 @@
 
 ## What is Rome?
 
-Rome is an open source alternative to Grok Bot and Meta's Muse. The
-[MIT-licensed](LICENSE) runtime combines persistent AI agents, scheduled
-workflows, and apps you can inspect, extend, and self-host.
-
-See how Rome compares with [Grok Bot](#grok-bot-alternative) and
-[Muse](#muse-alternative), or [run Rome with Docker](#run-with-docker).
-
 Most progress in AI comes from scaling models. Rome scales the other axis, the environment: the tools, workflows, memory, and interfaces an agent works within ([why this matters](VISION.md)).
 
 Rome is a guardrailed environment where human and agent collaborate, and the collaboration compounds. Agents build their own harnesses, design their own SOPs, and orchestrate workflows under your guidance. Proven capabilities stick. Every interaction raises the ceiling for the next.
+
+Rome also works as an open source alternative to [Grok Bot and Meta's Muse](#how-rome-compares)
+for persistent agents, scheduled tasks, and custom apps.
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=lyNGYEw4a6Y">
@@ -215,9 +211,9 @@ comparison is who and what stands behind the app.
 
 | | What accumulates | What runs repeated work | Where you operate it | Hosting |
 | --- | --- | --- | --- | --- |
-| **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | A saved action, with model calls only when the action needs them | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
-| **[Grok Bot](https://docs.x.ai/grok-bot/overview)** (xAI) | Bot memory and preferences, reusable skills, and files on a shared cloud computer | Bots following skills through scheduled or event-triggered routines | Chat, file previews, computer access, and routine controls | xAI-hosted service |
-| **[Muse](https://introducing.muse.ai/)** (Meta) | Personal memory, goals, files, and interactive artifacts on a dedicated cloud computer | An agent working on schedules and relevant events, with tools it can build | The Muse app and WhatsApp, plus goals, activity, approvals, and interactive artifacts | Meta-hosted service |
+| **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | Saved actions, with model calls as needed | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
+| **[Grok Bot](https://docs.x.ai/grok-bot/overview)** (xAI) | Memory, skills, and files on a shared cloud computer | Bots running skills and routines | Chat, file previews, and computer access | xAI-hosted |
+| **[Muse](https://introducing.muse.ai/)** (Meta) | Memory, goals, files, and interactive artifacts | Scheduled and event-triggered agent work | Muse app, WhatsApp, goals, and artifacts | Meta-hosted |
 | **Hermes Agent** (Nous Research) | Bounded memory notes and skill documents, as text | The model, or a script-only cron job\* | A chat thread (chat clients, desktop app, or CLI) | Self-hosted |
 | **Manus** | Files, tools, and databases on a persistent cloud computer, plus knowledge and playbooks | The model, or scripts left on its machine\* | A chat session, plus standalone web apps it builds | Hosted, with app-code export |
 
@@ -225,51 +221,16 @@ comparison is who and what stands behind the app.
 answers only to its timer. A Rome action is a building block: agents, apps,
 and interfaces all call it, and it can pause for approval.
 
-### Grok Bot alternative
-
-[Grok Bot](https://docs.x.ai/grok-bot/overview) gives named agents a shared
-cloud computer with a browser, files, and app logins. Bots remember context,
-delegate to each other, and keep working while your laptop is closed. Its
+**[Grok Bot](https://docs.x.ai/grok-bot/overview)** gives persistent bots a
+shared cloud computer. Its
 [skills and routines](https://docs.x.ai/grok-bot/skills-routines-and-automations)
-capture reusable instructions and run work on schedules or supported events.
-You can also preview and save
-[generated files](https://docs.x.ai/grok-bot/files-and-results).
+support repeated work. Rome adds a runtime you can self-host and
+[apps](docs/concepts/apps.md) whose actions, data, and interfaces you can reuse.
 
-Rome is an open source Grok Bot alternative for people who want to run and
-extend the agent environment themselves. You can [self-host](#run-with-docker),
-choose a [supported model provider](docs/concepts/agents.md#model-selection),
-and package repeated work as [Rome Apps](docs/concepts/apps.md). Each app can
-combine an interface, persistent data, and callable actions. A saved
-[action](docs/concepts/actions.md) runs code directly and uses a model only
-when the task needs reasoning. Agents, schedules, and app interfaces can reuse
-that same action.
-
-### Muse alternative
-
-[Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/)
-is Meta's personal AI agent for everyday tasks and long-term goals. It runs
-on a dedicated cloud computer, uses a browser and connected services, remembers
-personal context, and follows up through the Muse app or WhatsApp. It asks for
-approval before sensitive actions such as sending an email or making a purchase.
-
-[Meta's design overview](https://introducing.muse.ai/) also describes tools
-and interactive artifacts, including trackers and dashboards. Its interface
-includes goals, activity history, editable memory, and structured approval
-controls. Rome shares this emphasis on personal software.
-
-Rome is a Muse alternative for people who want an MIT-licensed runtime they
-can self-host and modify. You can also
-[choose a model provider](docs/concepts/agents.md#model-selection).
-In Rome, an [app](docs/concepts/apps.md) packages interfaces, actions, agents,
-and persistent data into an installable capability. You and your agents can
-reuse it across later tasks, adapt its source, and share it through the
-[App Store](https://romeos.cc/store). Choose Rome when owning and extending
-that environment matters to you.
-
-The Grok Bot and Muse comparisons reflect the official documentation linked
-above, reviewed on September 11, 2026.
-
-### Other alternatives
+**[Muse](https://introducing.muse.ai/)** handles personal tasks with memory,
+scheduled work, and interactive artifacts. Rome covers similar workflows
+through [apps](docs/concepts/apps.md), with source code you can modify and a
+[choice of model provider](docs/concepts/agents.md#model-selection).
 
 **Hermes Agent** is the closest in spirit: MIT-licensed, self-hostable, with
 curated memory, self-written skill documents, and a skill marketplace. What
@@ -307,8 +268,6 @@ in later tasks. Every new Wabi app grows your library, and every new Rome
 capability also extends what the agent can do next. Wabi asks you to describe
 an app, while Rome asks you to describe an outcome and leaves an app behind
 when the work deserves one.
-
-### What Rome keeps
 
 The difference is the unit of compounding. Grok Bot compounds hosted bot
 state and skills, and Muse compounds personal context and artifacts.
