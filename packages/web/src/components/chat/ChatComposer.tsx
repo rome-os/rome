@@ -1069,7 +1069,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             variant="ghost"
             size="icon-sm"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isComposerBusy || uploadInFlight}
+            disabled={isComposerBusy}
             aria-label={t("composer.uploadFiles")}
             title={t("composer.uploadFiles")}
             className="touch-target"
@@ -1116,9 +1116,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               size="icon-sm"
               onClick={() => void runSend()}
               disabled={
-                isComposerBusy ||
-                uploadInFlight ||
-                (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
+                isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
               }
               title={
                 uploadInFlight
