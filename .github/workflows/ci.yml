@@ -100,6 +100,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Test Delta OpenCLI plugin
+        run: pnpm -C opencli-plugins/delta test
       - name: Test United OpenCLI plugin
         run: pnpm -C opencli-plugins/united test
       - run: pnpm lint
