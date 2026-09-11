@@ -160,8 +160,14 @@ export class ApprovalsRepository {
             .run();
         } else if (previous.status === "pending") {
           const guide = now - payload.lastGuidanceAt >= 30_000;
+          const displayName = input.displayName.trim();
+          const hasDisplayName =
+            displayName.length > 0 &&
+            displayName !== input.channelUserId &&
+            !(input.channel === "feishu" && displayName === "Feishu User");
           const updated = {
             ...payload,
+            displayName: hasDisplayName ? displayName : payload.displayName,
             username: input.username,
             ...(input.conversationId ? { conversationId: input.conversationId } : {}),
             lastGuidanceAt: guide ? now : payload.lastGuidanceAt,

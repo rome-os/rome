@@ -134,6 +134,50 @@ describe("channel pairing approvals", () => {
     expect(JSON.stringify(await repo.list())).not.toContain(code);
   });
 
+  it("refreshes a reused Feishu request name for display and Web approval notification", async () => {
+    const input = { ...identity, channel: "feishu" as const, channelUserId: "ou_123" };
+    const now = Date.now();
+    const first = repo.requestPairing({ ...input, displayName: "Feishu User" }, now)!;
+    const code = await repo.pairingCode(first.approval.id);
+    const second = repo.requestPairing({ ...input, displayName: " Alice " }, now + 1_000)!;
+    expect(second.approval.id).toBe(first.approval.id);
+    expect(second.guide).toBe(false);
+    expect(pairingPayload((await repo.findById(first.approval.id))!)).toMatchObject({
+      displayName: "Alice",
+      expiresAt: now + 10 * 60_000,
+      failedAttempts: 0,
+      lastGuidanceAt: now,
+    });
+    expect(await repo.pairingCode(first.approval.id)).toBe(code);
+    const result = await repo.resolvePending(first.approval.id, "approve", "owner");
+    if (result.outcome !== "resolved") throw new Error("Approval failed");
+    const send = rs.fn<TalkRouter["send"]>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const router = {
+      send,
+      feature: () => ({ conversationFor: async () => "dm" as ConversationId }),
+    } as unknown as TalkRouter;
+    await notifyPairingResolution(router, result.approval);
+    expect(send).toHaveBeenCalledWith(input.connectionId, "dm", {
+      text: '✅ <at user_id="ou_123">Alice</at> (`ou_123`) is paired with Rome. You can start chatting now.',
+    });
+  });
+
+  it.each(["", "   ", "ou_123", "Feishu User"])("preserves a known name when a reused request supplies %j", async (displayName) => {
+    const input = { ...identity, channel: "feishu" as const, channelUserId: "ou_123" };
+    const first = repo.requestPairing(input)!;
+    repo.requestPairing({ ...input, displayName })!;
+    expect(pairingPayload((await repo.findById(first.approval.id))!)?.displayName).toBe("Alice");
+  });
+
+  it("refreshes a known name when the requesting account is renamed", async () => {
+    const first = repo.requestPairing(identity)!;
+    repo.requestPairing({ ...identity, displayName: "Alice Smith" });
+    expect(pairingPayload((await repo.findById(first.approval.id))!)?.displayName).toBe("Alice Smith");
+  });
+
   it("rejects cross-identity, cross-channel, cross-connection and replayed codes", async () => {
     const request = repo.requestPairing(identity)!;
     const code = (await repo.pairingCode(request.approval.id))!;
