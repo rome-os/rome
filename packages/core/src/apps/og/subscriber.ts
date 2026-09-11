@@ -26,11 +26,16 @@ async function readIcon(app: ResolvedApp): Promise<OgIcon | null> {
   }
 }
 
+/** Card description: the author's tagline, or null when there isn't one. */
+export function cardDescription(manifest: { tagline?: string }): string | null {
+  return manifest.tagline ?? null;
+}
+
 /** Template + rasterizer for one app. */
 async function generateOgImage(app: ResolvedApp, link: string | null): Promise<Buffer> {
   const svg = renderOgSvg({
     name: app.displayName,
-    description: app.manifest.description,
+    description: cardDescription(app.manifest),
     link,
     icon: await readIcon(app),
   });

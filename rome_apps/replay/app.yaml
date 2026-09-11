@@ -8,6 +8,7 @@ description: >-
   block-by-block in chat — reproducing the recorded assistant text, thinking,
   tool calls and results. Replay is inert; no model is called and no action is
   re-executed.
+tagline: "Replay any recorded chat step by step, exactly as it happened."
 appRoot: dist
 
 # Web UI: multi-upload trace.json, drag to order, "replay in chat".

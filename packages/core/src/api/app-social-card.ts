@@ -1,5 +1,6 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import type { OgImageStore } from "../apps/og/store.js";
+import { cardDescription } from "../apps/og/subscriber.js";
 import { appIdToPathSegment } from "../apps/packaging/app-id.js";
 import type { ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
@@ -61,10 +62,11 @@ export async function buildAppSocialCard(
   // The card image is auxiliary: any lookup failure just means "no image yet"
   // and the shell keeps its static og:image.
   const image = await deps.ogImageStore.stat(appId).catch(() => null);
+  const description = cardDescription(view.manifest);
   return {
     title: view.displayName,
-    description: view.manifest.description,
     url: `${origin}${pathname}`,
+    ...(description ? { description } : {}),
     ...(image
       ? {
           imageUrl: `${origin}/app-og/${appIdToPathSegment(appId)}.png?v=${Math.floor(image.mtimeMs)}`,

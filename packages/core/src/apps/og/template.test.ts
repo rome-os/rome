@@ -65,4 +65,20 @@ describe("renderOgSvg", () => {
     const svg = renderOgSvg({ ...base, link: null });
     expect(svg).not.toContain('y="566"');
   });
+
+  it("wraps a long description across two lines, no third baseline", () => {
+    const long =
+      "This app watches every subreddit you care about and ranks the best posts of the day.";
+    const svg = renderOgSvg({ ...base, description: long });
+    const spans = svg.match(/<tspan x="96" y="\d+">/g) ?? [];
+    expect(spans).toHaveLength(2);
+    expect(svg).toContain('<tspan x="96" y="396">');
+    expect(svg).toContain('<tspan x="96" y="444">');
+    expect(svg).not.toContain('<tspan x="96" y="492">');
+  });
+
+  it("renders no description line when description is null", () => {
+    const svg = renderOgSvg({ ...base, description: null });
+    expect(svg).not.toContain('<tspan x="96"');
+  });
 });

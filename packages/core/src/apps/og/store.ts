@@ -3,6 +3,13 @@ import { join } from "node:path";
 import { getProfileAppsDir } from "../../paths.js";
 import { appIdToPathSegment } from "../packaging/app-id.js";
 
+/**
+ * Bumped whenever the card's look or inputs change. It is part of the on-disk
+ * name, so a card rendered by an older format is simply never read again and
+ * the next event renders a fresh one — no timestamp guessing.
+ */
+export const CARD_FORMAT_VERSION = 2;
+
 export interface OgImageStore {
   path(appId: string): string;
   write(appId: string, png: Buffer): Promise<void>;
@@ -19,7 +26,8 @@ function isEnoent(err: unknown): boolean {
 export function createOgImageStore(
   rootDir: string = join(getProfileAppsDir(), "og"),
 ): OgImageStore {
-  const path = (appId: string) => join(rootDir, `${appIdToPathSegment(appId)}.png`);
+  const path = (appId: string) =>
+    join(rootDir, `${appIdToPathSegment(appId)}.v${CARD_FORMAT_VERSION}.png`);
   return {
     path,
     async write(appId, png) {

@@ -4,6 +4,7 @@ name: Inbox
 icon: assets/icon.svg
 version: 0.2.13
 description: Incoming-message triage, routing, and channel hooks
+tagline: "Every message, triaged and routed before you even open it."
 appRoot: dist
 
 web:

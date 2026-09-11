@@ -10,7 +10,7 @@ const reddit = {
   state: "installed",
   enabled: true,
   displayName: "Reddit Radar",
-  manifest: { id: "reddit", description: "Watches subreddits" },
+  manifest: { id: "reddit", description: "Watches subreddits", tagline: "Watches subreddits" },
   web: { displayName: "Reddit Radar" },
 };
 
@@ -86,5 +86,12 @@ describe("buildAppSocialCard", () => {
     const card = await buildAppSocialCard(deps, req("/full/apps/reddit"));
     expect(card?.title).toBe("Reddit Radar");
     expect(card).not.toHaveProperty("imageUrl");
+  });
+
+  it("omits description when the app has no tagline", async () => {
+    const untagged = { ...reddit, manifest: { id: "reddit", description: "Watches subreddits" } };
+    const deps = { appCatalog: catalogWith({ reddit: untagged }), ogImageStore: storeWith(null) };
+    const card = await buildAppSocialCard(deps, req("/apps/reddit"));
+    expect(card).not.toHaveProperty("description");
   });
 });

@@ -15,7 +15,7 @@ describe("createOgImageStore", () => {
 
   it("writes, stats, reads and removes one file per app", async () => {
     const store = createOgImageStore(root);
-    expect(store.path("@acme/radar")).toBe(join(root, "%40acme%2Fradar.png"));
+    expect(store.path("@acme/radar")).toBe(join(root, "%40acme%2Fradar.v2.png"));
     expect(await store.stat("reddit")).toBeNull();
     expect(await store.read("reddit")).toBeNull();
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CatalogEvent, ResolvedApp } from "../state.js";
 import { createOgImageStore } from "./store.js";
-import { createAppOgImageSubscriber } from "./subscriber.js";
+import { cardDescription, createAppOgImageSubscriber } from "./subscriber.js";
 
 function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
   return {
@@ -20,6 +20,18 @@ function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
+
+describe("cardDescription", () => {
+  it("returns the tagline when present", () => {
+    expect(cardDescription({ tagline: "Never miss a good thread" })).toBe(
+      "Never miss a good thread",
+    );
+  });
+
+  it("returns null when there is no tagline", () => {
+    expect(cardDescription({})).toBeNull();
+  });
+});
 
 describe("createAppOgImageSubscriber", () => {
   let root: string;
@@ -133,30 +145,31 @@ describe("createAppOgImageSubscriber", () => {
 
   it("keeps the newest render when an older one finishes last", async () => {
     const store = createOgImageStore(root);
-    const gates: Array<() => void> = [];
-    let n = 0;
+    // Gates keyed by the app's updatedAt: the two renders reach `generate`
+    // after independent fs stats, so arrival order is not event order.
+    const gates = new Map<string, () => void>();
     const handler = createAppOgImageSubscriber({
       store,
       host: null,
-      generate: async () => {
-        const mine = ++n;
-        await new Promise<void>((r) => gates.push(r));
-        return Buffer.from(`render-${mine}`);
+      generate: async (app) => {
+        await new Promise<void>((r) => gates.set(app.updatedAt, r));
+        return Buffer.from(app.updatedAt);
       },
     });
-    await handler({ appId: "reddit", change: "added", current: resolvedApp() });
+    const older = "2026-09-01T00:00:00.000Z";
+    const newer = "2026-09-02T00:00:00.000Z";
+    await handler({ appId: "reddit", change: "added", current: resolvedApp({ updatedAt: older }) });
     await handler({
       appId: "reddit",
       change: "changed",
-      current: resolvedApp({ updatedAt: "2026-09-02T00:00:00.000Z" }),
+      current: resolvedApp({ updatedAt: newer }),
     });
+    while (gates.size < 2) await tick();
+    gates.get(newer)?.(); // newest finishes first
     await tick();
-    expect(gates).toHaveLength(2);
-    gates[1](); // newest finishes first
+    gates.get(older)?.(); // stale one finishes last
     await tick();
-    gates[0](); // stale one finishes last
-    await tick();
-    expect((await store.read("reddit"))?.toString()).toBe("render-2");
+    expect((await store.read("reddit"))?.toString()).toBe(newer);
   });
 
   it("does not recreate the card when removal arrives while a write is queued", async () => {

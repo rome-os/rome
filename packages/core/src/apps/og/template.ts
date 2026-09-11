@@ -2,6 +2,7 @@
 // 1200x630 social card. Fixed layout with four slots (icon, name, description,
 // link); geometry and budgets match jessie_local_rome_study spec §4.4. SVG has
 // no automatic wrapping, so lines are broken here by a width-unit budget.
+import { widthUnits } from "../packaging/width-units.js";
 
 export interface OgIcon {
   mime: "image/svg+xml" | "image/png";
@@ -10,7 +11,8 @@ export interface OgIcon {
 
 export interface OgTemplateInput {
   name: string;
-  description: string;
+  /** author-written tagline; null → no description line. */
+  description: string | null;
   /** e.g. `jessie.romeos.cc/full/apps/reddit`; null hides the line. */
   link: string | null;
   icon: OgIcon | null;
@@ -39,11 +41,7 @@ function escapeXml(value: string): string {
 }
 
 /** Width units: CJK / fullwidth count 2, everything else 1. */
-function units(text: string): number {
-  let total = 0;
-  for (const ch of text) total += (ch.codePointAt(0) ?? 0) > 0x2e7f ? 2 : 1;
-  return total;
-}
+const units = widthUnits;
 
 /**
  * Greedy character wrap that prefers the last space in the line (English
@@ -105,7 +103,8 @@ function nameSlot(name: string): string {
     .join("\n  ");
 }
 
-function descriptionSlot(description: string): string {
+function descriptionSlot(description: string | null): string {
+  if (description === null) return "";
   const lines = wrapText(description, 56, 2);
   const baselines = [396, 444];
   const spans = lines
