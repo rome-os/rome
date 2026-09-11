@@ -6,6 +6,7 @@ description: __APP_NAME__ — a workflow that composes actions in plain TypeScri
 # Shown on the app's social share card. One sentence, at most 80 characters
 # (40 for CJK): lead with what the user gets, no jargon — write it like an
 # App Store subtitle, and update it when the app's purpose changes.
+# Fill it in or delete the line; a placeholder tagline is worse than none (the card falls back to the first sentence of description).
 tagline: __APP_NAME__ in one sentence
 icon: assets/icon.svg
 appRoot: dist
