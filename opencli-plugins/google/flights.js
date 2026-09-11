@@ -1,5 +1,10 @@
 import { CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
+import {
+  configureFlightAirports,
+  parseFlightLocation,
+  verifyFlightAirports,
+} from "./flight-airports.mjs";
 import { FLIGHT_PRICE_PATTERN_SOURCE } from "./flight-labels.mjs";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -185,14 +190,14 @@ cli({
       type: "string",
       positional: true,
       required: true,
-      help: "Origin airport code, city, or airport name",
+      help: "Origin airport code, city, airport name, or comma-separated airport codes (SFO,OAK)",
     },
     {
       name: "to",
       type: "string",
       positional: true,
       required: true,
-      help: "Destination airport code, city, or airport name",
+      help: "Destination airport code, city, airport name, or comma-separated airport codes (IAH,HOU)",
     },
     {
       name: "depart",
@@ -294,10 +299,21 @@ cli({
   func: async (page, kwargs) => {
     if (!page) throw new CommandExecutionError("Browser session required for google flights");
 
-    const origin = String(kwargs.from || "").trim();
-    const destination = String(kwargs.to || "").trim();
-    if (!origin) throw new CommandExecutionError("from must not be empty");
-    if (!destination) throw new CommandExecutionError("to must not be empty");
+    let originLocation;
+    let destinationLocation;
+    try {
+      originLocation = parseFlightLocation(kwargs.from, "from");
+      destinationLocation = parseFlightLocation(kwargs.to, "to");
+    } catch (error) {
+      throw new CommandExecutionError(error.message);
+    }
+    const origin = originLocation.query;
+    const destination = destinationLocation.query;
+    const airportSelections = {
+      origin: originLocation.airports,
+      destination: destinationLocation.airports,
+    };
+    const hasAirportLists = Boolean(originLocation.airports || destinationLocation.airports);
 
     const departDate = validateDate(String(kwargs.depart || ""), "depart");
     const returnDate = kwargs.return ? validateDate(String(kwargs.return), "return") : null;
@@ -342,6 +358,17 @@ cli({
     // discard locale parameters. Reapply them before using English aria-label
     // prose or English passenger/cabin controls, then verify the rendered locale.
     await normalizeFlightLocale(page, searchUrl.toString(), currency, region);
+    if (hasAirportLists) {
+      try {
+        await configureFlightAirports(page, airportSelections);
+        // A fresh load prevents the initial single-airport cards from leaking into the combined search.
+        await page.goto(await page.evaluate("window.location.href"));
+        await normalizeFlightLocale(page, searchUrl.toString(), currency, region);
+        await verifyFlightAirports(page, airportSelections);
+      } catch (error) {
+        throw new CommandExecutionError(error.message);
+      }
+    }
     try {
       await page.wait({
         selector: 'li.pIav2d [role="link"][aria-label]',
