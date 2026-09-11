@@ -96,6 +96,39 @@ function binding(label: string): CodexThreadBinding & {
 }
 
 describe("CodexAppServerManager", () => {
+  it.each([
+    "http://127.0.0.1:9222",
+    "http://chrome:9333",
+    undefined,
+  ])("passes through the OpenCLI endpoint (%s) and filters unrelated env vars", async (endpoint) => {
+    rs.stubEnv("OPENCLI_CDP_ENDPOINT", endpoint as string);
+    rs.stubEnv("ROME_TEST_UNLISTED_ENV", "not-for-child-processes");
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-env");
+        clients.push(client);
+        return client;
+      },
+    });
+
+    try {
+      await manager.warmup();
+
+      expect(clients).toHaveLength(1);
+      const env = clients[0].options.env;
+      if (endpoint === undefined) {
+        expect(env).not.toHaveProperty("OPENCLI_CDP_ENDPOINT");
+      } else {
+        expect(env.OPENCLI_CDP_ENDPOINT).toBe(endpoint);
+      }
+      expect(env).not.toHaveProperty("ROME_TEST_UNLISTED_ENV");
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
   it("initializes once and isolates concurrent thread notifications and dynamic calls", async () => {
     const clients: FakeConnection[] = [];
     let threadSequence = 0;
