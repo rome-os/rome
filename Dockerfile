@@ -342,6 +342,7 @@ RUN find /opt/rome/node_modules /usr/local/lib/node_modules \
 # backend runs without one.
 RUN install -m 0755 /opt/rome/scripts/docker/rome-open-in-server-browser.sh /usr/local/bin/rome-open-in-server-browser
 ENV BROWSER=/usr/local/bin/rome-open-in-server-browser
+ENV OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222
 
 RUN test ! -e /opt/rome/packages/desktop && \
     test ! -e /opt/rome/packages/pantheon && \
