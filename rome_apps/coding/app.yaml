@@ -7,6 +7,7 @@ description: >-
   Planning and coding agents, the app_creation skill, and a frontend gallery of
   live UI mocks. Use app_creation when visuals are important, such as for apps,
   dashboards, games, and other Rome experiences that need a polished UI.
+tagline: "Plan, build, and preview apps with agents that write the code."
 appRoot: dist
 
 web:

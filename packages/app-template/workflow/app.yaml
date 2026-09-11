@@ -3,6 +3,10 @@ id: __APP_ID__
 name: __APP_NAME__
 version: 0.1.0
 description: __APP_NAME__ — a workflow that composes actions in plain TypeScript control flow.
+# Shown on the app's social share card. One sentence, at most 80 characters
+# (40 for CJK): lead with what the user gets, no jargon — write it like an
+# App Store subtitle, and update it when the app's purpose changes.
+tagline: __APP_NAME__ in one sentence
 icon: assets/icon.svg
 appRoot: dist
 includeSource: true

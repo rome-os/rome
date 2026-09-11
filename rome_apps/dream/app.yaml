@@ -1,8 +1,10 @@
 formatVersion: 1
 id: dream
+name: Dream
 icon: assets/icon.svg
 version: 0.1.5
 description: Periodic self-review agent that summarizes recent conversations and updates memory
+tagline: "Your Rome reflects on recent conversations and remembers what matters."
 appRoot: dist
 
 web:
