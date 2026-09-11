@@ -32,6 +32,7 @@ interface ProjectCatalog {
 }
 
 interface ProjectSelectorProps {
+  disabled?: boolean;
   t: TFunction;
   projectCatalog: ProjectCatalog | null;
   projectsLoading: boolean;
@@ -61,6 +62,7 @@ function getProjectDisplayName(name: string): string {
 
 export const ProjectSelector = forwardRef(function ProjectSelector(
   {
+    disabled = false,
     t,
     projectCatalog,
     projectsLoading,
@@ -123,8 +125,9 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
   return (
     <div ref={ref} className="shrink-0">
       <Popover
-        open={menuOpen}
+        open={menuOpen && !disabled}
         onOpenChange={(next) => {
+          if (disabled) return;
           if (next !== menuOpen) onToggleMenu();
         }}
       >
@@ -138,6 +141,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             // loudest thing in a row of muted chrome.
             variant={isDefault ? "ghost" : "secondary"}
             size="sm"
+            disabled={disabled}
             className={cn("max-w-[200px] touch-target", isDefault && "text-muted-foreground")}
             title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
             aria-label={t("project.buttonLabel")}

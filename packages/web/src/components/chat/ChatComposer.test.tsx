@@ -247,7 +247,11 @@ describe("composer attachment uploads", () => {
       return sendPending;
     });
     const composerRef = createRef<ChatComposerHandle>();
-    const { container } = renderComposer({ onSend }, { composerRef });
+    const { container } = renderComposer(
+      { onSend, showProjectSelector: true },
+      { composerRef, settings: { enableImpersonation: true } },
+    );
+    await screen.findByRole("button", { name: "Impersonation" });
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     if (!fileInput) throw new Error("file input not found");
     const first = new File([new Uint8Array(25)], "first.txt", { type: "text/plain" });
@@ -262,6 +266,12 @@ describe("composer attachment uploads", () => {
       (screen.getByRole("button", { name: "Uploading files…" }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Project" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Impersonation" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(
       screen
         .getByRole("progressbar", { name: "Attachment upload progress" })

@@ -331,6 +331,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
+      if (uploadInFlightRef.current) return;
       setLargeModelSelection(next);
       setComposerError(null);
       const ok = await saveSetting("webchatLargeModel", next).catch(() => false);
@@ -344,6 +345,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateReasoningEffort = useCallback(
     async (next: ReasoningEffort) => {
+      if (uploadInFlightRef.current) return;
       setReasoningEffort(next);
       setComposerError(null);
       const ok = await saveSetting("webchatReasoningEffort", next).catch(() => false);
@@ -523,6 +525,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const removePendingUpload = useCallback((id: string) => {
+    if (uploadInFlightRef.current) return;
     setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
   }, []);
 
@@ -677,6 +680,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptMention = useCallback(
     (mention: AgentMention) => {
+      if (uploadInFlightRef.current) return;
       // Splice out the `@<query>` token that triggered the menu so the chip
       // becomes the single source of truth for "which agent."
       if (mentionAnchorIndex !== null) {
@@ -709,6 +713,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptSlashSkill = useCallback(
     (skill: SkillSelection) => {
+      if (uploadInFlightRef.current) return;
       // Mirror acceptMention: splice out the leading `/<query>` token so the
       // chip becomes the single source of truth for "which skill" — whatever
       // the user already typed after the cursor stays as the task text.
@@ -916,16 +921,23 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              collaborating
-                ? collaborating.onCancel
-                : pinnedAgentMention
-                  ? undefined
-                  : () => setDraftAgentMention(null)
+              isComposerBusy
+                ? undefined
+                : collaborating
+                  ? collaborating.onCancel
+                  : pinnedAgentMention
+                    ? undefined
+                    : () => setDraftAgentMention(null)
             }
             removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />
         )}
-        {draftSkill && <SkillCommandChip skill={draftSkill} onRemove={() => setDraftSkill(null)} />}
+        {draftSkill && (
+          <SkillCommandChip
+            skill={draftSkill}
+            onRemove={isComposerBusy ? undefined : () => setDraftSkill(null)}
+          />
+        )}
         <WorkspaceContextChips />
       </div>
       <div data-chat-composer-box className={cn("relative z-10", boxClassName)}>
@@ -957,6 +969,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           ref={slashMenuRef}
           open={slashMenuOpen && !isComposerBusy}
           onOpenChange={(next) => {
+            if (uploadInFlightRef.current) return;
             setSlashMenuOpen(next);
             if (!next) setSlashQuery("");
           }}
@@ -966,8 +979,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             <div>
               <AgentMentionMenu
                 ref={mentionMenuRef}
-                open={mentionMenuOpen && !agentMentionLocked}
+                open={mentionMenuOpen && !agentMentionLocked && !isComposerBusy}
                 onOpenChange={(next) => {
+                  if (uploadInFlightRef.current) return;
                   setMentionMenuOpen(next);
                   if (!next) {
                     setMentionAnchorIndex(null);
@@ -1010,6 +1024,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           {showProjectSelector && (
             <ProjectSelector
               ref={projectMenuRef}
+              disabled={isComposerBusy}
               t={t}
               projectCatalog={projectCatalog}
               projectsLoading={projectsLoading}
@@ -1028,6 +1043,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               connectOnCreate={connectOnCreate}
               setConnectOnCreate={setConnectOnCreate}
               onToggleMenu={async () => {
+                if (uploadInFlightRef.current) return;
                 const nextOpen = !draftProjectMenuOpen;
                 setDraftProjectMenuOpen(nextOpen);
                 setProjectsError(null);
@@ -1039,12 +1055,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 }
               }}
               onPickProject={(name) => {
+                if (uploadInFlightRef.current) return;
                 setDraftProjectName(name);
                 setDraftProjectMenuOpen(false);
                 setProjectSearchQuery("");
                 setCreateProjectFormOpen(false);
               }}
-              onCreateProject={() => createProjectAndSelect()}
+              onCreateProject={() => {
+                if (!uploadInFlightRef.current) void createProjectAndSelect();
+              }}
             />
           )}
           {pendingConnectPath ? (
@@ -1057,10 +1076,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           ) : null}
           {impersonationEnabled && (
             <ImpersonationMenu
+              disabled={isComposerBusy}
               open={impersonationMenuOpen}
-              onOpenChange={setImpersonationMenuOpen}
+              onOpenChange={(next) => {
+                if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
+              }}
               selectedPersonId={selectedPersonId}
-              onSelectPersonId={setSelectedPersonId}
+              onSelectPersonId={(id) => {
+                if (!uploadInFlightRef.current) setSelectedPersonId(id);
+              }}
               options={impersonationOptions}
               selectedPerson={selectedPerson}
               selectedPersonLabel={selectedPersonLabel}
