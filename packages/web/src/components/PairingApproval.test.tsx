@@ -7,6 +7,7 @@ import i18n from "@/i18n";
 import type { Approval } from "@/pages/ActivityPage";
 import { MemoryRouter } from "react-router-dom";
 import { useApprovals } from "@/hooks/use-approvals";
+import { pairingFixtures } from "@/pages/dev/pairing-fixtures";
 import { pairingPayload } from "@rome/api-types/approvals";
 import { PairingApproval, ApprovalHistoryButton, PairingApprovals } from "./PairingApproval";
 
@@ -118,7 +119,8 @@ describe("shared pairing approvals", () => {
     expect(connections.getByText(/No pending pairing requests/)).toBeTruthy();
     expect(activity.queryByText(code)).toBeNull();
     expect(resolve).toHaveBeenCalledTimes(1);
-    expect(activity.getByText(/verified-owner/)).toBeTruthy();
+    fireEvent.focus(activity.getByText("Approved", { exact: true }));
+    expect((await screen.findByRole("tooltip")).textContent).toContain("verified-owner");
     client.clear();
   });
 
@@ -273,4 +275,25 @@ describe("shared pairing approvals", () => {
     );
     client.clear();
   });
+});
+
+it("waits for refreshed approval state when the code endpoint returns null", async () => {
+  const approval = pairingFixtures()[0];
+  rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ code: null }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  try {
+    render(
+      <QueryClientProvider client={client}>
+        <PairingApproval approval={approval} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    fireEvent.click(screen.getByText("Pair with a verification code"));
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+  } finally {
+    client.clear();
+  }
 });

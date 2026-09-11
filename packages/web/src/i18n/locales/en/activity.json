@@ -154,7 +154,11 @@
     }
   },
   "pairing": {
+    "approving": "Approving…",
+    "rejecting": "Rejecting…",
+    "codeLoadFailed": "Could not load the verification code",
     "title": "Pairing requests",
+    "description": "Connect your chat-platform accounts to Rome. Approving an account grants it guardian permissions to use and manage this Rome instance through chat. Only approve accounts you control.",
     "account": "Pairing request for {{account}}",
     "validity": "Valid for {{duration}}",
     "thisAccount": "this account",

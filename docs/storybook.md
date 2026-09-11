@@ -40,8 +40,8 @@ Storybook provides parallel design demonstrations. It does not replace runtime d
 
 Each story imports a production renderer and passes typed fixtures or callbacks. The initial render
 does not use mock handlers, fetch overrides, or request guards.
-Storybook uses the preview browser's detected locale. In a browser check, set the locale before
-asserting translated text. Otherwise, assert a role, fixture identity, or local control label.
+Use the language toolbar to select English or Chinese. Browser checks can pin the locale with
+`globals=locale:en` before asserting translated text.
 
 | Source component | Fixture and state | Story ID | Iframe |
 | --- | --- | --- | --- |
@@ -61,6 +61,35 @@ production behavior and belong to application-flow coverage.
 
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,
 the auth query cache, and service-backed submit or setup flows.
+
+### Pairing components
+
+The pairing stories render the production components in
+[`pairing-views.tsx`](../packages/web/src/components/pairing/pairing-views.tsx).
+These components take account data, operation state, and callbacks through props.
+They use `useTranslation()` for UI copy and reuse the dashboard's UI primitives and semantic theme
+tokens. They require no query client, router, or Rome backend.
+
+[`PairingApproval.tsx`](../packages/web/src/components/PairingApproval.tsx) owns queries, mutations,
+clipboard writes, and navigation composition.
+The presentation adapter maps approval records to component data; the views format dates and UI copy.
+Connections and Activity continue to use this shared container.
+
+| Component | States | Example |
+| --- | --- | --- |
+| `PairingRequestCard` | Pending, submitting, failed, approved, rejected, expired, long identity | [Interactive](http://localhost:6006/?path=/story/connections-pairing-request--interactive) |
+| `PairingConfirmationDialog` | Confirmation, submitting, failed | [Confirm](http://localhost:6006/?path=/story/connections-pairing-confirmation--confirm) |
+| `PairingRequestsSection` | Empty, loading, failed, multiple requests | [Multiple requests](http://localhost:6006/?path=/story/connections-pairing-requests--multiple-requests) |
+
+The verification code is previewed inside Request stories rather than as a separate story group.
+The Interactive story keeps approval, rejection, and copy feedback in local React state.
+It does not authorize accounts or write to the clipboard.
+The fixture timestamps are fixed. Use the language and color-mode toolbars to check the same
+states in English or Chinese and light or dark themes.
+
+The pairing browser checks cover local interaction callbacks, submission guards, and narrow layouts.
+They observe service requests throughout the interactive flow without intercepting them.
+The `PairingApproval` tests retain coverage for mutation and clipboard boundaries.
 
 ## Agent workflow
 
@@ -138,6 +167,18 @@ Keep it disabled unless the Playwright container check passes with the builder v
 4. Refresh the page to check the direct link.
 
 The build writes only to the root `storybook-static` directory. The dashboard output stays in `packages/web/dist`.
+
+## Language switching
+
+The preview's language toolbar selects English (`en`) or Chinese (`zh-CN`) through the existing
+application i18next instance and an `I18nextProvider` decorator. Components using `useTranslation()`
+update in place, preserving local interaction state. The preview also updates the document's
+`lang` and `dir` attributes.
+
+Share a selection with `globals=locale:zh-CN;colorMode:dark` in a story URL. Without an explicit
+global, the initial locale follows the preview origin's saved `rome.lang` preference, then browser
+language detection. Selecting a language updates that stored preference. Storybook's manager UI
+is separate. Literal fixture data and externally supplied error strings need their own translations.
 
 ## Source and theme wiring
 
