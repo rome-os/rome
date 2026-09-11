@@ -53,6 +53,10 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 
 ## Rome-owned commands
 
+- `opencli southwest flights FROM TO DEPART [--return DATE] [--miles]` — searches Southwest cash fares
+  or Rapid Rewards points, with separate award taxes, fare-product and stop filters, and per-person, each-way prices.
+  `--points` also selects award pricing. See the [Southwest command reference](southwest/README.md) for examples and browser requirements.
+
 - `opencli delta flights FROM TO DEPART [--return DATE] [--miles]` — searches Delta cash fares or
   SkyMiles awards, with separate taxes and card-member offers, cabin and stop filters, and per-passenger prices.
   See the [Delta command reference](delta/README.md) for examples and browser requirements.

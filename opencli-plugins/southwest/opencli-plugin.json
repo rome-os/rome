@@ -1,0 +1,6 @@
+{
+  "name": "rome-southwest",
+  "description": "Southwest flight prices in cash or Rapid Rewards points with separate taxes",
+  "version": "0.1.0",
+  "opencli": ">=1.8.0"
+}
