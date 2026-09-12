@@ -6,7 +6,7 @@
 
 ## Context
 
-Rome counts page visits on the dashboard, on every app, and on the public-access gateway page. The desktop shell runs that same dashboard, so it counts as the dashboard rather than as a fourth surface. Apps have no document of their own — every app surface renders inside the one `rome-web` shell. Instrumentation placed in that shell covers every app, including the ones an agent writes after this decision ships. The goal is raw visit counting. Identity, funnels, and session replay stay out of scope, so the instrumentation earns very little code.
+Rome counts page visits on the dashboard, on every app, and on the public-access gateway page. The desktop shell runs that same dashboard, so it counts as the dashboard rather than as a fourth surface. Apps have no document of their own — every app surface renders inside the one `rome-web` shell. Instrumentation placed in that shell covers every app, including the ones an agent writes after this decision ships. The goal is raw visit counting with an [app visitor breakdown](../observability/app-visits.md). Funnels and session replay stay out of scope.
 
 Rome puts meaning in the URL path. `/share/<token>` carries a bearer credential granting access to a shared chat. `/memory/<file>`, `/chat/<sessionId>`, and `/projects/<name>` carry personal metadata, and apps mint arbitrary sub-routes under their own ids. Any page-view report that includes the URL carries those values to Google and into the operator's GA property.
 

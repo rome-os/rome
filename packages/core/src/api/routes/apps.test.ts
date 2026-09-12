@@ -14,7 +14,13 @@ import type {
   SubscriberHandler,
   Unsubscribe,
 } from "../../apps/state.js";
-import { COOKIE_NAME, createSession } from "../../lib/auth.js";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../../lib/auth.js";
+import { createCloudGuardian } from "../../lib/guardian-auth-state.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(
@@ -156,6 +162,54 @@ describe("deriveAppProjectPath", () => {
     expect(
       deriveAppProjectPath({ mode: "source", path: "/home/user/other/weather" }, root),
     ).toBeNull();
+  });
+});
+
+describe("GET /apps/:appId/manifest caller email", () => {
+  it("uses the authenticated caller email and gives the guardian precedence over a visitor", async () => {
+    const testDb = createTestDb();
+    try {
+      await createCloudGuardian(testDb.db, "owner-id", "owner@example.com");
+      const resolved = buildResolvedApp("test-app");
+      resolved.web = {
+        appId: "test-app",
+        version: "0.0.1",
+        entry: "entry.js",
+        styles: [],
+        assetVersion: "abcdef123456",
+        displayName: "Test app",
+        routing: "client",
+        manifestPath: "/tmp/unused-web-manifest.json",
+        distPath: "/tmp/unused-dist",
+      };
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalogWith(resolved),
+      };
+      const app = new Hono().route("/", appsRoutes(deps));
+      const visitorCookie = `${VISITOR_COOKIE_NAME}=${createVisitorSession("visitor-id", "visitor@example.com")}`;
+      const guardianCookie = `${COOKIE_NAME}=${createSession("owner-id")}`;
+      const cases = [
+        { cookie: "", caller: { kind: "anonymous" } },
+        { cookie: `${VISITOR_COOKIE_NAME}=invalid`, caller: { kind: "anonymous" } },
+        {
+          cookie: visitorCookie,
+          caller: { kind: "visitor", accountId: "visitor-id", email: "visitor@example.com" },
+        },
+        {
+          cookie: `${guardianCookie}; ${visitorCookie}`,
+          caller: { kind: "guardian", userId: "owner-id", email: "owner@example.com" },
+        },
+      ];
+      for (const { cookie, caller } of cases) {
+        const res = await app.request("/apps/test-app/manifest", { headers: { cookie } });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { bootstrap: { caller: unknown } };
+        expect(body.bootstrap.caller).toEqual(caller);
+      }
+    } finally {
+      testDb.close();
+    }
   });
 });
 
