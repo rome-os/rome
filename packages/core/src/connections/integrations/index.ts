@@ -83,7 +83,7 @@ export function registerBuiltinConnections(
   registry: ConnectionRegistry,
   deps: BuiltinConnectionDeps,
 ): void {
-  registry.register(makeTelegramDescriptor({ personMappingRepo: deps.personMappingRepo }));
+  registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
       conversationSettings: deps.conversationSettings,

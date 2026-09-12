@@ -1,7 +1,9 @@
+import { pairingPayload } from "@rome/api-types/approvals";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { desc, eq } from "drizzle-orm";
-import { approvals } from "../../db/schema.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { currentSessionActor } from "../../lib/session-actor.js";
+import { notifyPairingResolution } from "../../channels/pairing.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -13,7 +15,9 @@ const VALID_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "au
 async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "reject") {
   const { approvalHandler, approvalsRepo, personMappingRepo } = deps;
   const approvalId = c.req.param("id") as string;
-  const resolveResult = await approvalsRepo.resolvePending(approvalId, action, "guardian");
+  const actor = await currentSessionActor();
+  if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
+  const resolveResult = await approvalsRepo.resolvePending(approvalId, action, actor.userId);
   if (resolveResult.outcome === "not_found") {
     return c.json({ error: "Approval not found" }, 404);
   }
@@ -22,6 +26,13 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
   }
 
   const approval = resolveResult.approval;
+  if (pairingPayload(approval)?.resolution === "account_linked") {
+    return c.json(
+      { error: "This account is already linked. Pairing was not approved.", approval },
+      409,
+    );
+  }
+  await notifyPairingResolution(deps.talkRouter, approval);
   if (action === "approve" && approval.type === "action_execution") {
     approvalHandler.onApproved(approvalId).catch((err) => {
       log.error("approval execution failed", {
@@ -65,17 +76,38 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
 
 export function approvalsRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  app.use("/approvals/*", async (c, next) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "Guardian authentication required" }, 403);
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
+      !isSameOriginMutationRequest(c.req.raw)
+    )
+      return c.json({ error: "Cross-site requests are not allowed." }, 403);
+    await next();
+  });
+  app.use("/approvals", async (c, next) => {
+    if ((await currentSessionActor())?.kind !== "guardian")
+      return c.json({ error: "Guardian authentication required" }, 403);
+    await next();
+  });
+  app.get("/approvals/:id/code", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const code = await deps.approvalsRepo.pairingCode(c.req.param("id"));
+    return c.json({ code });
+  });
 
   app.get("/approvals", async (c) => {
     const status = c.req.query("status");
-    const rows =
+    const offset = Number(c.req.query("pairingHistoryOffset") ?? "0");
+    if (!Number.isSafeInteger(offset) || offset < 0)
+      return c.json({ error: "Invalid history offset" }, 400);
+    const rows = await deps.approvalsRepo.list(
       status && VALID_STATUSES.includes(status as ApprovalStatus)
-        ? await deps.db
-            .select()
-            .from(approvals)
-            .where(eq(approvals.status, status as ApprovalStatus))
-            .orderBy(desc(approvals.createdAt))
-        : await deps.db.select().from(approvals).orderBy(desc(approvals.createdAt));
+        ? (status as ApprovalStatus)
+        : undefined,
+      offset,
+    );
     return c.json(rows);
   });
 

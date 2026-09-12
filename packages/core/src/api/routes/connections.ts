@@ -287,28 +287,19 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (isOAuthProvider(service)) await removeProviderAccount(deps.db, service);
   };
 
-  const clearGuardianMapping = async (
-    registry: ConnectionRegistry,
-    conn: Connection,
-    grant?: string,
-  ): Promise<void> => {
-    const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return;
-    await deps.personMappingRepo.deleteGuardianChannelMappings(conn.service);
-  };
-
-  /** The connection-level guardian-mapping teardown, expressed as a transaction
-   *  participant so it commits atomically with the connection/grant deletes in
-   *  `registry.remove` — a failed cleanup cannot strand the mapping after the
-   *  connection is already deleted. Returns undefined when the service has no
-   *  talker — nothing to clear — leaving `remove` on its plain delete path. */
+  /** Enlist pairing and mapping cleanup in connection deletion or Talk-grant
+   *  revocation. Unrelated grants have no cleanup participant. */
   const guardianMappingTeardown = (
     registry: ConnectionRegistry,
     conn: Connection,
+    grant?: string,
   ): ((tx: DrizzleTx) => void) | undefined => {
     const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker) return undefined;
-    return (tx) => deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
+    return (tx) => {
+      deps.approvalsRepo.supersedePairings(conn.id, tx);
+      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    };
   };
 
   app.delete("/connections/:id/grants/:name", async (c) => {
@@ -331,8 +322,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     await deps.setupManager?.cancelActive(conn.id, name);
     await registry.withGrantSection(conn.service, name, async () => {
       await removeLegacyProviderRow(conn.service);
-      await conn.auth.revoke(name);
-      await clearGuardianMapping(registry, conn, name);
+      await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
     });
     c.header("Cache-Control", "no-store");
     return c.json({

@@ -1,3 +1,6 @@
+import { pairingPayload } from "@rome/api-types/approvals";
+import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
+import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -309,12 +312,16 @@ function ApprovalCard({
   const displayStatus = getApprovalDisplayStatus(approval);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [actionError, setActionError] = useState("");
   const canRetry = approval.type === "action_execution" && displayStatus === "execution_failed";
 
   async function handleAction(action: "approve" | "reject") {
     setActing(action);
+    setActionError("");
     try {
       await onAction(approval.id, action);
+    } catch {
+      setActionError(t("approval.resolveFailed"));
     } finally {
       setActing(null);
     }
@@ -368,6 +375,11 @@ function ApprovalCard({
               </>
             )}
           </p>
+          {actionError && (
+            <p role="alert" className="text-ui text-destructive">
+              {actionError}
+            </p>
+          )}
           {approval.executionError && (
             <Alert variant="destructive" className="mt-2 px-3 py-2">
               <AlertDescription className="text-aux">
@@ -689,7 +701,9 @@ function StatTile({
 
 export default function ActivityPage() {
   const { t } = useTranslation("activity");
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const approvalsQuery = useApprovals();
+  const approvals = approvalsQuery.data ?? [];
+  const resolveApproval = useResolveApproval();
   const [executionGroups, setExecutionGroups] = useState<ExecutionGroup[]>([]);
   const [webhookInvocations, setWebhookInvocations] = useState<WebhookInvocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -709,13 +723,11 @@ export default function ActivityPage() {
       params.set("limit", String(limit));
       params.set("offset", String(offset));
 
-      const [approvalsRes, executionsRes, webhooksRes] = await Promise.all([
-        fetch("/api/approvals", { signal: ac.signal }),
+      const [executionsRes, webhooksRes] = await Promise.all([
         fetch(`/api/action-executions?${params}`, { signal: ac.signal }),
         fetch(`/api/webhook-invocations?${params}`, { signal: ac.signal }),
       ]);
 
-      if (approvalsRes.ok) setApprovals(await approvalsRes.json());
       if (executionsRes.ok) setExecutionGroups(await executionsRes.json());
       if (webhooksRes.ok) setWebhookInvocations(await webhooksRes.json());
       setLastFetchedAt(Date.now());
@@ -742,22 +754,26 @@ export default function ActivityPage() {
   }, []);
 
   async function handleAction(id: string, action: "approve" | "reject") {
-    const res = await fetch(`/api/approvals/${id}/${action}`, {
-      method: "POST",
-    });
-    if (res.ok) await fetchData();
+    await resolveApproval.mutateAsync({ id, action });
+    await fetchData();
   }
 
   async function handleRetry(id: string) {
     const res = await fetch(`/api/approvals/${id}/retry`, { method: "POST" });
-    if (res.ok) await fetchData();
+    if (res.ok) {
+      await fetchData();
+      await approvalsQuery.refetch();
+    }
   }
 
   async function handleCancel(id: string) {
     const res = await fetch(`/api/action-executions/${id}/cancel`, {
       method: "POST",
     });
-    if (res.ok) await fetchData();
+    if (res.ok) {
+      await fetchData();
+      await approvalsQuery.refetch();
+    }
   }
 
   const allItems: ActivityItem[] = useMemo(
@@ -814,7 +830,15 @@ export default function ActivityPage() {
               <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
             </div>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={fetchData}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void fetchData();
+              void approvalsQuery.refetch();
+            }}
+          >
             {t("page.refresh")}
           </Button>
         </div>
@@ -887,8 +911,15 @@ export default function ActivityPage() {
           })}
         </div>
 
+        <ApprovalHistoryButton />
+
         {/* Content */}
-        {loading ? (
+        {approvalsQuery.isError && (
+          <Alert variant="destructive">
+            <AlertDescription>{t("pairing.loadFailed")}</AlertDescription>
+          </Alert>
+        )}
+        {loading || approvalsQuery.isLoading ? (
           <div className="py-12 text-center">
             <div
               className="mx-auto mb-3 h-5 w-5 rounded-full border-2 border-border-strong border-t-gray-800"
@@ -914,11 +945,15 @@ export default function ActivityPage() {
                   }}
                 >
                   {item.kind === "approval" ? (
-                    <ApprovalCard
-                      approval={item.data}
-                      onAction={handleAction}
-                      onRetry={handleRetry}
-                    />
+                    pairingPayload(item.data) ? (
+                      <PairingApproval approval={item.data} />
+                    ) : (
+                      <ApprovalCard
+                        approval={item.data}
+                        onAction={handleAction}
+                        onRetry={handleRetry}
+                      />
+                    )
                   ) : item.kind === "webhook_invocation" ? (
                     <WebhookInvocationCard invocation={item.data} />
                   ) : (

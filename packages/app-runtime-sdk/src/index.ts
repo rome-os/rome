@@ -1344,6 +1344,7 @@ export interface NormalizedMessage {
     | "linkedin";
   channelUserId: string;
   displayName: string;
+  username?: string;
   threadId: string;
   /** Parent chat id when threadId is a platform-native thread id. */
   parentThreadId?: string;
@@ -1385,6 +1386,7 @@ export interface InboundMessage {
   parentConversationId?: ConversationId;
   senderId: string;
   senderDisplayName?: string;
+  senderUsername?: string;
   text: string;
   attachments: Attachment[];
   timestamp: Date;

@@ -46,7 +46,7 @@ expect(await rome.repos.actionExecutions.findByAction("send_message")).toHaveLen
 await rome.cleanup(); // always — restores env scoping, closes sessions/DB, removes temp dirs
 ```
 
-Approval flows: record through `rome.actionEngine.run(...)` (the gate persists journal + payload for real), approve via `rome.repos.approvals.resolvePending(id, "approve")` or seed directly with `rome.seed.approvedActionApproval(payload)`, then drive `rome.approvalHandler.onApproved(id)`. See `src/actions/approval-handler.test.ts` for the reference conversion.
+Approval flows: record through `rome.actionEngine.run(...)` (the gate persists journal + payload for real), approve via `rome.repos.approvals.resolvePending(id, "approve", "test-guardian")` or seed directly with `rome.seed.approvedActionApproval(payload)`, then drive `rome.approvalHandler.onApproved(id)`. See `src/actions/approval-handler.test.ts` for the reference conversion.
 
 Channels: `rome.channel("telegram").send({ text: "hello" })` injects an incoming message at the adapter seam; `nextReply()` awaits what Rome sent back. (The inbox pipeline — the system-app message hook — is not booted by the harness yet; attach your handler under test via `onMessage`.)
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ConversationId,
   InboundMessage,
@@ -16,7 +16,10 @@ describe("ConnectionTalkRouter", () => {
   let testDb: TestDb | undefined;
   afterEach(() => testDb?.close());
 
-  it("keeps subscriptions and semantic feature handles on the current epoch", async () => {
+  it.each([
+    false,
+    true,
+  ])("keeps subscriptions on the current epoch with admission=%s", async (gated) => {
     testDb = createTestDb();
     const instances: Array<{
       deliver?: (message: InboundMessage) => void;
@@ -69,7 +72,15 @@ describe("ConnectionTalkRouter", () => {
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     registry.register(descriptor);
     const connection = await registry.connect("discord");
-    const router = createTalkRouter(registry);
+    const admit = rs.fn(
+      async (_id: string, _service: string, message: InboundMessage) =>
+        message.senderId === "guardian",
+    );
+    const router = createTalkRouter(registry, gated ? admit : undefined);
+    const sibling: string[] = [];
+    const unsubscribe = router.subscribe(connection.id, async (message) => {
+      sibling.push(message.messageId);
+    });
     const received: string[] = [];
     router.subscribe(connection.id, async (message) => {
       received.push(message.messageId);
@@ -87,7 +98,9 @@ describe("ConnectionTalkRouter", () => {
       attachments: [],
       timestamp: new Date(0),
     });
-    expect(received).toEqual(["inbound-1"]);
+    await rs.waitFor(() => expect(received).toEqual(["inbound-1"]));
+    expect(sibling).toEqual(["inbound-1"]);
+    if (gated) expect(admit).toHaveBeenCalledTimes(1);
     expect(await router.list()).toEqual([{ connectionId: connection.id, service: "discord" }]);
 
     const history = router.feature(connection.id, "history");
@@ -110,7 +123,22 @@ describe("ConnectionTalkRouter", () => {
       attachments: [],
       timestamp: new Date(0),
     });
-    expect(received).toEqual(["inbound-1", "inbound-2"]);
+    await rs.waitFor(() => expect(received).toEqual(["inbound-1", "inbound-2"]));
+    expect(sibling).toEqual(received);
+    if (gated) {
+      expect(admit).toHaveBeenCalledTimes(2);
+      instances[1]!.deliver?.({
+        messageId: "blocked",
+        conversationId: "general" as ConversationId,
+        senderId: "unknown",
+        text: "not authorized",
+        attachments: [],
+        timestamp: new Date(),
+      });
+      await rs.waitFor(() => expect(admit).toHaveBeenCalledTimes(3));
+      expect(received).toEqual(["inbound-1", "inbound-2"]);
+    }
+    unsubscribe();
     expect((await history?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-2");
   });
 });

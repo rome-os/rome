@@ -75,18 +75,78 @@ describe("TelegramAdapter", () => {
     it("normalizes a private message", async () => {
       const captured = await startCapturing();
 
-      await telegram.emitUpdate(makeUpdate());
+      await telegram.emitUpdate(makeUpdate({ from: { username: "alice_smith" } }));
 
       expect(captured).toHaveLength(1);
       expect(captured[0].id).toBe("42");
       expect(captured[0].channel).toBe("telegram");
       expect(captured[0].channelUserId).toBe("111");
       expect(captured[0].displayName).toBe("Alice Smith");
+      expect(captured[0].username).toBe("alice_smith");
       expect(captured[0].threadId).toBe("999");
       expect(captured[0].threadType).toBe("private");
       expect(captured[0].text).toBe("hello");
       expect(captured[0].attachments).toEqual([]);
       expect(captured[0].replyTo).toBeUndefined();
+    });
+
+    it("recognizes commands addressed to this bot in groups", async () => {
+      const captured = await startCapturing();
+      for (const text of ["/start@FAKE_BOT", "/start@other_bot", "/start"]) {
+        await telegram.emitUpdate(
+          makeUpdate({
+            chat: { id: -555, type: "group" },
+            message: { text, entities: [{ type: "bot_command", offset: 0, length: text.length }] },
+          }),
+        );
+      }
+      expect(captured.map((message) => message.addressing)).toEqual([
+        "mention",
+        "ambient",
+        "ambient",
+      ]);
+    });
+
+    it("distinguishes ambient groups, bot mentions, replies and anonymous channel senders", async () => {
+      const captured = await startCapturing();
+      await telegram.emitUpdate(makeUpdate({ chat: { id: -555, type: "group" } }));
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            text: "@FAKE_BOT hello",
+            entities: [{ type: "mention", offset: 0, length: 9 }],
+          },
+        }),
+      );
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            reply_to_message: {
+              message_id: 1,
+              date: 1700000000,
+              chat: { id: -555, type: "group" },
+              from: { id: 424242, is_bot: true, first_name: "bot" },
+            },
+          },
+        }),
+      );
+      await telegram.emitUpdate(
+        makeUpdate({
+          chat: { id: -555, type: "group" },
+          message: {
+            sender_chat: { id: -555, type: "group", title: "Anonymous" },
+          },
+        }),
+      );
+      expect(captured.map((msg) => msg.addressing)).toEqual([
+        "ambient",
+        "mention",
+        "reply",
+        "ambient",
+      ]);
+      expect(captured[3].channelUserId).toBe("-555");
     });
 
     it("normalizes a group message with threadName", async () => {
@@ -189,10 +249,11 @@ describe("TelegramAdapter", () => {
     it("normalizes a channel post", async () => {
       const captured = await startCapturing();
 
-      // Channel posts arrive as channel_post instead of message, with no from
+      // A channel post is a channel identity even when an author is supplied.
       await telegram.emitUpdate({
         channel_post: {
           message_id: 77,
+          from: { id: 111, is_bot: false, first_name: "Alice" },
           date: 1700000000,
           text: "channel announcement",
           chat: { id: -1001234, type: "channel", title: "My Channel" },

@@ -1,3 +1,4 @@
+import { PairingApprovals } from "./PairingApproval";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
@@ -57,6 +58,7 @@ export function ConnectionsSection({
 
   return (
     <div className="space-y-6">
+      <PairingApprovals />
       <div>
         <h2 className="text-title text-foreground">Connections</h2>
         <p className="mt-1 text-body text-muted-foreground">

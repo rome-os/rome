@@ -19,7 +19,17 @@ export class ConnectionTalkRouter implements TalkRouter {
     Set<(message: InboundMessage) => Promise<void>>
   >();
 
-  constructor(private readonly registry: ConnectionRegistry) {
+  private readonly attached = new Map<ConnectionId, () => void>();
+
+  constructor(
+    private readonly registry: ConnectionRegistry,
+    private readonly admit?: (
+      connectionId: string,
+      service: string,
+      message: InboundMessage,
+      router: TalkRouter,
+    ) => Promise<boolean>,
+  ) {
     registry.onUnlocked("talk", (connection) => this.attach(connection));
   }
 
@@ -34,12 +44,10 @@ export class ConnectionTalkRouter implements TalkRouter {
     const handlers = this.handlers.get(connectionId) ?? new Set();
     handlers.add(handler);
     this.handlers.set(connectionId, handlers);
-    const talk = this.registry.get(connectionId).talk;
-    const detach = talk?.subscribe(handler);
+    this.attach(this.registry.get(connectionId));
     return () => {
       handlers.delete(handler);
       if (handlers.size === 0) this.handlers.delete(connectionId);
-      detach?.();
     };
   }
 
@@ -85,7 +93,16 @@ export class ConnectionTalkRouter implements TalkRouter {
   private attach(connection: Connection): void {
     const talk = connection.talk;
     if (!talk) return;
-    for (const handler of this.handlers.get(connection.id) ?? []) talk.subscribe(handler);
+    const previous = this.attached.get(connection.id);
+    previous?.();
+    const detach = talk.subscribe(async (message) => {
+      if (this.admit && !(await this.admit(connection.id, connection.service, message, this)))
+        return;
+      await Promise.all(
+        [...(this.handlers.get(connection.id) ?? [])].map((handler) => handler(message)),
+      );
+    });
+    this.attached.set(connection.id, detach);
   }
 
   private requireTalk(connectionId: string) {
@@ -96,6 +113,9 @@ export class ConnectionTalkRouter implements TalkRouter {
   }
 }
 
-export function createTalkRouter(registry: ConnectionRegistry): ConnectionTalkRouter {
-  return new ConnectionTalkRouter(registry);
+export function createTalkRouter(
+  registry: ConnectionRegistry,
+  admit?: ConstructorParameters<typeof ConnectionTalkRouter>[1],
+): ConnectionTalkRouter {
+  return new ConnectionTalkRouter(registry, admit);
 }

@@ -14,7 +14,8 @@ import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
 import { makeGatedWatch, makePasteTalk, makeTwoGrant } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
@@ -37,10 +38,22 @@ function fakePersonMappingRepo(): PersonMappingRepository {
   } as unknown as PersonMappingRepository;
 }
 
-function makeApp(registry: ConnectionRegistry, personMappingRepo = fakePersonMappingRepo()): Hono {
+function makeApp(
+  registry: ConnectionRegistry,
+  personMappingRepo = fakePersonMappingRepo(),
+  overrides: Partial<ApiDeps> = {},
+): Hono {
+  const { db, close } = createTestDb();
+  openDbs.push(close);
   return new Hono().route(
     "/",
-    connectionsRoutes({ connectionRegistry: registry, personMappingRepo } as unknown as ApiDeps),
+    connectionsRoutes({
+      db,
+      approvalsRepo: new ApprovalsRepository(db),
+      connectionRegistry: registry,
+      personMappingRepo,
+      ...overrides,
+    } as ApiDeps),
   );
 }
 
@@ -357,8 +370,10 @@ describe("DELETE /connections/:id/grants/:name", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(personMappingRepo.deleteGuardianChannelMappings).toHaveBeenCalledOnce();
-    expect(personMappingRepo.deleteGuardianChannelMappings).toHaveBeenCalledWith("fake-telegram");
+    expect(personMappingRepo.writeDeleteGuardianChannelMappings).toHaveBeenCalledWith(
+      expect.anything(),
+      "fake-telegram",
+    );
   });
 
   it("404s an unknown grant name and an unknown connection", async () => {
@@ -480,5 +495,91 @@ describe("DELETE /connections/:id", () => {
     });
     expect(crossSite.status).toBe(403);
     expect(registry.all()).toHaveLength(1);
+  });
+});
+
+describe("connection pairing teardown", () => {
+  it.each([
+    "connection",
+    "talk",
+    "unrelated",
+    "rollback",
+    "talk-rollback",
+  ])("%s teardown preserves only requests that still have Talk authorization", async (teardown) => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const ledger = new DrizzleGrantLedger(db);
+    const registry = new ConnectionRegistry({ ledger });
+    const fixture = makeTwoGrant();
+    fixture.descriptor.service = "discord";
+    registry.register(fixture.descriptor);
+    const conn = await registry.connect("discord");
+    await registry.importCredential(conn.id, "bot", fixture.botCredential());
+    await registry.importCredential(conn.id, "user", fixture.userCredential());
+    const personMappingRepo = new PersonMappingRepository(db);
+    await personMappingRepo.create({
+      displayName: "Guardian",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "discord", channelUserId: "paired" }],
+    });
+    const approvalsRepo = new ApprovalsRepository(db, () => Buffer.alloc(32, 1));
+    const input = {
+      connectionId: conn.id,
+      channel: "discord" as const,
+      channelUserId: "requester",
+      displayName: "Requester",
+    };
+    const request = approvalsRepo.requestPairing(input)!;
+    const code = (await approvalsRepo.pairingCode(request.approval.id))!;
+    const other = approvalsRepo.requestPairing({
+      ...input,
+      connectionId: "other",
+      channelUserId: "other",
+    })!;
+    const app = makeApp(registry, personMappingRepo, { db, approvalsRepo });
+    if (teardown.endsWith("rollback")) {
+      rs.spyOn(personMappingRepo, "writeDeleteGuardianChannelMappings").mockImplementation(() => {
+        throw new Error("cleanup failed");
+      });
+    }
+    const suffix =
+      teardown === "connection" || teardown === "rollback"
+        ? ""
+        : `/grants/${teardown.startsWith("talk") ? "bot" : "user"}`;
+    const response = await app.request(`/connections/${conn.id}${suffix}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    if (teardown.endsWith("rollback")) {
+      expect(response.status).toBe(500);
+      expect(await ledger.listConnections()).toHaveLength(1);
+      expect(registry.get(conn.id).auth.grants().bot).toBe("authorized");
+      expect((await ledger.getGrant(conn.id, "bot"))?.credential).toBeDefined();
+      expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
+      expect(await personMappingRepo.findByChannelUser("discord", "paired")).not.toBeNull();
+      expect((await approvalsRepo.findById(request.approval.id))?.status).toBe("pending");
+      return;
+    }
+    expect(response.status).toBe(200);
+    expect((await approvalsRepo.findById(other.approval.id))?.status).toBe("pending");
+    if (teardown === "unrelated") {
+      expect(approvalsRepo.verifyPairing({ ...input, code }).outcome).toBe("resolved");
+      return;
+    }
+    expect((await approvalsRepo.findById(request.approval.id))?.payload).toMatchObject({
+      resolution: "superseded",
+    });
+    expect(await approvalsRepo.pairingCode(request.approval.id)).toBeNull();
+    expect(
+      (await approvalsRepo.resolvePending(request.approval.id, "approve", "guardian")).outcome,
+    ).toBe("already_resolved");
+    expect(approvalsRepo.verifyPairing({ ...input, code }).outcome).toBe("invalid_code");
+    expect(await personMappingRepo.findByChannelUser("discord", "requester")).toBeNull();
+    expect(await personMappingRepo.findByChannelUser("discord", "paired")).toBeNull();
+    const reconnected = teardown === "connection" ? await registry.connect("discord") : conn;
+    await registry.importCredential(reconnected.id, "bot", fixture.botCredential());
+    const fresh = approvalsRepo.requestPairing({ ...input, connectionId: reconnected.id });
+    expect(fresh?.approval.id).toBeDefined();
+    expect(fresh?.approval.id).not.toBe(request.approval.id);
   });
 });
