@@ -68,6 +68,11 @@ export interface ChatComposerSnapshot {
   skillName?: string;
 }
 
+export interface ChatComposerSendControls {
+  /** `null` means the browser cannot determine the multipart body size. */
+  onUploadProgress: (progress: number | null) => void;
+}
+
 export interface ChatComposerHandle {
   focus: () => void;
   insertText: (text: string) => void;
@@ -143,10 +148,13 @@ export interface ChatComposerProps {
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
   boxClassName?: string;
-  // Called when the user submits. The composer optimistically clears its
-  // input + uploads before invoking; if `onSend` throws, the inputs are
-  // restored.
-  onSend: (snapshot: ChatComposerSnapshot) => void | Promise<void>;
+  // Called when the user submits. The composer clears text immediately but
+  // keeps uploading attachments visible until this promise settles. If it
+  // rejects, the submitted inputs remain available for a retry.
+  onSend: (
+    snapshot: ChatComposerSnapshot,
+    controls: ChatComposerSendControls,
+  ) => void | Promise<void>;
 }
 
 // The empty input is one line box tall, expressed as `1lh` so it resolves
@@ -192,6 +200,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const [inputText, setInputText] = useState("");
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [uploadInFlight, setUploadInFlight] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // When `pinnedAgentMention` is set, the session is already bound to an
   // agent — the `@` menu and the local draftAgentMention are inert.
@@ -279,6 +289,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+  // State drives the UI, while the ref closes the same-event gap before React
+  // commits that state (for example, two rapid Enter keydown events).
+  const uploadInFlightRef = useRef(false);
 
   // Resize the textarea to fit its content. The `onInput` handler below also
   // runs this math, but only on user typing — programmatic clears (e.g. the
@@ -318,6 +331,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
+      if (uploadInFlightRef.current) return;
       setLargeModelSelection(next);
       setComposerError(null);
       const ok = await saveSetting("webchatLargeModel", next).catch(() => false);
@@ -331,6 +345,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateReasoningEffort = useCallback(
     async (next: ReasoningEffort) => {
+      if (uploadInFlightRef.current) return;
       setReasoningEffort(next);
       setComposerError(null);
       const ok = await saveSetting("webchatReasoningEffort", next).catch(() => false);
@@ -389,18 +404,49 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   }, [newProjectName, t, connectOnCreate]);
 
   const addPendingFiles = useCallback((files: File[]) => {
-    if (files.length === 0) return;
+    // The visible file picker is disabled during an upload, but paste and the
+    // parent drop zones enter through this callback directly. Guard the shared
+    // boundary so a file cannot be added to the tray without belonging to the
+    // multipart request whose progress it displays.
+    if (files.length === 0 || uploadInFlightRef.current) return;
     setPendingUploads((prev) => [
       ...prev,
       ...files.map((file) => ({ id: crypto.randomUUID(), file })),
     ]);
   }, []);
 
+  const invokeOnSend = useCallback(
+    async (snapshot: ChatComposerSnapshot) => {
+      const tracksUpload = snapshot.uploads.length > 0;
+      if (tracksUpload) {
+        uploadInFlightRef.current = true;
+        setUploadInFlight(true);
+        setUploadProgress(0);
+      }
+      try {
+        await onSend(snapshot, {
+          onUploadProgress: (progress) => {
+            if (!tracksUpload) return;
+            setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
+          },
+        });
+      } finally {
+        if (tracksUpload) {
+          uploadInFlightRef.current = false;
+          setUploadInFlight(false);
+          setUploadProgress(null);
+        }
+      }
+    },
+    [onSend],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
       focus: () => textareaRef.current?.focus(),
       insertText: (text: string) => {
+        if (uploadInFlightRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
@@ -411,7 +457,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         });
       },
       setAgentMention: (mention: AgentMention | null) => {
-        if (agentMentionLocked) return;
+        if (agentMentionLocked || uploadInFlightRef.current) return;
         // Mirror acceptMention's cleanup: scoping the draft programmatically
         // must also dismiss any open `@` menu, or its stale anchor/query keeps
         // intercepting Enter/arrow keys against the wrong token.
@@ -421,13 +467,14 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setMentionQuery("");
       },
       setSkillSelection: (skill: SkillSelection | null) => {
+        if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
         setSlashMenuOpen(false);
         setSlashQuery("");
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
-        if (disabled || disabledHint != null) return;
+        if (disabled || disabledHint != null || uploadInFlightRef.current) return;
         const trimmed = text.trim();
         const skillName = opts?.skillName ?? draftSkill?.name;
         if (!trimmed && pendingUploads.length === 0 && !skillName) return;
@@ -442,7 +489,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           agentMention: draftAgentMention ?? undefined,
           skillName,
         };
-        void onSend(snapshot);
+        void invokeOnSend(snapshot)
+          .then(() => {
+            const sentIds = new Set(snapshot.uploads.map((upload) => upload.id));
+            setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+          })
+          .catch(() => {
+            // The imperative submit path leaves its inputs in place, so the
+            // parent error banner is sufficient and the turn remains retryable.
+          });
       },
       getMetadataSnapshot: () => ({
         personaId: impersonationEnabled && selectedPersonId ? selectedPersonId : undefined,
@@ -465,10 +520,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       draftProjectName,
       draftAgentMention,
       onSend,
+      invokeOnSend,
     ],
   );
 
   const removePendingUpload = useCallback((id: string) => {
+    if (uploadInFlightRef.current) return;
     setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
   }, []);
 
@@ -489,10 +546,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [addPendingFiles, disabled],
   );
 
-  const isComposerBusy = disabled || disabledHint != null;
+  const isComposerBusy = disabled || disabledHint != null || uploadInFlight;
 
   const runSend = useCallback(async () => {
-    if (isComposerBusy) return;
+    if (isComposerBusy || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -514,17 +571,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       skillName: skill?.name,
     };
 
-    // Optimistically clear so the user sees the input wipe immediately. If
-    // onSend rejects, restore the snapshot so they can retry without
-    // re-typing.
+    // Optimistically clear so the user sees the input wipe immediately. The
+    // composer stays locked while attachments upload; if onSend rejects,
+    // restore the snapshot so it can be retried without re-typing.
     setInputText("");
-    setPendingUploads([]);
+    if (uploads.length === 0) setPendingUploads([]);
     setDraftSkill(null);
     try {
-      await onSend(snapshot);
+      await invokeOnSend(snapshot);
+      if (uploads.length > 0) {
+        const sentIds = new Set(uploads.map((upload) => upload.id));
+        setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+      }
     } catch {
       setInputText(text);
-      setPendingUploads(uploads);
+      if (uploads.length === 0) setPendingUploads(uploads);
       setDraftSkill(skill);
     }
   }, [
@@ -540,7 +601,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     draftProjectName,
     draftAgentMention,
     isComposerBusy,
-    onSend,
+    invokeOnSend,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -602,6 +663,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (uploadInFlightRef.current) return;
     const value = event.target.value;
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
@@ -618,6 +680,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptMention = useCallback(
     (mention: AgentMention) => {
+      if (uploadInFlightRef.current) return;
       // Splice out the `@<query>` token that triggered the menu so the chip
       // becomes the single source of truth for "which agent."
       if (mentionAnchorIndex !== null) {
@@ -650,6 +713,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptSlashSkill = useCallback(
     (skill: SkillSelection) => {
+      if (uploadInFlightRef.current) return;
       // Mirror acceptMention: splice out the leading `/<query>` token so the
       // chip becomes the single source of truth for "which skill" — whatever
       // the user already typed after the cursor stays as the task text.
@@ -804,6 +868,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // name the same specialist.
   const collaborating =
     designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
+  const sendActionLabel = uploadInFlight
+    ? t("composer.uploadingFiles")
+    : isStreaming
+      ? t("composer.sendWhileRunningTitle")
+      : t("composer.sendTitle");
 
   return (
     <>
@@ -852,16 +921,23 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              collaborating
-                ? collaborating.onCancel
-                : pinnedAgentMention
-                  ? undefined
-                  : () => setDraftAgentMention(null)
+              isComposerBusy
+                ? undefined
+                : collaborating
+                  ? collaborating.onCancel
+                  : pinnedAgentMention
+                    ? undefined
+                    : () => setDraftAgentMention(null)
             }
             removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />
         )}
-        {draftSkill && <SkillCommandChip skill={draftSkill} onRemove={() => setDraftSkill(null)} />}
+        {draftSkill && (
+          <SkillCommandChip
+            skill={draftSkill}
+            onRemove={isComposerBusy ? undefined : () => setDraftSkill(null)}
+          />
+        )}
         <WorkspaceContextChips />
       </div>
       <div data-chat-composer-box className={cn("relative z-10", boxClassName)}>
@@ -887,11 +963,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           uploads={pendingUploads}
           onRemove={removePendingUpload}
           disabled={isComposerBusy}
+          uploadProgress={uploadInFlight ? uploadProgress : undefined}
         />
         <SlashSkillMenu
           ref={slashMenuRef}
           open={slashMenuOpen && !isComposerBusy}
           onOpenChange={(next) => {
+            if (uploadInFlightRef.current) return;
             setSlashMenuOpen(next);
             if (!next) setSlashQuery("");
           }}
@@ -901,8 +979,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             <div>
               <AgentMentionMenu
                 ref={mentionMenuRef}
-                open={mentionMenuOpen && !agentMentionLocked}
+                open={mentionMenuOpen && !agentMentionLocked && !isComposerBusy}
                 onOpenChange={(next) => {
+                  if (uploadInFlightRef.current) return;
                   setMentionMenuOpen(next);
                   if (!next) {
                     setMentionAnchorIndex(null);
@@ -945,6 +1024,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           {showProjectSelector && (
             <ProjectSelector
               ref={projectMenuRef}
+              disabled={isComposerBusy}
               t={t}
               projectCatalog={projectCatalog}
               projectsLoading={projectsLoading}
@@ -963,6 +1043,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               connectOnCreate={connectOnCreate}
               setConnectOnCreate={setConnectOnCreate}
               onToggleMenu={async () => {
+                if (uploadInFlightRef.current) return;
                 const nextOpen = !draftProjectMenuOpen;
                 setDraftProjectMenuOpen(nextOpen);
                 setProjectsError(null);
@@ -974,12 +1055,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 }
               }}
               onPickProject={(name) => {
+                if (uploadInFlightRef.current) return;
                 setDraftProjectName(name);
                 setDraftProjectMenuOpen(false);
                 setProjectSearchQuery("");
                 setCreateProjectFormOpen(false);
               }}
-              onCreateProject={() => createProjectAndSelect()}
+              onCreateProject={() => {
+                if (!uploadInFlightRef.current) void createProjectAndSelect();
+              }}
             />
           )}
           {pendingConnectPath ? (
@@ -992,10 +1076,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           ) : null}
           {impersonationEnabled && (
             <ImpersonationMenu
+              disabled={isComposerBusy}
               open={impersonationMenuOpen}
-              onOpenChange={setImpersonationMenuOpen}
+              onOpenChange={(next) => {
+                if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
+              }}
               selectedPersonId={selectedPersonId}
-              onSelectPersonId={setSelectedPersonId}
+              onSelectPersonId={(id) => {
+                if (!uploadInFlightRef.current) setSelectedPersonId(id);
+              }}
               options={impersonationOptions}
               selectedPerson={selectedPerson}
               selectedPersonLabel={selectedPersonLabel}
@@ -1056,10 +1145,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               disabled={
                 isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
               }
-              title={isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")}
-              aria-label={
-                isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")
-              }
+              title={sendActionLabel}
+              aria-label={sendActionLabel}
               className="touch-target"
             >
               <ArrowUp aria-hidden />

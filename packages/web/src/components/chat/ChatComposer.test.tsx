@@ -1,12 +1,18 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createRef, type RefObject } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
+import {
+  ChatComposer,
+  type ChatComposerHandle,
+  type ChatComposerProps,
+  type ChatComposerSendControls,
+} from "./ChatComposer";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -49,6 +55,7 @@ interface RenderComposerOptions {
   settings?: Record<string, unknown>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
+  composerRef?: RefObject<ChatComposerHandle | null>;
 }
 
 function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
@@ -87,7 +94,7 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     ...render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <ChatComposer onSend={rs.fn()} {...props} />
+          <ChatComposer ref={options.composerRef} onSend={rs.fn()} {...props} />
         </QueryClientProvider>
       </MemoryRouter>,
     ),
@@ -225,6 +232,108 @@ describe("composer Enter key", () => {
     fireEvent.click(screen.getByRole("button", { name: /send/i }));
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0][0].text).toBe("hello");
+  });
+});
+
+describe("composer attachment uploads", () => {
+  it("shows request progress and locks the composer until the upload finishes", async () => {
+    let controls: ChatComposerSendControls | null = null;
+    let resolveSend: (() => void) | null = null;
+    const sendPending = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+    const onSend = rs.fn((_snapshot, nextControls: ChatComposerSendControls) => {
+      controls = nextControls;
+      return sendPending;
+    });
+    const composerRef = createRef<ChatComposerHandle>();
+    const { container } = renderComposer(
+      { onSend, showProjectSelector: true },
+      { composerRef, settings: { enableImpersonation: true } },
+    );
+    await screen.findByRole("button", { name: "Impersonation" });
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("file input not found");
+    const first = new File([new Uint8Array(25)], "first.txt", { type: "text/plain" });
+    const second = new File([new Uint8Array(75)], "second.txt", { type: "text/plain" });
+
+    fireEvent.change(fileInput, { target: { files: [first, second] } });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "inspect these" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(
+      (screen.getByRole("button", { name: "Uploading files…" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Project" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Impersonation" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Attachment upload progress" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("0");
+
+    if (!controls) throw new Error("send controls not captured");
+    act(() => controls?.onUploadProgress(0.5));
+    expect(
+      screen
+        .getByRole("progressbar", { name: "Attachment upload progress" })
+        .getAttribute("aria-valuenow"),
+    ).toBe("50");
+    expect(screen.getByText("50%")).toBeTruthy();
+
+    // Parent drop zones and clipboard pastes bypass the disabled file input,
+    // so the shared add-files boundary must reject both paths too.
+    act(() => composerRef.current?.addFiles([new File(["drop"], "dropped.txt")]));
+    fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: { files: [new File(["paste"], "pasted.txt")], items: [] },
+    });
+    expect(screen.queryByText("dropped.txt")).toBeNull();
+    expect(screen.queryByText("pasted.txt")).toBeNull();
+
+    expect(
+      (screen.getByRole("button", { name: "Uploading files…" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Uploading files…" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    act(() => resolveSend?.());
+    await waitFor(() => expect(screen.queryByText("first.txt")).toBeNull());
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("restores submitted text and attachments when an upload fails", async () => {
+    let rejectSend: ((reason?: unknown) => void) | null = null;
+    const sendPending = new Promise<void>((_resolve, reject) => {
+      rejectSend = reject;
+    });
+    const onSend = rs.fn(() => sendPending);
+    const { container } = renderComposer({ onSend });
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("file input not found");
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["retry"], "retry.txt", { type: "text/plain" })] },
+    });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "please retry" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+    act(() => rejectSend?.(new Error("upload failed")));
+
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("please retry"),
+    );
+    expect(screen.getByText("retry.txt")).toBeTruthy();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });
 

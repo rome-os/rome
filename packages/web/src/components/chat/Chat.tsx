@@ -72,6 +72,7 @@ import type { DelegatedSubagentNode } from "@/components/chat/DelegatedSubagentG
 import {
   ChatComposer,
   type ChatComposerHandle,
+  type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import type {
@@ -1190,7 +1191,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   //
   // The session decides whether input joins the active run or starts the next.
   const handleComposerSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
+    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       // The single composer talks to whoever holds the floor — the open
       // handoff's specialist, or the main agent.
       const sendingSessionId = floorSessionIdRef.current;
@@ -1224,7 +1225,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData);
+          return postSessionTurn(sendingSessionId, formData, {
+            onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+          });
         },
         optimisticContent,
       );
