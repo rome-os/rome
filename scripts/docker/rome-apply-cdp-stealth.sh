@@ -154,14 +154,6 @@ browser_ws="$(printf '%s' "$browser_version_json" | python3 -c "import json, sys
   exit 1
 }
 
-if [[ -z "$CHROME_USER_AGENT" ]]; then
-  CHROME_USER_AGENT="$(printf '%s' "$browser_version_json" | python3 -c "import json, sys; print(json.load(sys.stdin).get('User-Agent', ''))")"
-  if [[ -z "$CHROME_USER_AGENT" ]]; then
-    err "cannot determine browser user agent from ${CDP_BASE}/json/version"
-    exit 1
-  fi
-fi
-
 stealth_js_file="${SCRIPT_DIR}/stealth-inject.js"
 if [[ ! -f "$stealth_js_file" ]]; then
   err "stealth injector not found at ${stealth_js_file}"
@@ -169,7 +161,10 @@ if [[ ! -f "$stealth_js_file" ]]; then
 fi
 
 geo_params="$(get_geo_for_timezone "$TIMEZONE")"
-ua_metadata="$(build_ua_metadata)"
+ua_metadata='{}'
+if [[ -n "$CHROME_USER_AGENT" ]]; then
+  ua_metadata="$(build_ua_metadata)"
+fi
 BROWSER_WS="$browser_ws" \
   STEALTH_JS_FILE="$stealth_js_file" \
   READY_FILE="$READY_FILE" \
@@ -270,11 +265,26 @@ def build_ua_override() -> dict:
     }
 
 
+def auto_attach(session_id: str | None = None) -> None:
+    send(
+        "Target.setAutoAttach",
+        {
+            "autoAttach": True,
+            "waitForDebuggerOnStart": True,
+            "flatten": True,
+        },
+        session_id,
+    )
+
+
 def configure_target(session_id: str, target_info: dict, waiting_for_debugger: bool) -> None:
     target_type = target_info.get("type", "")
     target_id = target_info.get("targetId", "")
 
     try:
+        if target_type in {"page", "iframe"}:
+            # Auto-attach follows one level. Watch each document's children before resuming it.
+            auto_attach(session_id)
         if target_type == "page":
             send("Emulation.setGeolocationOverride", geo_params, session_id)
             send("Emulation.setTimezoneOverride", {"timezoneId": timezone}, session_id)
@@ -292,13 +302,13 @@ def configure_target(session_id: str, target_info: dict, waiting_for_debugger: b
                 session_id,
             )
             send("Network.enable", {}, session_id)
-            send("Network.setUserAgentOverride", build_ua_override(), session_id)
+            if chrome_user_agent:
+                send("Network.setUserAgentOverride", build_ua_override(), session_id)
+        if target_type in {"page", "iframe"}:
             send("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js}, session_id)
+            # Enable the Page agent so registered scripts also run in OOPIF documents.
             send("Page.enable", {}, session_id)
-            log(f"stealth configured for page {target_id}")
-        elif target_type == "iframe":
-            send("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_js}, session_id)
-            log(f"stealth configured for iframe {target_id}")
+            log(f"stealth configured for {target_type} {target_id}")
     except Exception as exc:
         log(f"stealth injection failed on {target_type or 'target'} {target_id}: {exc}")
     finally:
@@ -321,44 +331,21 @@ def handle_event(message: dict) -> None:
 
 
 try:
-    send(
-        "Target.setAutoAttach",
-        {
-            "autoAttach": True,
-            "waitForDebuggerOnStart": True,
-            "flatten": True,
-        },
-    )
+    auto_attach()
 
     targets = send("Target.getTargets", {}).get("result", {}).get("targetInfos", [])
-    page_targets = [target for target in targets if target.get("type") in {"page", "iframe"}]
-
-    if not any(target.get("type") == "page" for target in page_targets):
-        created_target_id = (
-            send("Target.createTarget", {"url": "about:blank"})
-            .get("result", {})
-            .get("targetId")
-        )
-        if created_target_id:
-            page_targets.append({"targetId": created_target_id, "type": "page"})
-
-    for target in page_targets:
-        target_id = target.get("targetId")
-        if not target_id:
-            continue
-        try:
-            response = send("Target.attachToTarget", {"targetId": target_id, "flatten": True})
-            session_id = response.get("result", {}).get("sessionId")
-            if session_id:
-                configure_target(session_id, target, False)
-        except Exception as exc:
-            log(f"failed to attach to {target.get('type', 'target')} {target_id}: {exc}")
+    if not any(target.get("type") == "page" for target in targets):
+        send("Target.createTarget", {"url": "about:blank"})
 
     set_ready()
     log("browser-level stealth guard active")
 
     while True:
-        raw = ws.recv()
+        try:
+            raw = ws.recv()
+        except websocket.WebSocketTimeoutException:
+            # Quiet browsers may emit no events. Command-response waits still time out.
+            continue
         if not raw:
             fail("browser CDP connection closed")
         handle_event(json.loads(raw))

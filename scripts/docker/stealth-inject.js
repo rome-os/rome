@@ -4,6 +4,16 @@
 (() => {
   "use strict";
 
+  const configuredLanguages = globalThis.__ROME_STEALTH_LANGUAGES__;
+  try {
+    delete globalThis.__ROME_STEALTH_LANGUAGES__;
+  } catch {}
+
+  // Replacing native properties can make ordinary Chrome fail site compatibility checks.
+  if (navigator.webdriver !== true) {
+    return;
+  }
+
   const NATIVE_FUNCTION_STRINGS = new WeakMap();
   const originalFunctionToString = Function.prototype.toString;
 
@@ -44,7 +54,7 @@
   };
 
   const getNavigatorLanguages = () => {
-    const configured = normalizeLanguages(globalThis.__ROME_STEALTH_LANGUAGES__);
+    const configured = normalizeLanguages(configuredLanguages);
     if (configured.length > 0) {
       return configured;
     }
@@ -72,9 +82,6 @@
 
   // 2. navigator.languages
   const navigatorLanguages = Object.freeze(getNavigatorLanguages());
-  try {
-    delete globalThis.__ROME_STEALTH_LANGUAGES__;
-  } catch {}
   defineGetter(navigator, "languages", () => [...navigatorLanguages]);
 
   // 3. navigator.plugins / navigator.mimeTypes
