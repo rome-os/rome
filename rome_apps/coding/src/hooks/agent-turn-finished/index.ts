@@ -3,13 +3,7 @@
 // finishes after this hook ships writes a marker into the app's settings,
 // then — only if some enabled source-dir app with a web surface still lacks a
 // `tagline` — summons the coding agent to run the `app_tagline_backfill`
-// skill. The marker is final once the run reaches a definite outcome (nothing
-// to do, or the agent returned); a thrown failure leaves it unfinished so a
-// later turn retries, up to `BACKFILL_MAX_ATTEMPTS`. An unfinished marker
-// without an error is a run in progress — core rebuilds every hook on each
-// catalog change (including the reinstalls this backfill performs), so the
-// in-memory flag alone cannot see it — and is left alone until the lease
-// expires. Every later turn sees the finished marker and returns immediately.
+// skill. Every later turn sees the marker and returns immediately.
 //
 // Bump `BACKFILL_VERSION` to run the backfill again on every instance.
 
@@ -27,20 +21,13 @@ import type {
 
 export const BACKFILL_SETTINGS_KEY = "coding.taglineBackfill";
 export const BACKFILL_VERSION = 1;
-export const BACKFILL_MAX_ATTEMPTS = 3;
-/** How long an unfinished, error-free marker counts as a run in progress. */
-export const BACKFILL_LEASE_MS = 15 * 60_000;
 export const BACKFILL_AGENT = "coding";
 export const BACKFILL_SKILL = "coding:app_tagline_backfill";
 
 export interface TaglineBackfillMarker {
   version: number;
   startedAt: string;
-  /** Runs started for this version, including the one in progress. */
-  attempts: number;
-  /** Set only on a definite outcome; absent means retry on the next turn. */
   finishedAt?: string;
-  lastError?: string;
   /** Source roots handed to the agent (absent when nothing needed a tagline). */
   apps?: string[];
   /** The agent's final text, kept for inspection. */
@@ -69,20 +56,18 @@ interface LockfileEntry {
  * Absolute source roots of enabled, installed `mode: "source"` apps whose
  * `app.yaml` declares `web:` but no `tagline:`. Store bundles and first-party
  * apps never have `mode: "source"`, so they are skipped by construction. A
- * missing lockfile or an unreadable manifest counts as "nothing to do"; any
- * other lockfile read or parse failure throws so the caller retries later
- * instead of settling on a scan that never happened.
+ * missing lockfile or an unreadable manifest counts as "nothing to do".
  */
 export async function findAppsMissingTagline(lockfilePath: string): Promise<string[]> {
-  let raw: string;
+  let entries: Record<string, LockfileEntry>;
   try {
-    raw = await readFile(lockfilePath, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
+    const parsed = JSON.parse(await readFile(lockfilePath, "utf8")) as {
+      apps?: Record<string, LockfileEntry>;
+    };
+    entries = parsed.apps ?? {};
+  } catch {
+    return [];
   }
-  const parsed = JSON.parse(raw) as { apps?: Record<string, LockfileEntry> };
-  const entries = parsed.apps ?? {};
   const roots: string[] = [];
   for (const entry of Object.values(entries)) {
     if (entry.source?.mode !== "source" || !entry.source.path) continue;
@@ -107,19 +92,6 @@ export function buildBackfillPrompt(roots: string[]): string {
   ].join("\n");
 }
 
-/** Finished for this version, or out of attempts: nothing more to do. */
-function isSettled(marker: TaglineBackfillMarker | null): boolean {
-  if (!marker || marker.version < BACKFILL_VERSION) return false;
-  return marker.finishedAt !== undefined || marker.attempts >= BACKFILL_MAX_ATTEMPTS;
-}
-
-/** Unfinished without a recorded error and started recently: another hook instance is on it. */
-function isInProgress(marker: TaglineBackfillMarker | null, now: number): boolean {
-  if (!marker || marker.version !== BACKFILL_VERSION) return false;
-  if (marker.finishedAt !== undefined || marker.lastError !== undefined) return false;
-  return now - Date.parse(marker.startedAt) < BACKFILL_LEASE_MS;
-}
-
 export class TaglineBackfillHook implements AgentTurnFinishedHook {
   private running = false;
 
@@ -130,9 +102,8 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
     this.running = true;
     try {
       const marker = await this.deps.settings.get<TaglineBackfillMarker>(BACKFILL_SETTINGS_KEY);
-      if (isSettled(marker) || isInProgress(marker, Date.now())) return;
-      const attempts = marker?.version === BACKFILL_VERSION ? marker.attempts + 1 : 1;
-      await this.backfill(attempts);
+      if (marker && marker.version >= BACKFILL_VERSION) return;
+      await this.backfill();
     } catch (err) {
       this.deps.logger.warn("tagline backfill failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -142,50 +113,41 @@ export class TaglineBackfillHook implements AgentTurnFinishedHook {
     }
   }
 
-  private async backfill(attempts: number): Promise<void> {
-    // Record the attempt before doing anything so a crash mid-run still counts
-    // toward the cap. `finishedAt` is only written on a definite outcome.
+  private async backfill(): Promise<void> {
+    // Mark first: the backfill runs once whether or not it succeeds. The
+    // manual `/app_tagline_backfill` skill covers anything it leaves behind.
     const started: TaglineBackfillMarker = {
       version: BACKFILL_VERSION,
       startedAt: new Date().toISOString(),
-      attempts,
     };
     await this.deps.settings.set(BACKFILL_SETTINGS_KEY, started);
 
-    try {
-      const roots = await findAppsMissingTagline(this.deps.lockfilePath ?? defaultLockfilePath());
-      if (roots.length === 0) {
-        await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
-          ...started,
-          finishedAt: new Date().toISOString(),
-        });
-        this.deps.logger.debug("tagline backfill: nothing to do");
-        return;
-      }
-
-      this.deps.logger.info("tagline backfill started", { apps: roots, attempts });
-      let summary = "";
-      for await (const msg of this.deps.agentRunner.run({
-        agentName: BACKFILL_AGENT,
-        prompt: buildBackfillPrompt(roots),
-      })) {
-        if (msg.type === "result") summary = String(msg.content ?? "");
-        if (msg.type === "error") throw new Error(String(msg.error));
-      }
+    const roots = await findAppsMissingTagline(this.deps.lockfilePath ?? defaultLockfilePath());
+    if (roots.length === 0) {
       await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
         ...started,
         finishedAt: new Date().toISOString(),
-        apps: roots,
-        summary,
       });
-      this.deps.logger.info("tagline backfill finished", { apps: roots });
-    } catch (err) {
-      await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
-        ...started,
-        lastError: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
+      this.deps.logger.debug("tagline backfill: nothing to do");
+      return;
     }
+
+    this.deps.logger.info("tagline backfill started", { apps: roots });
+    let summary = "";
+    for await (const msg of this.deps.agentRunner.run({
+      agentName: BACKFILL_AGENT,
+      prompt: buildBackfillPrompt(roots),
+    })) {
+      if (msg.type === "result") summary = String(msg.content ?? "");
+      if (msg.type === "error") throw new Error(String(msg.error));
+    }
+    await this.deps.settings.set(BACKFILL_SETTINGS_KEY, {
+      ...started,
+      finishedAt: new Date().toISOString(),
+      apps: roots,
+      summary,
+    });
+    this.deps.logger.info("tagline backfill finished", { apps: roots });
   }
 }
 

@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { AgentMessage, AgentTurnFinishedEvent, RunParams } from "@rome-os/app-runtime";
 import {
-  BACKFILL_MAX_ATTEMPTS,
   BACKFILL_SETTINGS_KEY,
   BACKFILL_SKILL,
   BACKFILL_VERSION,
@@ -114,23 +113,13 @@ describe("coding tagline backfill hook", () => {
     it("treats a missing lockfile as nothing to do", async () => {
       expect(await findAppsMissingTagline(join(tempDir, "nope.json"))).toEqual([]);
     });
-
-    it("throws on a lockfile it cannot parse", async () => {
-      await writeFile(lockfilePath, "{ not json");
-      await expect(findAppsMissingTagline(lockfilePath)).rejects.toThrow();
-    });
   });
 
   describe("onAgentTurnFinished", () => {
-    it("does nothing when the marker is finished at the current version", async () => {
+    it("does nothing when the marker is already at the current version", async () => {
       const runner = createRunner();
       const settings = createSettings({
-        [BACKFILL_SETTINGS_KEY]: {
-          version: BACKFILL_VERSION,
-          startedAt: "2026-01-01T00:00:00Z",
-          attempts: 1,
-          finishedAt: "2026-01-01T00:01:00Z",
-        },
+        [BACKFILL_SETTINGS_KEY]: { version: BACKFILL_VERSION, startedAt: "2026-01-01T00:00:00Z" },
       });
       const hook = new TaglineBackfillHook({
         agentRunner: runner,
@@ -160,7 +149,6 @@ describe("coding tagline backfill hook", () => {
       expect(runner.calls).toHaveLength(0);
       const marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
       expect(marker.version).toBe(BACKFILL_VERSION);
-      expect(marker.attempts).toBe(1);
       expect(marker.finishedAt).toBeDefined();
       expect(marker.apps).toBeUndefined();
     });
@@ -188,14 +176,13 @@ describe("coding tagline backfill hook", () => {
       expect(first.finishedAt).toBeUndefined();
       expect(last).toMatchObject({
         version: BACKFILL_VERSION,
-        attempts: 1,
         apps: [root],
         summary: "Added 1 tagline.",
       });
       expect(last.finishedAt).toBeDefined();
     });
 
-    it("retries a failed run on later turns, up to the attempt cap", async () => {
+    it("keeps the marker and swallows agent failures", async () => {
       const root = await writeApp("todo", "id: todo\nweb:\n  manifest: web/manifest.json\n");
       await writeLockfile({ todo: sourceEntry(root) });
       const runner = createRunner([{ type: "error", error: "model unavailable" }]);
@@ -203,77 +190,12 @@ describe("coding tagline backfill hook", () => {
       const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
 
       await expect(hook.onAgentTurnFinished(event)).resolves.toBeUndefined();
-      let marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
-      expect(marker).toMatchObject({ version: BACKFILL_VERSION, attempts: 1 });
-      expect(marker.lastError).toBe("model unavailable");
-      expect(marker.finishedAt).toBeUndefined();
-
-      for (let i = 1; i < BACKFILL_MAX_ATTEMPTS + 2; i++) {
-        await hook.onAgentTurnFinished(event);
-      }
-
-      expect(runner.calls).toHaveLength(BACKFILL_MAX_ATTEMPTS);
-      marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
-      expect(marker.attempts).toBe(BACKFILL_MAX_ATTEMPTS);
-      expect(marker.finishedAt).toBeUndefined();
-    });
-
-    it("leaves a recent in-progress marker to the instance that owns it", async () => {
-      const root = await writeApp("todo", "id: todo\nweb:\n  manifest: web/manifest.json\n");
-      await writeLockfile({ todo: sourceEntry(root) });
-      const runner = createRunner();
-      const settings = createSettings({
-        [BACKFILL_SETTINGS_KEY]: {
-          version: BACKFILL_VERSION,
-          startedAt: new Date().toISOString(),
-          attempts: 1,
-        },
-      });
-      const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
-
       await hook.onAgentTurnFinished(event);
 
-      expect(runner.calls).toHaveLength(0);
-      expect(settings.sets).toHaveLength(0);
-    });
-
-    it("records a failed scan as an attempt without settling", async () => {
-      await writeFile(lockfilePath, "{ not json");
-      const runner = createRunner();
-      const settings = createSettings();
-      const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
-
-      await expect(hook.onAgentTurnFinished(event)).resolves.toBeUndefined();
-
-      expect(runner.calls).toHaveLength(0);
+      expect(runner.calls).toHaveLength(1);
       const marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
-      expect(marker).toMatchObject({ version: BACKFILL_VERSION, attempts: 1 });
-      expect(marker.lastError).toBeDefined();
+      expect(marker.version).toBe(BACKFILL_VERSION);
       expect(marker.finishedAt).toBeUndefined();
-    });
-
-    it("resumes an interrupted run and finishes once the work is done", async () => {
-      const root = await writeApp(
-        "ok",
-        "id: ok\ntagline: Fine\nweb:\n  manifest: web/manifest.json\n",
-      );
-      await writeLockfile({ ok: sourceEntry(root) });
-      const runner = createRunner();
-      const settings = createSettings({
-        [BACKFILL_SETTINGS_KEY]: {
-          version: BACKFILL_VERSION,
-          startedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
-          attempts: 1,
-        },
-      });
-      const hook = new TaglineBackfillHook({ agentRunner: runner, settings, logger, lockfilePath });
-
-      await hook.onAgentTurnFinished(event);
-
-      expect(runner.calls).toHaveLength(0);
-      const marker = settings.store.get(BACKFILL_SETTINGS_KEY) as TaglineBackfillMarker;
-      expect(marker).toMatchObject({ version: BACKFILL_VERSION, attempts: 2 });
-      expect(marker.finishedAt).toBeDefined();
     });
   });
 });
