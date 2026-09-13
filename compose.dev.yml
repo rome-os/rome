@@ -121,6 +121,7 @@ x-rome-env: &rome-env
   WEB_HOST: 0.0.0.0
   WEB_PORT: "3000"
   INTERNAL_API_PORT: "4141"
+  ROME_ENABLE_CDP_AUTOMATION: ${ROME_ENABLE_CDP_AUTOMATION:-false}
 
   # Auto re-apply rome_apps when source files change (dev only).
   ROME_APP_AUTO_RELOAD: "1"
@@ -299,6 +300,8 @@ services:
       # Loopback is shared with the rome container, so CDP needs to listen no
       # further — same shape as production.
       ROME_CHROME_BIND_ADDRESS: 127.0.0.1
+      ROME_ENABLE_CDP_AUTOMATION: ${ROME_ENABLE_CDP_AUTOMATION:-false}
+      ROME_CHROME_ENABLE_STEALTH: ${ROME_CHROME_ENABLE_STEALTH:-1}
       # Debian chromium in a default-seccomp container can't always set up its
       # user-namespace sandbox; this sidecar is dev-only, so trade it away.
       ROME_CHROME_DISABLE_SANDBOX: "1"

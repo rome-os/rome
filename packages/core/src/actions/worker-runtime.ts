@@ -153,7 +153,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       },
     },
   );
-  const capabilityDiscovery = new CapabilityDiscovery();
+  const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
   // Fire-and-forget: tailscale-based remote discovery is low-priority, and its
   // initial `tailscale status` probe blocks ~2s when the daemon isn't running.
   // Awaiting it here would put that cost on every forked worker's engine-build

@@ -48,6 +48,10 @@ const configSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  cdpAutomationEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 
   // Every root, delegated, and warm action worker counts against this bound.
   // A bounded default keeps burst traffic from forking unbounded workers;
@@ -146,6 +150,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
     raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
+  }
+  if (env.ROME_ENABLE_CDP_AUTOMATION !== undefined) {
+    raw.cdpAutomationEnabled = env.ROME_ENABLE_CDP_AUTOMATION;
   }
   if (env.LINKEDIN_POLL_MIN_MINUTES) {
     raw.linkedinPollMinMinutes = env.LINKEDIN_POLL_MIN_MINUTES;

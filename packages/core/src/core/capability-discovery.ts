@@ -79,8 +79,12 @@ export class CapabilityDiscovery {
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private tailscaleBin: string | null = null;
 
-  /** Start periodic discovery. Safe to call even if Tailscale is not installed. */
+  constructor(private readonly cdpAutomationEnabled = false) {}
+
+  /** Start periodic discovery when enabled. Safe to call without Tailscale installed. */
   async start(): Promise<void> {
+    if (!this.cdpAutomationEnabled) return;
+
     this.tailscaleBin = await this.findTailscale();
     if (!this.tailscaleBin) {
       log.debug("tailscale not installed, remote capability discovery disabled");

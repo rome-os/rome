@@ -73,6 +73,13 @@ To run a command inside the worktree's Rome container:
 ./r bash              # interactive shell
 ```
 
+Browser automation uses the OpenCLI extension by default. Set
+`ROME_ENABLE_CDP_AUTOMATION=true` in the root `.env` or host shell to enable
+CDP browser discovery, automatic Chrome DevTools MCP servers, and stealth injection.
+Run `pnpm dev:all` after changing the flag so both `rome` and `chrome` receive it.
+With CDP automation enabled, `ROME_CHROME_ENABLE_STEALTH=0` skips stealth injection.
+Chrome's CDP listener stays available for login tabs and URL opening in either mode.
+
 ## Established patterns
 
 - Dashboard UI imports [`@/components/ui/*`](packages/web/src/components/ui/). Rome Apps import [`@rome-os/ui/<component>`](docs/ui-kit.md#every-component-gets-a-subpath-export).

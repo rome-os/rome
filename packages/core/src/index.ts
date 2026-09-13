@@ -633,7 +633,7 @@ async function main() {
     isEnabled: () => resolveAutoUpgradeEnabled(config),
   });
 
-  const capabilityDiscovery = new CapabilityDiscovery();
+  const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
   try {
     await capabilityDiscovery.start();
   } catch (err) {

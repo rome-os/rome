@@ -17,6 +17,7 @@ const CONFIG_ENV_KEYS = [
   "ROME_ACTION_MAX_WORKERS",
   "ROME_HOST_EXECUTION_SOCKET",
   "ROME_HOST_EXECUTION_ENABLED",
+  "ROME_ENABLE_CDP_AUTOMATION",
   "WEB_PORT",
   "WEB_HOST",
   "INTERNAL_API_PORT",
@@ -35,6 +36,23 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
+  it("disables CDP automation by default", () => {
+    expect(loadConfig().cdpAutomationEnabled).toBe(false);
+  });
+
+  it.each([
+    ["true", true],
+    ["false", false],
+  ] as const)("parses ROME_ENABLE_CDP_AUTOMATION=%s", (value, enabled) => {
+    rs.stubEnv("ROME_ENABLE_CDP_AUTOMATION", value);
+    expect(loadConfig().cdpAutomationEnabled).toBe(enabled);
+  });
+
+  it.each(["1", "yes", "", "invalid"])("rejects an invalid CDP automation flag: %s", (value) => {
+    rs.stubEnv("ROME_ENABLE_CDP_AUTOMATION", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+
   it("disables host execution and leaves its socket unset by default", () => {
     expect(loadConfig()).toMatchObject({ hostExecutionEnabled: false });
     expect(loadConfig().hostExecutionSocket).toBeUndefined();
