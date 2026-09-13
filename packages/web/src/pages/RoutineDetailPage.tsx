@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronRight, Clock, Radio, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Badge } from "@/components/ui/badge";
-import { ListRow } from "@/components/ui/list-row";
+import { List, ListRow } from "@/components/ui/list-row";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { ActionExecutionTree } from "@/components/agent-trace/ActionExecutionTree";
 import {
@@ -108,11 +108,15 @@ function RunHistoryList({ routineId }: { routineId: string }) {
     return <p className="text-aux text-subtle-foreground">{t("history.empty")}</p>;
   }
   return (
-    <ul className="divide-y divide-border-subtle overflow-hidden rounded-12 border border-border">
-      {runs.map((run) => (
-        <RunRow key={run.id} routineId={routineId} run={run} />
-      ))}
-    </ul>
+    // A run history is a list in the document too, so the section is the `<ul>`
+    // rather than a `<div>` beside one, and the hairline stays the section's.
+    <List asChild className="overflow-hidden rounded-12 border border-border">
+      <ul>
+        {runs.map((run) => (
+          <RunRow key={run.id} routineId={routineId} run={run} />
+        ))}
+      </ul>
+    </List>
   );
 }
 
