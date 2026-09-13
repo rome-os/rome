@@ -594,11 +594,14 @@ export function useAppLifecycle(
               return (
                 // The card paint sits on the label and follows the radio's own
                 // state, so what is highlighted can never disagree with what is
-                // checked.
+                // checked. The focus edge is on the card for the same reason it
+                // used to be: roving focus lands on the checked option, so an
+                // edge drawn only around the 16px circle inside an
+                // already-highlighted card says almost nothing.
                 <label
                   key={option.mode}
                   htmlFor={id}
-                  className="flex min-h-20 items-start gap-3 rounded-8 border border-border bg-surface px-3 py-3 text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground has-data-[state=checked]:border-foreground has-data-[state=checked]:bg-surface-muted has-data-[state=checked]:text-foreground has-disabled:opacity-60"
+                  className="flex min-h-20 items-start gap-3 rounded-8 border border-border bg-surface px-3 py-3 text-muted-foreground outline-1 outline-offset-0 outline-transparent transition-colors hover:border-border-strong hover:text-foreground has-data-[state=checked]:border-foreground has-data-[state=checked]:bg-surface-muted has-data-[state=checked]:text-foreground has-focus-visible:outline-solid has-focus-visible:outline-ring/50 has-disabled:opacity-60"
                 >
                   <span className="flex h-5 shrink-0 items-center">
                     {/* The card already dims as a whole, and nested opacity
