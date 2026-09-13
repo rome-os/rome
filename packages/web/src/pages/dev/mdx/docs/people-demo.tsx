@@ -24,6 +24,7 @@ import { Avatar } from "@/pages/people/avatar";
 import { CHANNEL_META, ChannelGlyph, channelLabel } from "@/pages/people/channel-meta";
 import { FILTER_ORDER, type PeopleRow, type RowLevel } from "@/pages/people/people-model";
 import { DirectoryRow, StreamRow, UnknownRow, levelLabelKey } from "@/pages/people/rows";
+import { List } from "@/components/ui/list-row";
 
 // Live specimens for the People-page design note (people-page.mdx).
 //
@@ -139,7 +140,7 @@ function Frame({ children, label }: { children: React.ReactNode; label?: string 
           {label}
         </div>
       )}
-      <div className="p-2">{children}</div>
+      <List className="p-2">{children}</List>
     </div>
   );
 }

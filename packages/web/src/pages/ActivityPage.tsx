@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import type { ApprovalStatus, ApprovalType } from "@rome/api-types/approvals";
 
 export interface Approval {
@@ -800,10 +800,10 @@ export default function ActivityPage() {
   return (
     <PageShell>
       <PageBody>
-        <div className="flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-title text-foreground">{t("page.title")}</h1>
-            <div className="mt-1 flex items-center gap-2 text-aux text-muted-foreground">
+        <PageHeader
+          title={t("page.title")}
+          description={
+            <span className="flex items-center gap-2">
               <span
                 className="h-1.5 w-1.5 rounded-full bg-success"
                 style={{
@@ -812,12 +812,14 @@ export default function ActivityPage() {
                 aria-hidden="true"
               />
               <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
-            </div>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={fetchData}>
-            {t("page.refresh")}
-          </Button>
-        </div>
+            </span>
+          }
+          actions={
+            <Button type="button" variant="outline" size="sm" onClick={fetchData}>
+              {t("page.refresh")}
+            </Button>
+          }
+        />
 
         {/* Stats */}
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -29,7 +29,7 @@ import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
@@ -495,10 +495,10 @@ export default function AppsIndexPage() {
       <PageShell>
         <PageBody>
           <header className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-              <div className="min-w-0">
-                <h1 className="text-title text-foreground">{t("header.title")}</h1>
-                <p className="mt-1 flex flex-wrap items-center gap-x-2 text-aux text-muted-foreground">
+            <PageHeader
+              title={t("header.title")}
+              description={
+                <span className="flex flex-wrap items-center gap-x-2">
                   {apps !== null ? (
                     <>
                       <span>{t("header.myAppsCount", { count: myAppsCount })}</span>
@@ -516,25 +516,32 @@ export default function AppsIndexPage() {
                       </span>
                     </>
                   ) : null}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={lifecycle.upgradeAll}
-                  disabled={updatesCount === 0 || menusDisabled}
-                >
-                  <Download className="h-3.5 w-3.5" aria-hidden />
-                  {lifecycle.bulkUpgradePending
-                    ? t("installed.updateAllUpdating")
-                    : t("installed.updateAll")}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
-                  {t("header.appStore")}
-                </Button>
-              </div>
-            </div>
+                </span>
+              }
+              actions={
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={lifecycle.upgradeAll}
+                    disabled={updatesCount === 0 || menusDisabled}
+                  >
+                    <Download className="h-3.5 w-3.5" aria-hidden />
+                    {lifecycle.bulkUpgradePending
+                      ? t("installed.updateAllUpdating")
+                      : t("installed.updateAll")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setStoreOpen(true)}
+                  >
+                    {t("header.appStore")}
+                  </Button>
+                </>
+              }
+            />
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="relative w-full sm:max-w-sm">

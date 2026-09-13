@@ -54,6 +54,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { List, ListRow, ListRowContent, ListRowTitle } from "@/components/ui/list-row";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
@@ -100,7 +101,7 @@ import {
   type SessionHandoffPayload,
 } from "@/lib/access-control-client";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
@@ -351,7 +352,7 @@ export default function SettingsPage() {
   return (
     <PageShell>
       <PageBody>
-        <h1 className="text-title text-foreground">{t("page.title")}</h1>
+        <PageHeader title={t("page.title")} />
 
         {/* Navigation, not a tablist: each entry is a route change, and the
           section it reveals renders outside this element rather than in a
@@ -451,13 +452,15 @@ function AppearanceRow({
   control: ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-4 px-4 py-3">
+    <ListRow>
       <div className="flex size-9 shrink-0 items-center justify-center rounded-8 bg-surface-muted text-muted-foreground [&_svg]:size-4.5">
         {icon}
       </div>
-      <p className="min-w-0 flex-1 text-ui text-foreground">{title}</p>
+      <ListRowContent>
+        <ListRowTitle>{title}</ListRowTitle>
+      </ListRowContent>
       <div className="shrink-0">{control}</div>
-    </div>
+    </ListRow>
   );
 }
 
@@ -476,7 +479,7 @@ function AppearanceSection() {
 
   return (
     <div className="space-y-6">
-      <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+      <List className="overflow-hidden rounded-8 border border-border bg-surface">
         <AppearanceRow
           icon={<Languages />}
           title={t("appearance.language.title")}
@@ -548,7 +551,7 @@ function AppearanceSection() {
             </Select>
           }
         />
-      </div>
+      </List>
     </div>
   );
 }

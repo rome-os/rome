@@ -6,6 +6,7 @@ import { ArrowLeft, Check, ChevronRight, Clock, Radio, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Badge } from "@/components/ui/badge";
+import { ListRow } from "@/components/ui/list-row";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { ActionExecutionTree } from "@/components/agent-trace/ActionExecutionTree";
 import {
@@ -17,7 +18,7 @@ import {
   type RoutineRun,
 } from "@/lib/routine-language";
 import { useRoutines, useRoutineRuns, useRoutineRunTrace } from "@/hooks/use-routines";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // Detail view for one routine: a plain-language header over its run history,
 // where each run expands to the reconstructed action-execution trace.
@@ -72,24 +73,24 @@ function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
   const TriggerIcon = isScheduleTrigger(routine.trigger) ? Clock : Radio;
 
   return (
-    <header className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-title text-foreground">{title}</h1>
-        {!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
-      </div>
-      <p className="flex items-start gap-2 text-body text-muted-foreground">
-        <TriggerIcon className="mt-1 h-4 w-4 flex-shrink-0" aria-hidden />
-        <span className="min-w-0">
-          <span>{triggerPhrase}</span>
-          {hasName && (
-            <>
-              <span className="text-subtle-foreground"> · </span>
-              <span>{outcomePhrase}</span>
-            </>
-          )}
+    <PageHeader
+      title={title}
+      titleAside={!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
+      description={
+        <span className="flex items-center gap-1">
+          <TriggerIcon className="size-3.5 flex-shrink-0" aria-hidden />
+          <span className="min-w-0">
+            <span>{triggerPhrase}</span>
+            {hasName && (
+              <>
+                <span className="text-subtle-foreground"> · </span>
+                <span>{outcomePhrase}</span>
+              </>
+            )}
+          </span>
         </span>
-      </p>
-    </header>
+      }
+    />
   );
 }
 
@@ -171,22 +172,19 @@ function RunRow({ routineId, run }: { routineId: string; run: RoutineRun }) {
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui hover:bg-surface-muted"
-      >
-        <ChevronRight
-          className={`h-4 w-4 flex-none text-subtle-foreground transition-transform ${open ? "rotate-90" : ""}`}
-          aria-hidden
-        />
-        <RunStatusIcon status={run.status} />
-        <span className="min-w-0 flex-1 truncate text-foreground">{runText(run, t)}</span>
-        {duration && (
-          <span className="flex-none font-mono text-aux text-muted-foreground">{duration}</span>
-        )}
-      </button>
+      <ListRow asChild interactive size="sm">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <ChevronRight
+            className={`h-4 w-4 flex-none text-subtle-foreground transition-transform ${open ? "rotate-90" : ""}`}
+            aria-hidden
+          />
+          <RunStatusIcon status={run.status} />
+          <span className="min-w-0 flex-1 truncate text-foreground">{runText(run, t)}</span>
+          {duration && (
+            <span className="flex-none font-mono text-aux text-muted-foreground">{duration}</span>
+          )}
+        </button>
+      </ListRow>
 
       {/* The run-level error reads even when the trace is collapsed. */}
       {run.error && (

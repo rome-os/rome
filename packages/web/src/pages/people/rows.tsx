@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { ListRow } from "@/components/ui/list-row";
 import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
 import { ChannelGlyph, ChannelPill } from "./channel-meta";
 import { timeAgo } from "./format";
@@ -23,8 +24,12 @@ export function levelLabelKey(level: RowLevel): string {
   return LEVEL_LABEL_KEY[level];
 }
 
-export const ROW_BASE =
-  "grid w-full items-center gap-3 border-b border-border-subtle px-2 py-2 text-left last:border-b-0";
+/**
+ * Every row on the page is a grid rather than the kit's flex row, so the
+ * avatar column and the trailing column line up down the whole list. The
+ * inset, the height floor, and the hover paint are `ListRow`'s.
+ */
+const ROW_GRID = "grid grid-cols-[2rem_minmax(0,1fr)_auto]";
 
 /**
  * A stream row carries only what routing needs: who, what they said, where it
@@ -62,12 +67,13 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
     </>
   );
 
-  const className = cn(ROW_BASE, "grid-cols-[2rem_minmax(0,1fr)_auto]");
-  if (!onOpen) return <div className={className}>{body}</div>;
+  if (!onOpen) return <ListRow className={ROW_GRID}>{body}</ListRow>;
   return (
-    <button type="button" onClick={onOpen} className={cn(className, "hover:bg-surface")}>
-      {body}
-    </button>
+    <ListRow asChild interactive className={ROW_GRID}>
+      <button type="button" onClick={onOpen}>
+        {body}
+      </button>
+    </ListRow>
   );
 }
 
@@ -88,10 +94,10 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
   const handle = rowHandle(row);
   const channel = row.accounts[0]?.channel;
   return (
-    <div
+    <ListRow
       className={cn(
-        ROW_BASE,
-        "group grid-cols-[2rem_minmax(0,1fr)_auto] hover:bg-surface sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
+        ROW_GRID,
+        "group hover:bg-surface-hover sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
       )}
     >
       <Avatar name={row.displayName} />
@@ -123,7 +129,7 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
           </span>
         )}
       </span>
-    </div>
+    </ListRow>
   );
 }
 
@@ -173,13 +179,9 @@ export function DirectoryRow({
   );
 
   return (
-    <div
-      className={cn(
-        ROW_BASE,
-        "grid-cols-[2rem_minmax(0,1fr)_auto]",
-        fixed ? "cursor-default" : "hover:bg-surface",
-        selected && "bg-primary/10 hover:bg-primary/15",
-      )}
+    <ListRow
+      selected={selected}
+      className={cn(ROW_GRID, fixed ? "cursor-default" : !selected && "hover:bg-surface-hover")}
     >
       {fixed || !onToggleSelect ? (
         <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} />
@@ -205,6 +207,6 @@ export function DirectoryRow({
         <span className="min-w-0">{who}</span>
       )}
       <span className="flex items-center justify-end gap-2">{actions}</span>
-    </div>
+    </ListRow>
   );
 }
