@@ -321,6 +321,7 @@ def handle_event(message: dict) -> None:
 
 
 try:
+    # Auto-attach includes existing targets and emits the events that configure them.
     send(
         "Target.setAutoAttach",
         {
@@ -331,34 +332,18 @@ try:
     )
 
     targets = send("Target.getTargets", {}).get("result", {}).get("targetInfos", [])
-    page_targets = [target for target in targets if target.get("type") in {"page", "iframe"}]
-
-    if not any(target.get("type") == "page" for target in page_targets):
-        created_target_id = (
-            send("Target.createTarget", {"url": "about:blank"})
-            .get("result", {})
-            .get("targetId")
-        )
-        if created_target_id:
-            page_targets.append({"targetId": created_target_id, "type": "page"})
-
-    for target in page_targets:
-        target_id = target.get("targetId")
-        if not target_id:
-            continue
-        try:
-            response = send("Target.attachToTarget", {"targetId": target_id, "flatten": True})
-            session_id = response.get("result", {}).get("sessionId")
-            if session_id:
-                configure_target(session_id, target, False)
-        except Exception as exc:
-            log(f"failed to attach to {target.get('type', 'target')} {target_id}: {exc}")
+    if not any(target.get("type") == "page" for target in targets):
+        send("Target.createTarget", {"url": "about:blank"})
 
     set_ready()
     log("browser-level stealth guard active")
 
     while True:
-        raw = ws.recv()
+        try:
+            raw = ws.recv()
+        except websocket.WebSocketTimeoutException:
+            # Quiet browsers may emit no events. Command-response waits still time out.
+            continue
         if not raw:
             fail("browser CDP connection closed")
         handle_event(json.loads(raw))

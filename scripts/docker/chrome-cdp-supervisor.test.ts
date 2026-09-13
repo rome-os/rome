@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "@rstest/core";
 
@@ -48,6 +48,44 @@ async function waitForCount(path: string, minimum: number) {
 }
 
 describe("rome-start-chrome-cdp.sh", () => {
+  it("rejects a guard that exits before signaling readiness", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-readiness-"));
+    tempDirs.push(tempDir);
+    makeExecutable(join(tempDir, "rome-apply-cdp-stealth.sh"), "#!/usr/bin/env bash\nexit 7\n");
+    const source = readFileSync(resolve(PROJECT_ROOT, SCRIPT_PATH), "utf8");
+    const startGuard = source.match(/^start_stealth_guard\(\) \{\n[\s\S]*?^}\n/m)?.[0];
+    expect(startGuard).toBeDefined();
+
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        `
+info() { :; }
+err() { printf '%s\\n' "$*" >&2; }
+${startGuard?.replaceAll("/tmp/chrome-stealth.log", '"$TEST_STEALTH_LOG"')}
+start_stealth_guard
+`,
+      ],
+      {
+        encoding: "utf8",
+        timeout: 2_000,
+        env: {
+          ...process.env,
+          ENABLE_STEALTH: "1",
+          SCRIPT_DIR: tempDir,
+          TMPDIR: tempDir,
+          TEST_STEALTH_LOG: join(tempDir, "stealth.log"),
+          max_attempts: "3",
+        },
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("CDP stealth guard exited unexpectedly");
+  });
+
   it("restarts Chrome when the browser process exits", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
     tempDirs.push(tempDir);

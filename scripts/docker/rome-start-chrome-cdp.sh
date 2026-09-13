@@ -12,7 +12,7 @@ CHROME_USER_DATA_DIR="${ROME_CHROME_USER_DATA_DIR:-$HOME/.rome/chrome-profile}"
 # (which mounts $HOME/.rome): the cache is regenerable and, left in the profile,
 # grows to tens of GB and fills the host disk. Default to an ephemeral path on
 # the container's writable layer (wiped on recreate) and hard-cap its size.
-# Logins (cookies/localStorage) stay in CHROME_USER_DATA_DIR, so they persist.
+# Persistent cookies and localStorage stay in CHROME_USER_DATA_DIR.
 CHROME_DISK_CACHE_DIR="${ROME_CHROME_DISK_CACHE_DIR:-$HOME/chrome-cache}"
 CHROME_DISK_CACHE_SIZE="${ROME_CHROME_DISK_CACHE_SIZE:-536870912}"
 CHROME_WINDOW_SIZE="${ROME_CHROME_WINDOW_SIZE:-1280,800}"
@@ -129,6 +129,8 @@ chrome_args=(
   --no-first-run
   --no-default-browser-check
   --password-store=basic
+  # A persistent profile alone does not restore session cookies after a clean exit.
+  --restore-last-session
   "--user-data-dir=$CHROME_USER_DATA_DIR"
   "--disk-cache-dir=$CHROME_DISK_CACHE_DIR"
   "--disk-cache-size=$CHROME_DISK_CACHE_SIZE"
@@ -233,8 +235,9 @@ start_stealth_guard() {
   fi
 
   info "starting CDP stealth guard"
-  local stealth_ready_file stealth_script
-  stealth_ready_file="$(mktemp)"
+  local stealth_ready_dir stealth_ready_file stealth_script
+  stealth_ready_dir="$(mktemp -d)"
+  stealth_ready_file="$stealth_ready_dir/ready"
   stealth_script="$SCRIPT_DIR/rome-apply-cdp-stealth.sh"
   CDP_PORT="$CHROME_INTERNAL_PORT" \
     READY_FILE="$stealth_ready_file" \
@@ -248,12 +251,12 @@ start_stealth_guard() {
   local attempt=0
   while ((attempt < max_attempts)); do
     if [[ -f "$stealth_ready_file" ]]; then
-      rm -f "$stealth_ready_file"
+      rm -rf "$stealth_ready_dir"
       return 0
     fi
     if ! kill -0 "$STEALTH_PID" 2>/dev/null; then
       err "CDP stealth guard exited unexpectedly; see /tmp/chrome-stealth.log"
-      rm -f "$stealth_ready_file"
+      rm -rf "$stealth_ready_dir"
       return 1
     fi
     sleep 0.2
@@ -261,7 +264,7 @@ start_stealth_guard() {
   done
 
   err "CDP stealth guard did not become ready; see /tmp/chrome-stealth.log"
-  rm -f "$stealth_ready_file"
+  rm -rf "$stealth_ready_dir"
   return 1
 }
 
