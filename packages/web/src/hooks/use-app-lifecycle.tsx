@@ -601,7 +601,10 @@ export function useAppLifecycle(
                   className="flex min-h-20 items-start gap-3 rounded-8 border border-border bg-surface px-3 py-3 text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground has-data-[state=checked]:border-foreground has-data-[state=checked]:bg-surface-muted has-data-[state=checked]:text-foreground has-disabled:opacity-60"
                 >
                   <span className="flex h-5 shrink-0 items-center">
-                    <RadioGroupItem id={id} value={option.mode} />
+                    {/* The card already dims as a whole, and nested opacity
+                        multiplies, so the item keeps its own full opacity
+                        rather than landing at 30% inside a card at 60%. */}
+                    <RadioGroupItem id={id} value={option.mode} className="disabled:opacity-100" />
                   </span>
                   <span className="flex h-5 shrink-0 items-center">
                     <Icon className="size-4" aria-hidden />
