@@ -3,6 +3,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 
 import { cn } from "./cn.js";
+import { InputGlyph, inputVariants } from "./input.js";
 
 // shadcn Command (cmdk) rewired to the semantic token set. The Dialog variant
 // is intentionally omitted — Rome composes Command inside Popover (combobox)
@@ -48,26 +49,29 @@ function CommandInput({
 }: CommandInputProps) {
   return (
     <div
-      data-slot="command-input-wrapper"
-      // The one Control member with no focus edge, for two reasons that hold
-      // independently. The row is a full-bleed header inside Command's
-      // `overflow-hidden`, so the role's edge — 2px at `outline-offset: 0`,
-      // outside the box — is drawn past the clip and cut away on three sides.
-      // And cmdk holds focus in this input for the life of the surface, so an
-      // edge keyed to it stays lit and marks nothing. `border-b-border` is
-      // what reads the header against the list. Trailing controls below draw
-      // their own edges and have room for them.
+      // The row is a `plain` Input inside a header: the field paints no border
+      // or radius of its own, and the row's bottom rule is what reads the
+      // header against the list. The glyph takes the seat `Input` gives one.
+      //
+      // No focus edge, for two reasons that hold independently. The row is a
+      // full-bleed header inside Command's `overflow-hidden`, so an edge is
+      // clipped on three sides; and cmdk holds focus in this input for the
+      // life of the surface, so an edge keyed to it stays lit and marks
+      // nothing. The `plain` variant keeps the edge; this caller turns it off.
       // Role and divergence: docs/ui/component-roles.md.
-      className={cn(
-        "flex h-[var(--control-h-md)] w-full items-center gap-[var(--control-gap)] rounded-[var(--control-r-md)] border border-transparent border-b-border px-[var(--control-px-start-md)]",
-        className,
-      )}
+      data-slot="command-input-wrapper"
+      className={cn("relative flex items-center border-b border-border", className)}
     >
-      <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <InputGlyph size="md">
+        <Search aria-hidden />
+      </InputGlyph>
       <CommandPrimitive.Input
         data-slot="command-input"
+        data-size="md"
+        data-variant="plain"
         className={cn(
-          "flex h-full w-full bg-transparent text-body outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          inputVariants({ size: "md", variant: "plain", hasIcon: true }),
+          "focus-visible:outline-transparent",
           inputClassName,
         )}
         onKeyDown={(event) => {
@@ -87,7 +91,9 @@ function CommandInput({
         // which the list would take instead.
         <div
           data-slot="command-input-trailing"
-          className="flex shrink-0 items-center gap-2"
+          // Sits at the row's own inset: the field pads itself, so the trailing
+          // slot has to take the same start-group step on its outer side.
+          className="mr-[var(--control-px-start-md)] flex shrink-0 items-center gap-2"
           onKeyDown={stopEnterPropagation}
         >
           {children}

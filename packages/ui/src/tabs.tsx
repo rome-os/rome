@@ -50,7 +50,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
         // `docs/ui/component-roles.md` rather than passed off as a fit. The
         // glyph follows that same judgement to the same step, so the trigger
         // does not pad at `sm` while sizing its icon at `md`.
-        "relative inline-flex h-[calc(100%-1px)] items-center justify-center gap-2 rounded-8 border border-transparent bg-transparent px-[var(--control-px-center-sm)] py-1 text-ui whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative inline-flex h-[calc(100%-1px)] items-center justify-center gap-2 rounded-8 border border-transparent bg-transparent px-[var(--control-px-center-sm)] py-1 text-ui whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         "data-active:bg-transparent data-active:text-foreground",
         // The underline itself: a 2px foreground border that fades in on the
         // active trigger — below it when horizontal, beside it when vertical.

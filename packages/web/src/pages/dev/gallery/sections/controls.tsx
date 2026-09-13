@@ -71,7 +71,7 @@ export function ControlsSection() {
 
         <Specimen
           label="Button — sizes"
-          note="sm / md / lg are the 28 / 36 / 44px scale steps, and mean the same height on every control. xs sits deliberately below the scale, for dense toolbars."
+          note="sm / md / lg are the 28 / 32 / 44px scale steps, and mean the same height on every control. xs sits deliberately below the scale, for dense toolbars."
         >
           <Row className="items-end">
             {BUTTON_SIZES.map((size) => (
@@ -84,7 +84,7 @@ export function ControlsSection() {
 
         <Specimen
           label="Button — alignment"
-          note="`align` picks the padding group: a centred label reads --control-px-center-*, a label on the start edge reads --control-px-start-*. The two agree at md and lg and diverge at sm, so the sm column is where the difference shows. Each button is w-56 so the alignment, not the label, sets the box."
+          note="`align` picks the padding group: a centred label reads --control-px-center-*, a label on the start edge reads --control-px-start-*. The two agree at sm and the centre group sits wider at md and lg, so the md column is where the difference shows. Each button is w-56 so the alignment, not the label, sets the box."
         >
           <Row className="items-end">
             {(["sm", "md"] as const).map((size) => (
@@ -180,7 +180,7 @@ export function ControlsSection() {
             <Item label="sm — 28px">
               <IconButton size="sm" label="Search" icon={<Search />} />
             </Item>
-            <Item label="md — 36px">
+            <Item label="md — 32px">
               <IconButton size="md" label="Search" icon={<Search />} />
             </Item>
             <Item label="lg — 44px">
@@ -235,7 +235,7 @@ export function ControlsSection() {
       </Component>
 
       <Component id="input" name="Input" source="@rome-os/ui/input">
-        <Specimen label="Input" note="36px tall at md, 12px inner padding, 14px type.">
+        <Specimen label="Input" note="32px tall at md, 12px inner padding, 14px type.">
           <div className="grid max-w-xl gap-3">
             <Input placeholder="Search title, app, agent, or ID" />
             <Input defaultValue="A filled field" />
@@ -247,7 +247,7 @@ export function ControlsSection() {
 
         <Specimen
           label="Input — sizes"
-          note="sm and md are the whole shared vocabulary: the same 28 / 36px steps a Button or Select of the same name takes, so a mixed row needs no adjustment. There is no field at 44px — that step serves standalone calls to action, which no field joins."
+          note="sm and md are the whole shared vocabulary: the same 28 / 32px steps a Button or Select of the same name takes, so a mixed row needs no adjustment. There is no field at 44px — that step serves standalone calls to action, which no field joins."
         >
           <div className="grid max-w-xl gap-3">
             {(["sm", "md"] as const).map((size) => (
@@ -282,6 +282,18 @@ export function ControlsSection() {
             ))}
           </div>
         </Specimen>
+
+        <Specimen
+          label="Input — plain"
+          note="A field inside a surface that already frames it: no border, radius, fill or hover of its own, with the surface's edge as the frame. CommandInput is built on it. Focus stays unless the surface holds focus for its whole life, as a command palette does."
+        >
+          <div className="max-w-xl overflow-hidden rounded-12 border border-border bg-popover">
+            <div className="border-b border-border">
+              <Input variant="plain" icon={<Search aria-hidden />} placeholder="Search apps" />
+            </div>
+            <p className="px-3 py-2 text-ui text-muted-foreground">Results would list here.</p>
+          </div>
+        </Specimen>
       </Component>
 
       <Component id="textarea" name="Textarea" source="@rome-os/ui/textarea">
@@ -297,7 +309,7 @@ export function ControlsSection() {
       <Component id="select" name="Select" source="ui/select.tsx">
         <Specimen label="Select" note="Shares its height and radius with Button and Input.">
           <Row className="items-end">
-            <Item label="default (36px)">
+            <Item label="default (32px)">
               <Select value={model} onValueChange={setModel}>
                 <SelectTrigger className="w-48" aria-label="Model">
                   <SelectValue />

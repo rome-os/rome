@@ -192,7 +192,7 @@ export function DirectoryRow({
           onClick={onToggleSelect}
           aria-pressed={selected}
           aria-label={t("actions.select", { name: row.displayName })}
-          className="rounded-full outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
+          className="rounded-full outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
         >
           <Avatar name={row.displayName} />
         </button>

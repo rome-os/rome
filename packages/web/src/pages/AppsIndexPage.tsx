@@ -231,7 +231,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="flex select-none flex-col items-center rounded-12 p-3 transition-colors hover:bg-surface-muted focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+      className="flex select-none flex-col items-center rounded-12 p-3 transition-colors hover:bg-surface-muted outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       <span
         aria-hidden

@@ -193,12 +193,12 @@ function isEntryActive(pathname: string, href: string): boolean {
 }
 
 const LINK_CLASS =
-  "rome-sidebar-link group flex h-8 w-full items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring";
+  "rome-sidebar-link group flex h-8 w-full items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 // The rail counterpart of LINK_CLASS: a square tile whose tooltip carries the
 // label. `relative` anchors the status dots that the wide rows render inline.
 const RAIL_LINK_CLASS =
-  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-8 border border-transparent text-foreground transition outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring";
+  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-8 border border-transparent text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 const RAIL_ACTIVE_CLASS = "bg-surface shadow-1 dark:bg-surface-hover";
 const RAIL_IDLE_CLASS = "hover:bg-surface-hover dark:hover:bg-surface";

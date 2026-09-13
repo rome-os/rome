@@ -16,14 +16,14 @@ A text run occupies its line box, not its font size. The box is the font size ti
 | UI Item | 14px | 20px |
 | Section | 15px | 20px |
 | Body | 16px | 20px |
-| Title | 20px | 24px |
+| Title | 18px | 24px |
 | Display | 30px | 36px |
 
 A component occupies its declared height.
 
 | Component | Steps |
 |---|---|
-| Control, inline | 28 (`sm`), 36 (`md`). Button family also 24 (`xs`), and 44 (`lg`) on its square members only |
+| Control, inline | 28 (`sm`), 32 (`md`). Button family also 24 (`xs`), and 44 (`lg`) on its square members only |
 | Badge | 22 |
 | Avatar | 24, 32, 40 |
 | Icon glyph | 14, 16, 20, 24 |
@@ -48,9 +48,9 @@ Past 1.0 the empty space outweighs the text it frames, and the component reads a
 |---|---|---|---|---|
 | Control `xs` + UI Item | 24 | 20 | 4 | 0.20 |
 | Control `sm` + UI Item | 28 | 20 | 8 | 0.40 |
-| Control `md` + UI Item | 36 | 20 | 16 | 0.80 |
+| Control `md` + UI Item | 32 | 20 | 12 | 0.60 |
 | Badge + Badge | 22 | 16 | 6 | 0.38 |
-| Control `md` + Title | 36 | 24 | 12 | 0.50 |
+| Control `md` + Title | 32 | 24 | 8 | 0.33 |
 
 A pairing under a 4px floor fails from the other side. The text then touches the box, and a descender clips against the border. `[mech]`
 
@@ -60,8 +60,8 @@ A control that renders no text has no pairing, so the bound does not reach it. A
 
 The bound decides which steps may carry a label at all. A member holds one typography role, so a taller box spends the whole gain on air, and past a ratio of 1.0 the control reads as inflated rather than loud. Height is not one of the four sources of hierarchy [typography.md](semantic-token/typography.md) names. `[llm]`
 
-> Prefer: a call to action at 36px leading through full width, primary ink, and its position in a dialog footer.
-> Over: the same button at 44px, which holds the same 14px text in the same 20px line box and spends the extra 8px on air, at a ratio of 1.20.
+> Prefer: a call to action at 32px leading through full width, primary ink, and its position in a dialog footer.
+> Over: the same button at 44px, which holds the same 14px text in the same 20px line box and spends the extra 12px on air, at a ratio of 1.20.
 
 The roster is what caps it. Escaping the bound at 44px needs a 24px line box, and the line-height formula puts every font size under 17px in a 20px box — so no role below Title moves the ratio at all. Title on a button is a heading on a control, which its usage statement rules out.
 
@@ -103,7 +103,7 @@ Vertical rhythm needs no pairing table. Every line box and every control height 
 
 ## Examples
 
-- Positive: a `text-ui` label, a 36px `Select`, and a 16px trailing icon in one row under `items-center` and `gap-2`. The row is 36px because the `Select` is. Moving the row to `sm` moves the label and icon with it, since neither carries a size of its own.
+- Positive: a `text-ui` label, a 32px `Select`, and a 16px trailing icon in one row under `items-center` and `gap-2`. The row is 32px because the `Select` is. Moving the row to `sm` moves the label and icon with it, since neither carries a size of its own.
 - Positive: an avatar at 24px, a `text-body` name, and a `text-aux` timestamp. The row is 24px, and the timestamp reads as annotation through ink rather than through a second row.
 - Negative: a `text-title` heading given a 28px `sm` button beside it. The heading's 24px box leaves the button 4px of visual lead, so the button reads as an afterthought at the size a title-led row calls for `md`.
 - Negative: a `text-aux` run raised to `text-ui` so it matches the button beside it. The row height does not change, because the button already set it. The only effect is one more thing at reading weight.

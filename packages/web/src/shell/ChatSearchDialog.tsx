@@ -344,7 +344,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
           value={query}
           onValueChange={setQuery}
           placeholder={t("recentChats.searchPlaceholder")}
-          className="h-14 text-body"
+          className="h-14"
+          inputClassName="text-body"
         >
           {query ? (
             <IconButton

@@ -66,7 +66,7 @@ export function AppActionsFab({ appId }: { appId: string }) {
   const triggerClass = cn(
     "fixed bottom-[max(var(--rome-safe-area-bottom),1rem)] right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-surface shadow-4 ring-1 ring-border",
     "opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-    "focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring",
+    "outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
     "pointer-coarse:h-12 pointer-coarse:w-12",
   );
   const triggerIcon = <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />;

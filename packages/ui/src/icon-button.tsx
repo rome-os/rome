@@ -87,7 +87,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         // has to: the caller's class lands on the `<svg>` while this rule lives
         // on the button, and tailwind-merge reconciles one element at a time,
         // so it never sees the collision.
-        "inline-flex shrink-0 items-center justify-center rounded-8 border border-transparent text-ui text-foreground transition hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "inline-flex shrink-0 items-center justify-center rounded-8 border border-transparent text-ui text-foreground transition hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         sizeClasses[size],
         className,
       )}

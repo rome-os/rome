@@ -142,10 +142,10 @@
   --popover-foreground: var(--surface-foreground);
 
   --control-h-sm: var(--rome-size-28);
-  --control-h-md: var(--rome-size-36);
+  --control-h-md: var(--rome-size-32);
   --control-h-lg: var(--rome-size-44);
 
-  --control-gap: var(--rome-space-2);
+  --control-gap: 6px;
   --control-gap-sm: var(--control-gap);
   --control-gap-md: var(--control-gap);
   --control-gap-lg: var(--control-gap);
@@ -158,9 +158,9 @@
   --control-px-start-md: 12px;
   --control-px-start-lg: 16px;
 
-  --control-px-center-sm: 8px;
-  --control-px-center-md: 12px;
-  --control-px-center-lg: 16px;
+  --control-px-center-sm: 10px;
+  --control-px-center-md: 14px;
+  --control-px-center-lg: 18px;
 
   /* Compatibility aliases for app artifacts built against the field names. */
   --field-px-sm: var(--control-px-start-sm);
@@ -223,9 +223,9 @@
    letter spacing are held directly, having too few distinct values across the
    roster to earn a scale.
 
-   Section and Badge carry the roster's only non-400 weight. A CJK system
-   fallback ships no 500 face, so CSS weight matching resolves both back to
-   Regular there and the emphasis is Latin-only. Hierarchy on a bilingual
+   Title, Section and Badge carry 500; every other role is 400. A CJK system
+   fallback ships no 500 face, so CSS weight matching resolves all three back
+   to Regular there and the emphasis is Latin-only. Hierarchy on a bilingual
    surface must also come from size, ink, position, or container geometry.
 
    This block is not `inline`: Tailwind must emit the variables on `:root,
@@ -243,10 +243,10 @@
   --text-display--letter-spacing: 0;
   --text-display--font-weight: 400;
 
-  --text-title: var(--rome-font-size-20);
-  --text-title--line-height: var(--rome-line-height-120);
+  --text-title: var(--rome-font-size-18);
+  --text-title--line-height: var(--rome-line-height-133);
   --text-title--letter-spacing: 0;
-  --text-title--font-weight: 400;
+  --text-title--font-weight: 500;
 
   --text-section: var(--rome-font-size-15);
   --text-section--line-height: var(--rome-line-height-133);
@@ -573,14 +573,15 @@
    Button has no `lg` — every step carries one typography role, so a taller box
    around one line of text buys air rather than emphasis.
 
-     --control-h-{sm,md,lg}    28 / 36 / 44px   explicit control height
-     --control-gap                        8px   icon/label gap, every size
+     --control-h-{sm,md,lg}    28 / 32 / 44px   explicit control height
+     --control-gap                        6px   glyph gap, every size: to its
+                                                label, and to a centred edge
      --control-r-{sm,md,lg}     8 / 10 / 12px   corner radius
      --control-px-start-{sm,md,lg}
                                10 / 12 / 16px   horizontal padding for content
                                                 that starts at an alignment edge
      --control-px-center-{sm,md,lg}
-                                8 / 12 / 16px   horizontal padding for centred
+                              10 / 14 / 18px   horizontal padding for centred
                                                 content
      --badge-{h,px,gap}        22 / 9 / 6px      chips sit below the scale
 
@@ -589,8 +590,10 @@
    SelectTrigger, CommandInput and a start-aligned Button take `start`, the
    inset every control stacked in one column lines up on. A centred Button
    label, a SegmentedControl segment and a TabsTrigger take `center`, which has
-   no such edge to hold and sits tighter at `sm`. Both groups set symmetric
-   padding — the words name the content's alignment, not a side.
+   no such edge to hold and so is set by the box's own proportion: the inset
+   is wider than the air above and below the line box at every step, so a
+   label reads as sitting in a button rather than a square tile. Both groups
+   set symmetric padding — the words name the content's alignment, not a side.
 
    Components read the tokens in bracket form — `h-[var(--control-h-md)]`,
    `px-[var(--control-px-start-md)]` — never Tailwind v4's parenthesis shorthand:

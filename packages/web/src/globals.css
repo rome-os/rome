@@ -391,6 +391,19 @@
     scrollbar-gutter: stable;
   }
 
+  /* Radix overlays lock document scroll through react-remove-scroll, which
+     hides the body's overflow and adds the scrollbar's width back as a body
+     margin so content does not widen when the track disappears. With the
+     gutter reserved above the track never disappears, so that margin is pure
+     shift: every card narrows by the scrollbar's width while a Select, Dialog,
+     or menu is open and snaps back on close. Cancel it; the gutter already
+     holds the width. Both declarations are `!important`, and this one wins by
+     sitting in a layer: layered important declarations beat unlayered ones,
+     and the library injects its rule unlayered. */
+  body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+
   /* Default routes use normal document flow and document scrolling. */
   body {
     min-height: 100dvh;

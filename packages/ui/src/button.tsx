@@ -26,7 +26,7 @@ const SIZE_ICON_MD = "size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
 // it and the reservation shows up as a canvas-colored ring on every filled
 // variant.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-all outline-none select-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-all outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // `outline` and `ghost` name their resting foreground, which the page
@@ -37,15 +37,22 @@ const buttonVariants = cva(
       // `text-muted-foreground`, which lands in a different tailwind-merge group
       // than the prefixed ones, so the promotion still fires.
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // The primary fill is the one variant whose label competes with its
+        // own background rather than with the page, so it carries the roster's
+        // 500 step on top of the UI role. Every other variant stays at 400.
+        default: "bg-primary text-primary-foreground font-medium hover:bg-primary/80",
+        // The one variant that paints its border, so its focus edge sits on
+        // that border rather than outside it; the filled and ghost variants
+        // keep the ring outside, where it separates from the canvas instead
+        // of vanishing into their fill.
         outline:
-          "border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "-outline-offset-1 border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:outline-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:outline-destructive/50 dark:bg-destructive/20 dark:hover:bg-destructive/30",
         link: "text-primary underline-offset-4 hover:underline",
       },
       // Height, radius, gap and padding all come from the --control-* scale in
@@ -108,6 +115,21 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
+      // Optical correction on the shared steps: a glyph at the edge of a
+      // centred label sits one `--control-gap` from that edge, the same
+      // distance it sits from the label, so the air on both sides of it reads
+      // as equal. The glyph names its side with `data-icon="inline-start"` or
+      // `"inline-end"`; the DOM cannot tell them apart on its own, since a
+      // bare-text label leaves a lone glyph both first and last element child.
+      // Only the labelled steps with the centre group take it — the square
+      // members hold no padding, `xs` reads no token, and a start-aligned
+      // glyph sits on the alignment edge and keeps the full inset.
+      {
+        align: "center",
+        size: ["sm", "md", "default"],
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-gap)] has-data-[icon=inline-end]:pr-[var(--control-gap)]",
+      },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
       { align: "between", size: "sm", className: "px-[var(--control-px-start-sm)]" },

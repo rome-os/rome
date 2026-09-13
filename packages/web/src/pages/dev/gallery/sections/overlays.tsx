@@ -58,7 +58,7 @@ export function OverlaysSection() {
               Open dialog
             </Button>
           </Row>
-          <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
+          <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} size="sm">
             <DialogHeader>
               <DialogTitle>Uninstall the bookkeeper?</DialogTitle>
               <DialogDescription>
@@ -66,7 +66,7 @@ export function OverlaysSection() {
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <p className="text-ui text-muted-foreground">
+              <p className="text-body text-foreground">
                 Twelve routines reference this app. They'll stop running until it's back.
               </p>
             </DialogBody>
