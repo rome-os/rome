@@ -100,7 +100,7 @@ describe("CodexAppServerManager", () => {
     "http://127.0.0.1:9222",
     "http://chrome:9333",
     undefined,
-  ])("passes through the OpenCLI endpoint (%s) and filters unrelated env vars", async (endpoint) => {
+  ])("keeps browser transport out of the shared agent environment (%s)", async (endpoint) => {
     rs.stubEnv("OPENCLI_CDP_ENDPOINT", endpoint as string);
     rs.stubEnv("ROME_TEST_UNLISTED_ENV", "not-for-child-processes");
     const clients: FakeConnection[] = [];
@@ -117,11 +117,7 @@ describe("CodexAppServerManager", () => {
 
       expect(clients).toHaveLength(1);
       const env = clients[0].options.env;
-      if (endpoint === undefined) {
-        expect(env).not.toHaveProperty("OPENCLI_CDP_ENDPOINT");
-      } else {
-        expect(env.OPENCLI_CDP_ENDPOINT).toBe(endpoint);
-      }
+      expect(env).not.toHaveProperty("OPENCLI_CDP_ENDPOINT");
       expect(env).not.toHaveProperty("ROME_TEST_UNLISTED_ENV");
     } finally {
       manager.close();

@@ -41,11 +41,22 @@ directory is its own standalone plugin rather than one plugin holding `<site>/<c
 
 ## Install points (all idempotent)
 
-Both container images set `OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222`, so OpenCLI uses
-Rome's browser without a shell alias or an extra flag. Codex passes this variable to
-agent subprocesses. Set `OPENCLI_CDP_ENDPOINT` in the container environment to use another
-browser, including deployments with a custom Chrome host or port. Recreate the container
-after changing the image or its environment. An explicit `--cdp-endpoint` overrides the variable.
+OpenCLI uses the Browser Bridge extension by default. The container starts the local
+OpenCLI daemon, and the browser image installs the extension through a managed policy.
+The extension download requires access to the Chrome Web Store on first startup.
+The dev browser sidecar shares the Rome container's network namespace and reaches the same daemon.
+
+`opencli profile list` lists connected browsers. Pass `--profile <name-or-id>` to choose
+one explicitly. An unavailable explicit profile fails instead of selecting another browser.
+For manual CDP debugging, pass `--cdp-endpoint http://127.0.0.1:9222`.
+Rome does not inject a CDP endpoint into agent processes.
+
+Settings > Advanced > Computer Use lists OpenCLI browser connections and their last seen times.
+Rome checks the daemon every five seconds and retains observed connections across backend restarts.
+Last seen records when Rome last observed a live connection. OpenCLI detects lost browser heartbeats,
+so disconnection detection includes its heartbeat timeout and the next Rome check.
+An unreachable daemon makes browser status unknown and preserves the last seen time.
+Remote browsers can reach the daemon through a private SSH tunnel.
 
 - **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the

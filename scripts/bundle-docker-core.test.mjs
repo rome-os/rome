@@ -13,21 +13,21 @@ const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
 
 for (const dockerfile of ["Dockerfile", "infra/rome/Dockerfile"]) {
-  test(`${dockerfile} sets the OpenCLI endpoint for processes that skip shell startup`, async () => {
+  test(`${dockerfile} leaves OpenCLI on its browser extension transport`, async () => {
     const source = await readFile(join(root, dockerfile), "utf8");
-    assert.match(source, /^ENV OPENCLI_CDP_ENDPOINT=http:\/\/127\.0\.0\.1:9222$/m);
+    assert.doesNotMatch(source, /^ENV OPENCLI_CDP_ENDPOINT=/m);
   });
 }
 
 for (const endpoint of [undefined, "http://chrome:9333"]) {
-  test(`the OpenCLI shell default preserves overrides (${endpoint ?? "unset"})`, () => {
+  test(`shell startup does not inject a browser endpoint (${endpoint ?? "unset"})`, () => {
     const output = execFileSync(
       "bash",
       [
         "--noprofile",
         "--norc",
         "-c",
-        'source "$1"; if alias opencli >/dev/null 2>&1; then exit 1; fi; exec "$2" -e "process.stdout.write(process.env.OPENCLI_CDP_ENDPOINT)"',
+        'source "$1"; if alias opencli >/dev/null 2>&1; then exit 1; fi; exec "$2" -e "process.stdout.write(process.env.OPENCLI_CDP_ENDPOINT ?? String())"',
         "opencli-env-test",
         join(root, "scripts/docker/rome-shell-aliases.sh"),
         process.execPath,
@@ -40,7 +40,7 @@ for (const endpoint of [undefined, "http://chrome:9333"]) {
         encoding: "utf8",
       },
     );
-    assert.equal(output, endpoint ?? "http://127.0.0.1:9222");
+    assert.equal(output, endpoint ?? "");
   });
 }
 

@@ -7,7 +7,7 @@ test("navigates afresh and waits for complete stable results without clicking an
   const d = fixture();
   const p = mockPage([{ ...d, ready: false, loading: true, rows: [] }, d, d]);
   assert.equal((await loadSouthwestFlights(p, searchFor(), { now: p.now })).rows.length, 4);
-  assert.equal(p.urls[0], "about:blank");
+  assert.equal(p.urls[0], "https://www.southwest.com/");
   assert.match(p.urls[1], /fareType=POINTS/);
   assert.equal(p.now(), 2000);
 });

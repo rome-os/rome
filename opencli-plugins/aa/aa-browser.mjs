@@ -6,7 +6,7 @@ export class AaLoginRequiredError extends Error {}
 /** Reads a fresh search without selecting a fare, accessing auth storage, or creating a booking. */
 export async function loadAaFlights(page, search, { now = Date.now } = {}) {
   const deadline = now() + search.timeout * 1000;
-  await page.goto("about:blank");
+  await page.goto(new URL("/", buildSearchUrl(search)).href);
   await page.goto(buildSearchUrl(search));
   let previous = "";
   let expected = null;

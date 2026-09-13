@@ -29,7 +29,6 @@ export const CODEX_ENV_ALLOWLIST = [
   "LANG",
   "LC_ALL",
   "TERM",
-  "OPENCLI_CDP_ENDPOINT",
 ] as const;
 
 export function stripLegacyReasoningSuffix(model: string): string {

@@ -45,7 +45,7 @@ test("waits for loading, expands all flights, and requires stable complete resul
   const b = browser([pending, partial, data, data]);
   assert.deepEqual(await loadUnitedFlights(b.page, search, b.options), data);
   assert.deepEqual(b.calls.slice(0, 2), [
-    ["goto", "about:blank"],
+    ["goto", new URL("/", buildSearchUrl(search)).href],
     ["goto", buildSearchUrl(search)],
   ]);
   assert.equal(b.calls.filter((c) => c[1] === "expandAllFlights").length, 1);

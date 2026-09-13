@@ -13,7 +13,10 @@ test("navigates fresh and waits for a stable complete result set", async () => {
     d,
   ]);
   assert.deepEqual(await loadAaFlights(p, searchFor(), { now: p.now }), d);
-  assert.deepEqual(p.urls, ["about:blank", buildSearchUrl(searchFor())]);
+  assert.deepEqual(p.urls, [
+    new URL("/", buildSearchUrl(searchFor())).href,
+    buildSearchUrl(searchFor()),
+  ]);
   assert.ok(p.now() >= 4000);
 });
 for (const [key, pattern] of [

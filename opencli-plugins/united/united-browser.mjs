@@ -18,7 +18,7 @@ export function expandAllFlights() {
 /** Only navigates and expands search results. Never chooses a fare or reads account state. */
 export async function loadUnitedFlights(page, search, { now = Date.now } = {}) {
   // A fresh document prevents the SPA from reusing the preceding route or award mode.
-  await page.goto("about:blank");
+  await page.goto(new URL("/", buildSearchUrl(search)).href);
   await page.goto(buildSearchUrl(search));
   const deadline = now() + search.timeout * 1000;
   let previous = "";

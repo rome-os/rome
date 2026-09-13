@@ -6,7 +6,7 @@ export class SouthwestLoginRequiredError extends Error {}
 /** Reads a fresh search. Never clicks a fare, changes account state, or creates a booking. */
 export async function loadSouthwestFlights(page, search, { now = Date.now } = {}) {
   const deadline = now() + search.timeout * 1000;
-  await page.goto("about:blank");
+  await page.goto(new URL("/", buildSearchUrl(search)).href);
   await page.goto(buildSearchUrl(search));
   let previous = "";
   let expected = null;

@@ -180,6 +180,7 @@ services:
       - bash
       - -c
       - |
+        bash /workspace/scripts/docker/rome-start-opencli.sh
         pnpm --filter @rome/core dev &
         backend_pid=$!
         pnpm --filter rome-web dev --host 0.0.0.0 &

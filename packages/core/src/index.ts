@@ -60,6 +60,7 @@ import { channelList } from "./channels/channel-list.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
+import { ComputerUseService } from "./computer-use/service.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -249,6 +250,7 @@ async function main() {
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
+  const computerUse = new ComputerUseService(settingsRepo);
 
   // Instance token: the DB is the single runtime read path. A cloud VM
   // gets ROME_INSTANCE_TOKEN injected into its env — seed it into the DB so the
@@ -1210,6 +1212,7 @@ async function main() {
   // boot's — the dashboard reads the result via /api/build-info. The stored
   // version is committed after "Rome started" below.
   const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
+  computerUse.start();
 
   // Wire the process-global feature-flag backend (Statsig) when a server secret
   // is configured, then apply any FEATURE_GATE_* env overrides on top, then
@@ -1276,6 +1279,7 @@ async function main() {
       ogImageStore,
       db,
       settingsRepo,
+      computerUse,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
@@ -1535,6 +1539,7 @@ async function main() {
     }
 
     stopInstanceHeartbeat();
+    await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
 
     capabilityDiscovery.stop();

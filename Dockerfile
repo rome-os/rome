@@ -311,6 +311,8 @@ RUN find /opt/rome \
 
 # Copy Caddyfile for public reverse proxy
 COPY Caddyfile /etc/caddy/Caddyfile
+COPY infra/chrome/opencli-policy.json /etc/opt/chrome/policies/managed/rome-opencli.json
+COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencli.json
 
 # Copy entrypoint
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -342,7 +344,6 @@ RUN find /opt/rome/node_modules /usr/local/lib/node_modules \
 # backend runs without one.
 RUN install -m 0755 /opt/rome/scripts/docker/rome-open-in-server-browser.sh /usr/local/bin/rome-open-in-server-browser
 ENV BROWSER=/usr/local/bin/rome-open-in-server-browser
-ENV OPENCLI_CDP_ENDPOINT=http://127.0.0.1:9222
 
 RUN test ! -e /opt/rome/packages/desktop && \
     test ! -e /opt/rome/packages/pantheon && \

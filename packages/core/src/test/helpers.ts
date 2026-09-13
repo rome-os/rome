@@ -645,6 +645,13 @@ export async function buildTestDeps(
     publicAccessState,
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
+    computerUse: {
+      getStatus: async () => ({
+        daemon: { status: "unavailable", version: null },
+        checkedAt: new Date().toISOString(),
+        connections: [],
+      }),
+    },
     favorService: unavailableFavorService,
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.

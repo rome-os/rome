@@ -445,6 +445,9 @@ fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
 
 CHROME_WRAPPER_PID=""
+if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
+  echo "Warning: OpenCLI could not start. Browser connections are unavailable."
+fi
 if [ "${ROME_ENABLE_CHROME:-1}" != "0" ]; then
   write_chrome_clipboard_policy
   CHROME_CDP_PORT="${ROME_CHROME_CDP_PORT:-9222}"

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
+import { ComputerUseSection } from "@/components/computer-use-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -1020,6 +1021,9 @@ function AdvancedSection({
       </div>
       <div className="border-b border-border pb-8">
         <SystemDiagnosisSection />
+      </div>
+      <div className="border-b border-border pb-8">
+        <ComputerUseSection />
       </div>
       <div className="border-b border-border pb-8">
         <PresentationModeSection />
