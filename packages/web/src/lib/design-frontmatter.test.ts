@@ -179,7 +179,7 @@ describe("DESIGN.md frontmatter", () => {
     }
   });
 
-  it("records the size, weight and line height styles.css gives each role", () => {
+  it("records the size, weight, line height and letter spacing styles.css gives each role", () => {
     expect(Object.keys(frontmatter.typography).sort()).toEqual(
       [...SIZED_ROLES, "serif", "mono"].sort(),
     );
@@ -191,6 +191,10 @@ describe("DESIGN.md frontmatter", () => {
         fontSize: declared.fontSize,
         fontWeight: declared.fontWeight,
         lineHeight: declared.lineHeight,
+        // `styles.css` owns `--text-<role>--letter-spacing` too, and the
+        // frontmatter copies it. Left out of the comparison, editing either
+        // copy leaves the two inconsistent while this gate stays green.
+        letterSpacing: String(declared.letterSpacing),
       }).toEqual({
         role,
         fontSize: deref(properties, properties.get(`--text-${role}`) ?? ""),
@@ -198,6 +202,7 @@ describe("DESIGN.md frontmatter", () => {
         lineHeight: round4(
           lineHeightRatio(deref(properties, properties.get(`--text-${role}--line-height`) ?? "")),
         ),
+        letterSpacing: deref(properties, properties.get(`--text-${role}--letter-spacing`) ?? ""),
       });
     }
   });
