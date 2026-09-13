@@ -81,7 +81,6 @@
     "storybook": "10.6.0",
     "storybook-react-rsbuild": "3.4.2",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.9.3",
-    "yaml": "2.8.2"
+    "typescript": "^5.9.3"
   }
 }

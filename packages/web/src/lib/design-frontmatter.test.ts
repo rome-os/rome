@@ -16,7 +16,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
-import { parse as parseYaml } from "yaml";
 import { getThemeDefinitions } from "./theme";
 import type { ThemeDefinition } from "./themes";
 
@@ -32,11 +31,75 @@ interface Frontmatter {
   spacing: Record<string, string>;
 }
 
+/**
+ * The frontmatter's shapes, and only those: a `key:` opening a nested block,
+ * `key: "string"`, and `key: bare` (a number, or the two prose values at the
+ * top). Two-space indentation, `#` comments, blank lines.
+ *
+ * Deliberately NOT a YAML dependency. `packages/web` has none, and adding one
+ * moved the lockfile whichever version was pinned — `^2.8.2` carried both
+ * `@opentelemetry/configuration` snapshots up, `2.8.2` carried two `metro`
+ * snapshots down — which is a production dependency graph moved by a
+ * test-only change either way.
+ *
+ * It REFUSES what it does not handle rather than guessing: a list item, an
+ * anchor, a multi-line scalar, or an indent that is not a multiple of two all
+ * throw, naming the line. A parser that silently mis-read this file would make
+ * every equality below pass against the wrong value, which is worse than the
+ * drift this gate exists to catch.
+ */
+function parseFrontmatterBlock(text: string): Record<string, unknown> {
+  const root: Record<string, unknown> = {};
+  const stack: Array<{ indent: number; node: Record<string, unknown> }> = [
+    { indent: -2, node: root },
+  ];
+
+  text.split("\n").forEach((rawLine, index) => {
+    const line = rawLine.replace(/\s+$/, "");
+    if (line === "" || /^\s*#/.test(line)) return;
+
+    const indent = line.length - line.trimStart().length;
+    const where = `DESIGN.md frontmatter line ${index + 1}: ${rawLine}`;
+    if (indent % 2 !== 0) throw new Error(`indent is not a multiple of two — ${where}`);
+
+    const entry = line.trimStart().match(/^("?[\w.-]+"?):(?:\s+(.*))?$/);
+    if (!entry) throw new Error(`not a \`key: value\` line — ${where}`);
+    const key = entry[1].replace(/^"|"$/g, "");
+    const raw = entry[2];
+
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+    const parent = stack[stack.length - 1].node;
+
+    if (raw === undefined) {
+      const child: Record<string, unknown> = {};
+      parent[key] = child;
+      stack.push({ indent, node: child });
+      return;
+    }
+    const quoted = raw.match(/^"(.*)"$/);
+    if (quoted) {
+      parent[key] = quoted[1];
+      return;
+    }
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+      parent[key] = Number(raw);
+      return;
+    }
+    if (/^[A-Za-z][\w .,'-]*$/.test(raw)) {
+      parent[key] = raw;
+      return;
+    }
+    throw new Error(`value is neither a quoted string, a number, nor a bare word — ${where}`);
+  });
+
+  return root;
+}
+
 function designFrontmatter(): Frontmatter {
   const text = read("DESIGN.md");
   const match = text.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!match) throw new Error("DESIGN.md has no YAML frontmatter block");
-  return parseYaml(match[1]) as Frontmatter;
+  if (!match) throw new Error("DESIGN.md has no frontmatter block");
+  return parseFrontmatterBlock(match[1]) as unknown as Frontmatter;
 }
 
 /** `--name: value;` declarations from `styles.css`, last one wins. */
