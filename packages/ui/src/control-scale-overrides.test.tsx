@@ -47,9 +47,8 @@ describe("control scale", () => {
     );
     const cls = screen.getByRole("button", { name: "Save" }).className;
 
-    // The role's glyph trim applies on the shared steps, where there is a
-    // token inset to trim from. `xs` pads from a raw spacing step and stays
-    // symmetric; `data-icon` only marks the glyph, nothing reads it for padding.
+    // The glyph correction applies on the shared steps, which have a token
+    // inset; `xs` pads from a raw spacing step and stays symmetric.
     expect(cls).toContain("px-2");
     expect(cls).not.toContain("has-data-[icon=inline-end]:pr-");
     expect(cls).not.toContain("has-data-[icon=inline-start]:pl-");

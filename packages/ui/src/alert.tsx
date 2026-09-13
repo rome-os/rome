@@ -47,11 +47,9 @@ export const Alert = forwardRef<HTMLDivElement, AlertProps>(function Alert(
   );
 });
 
-// The title lifts to the 600 step on top of the UI role: both rows share a
-// size and line box, and on a tinted variant both share the variant ink, so
-// weight is all that makes the first line read as the headline of the callout.
-// 600 rather than 500 because a CJK system fallback ships a Bold face and no
-// Medium, and a callout's headline has to survive there too.
+// 600 on top of the UI role: both rows share a size and line box, and on a
+// tinted variant the same ink, so weight alone marks the headline. 600 rather
+// than 500 because a CJK system fallback ships a Bold face and no Medium.
 export const AlertTitle = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function AlertTitle({ className, ...rest }, ref) {
     return (

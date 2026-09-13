@@ -143,12 +143,11 @@ export const DialogDescription = forwardRef<
   );
 });
 
-// No rule divides the sections: title, description, body, and actions read as
-// one column, spaced by padding alone. A body that follows a header drops its
-// top padding so the header's bottom padding is the whole gap; a body with no
-// visible header above it, as when the title is `sr-only`, keeps both. The
-// footer takes a wider gap above than the header leaves below, standing in for
-// the rule it no longer draws.
+// No rule divides the sections; padding alone spaces the column. A body after
+// a header drops its top padding so the header's bottom padding is the whole
+// gap; a body with no visible header above it, as when the title is
+// `sr-only`, keeps both. The footer's gap above is wider than the header's gap
+// below, in place of a rule.
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div

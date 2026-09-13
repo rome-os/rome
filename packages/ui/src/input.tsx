@@ -37,10 +37,9 @@ const iconSizeClass = {
 } as const;
 
 const inputVariants = cva(
-  // UI is the field role at every size and every breakpoint, the same role as
-  // the Button and SelectTrigger on the field's row. iOS Safari's focus zoom
-  // below 16px is suppressed by the host's viewport meta, so no size or width
-  // restores Body here.
+  // UI is the field role at every size and breakpoint, the role of the Button
+  // and SelectTrigger on the field's row. The host's viewport meta suppresses
+  // iOS Safari's focus zoom below 16px, so nothing restores Body.
   //
   // The role stays in the base rather than moving onto each size, because
   // `size` admits `null` and cva emits no variant class for it. A null-size
@@ -74,15 +73,11 @@ const inputVariants = cva(
        */
       hasIcon: { true: "", false: "" },
       /**
-       * `outlined` is a field standing on its own: it paints its border, and
-       * hover and focus play on that border. `plain` is a field inside a
-       * surface that already frames it — a command palette's search row, a
-       * panel header — so it paints no border, radius, fill, or hover of its
-       * own and lets the surface's edge be the frame. It keeps its height,
-       * inset, and glyph reserve, and it keeps the focus edge: a caller whose
-       * surface holds focus for its whole life suppresses that itself, and
-       * says why. This is the variant to reach for instead of an outlined
-       * field with its border painted over.
+       * `plain` is a field inside a surface that already frames it — a command
+       * palette's search row, a panel header. It paints no border, radius,
+       * fill, or hover; the surface's edge is the frame. It keeps the step's
+       * height, inset, glyph reserve, and focus edge. A caller whose surface
+       * holds focus for its whole life suppresses the edge itself.
        */
       variant: {
         outlined: "",
@@ -125,10 +120,10 @@ export interface InputProps
 }
 
 /**
- * The leading glyph's seat: absolutely positioned against a `relative` parent
- * that wraps the field, at the size step's inset. Exported so a composite that
- * has to render the `<input>` itself — `CommandInput`, whose input is cmdk's —
- * seats its glyph exactly where `Input` seats one.
+ * The leading glyph's seat, absolutely positioned against a `relative` parent
+ * at the size step's inset. Exported for a composite that renders the
+ * `<input>` itself, such as `CommandInput`, so its glyph sits where `Input`
+ * seats one.
  */
 function InputGlyph({
   size = "md",

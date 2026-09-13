@@ -24,8 +24,8 @@ describe("control typography roles", () => {
     expect(classes).not.toContain("font-medium");
   });
 
-  // The primary fill is the one variant that lifts its label to 500; the role
-  // stays UI so size and line box still match the controls beside it.
+  // The primary fill lifts its label to 500; the role stays UI so the size
+  // and line box match the controls beside it.
   it("lifts only the primary Button label to the 500 step", () => {
     render(
       <>
@@ -49,10 +49,9 @@ describe("control typography roles", () => {
     expect(screen.getByRole("button", { name: "Close" }).classList).toContain("text-ui");
   });
 
-  // A field is a control and reads UI at every step and every viewport width,
-  // the same role as the Button and SelectTrigger beside it. The negative half
-  // matters as much as the positive: a Body role creeping back in would leave
-  // a field two points larger than the row it sits in.
+  // A field is a control and reads UI at every step and width, like the
+  // Button and SelectTrigger beside it. The negative half matters: a Body role
+  // leaves a field two points larger than its row.
   it("uses UI for text fields at every step and viewport width", () => {
     render(
       <>

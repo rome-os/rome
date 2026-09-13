@@ -137,7 +137,7 @@ They are prominence steps. Every `lg` in the tree is a standalone call to action
 
 **Two ladders offer a square icon button at every step, and the overlap is deliberate.** `IconButton`'s steps and `Button`'s `icon-*` variants are value-identical, with the same height and the same radius. Reach for `IconButton` by default, because its required `label` prop makes an icon-only control accessible by construction rather than by reviewer vigilance. Reach for `Button size="icon-sm"` and friends in two cases. The first is a control needing a `Button` variant the icon primitive has no equivalent for, such as `ghost`'s `aria-expanded` paint or `destructive`. The second is a control sitting in a `ButtonGroup`.
 
-**Text inputs use `text-ui` at every width, like every other control.** A field of one size name matches the Button and SelectTrigger beside it in font size as well as height, and a combobox's field matches its options. iOS Safari's focus zoom below 16px is suppressed by the viewport meta in `index.html` (`maximum-scale=1`), so no mobile size exception is needed; do not introduce one.
+**Text inputs use `text-ui` at every width, like every other control.** A field of one size name matches the Button and SelectTrigger beside it in font size as well as height, and a combobox's field matches its options. iOS Safari's focus zoom below 16px is suppressed by the viewport meta in `index.html` (`maximum-scale=1`), so no mobile size exception is needed. Do not introduce one.
 
 Adding a control step works like adding a token. It goes in `packages/ui/src/styles.css` first, then every primitive that needs it reads it. Do not inline a fourth height.
 
@@ -203,7 +203,7 @@ Import sites are unchanged. Edit the source in `packages/ui/src/<name>.tsx`, and
 
 ## Focus and invalid states
 
-Both are one `outline` at `outline-offset: 0`, sitting just outside the control so it separates from the canvas rather than from the control's own fill. Focus is 1px of `ring` at 50% alpha, a hairline that reads as the control lifting rather than as a frame drawn around it; invalid stays 2px of solid `destructive`, so an error is always louder than focus. The control carries the outline at rest too, 1px and transparent with `outline-style: none`, so gaining focus changes only the style and the color: the style switches on at once and the color fades in over the control's own `transition-colors`, instead of the width snapping from the browser's 3px default. Neither is a box-shadow halo, and an outline never affects layout:
+Both are one `outline` at `outline-offset: 0`, sitting just outside the control so it separates from the canvas rather than from the control's own fill. Focus is 1px of `ring` at 50% alpha, a hairline that reads as the control lifting rather than as a frame drawn around it. Invalid stays 2px of solid `destructive`, so an error is always louder than focus. The control carries the outline at rest too, 1px and transparent with `outline-style: none`, so gaining focus changes only the style and the color: the style switches on at once and the color fades in over the control's own `transition-colors`, instead of the width snapping from the browser's 3px default. Neither is a box-shadow halo, and an outline never affects layout:
 
 ```
 outline-1 outline-offset-0 outline-transparent

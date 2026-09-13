@@ -115,9 +115,8 @@ export function EmptyStateTitle({ id, className, ...props }: ComponentProps<"h3"
     <h3
       id={effectiveId}
       data-slot="empty-state-title"
-      // Section, not Title: the panel sits inside a page or card, beside
-      // alerts and list rows, and its heading reads at their scale rather than
-      // as a second page heading.
+      // Section, not Title: the panel sits inside a page or card beside alerts
+      // and rows, and its heading reads at their scale.
       className={cn("text-section text-foreground", className)}
       {...props}
     />

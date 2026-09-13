@@ -49,16 +49,12 @@ function CommandInput({
 }: CommandInputProps) {
   return (
     <div
-      // The row is a `plain` Input inside a header: the field paints no border
-      // or radius of its own, and the row's bottom rule is what reads the
-      // header against the list. The glyph takes the seat `Input` gives one.
-      //
-      // No focus edge, for two reasons that hold independently. The row is a
-      // full-bleed header inside Command's `overflow-hidden`, so an edge is
-      // clipped on three sides; and cmdk holds focus in this input for the
+      // A `plain` Input in a header row; the row's bottom rule reads the
+      // header against the list. No focus edge, for two independent reasons:
+      // the row is a full-bleed header inside Command's `overflow-hidden`,
+      // which clips an edge on three sides, and cmdk holds focus here for the
       // life of the surface, so an edge keyed to it stays lit and marks
-      // nothing. The `plain` variant keeps the edge; this caller turns it off.
-      // Role and divergence: docs/ui/component-roles.md.
+      // nothing. Role and divergence: docs/ui/component-roles.md.
       data-slot="command-input-wrapper"
       className={cn("relative flex items-center border-b border-border", className)}
     >
@@ -91,8 +87,8 @@ function CommandInput({
         // which the list would take instead.
         <div
           data-slot="command-input-trailing"
-          // Sits at the row's own inset: the field pads itself, so the trailing
-          // slot has to take the same start-group step on its outer side.
+          // The field pads itself, so the trailing slot takes the start-group
+          // step on its outer side to sit at the row's inset.
           className="mr-[var(--control-px-start-md)] flex shrink-0 items-center gap-2"
           onKeyDown={stopEnterPropagation}
         >

@@ -33,9 +33,8 @@ describe("Command control geometry", () => {
     const input = screen.getByPlaceholderText("Search…");
     const wrapper = input.closest('[data-slot="command-input-wrapper"]');
 
-    // The field is a `plain` Input: it carries the md height, inset and glyph
-    // reserve, and no radius, border or fill of its own. The wrapper is only
-    // the header row with its bottom rule.
+    // A `plain` Input carries the md height, inset and glyph reserve and no
+    // radius, border or fill; the wrapper is the header row with its rule.
     expect(input.classList).toContain("h-[var(--control-h-md)]");
     expect(input.classList).toContain("px-[var(--control-px-start-md)]");
     expect(input.classList).toContain("rounded-none");
@@ -61,8 +60,8 @@ describe("Command control geometry", () => {
     const input = screen.getByPlaceholderText("Search…");
     const wrapper = input.closest('[data-slot="command-input-wrapper"]');
 
-    // The invalid edge stays as `plain` inherits it — cmdk never marks its
-    // field invalid, so it never fires. Only the focus edge is turned off.
+    // cmdk never marks its field invalid, so the inherited invalid edge never
+    // fires; only the focus edge is asserted absent.
     for (const cls of [...Array.from(wrapper?.classList ?? []), ...Array.from(input.classList)]) {
       expect(cls).not.toContain("outline-ring");
     }

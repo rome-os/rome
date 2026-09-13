@@ -37,14 +37,12 @@ const buttonVariants = cva(
       // `text-muted-foreground`, which lands in a different tailwind-merge group
       // than the prefixed ones, so the promotion still fires.
       variant: {
-        // The primary fill is the one variant whose label competes with its
-        // own background rather than with the page, so it carries the roster's
-        // 500 step on top of the UI role. Every other variant stays at 400.
+        // The label competes with its own fill rather than with the page, so
+        // it carries 500 on top of the UI role.
         default: "bg-primary text-primary-foreground font-medium hover:bg-primary/80",
-        // The one variant that paints its border, so its focus edge sits on
-        // that border rather than outside it; the filled and ghost variants
-        // keep the ring outside, where it separates from the canvas instead
-        // of vanishing into their fill.
+        // Paints its border, so the focus edge sits on that border. The filled
+        // and ghost variants keep the edge outside, where it separates from
+        // the canvas rather than vanishing into the fill.
         outline:
           "-outline-offset-1 border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -115,15 +113,12 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
-      // Optical correction on the shared steps: a glyph at the edge of a
-      // centred label sits one `--control-gap` from that edge, the same
-      // distance it sits from the label, so the air on both sides of it reads
-      // as equal. The glyph names its side with `data-icon="inline-start"` or
-      // `"inline-end"`; the DOM cannot tell them apart on its own, since a
-      // bare-text label leaves a lone glyph both first and last element child.
-      // Only the labelled steps with the centre group take it — the square
-      // members hold no padding, `xs` reads no token, and a start-aligned
-      // glyph sits on the alignment edge and keeps the full inset.
+      // A glyph at the edge of a centred label sits one `--control-gap` from
+      // that edge, the distance it sits from the label. The glyph names its
+      // side with `data-icon`, because a bare-text label leaves a lone glyph
+      // both first and last element child. Square members hold no padding,
+      // `xs` reads no token, and a start-aligned glyph sits on the alignment
+      // edge, so none of those take it.
       {
         align: "center",
         size: ["sm", "md", "default"],

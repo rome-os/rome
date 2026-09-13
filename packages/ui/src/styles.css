@@ -590,10 +590,10 @@
    SelectTrigger, CommandInput and a start-aligned Button take `start`, the
    inset every control stacked in one column lines up on. A centred Button
    label, a SegmentedControl segment and a TabsTrigger take `center`, which has
-   no such edge to hold and so is set by the box's own proportion: the inset
-   is wider than the air above and below the line box at every step, so a
-   label reads as sitting in a button rather than a square tile. Both groups
-   set symmetric padding — the words name the content's alignment, not a side.
+   no such edge to hold: its inset is wider than the air above and below the
+   line box at every step, so a label reads as sitting in a button rather than
+   a square tile. Both groups set symmetric padding — the words name the
+   content's alignment, not a side.
 
    Components read the tokens in bracket form — `h-[var(--control-h-md)]`,
    `px-[var(--control-px-start-md)]` — never Tailwind v4's parenthesis shorthand:

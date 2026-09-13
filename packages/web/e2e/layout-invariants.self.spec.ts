@@ -154,6 +154,49 @@ const SIBLING_CASES: { name: string; html: string; flagged: boolean }[] = [
   },
 ];
 
+/**
+ * A 32px control with a 14px label, so 0.4em is 5.6px and a child over 21px
+ * counts as media. The svg is a glyph in layout and a larger square once
+ * rotated, which is the case the collector measures by layout box.
+ */
+const control = (child: string) =>
+  `<button data-slot="button" style="box-sizing:border-box;display:inline-flex;align-items:center;height:32px;padding:0 14px;font-size:14px">${child} Connect</button>`;
+
+const BREATHING_CASES: { name: string; html: string; flagged: boolean }[] = [
+  {
+    name: "a media child too close to the edge",
+    html: control(`<img alt="" style="display:block;width:24px;height:24px" />`),
+    flagged: true,
+  },
+  {
+    name: "a glyph-sized child",
+    html: control(`<svg style="display:block;width:16px;height:16px"></svg>`),
+    flagged: false,
+  },
+  {
+    name: "a rotated glyph, whose painted box is wider than its layout box",
+    html: control(
+      `<svg style="display:block;width:16px;height:16px;transform:rotate(45deg)"></svg>`,
+    ),
+    flagged: false,
+  },
+];
+
+for (const { name, html, flagged } of BREATHING_CASES) {
+  test(`content-breathing-room ${flagged ? "flags" : "ignores"}: ${name}`, async ({ page }) => {
+    await page.setContent(`<body style="margin:0">${html}</body>`);
+    await page.evaluate(() => document.fonts.ready);
+
+    const all = await page.evaluate(collectButtonViolations);
+    const violations = all.filter((v) => v.invariant === "content-breathing-room");
+    const report = violations.map((v) => `  [${v.invariant}] ${v.element}\n    ${v.detail}`);
+
+    expect(violations.length, `expected ${flagged ? 1 : 0} violation:\n${report.join("\n")}`).toBe(
+      flagged ? 1 : 0,
+    );
+  });
+}
+
 for (const { name, html, flagged } of SIBLING_CASES) {
   test(`sibling-uniformity ${flagged ? "flags" : "ignores"}: ${name}`, async ({ page }) => {
     await page.setContent(`<body style="margin:0">${html}</body>`);
