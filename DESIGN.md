@@ -35,57 +35,53 @@ colors:
   ember-edge: "#fbcda6"
 typography:
   display:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "1.875rem"
     fontWeight: 400
     lineHeight: 1.2
     letterSpacing: "0"
   title:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
   section:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "0.9375rem"
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
   body:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.25
     letterSpacing: "0"
   ui:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.4286
     letterSpacing: "0"
   badge:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "0.8125rem"
     fontWeight: 500
     lineHeight: 1.2308
     letterSpacing: "0"
   aux:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
     fontSize: "0.8125rem"
     fontWeight: 400
     lineHeight: 1.2308
     letterSpacing: "0"
+  # Family-only entries. `font-serif` and `font-mono` compose with whichever
+  # role the text already carries and define no size of their own.
   serif:
     fontFamily: "Petrona, Cormorant Garamond, Times New Roman, serif"
-    fontSize: "1.875rem"
-    fontWeight: 400
-    lineHeight: 1.2
   mono:
-    fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace"
-    fontSize: "0.8125rem"
-    fontWeight: 400
-    lineHeight: 1.2308
+    fontFamily: "IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace"
 rounded:
   "4": "4px"
   "8": "8px"
@@ -119,9 +115,8 @@ components:
     rounded: "{rounded.control-md}"
     padding: "0 14px"
     height: "32px"
-  button-primary-hover:
-    backgroundColor: "{colors.coral-ember}"
-    textColor: "{colors.paper-white}"
+  # No button-primary-hover entry: the kit's hover is the primary fill at 80%
+  # alpha, which the component schema cannot express. The sidecar carries it.
   button-outline:
     backgroundColor: "{colors.linen-canvas}"
     textColor: "{colors.ink}"
@@ -289,7 +284,7 @@ Visual rejections are the ones the codebase already enforces. There is no market
 - Seven typography roles in one sans, with Petrona reserved for reading surfaces and IBM Plex Mono for code and identifiers.
 - Fixed control scale (28, 32, 44px) with concentric radii (8, 10, 12px).
 - Flat at rest. Shadows mark hover, checked state, and floating layers only.
-- One focus edge everywhere: a solid 2px outline in the ring color, offset 0.
+- One focus edge everywhere: a 1px outline in the ring color at 50% alpha, quieter than the 2px solid invalid edge.
 - Meaning in tinted chips and alerts, never in the canvas.
 
 ## Colors
@@ -300,7 +295,7 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 
 ### Primary
 - **Coral Ember** (`#d86f4c`): The one interactive accent. Fills the primary button, the checked switch, the selected filter chip, and the active tab underline's sibling states. Alpha-modulated for identity: `primary/5` on a selected card, `primary/15` behind a brand badge, `primary/30` for a selection ring. Also the `brand` token under Ember and Ash, so the logo stays on the same hue as the controls.
-- **Deep Ember** (`#c2410c`): Primary hover under Ember. Ash deepens further to `#a63a08`.
+- **Deep Ember** (`#c2410c`): The `primary-hover` token under Ember, and `#a63a08` under Ash. The kit's `Button` does not read it. Its hover is the primary fill at 80% alpha, and the token serves surfaces that want a solid darker step, such as the sign-in callback page.
 - **Ember Flare** (`#e55a22`): The focus ring under Ember and the Ember `info` mark. A slightly hotter step than the accent so a focused control stands apart from a resting primary button.
 
 ### Neutral
@@ -314,7 +309,7 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 - **Subtle Ink** (`#b0a294`): Tertiary text, archived items, and inactive glyphs. Below AA by design. Never carries a fact the reader needs.
 - **Hairline** (`#ece6de`): The default border and the input edge.
 - **Hairline Strong** (`#e0d8cd`): Field hover edge, tile borders, and unselected chip borders.
-- **Scrim**: A 45% ink over the page behind dialogs and sheets. The alpha is baked into the token, so it is used at full opacity.
+- **Scrim**: A 45% ink over the page, the `overlay` token. The alpha is baked in, so it is used at full opacity. Sheets and the mobile backdrop paint it. `Dialog` paints a 35% `foreground` wash with a small backdrop blur instead, a divergence this file records rather than resolves.
 
 ### Status
 - **Signal Red** (`oklch(0.58 0.245 27)`) with Red Tint, Red Ink, and Red Edge: The `destructive` family. The destructive button is a red tint at 10% with red text, not a solid red fill.
@@ -331,7 +326,7 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 
 ## Typography
 
-**Display and Body Font:** Funnel Sans (with ui-sans-serif, system-ui, -apple-system)
+**Display and Body Font:** Funnel Sans (with system sans fallbacks, then PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, and Source Han Sans SC for Simplified Chinese)
 **Reading Font:** Petrona (with Cormorant Garamond, Times New Roman)
 **Mono Font:** IBM Plex Mono (with ui-monospace, SFMono-Regular, Menlo)
 
@@ -353,7 +348,7 @@ The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The r
 ### Named Rules
 **The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-body`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
 
-**The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale.
+**The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale. The CJK system fallbacks ship no 500 face, so the weight on Title, Section, and Badge is Latin-only. Hierarchy on a bilingual surface also comes from ink, position, or container geometry.
 
 ## Layout
 
@@ -369,12 +364,12 @@ Touch targets on compact surfaces reach 44 to 48px through padding or a `::after
 
 Rome is flat at rest. Four depths exist, and tone plus a hairline border tell them apart: the canvas (`background`), a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). In dark mode the stack lightens as it rises, so a recessed region is lighter than the canvas, which is why depth names describe position rather than lightness.
 
-Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` or `shadow-10` with a 10% ink ring. Dialogs and sheets take `shadow-25` over the scrim. Nothing else casts.
+Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else casts.
 
 ### Shadow Vocabulary
 - **Rest lift** (`box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)`): `shadow-1`, on the checked segment of a segmented control and the active chat row.
-- **Hover lift** (`box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)`): `shadow-4`, on card hover, popovers, selects, and toasts.
-- **Menu** (`box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)`): `shadow-10`, on context and dropdown menus.
+- **Hover lift** (`box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)`): `shadow-4`, on card hover, menus, popovers, selects, and toasts.
+- **Submenu** (`box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)`): `shadow-10`, on a submenu that opens beside a menu, and on the dashboard's floating composer chrome.
 - **Modal** (`box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25)`): `shadow-25`, on dialogs and sheets.
 
 Dark mode deepens the ink (alpha 0.4 to 0.7) and widens the blur, because a 10% black cast vanishes on a near-black canvas. The values are per theme in `themes.ts`, and every theme carries all four steps in both halves.
@@ -390,7 +385,7 @@ Corners come from one scale (4, 8, 12, 16px) plus a saturation token for fully r
 
 Controls take their own three steps, 8, 10, and 12px, matched to their heights (28, 32, 44px), and inputs, buttons, and select triggers on the same size share the same corner. A small button inside a button group squares to 8px so the group reads as one object. Cards are 12px, dialogs 16px, menus and popovers 12px, menu items and tiles 8px, tooltips 8px, and inline code 4px. Badges, chips, switches, and avatars are pills.
 
-Borders are 1px hairlines in `border`. A control that can paint a border declares the width unconditionally and lets a variant change only the color, so nothing shifts on hover. Fields show a hairline edge at rest, `border-strong` on hover, and no fill on light themes. The focus edge is a solid 2px outline in `ring` at offset 0, outside the box, on every control. Invalid state uses the same geometry in `destructive`. A translucent halo never appears.
+Borders are 1px hairlines in `border`. A control that can paint a border declares the width unconditionally and lets a variant change only the color, so nothing shifts on hover. Fields show a hairline edge at rest, `border-strong` on hover, and no fill on light themes. The focus edge is a 1px outline in `ring` at 50% alpha. Filled and ghost controls sit it at offset 0, outside the box. Bordered controls (inputs, textareas, select triggers, outline buttons) inset it 1px onto their own border. The control carries the outline at rest, transparent, so focus changes only the style and the color. Invalid is 2px of solid `destructive`, always louder than focus. A translucent halo never appears.
 
 ### Named Rules
 **The Concentric Corner Rule.** A corner nested one spacing step inside another corner is one radius step smaller. No arithmetic, no eyeballing.
@@ -403,7 +398,7 @@ Components are precise and restrained. Each one declares its own typography role
 
 ### Buttons
 - **Shape:** Height 32px, radius 10px, horizontal padding 14px for centered content and 12px for start-aligned content. Small is 28px with 8px radius and 10px padding. Icon-only buttons are square on the same heights, plus a 44px large step with 12px radius.
-- **Primary:** Coral Ember fill, white label at weight 500. Hover fades the fill to 80%. Under Ash the fill is the deeper coral and under Slate it is ink.
+- **Primary:** Coral Ember fill, white label at weight 500. Hover is the same fill at 80% alpha (`hover:bg-primary/80`), not the `primary-hover` token. Under Ash the fill is the deeper coral and under Slate it is ink.
 - **Outline:** Canvas fill, hairline border, ink label. Hover switches to the recessed fill. Dark mode uses a 30% input tint.
 - **Ghost:** No fill or border at rest. Hover takes the recessed fill.
 - **Secondary:** Pressed Linen fill, ink label. Hover mixes 5% ink into the fill.
@@ -423,8 +418,8 @@ Components are precise and restrained. Each one declares its own typography role
 ### Inputs and Fields
 - **Style:** Transparent fill, hairline `input` border, 32px height, 10px radius, 12px start inset, `text-ui`. Placeholder is Muted Ink. A leading glyph sits at the start inset and pushes the text by the glyph width plus 6px.
 - **Hover:** Border steps up to Hairline Strong.
-- **Focus:** Solid 2px ring outline. No glow.
-- **Error:** The same outline in Signal Red.
+- **Focus:** 1px `ring` outline at 50% alpha, inset onto the border. No glow.
+- **Error:** 2px solid Signal Red at offset 0.
 - **Disabled:** 50% opacity, cursor `not-allowed`, and a 50% input tint.
 - **Plain variant:** No border, radius, or fill, for a field already framed by its surface, such as the command palette input.
 - **Textarea:** The same recipe with 8px vertical padding, a 64px minimum, and `field-sizing: content`.
@@ -441,9 +436,9 @@ Components are precise and restrained. Each one declares its own typography role
 - **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path.
 
 ### Floating Layers
-- **Menu and context menu:** Paper White, 12px radius, 4px padding, `shadow-10` for menus and `shadow-4` for popovers and selects, with a 10% ink ring. Items are 8px radius with 4px by 8px padding, and the focused item takes the `accent` fill. Destructive items take a 10% red tint on hover.
+- **Menu and context menu:** Paper White, 12px radius, 4px padding, `shadow-4` with a 10% ink ring, the same as popovers and selects. A submenu takes `shadow-10`. Items are 8px radius with 4px by 8px padding, and the focused item takes the `accent` fill. Destructive items take a 10% red tint on hover.
 - **Tooltip:** Ink fill with canvas-colored `text-aux`, 8px radius, 4px by 12px padding.
-- **Dialog:** Warm Paper, 16px radius, hairline border, `shadow-25`, a 5% black ring, over the scrim. Sheets share the treatment with a left hairline instead of a radius.
+- **Dialog:** Warm Paper, 16px radius, hairline border, `shadow-25`, a 5% black ring, over a 35% `foreground` wash with a small backdrop blur. Sheets share the treatment with a left hairline instead of a radius, over the `overlay` scrim.
 - **Toast:** Paper White, 8px radius, hairline border, 16px padding, `shadow-4`.
 - **Motion:** Floating layers fade and zoom from 95% over 100ms and slide 8px from their trigger side. The mobile sheet rises over 280ms on `cubic-bezier(0.16, 1, 0.3, 1)` with a 200ms backdrop fade. The sidebar slides and resizes over 200ms ease-out. Empty states rise 12px with a blur over 720ms. Every animation is disabled under `prefers-reduced-motion`.
 
