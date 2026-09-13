@@ -137,7 +137,8 @@ export default function AppDetailPage() {
         aria-label={t("detail.manage")}
         className="rounded-12 border border-border bg-surface"
       >
-        <div className="border-b border-border-subtle px-4 py-3">
+        {/* px-3 is `--row-px-md`, so the title starts where the rows below it do. */}
+        <div className="border-b border-border-subtle px-3 py-3">
           <h2 className="text-section text-foreground">{t("detail.manage")}</h2>
         </div>
         <List>
@@ -256,7 +257,7 @@ export default function AppDetailPage() {
     const remixable = canRemixApp(app);
     if (!targetHref && !app.fullHref && !remixable) return null;
     return (
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <>
         {targetHref ? (
           <Button asChild size="sm">
             <Link to={targetHref}>{t("detail.open")}</Link>
@@ -276,7 +277,7 @@ export default function AppDetailPage() {
             {t("installed.remix")}
           </Button>
         ) : null}
-      </div>
+      </>
     );
   };
 

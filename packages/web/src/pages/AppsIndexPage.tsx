@@ -494,7 +494,7 @@ export default function AppsIndexPage() {
     <TooltipProvider delayDuration={300}>
       <PageShell>
         <PageBody>
-          <header className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <PageHeader
               title={t("header.title")}
               description={
@@ -590,7 +590,7 @@ export default function AppsIndexPage() {
                 </p>
               ) : null}
             </div>
-          </header>
+          </div>
 
           {loadError ? (
             <p className="rounded-8 bg-destructive-bg px-4 py-3 text-ui text-destructive-fg">

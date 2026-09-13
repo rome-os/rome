@@ -94,6 +94,10 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
   const handle = rowHandle(row);
   const channel = row.accounts[0]?.channel;
   return (
+    // The hover fill is hand-rolled rather than `interactive` on purpose: the
+    // row is not a click target, and the fill is the cue that goes with
+    // revealing the actions below on `group-hover`. `interactive` would add a
+    // focus edge and a pointer cursor for a click that does nothing.
     <ListRow
       className={cn(
         ROW_GRID,
@@ -179,6 +183,10 @@ export function DirectoryRow({
   );
 
   return (
+    // Hand-rolled hover again, and again not `interactive`: the row holds three
+    // separate targets — select, open, and the menu — so the row itself is none
+    // of them. The fill marks the row the pointer is over, and predates the
+    // move onto `ListRow`.
     <ListRow
       selected={selected}
       className={cn(ROW_GRID, fixed ? "cursor-default" : !selected && "hover:bg-surface-hover")}

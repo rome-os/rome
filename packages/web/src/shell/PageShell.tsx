@@ -48,8 +48,9 @@ export function PageBody({ children, className }: { children: ReactNode; classNa
  * the page's actions at the trailing end. Lives beside `PageShell` so the
  * three parts hold one relation on every route.
  *
- * `title` is the only text inside the `h1`. A badge or a status beside it goes
- * in `titleAside`, so the heading a screen reader announces is the name alone.
+ * `title` is text, and it is the only text inside the `h1` — the type is what
+ * holds that, not this paragraph. A badge or a status beside it goes in
+ * `titleAside`, so the heading a screen reader announces is the name alone.
  * `description` is a caption in the Auxiliary role — counts, the live state,
  * the trigger phrase — and not a sentence that repeats the title.
  */
@@ -61,7 +62,7 @@ export function PageHeader({
   actions,
   className,
 }: {
-  title: ReactNode;
+  title: string;
   titleAside?: ReactNode;
   description?: ReactNode;
   leading?: ReactNode;

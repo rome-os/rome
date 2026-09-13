@@ -186,13 +186,15 @@ function RunRow({ routineId, run }: { routineId: string; run: RoutineRun }) {
         </button>
       </ListRow>
 
-      {/* The run-level error reads even when the trace is collapsed. */}
+      {/* The run-level error reads even when the trace is collapsed. Both this
+          and the trace panel below hang off the row, so they take the row's own
+          `sm` inset on the right and start under its status icon on the left. */}
       {run.error && (
-        <p className="px-3 pb-2 pl-9 font-mono text-aux text-destructive-fg">{run.error}</p>
+        <p className="px-2 pb-2 pl-9 font-mono text-aux text-destructive-fg">{run.error}</p>
       )}
 
       {open && (
-        <div className="border-t border-border-subtle bg-surface-muted/30 px-3 py-3 pl-9">
+        <div className="border-t border-border-subtle bg-surface-muted/30 px-2 py-3 pl-9">
           <h3 className="mb-2 text-aux text-subtle-foreground">{t("detail.trace")}</h3>
           {isLoading ? (
             <p className="text-aux text-subtle-foreground">{t("detail.traceLoading")}</p>

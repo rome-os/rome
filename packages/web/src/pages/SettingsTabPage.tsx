@@ -479,79 +479,81 @@ function AppearanceSection() {
 
   return (
     <div className="space-y-6">
-      <List className="overflow-hidden rounded-8 border border-border bg-surface">
-        <AppearanceRow
-          icon={<Languages />}
-          title={t("appearance.language.title")}
-          control={
-            <Select
-              value={currentLang}
-              onValueChange={(next) => {
-                void i18n.changeLanguage(next);
-              }}
-            >
-              <SelectTrigger className="w-44" aria-label={t("appearance.language.title")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" align="end">
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <SelectItem key={lang} value={lang}>
-                    {LANGUAGE_LABELS[lang]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
+      <div className="overflow-hidden rounded-8 border border-border bg-surface">
+        <List>
+          <AppearanceRow
+            icon={<Languages />}
+            title={t("appearance.language.title")}
+            control={
+              <Select
+                value={currentLang}
+                onValueChange={(next) => {
+                  void i18n.changeLanguage(next);
+                }}
+              >
+                <SelectTrigger className="w-44" aria-label={t("appearance.language.title")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" align="end">
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <SelectItem key={lang} value={lang}>
+                      {LANGUAGE_LABELS[lang]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
 
-        <AppearanceRow
-          icon={<Palette />}
-          title={t("appearance.theme.title")}
-          control={
-            <Select value={theme} onValueChange={(next) => setTheme(next)}>
-              <SelectTrigger className="w-44" aria-label={t("appearance.theme.title")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" align="end">
-                {themes.map((entry) => (
-                  <SelectItem key={entry.id} value={entry.id}>
-                    {entry.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
+          <AppearanceRow
+            icon={<Palette />}
+            title={t("appearance.theme.title")}
+            control={
+              <Select value={theme} onValueChange={(next) => setTheme(next)}>
+                <SelectTrigger className="w-44" aria-label={t("appearance.theme.title")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" align="end">
+                  {themes.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
 
-        <AppearanceRow
-          icon={modeIcon}
-          title={t("appearance.mode.title")}
-          control={
-            <Select
-              value={preference}
-              onValueChange={(next) => setPreference(next as ThemePreference)}
-            >
-              <SelectTrigger className="w-44" aria-label={t("appearance.mode.title")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" align="end">
-                <SelectItem value="system">
-                  <Monitor />
-                  {t("appearance.mode.system")}
-                </SelectItem>
-                <SelectItem value="light">
-                  <Sun />
-                  {t("appearance.mode.light")}
-                </SelectItem>
-                <SelectItem value="dark">
-                  <Moon />
-                  {t("appearance.mode.dark")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          }
-        />
-      </List>
+          <AppearanceRow
+            icon={modeIcon}
+            title={t("appearance.mode.title")}
+            control={
+              <Select
+                value={preference}
+                onValueChange={(next) => setPreference(next as ThemePreference)}
+              >
+                <SelectTrigger className="w-44" aria-label={t("appearance.mode.title")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" align="end">
+                  <SelectItem value="system">
+                    <Monitor />
+                    {t("appearance.mode.system")}
+                  </SelectItem>
+                  <SelectItem value="light">
+                    <Sun />
+                    {t("appearance.mode.light")}
+                  </SelectItem>
+                  <SelectItem value="dark">
+                    <Moon />
+                    {t("appearance.mode.dark")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            }
+          />
+        </List>
+      </div>
     </div>
   );
 }
