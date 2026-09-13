@@ -348,7 +348,7 @@ The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The s
 ### Named Rules
 **The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-body`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
 
-**The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale. The CJK system fallbacks ship no 500 face, so the weight on Title, Section, and Badge is Latin-only. Hierarchy on a bilingual surface also comes from ink, position, or container geometry.
+**The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale. The CJK system fallbacks ship no 500 face, so the weight on Title, Section, and Badge is Latin-only. Hierarchy on a bilingual surface also comes from size through a different role, ink, position, or container geometry.
 
 ## Layout
 
