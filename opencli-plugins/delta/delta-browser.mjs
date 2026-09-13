@@ -84,7 +84,6 @@ function assertAvailable(data) {
 /** Navigates, submits a search, and expands results. Never selects a flight or creates a booking. */
 export async function loadDeltaFlights(page, search, { now = Date.now } = {}) {
   const deadline = now() + search.timeout * 1000;
-  await page.goto("about:blank");
   await page.goto(buildSearchUrl(search));
   let submitted = false;
   while (now() <= deadline) {

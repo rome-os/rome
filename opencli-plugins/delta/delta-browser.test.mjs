@@ -20,6 +20,7 @@ function browser(states, form = true) {
   const queue = form ? [{ ...fixture(), form_ready: true, rows: [] }, ...states] : states;
   const page = {
     async goto(url) {
+      assert.match(url, /^https?:\/\//, "Browser Bridge only permits HTTP(S) navigation");
       calls.push(["goto", url]);
     },
     async evaluate(fn) {
@@ -45,10 +46,10 @@ test("prepares and submits separately, expands every page, and waits for stable 
     data,
   ]);
   assert.deepEqual(await loadDeltaFlights(b.page, search, b.options), data);
-  assert.deepEqual(b.calls.slice(0, 2), [
-    ["goto", "about:blank"],
-    ["goto", buildSearchUrl(search)],
-  ]);
+  assert.deepEqual(
+    b.calls.filter(([method]) => method === "goto"),
+    [["goto", buildSearchUrl(search)]],
+  );
   assert.equal(b.calls.filter((c) => c[1] === "expandMoreFlights").length, 2);
   const prepare = b.calls.findIndex((c) => c[1] === "prepareSearchForm");
   assert.equal(b.calls[prepare + 1][1], "submitSearchForm");
