@@ -162,7 +162,7 @@ A table cell aligns content within a shared column.
 A list section groups the rows of one list and draws the boundary between them.
 
 - A section sets no height, padding, typography, or fill. Rows own that geometry. `[mech]`
-- `List` separates each pair of adjacent rows with a hairline, so a row draws no border of its own and the last row needs no special case. `[mech]`
+- `List` separates each pair of adjacent rows with a hairline, so a row draws no border of its own and the last row needs no special case. A section that is a list in the document too passes a `<ul>` or an `<ol>` through `asChild`, so the separator stays the section's rather than becoming the page's. `[mech]`
 
 ## List row
 

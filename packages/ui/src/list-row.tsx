@@ -31,13 +31,23 @@ const selectedFill = "bg-primary/10";
    pointer can act on. */
 const selectedHoverFill = "hover:bg-primary/15";
 
+export interface ListProps extends React.ComponentProps<"div"> {
+  /**
+   * Renders the child element as the list, so a `<ul>` or an `<ol>` can own the
+   * separator. Reach for it when the records are a list in the document's own
+   * terms and not only in the layout's.
+   */
+  asChild?: boolean;
+}
+
 /**
  * The rows of one list. Owns the separator between rows, so a row never draws
  * a border of its own and the last row needs no special case.
  */
-export function List({ className, ...props }: React.ComponentProps<"div">) {
+export function List({ asChild = false, className, ...props }: ListProps) {
+  const Comp = asChild ? Slot : "div";
   return (
-    <div data-slot="list" className={cn("divide-y divide-border-subtle", className)} {...props} />
+    <Comp data-slot="list" className={cn("divide-y divide-border-subtle", className)} {...props} />
   );
 }
 
@@ -63,7 +73,10 @@ export type ListRowProps = ListRowBaseProps &
       }
     | {
         interactive?: false;
-        /** Renders the child element as the row, so a `<button>` or an `<a>` can be one. */
+        /**
+         * Renders the child element as the row, so a `<button>`, an `<a>` or an
+         * `<li>` under a `List asChild` can be one.
+         */
         asChild?: boolean;
       }
   );

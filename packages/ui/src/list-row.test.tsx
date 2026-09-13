@@ -139,6 +139,27 @@ describe("ListRow", () => {
 });
 
 describe("List", () => {
+  // A run history or a directory is a list in the document too, not only in
+  // the layout, and the separator has to stay the section's either way.
+  it("renders the child element as the list with asChild", () => {
+    render(
+      <List asChild data-testid="list">
+        <ul>
+          <ListRow asChild>
+            <li>One</li>
+          </ListRow>
+        </ul>
+      </List>,
+    );
+
+    const list = screen.getByTestId("list");
+    expect(list.tagName).toBe("UL");
+    expect(list.getAttribute("data-slot")).toBe("list");
+    expect([...list.classList]).toContain("divide-y");
+    expect(list.firstElementChild?.tagName).toBe("LI");
+    expect(list.firstElementChild?.getAttribute("data-slot")).toBe("list-row");
+  });
+
   it("separates its rows with a hairline", () => {
     render(
       <List data-testid="list">

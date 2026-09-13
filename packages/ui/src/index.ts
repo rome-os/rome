@@ -111,6 +111,7 @@ export {
   ListRowContent,
   ListRowDescription,
   ListRowTitle,
+  type ListProps,
   type ListRowProps,
 } from "./list-row.js";
 export {
