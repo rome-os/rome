@@ -294,7 +294,7 @@ The palette is a warm neutral ramp with a coral accent and four status hues held
 Rome has three themes, each with a light and a dark half. The frontmatter records Ember light, the default. Ash keeps Ember's ink and accent hue but lightens its surfaces and deepens the interactive coral to `#c05433` so labels clear AA. Slate is achromatic: `oklch(0.985 0 0)` canvas, `oklch(1 0 0)` cards, and an ink-colored `oklch(0.18 0 0)` primary that inverts to near-white in dark mode. Components never see these values. They read semantic tokens such as `--primary`, `--surface`, and `--border`, and the theme supplies the value.
 
 ### Primary
-- **Coral Ember** (`#d86f4c`): The one interactive accent. Fills the primary button, the checked switch, the selected filter chip, and the active tab underline's sibling states. Alpha-modulated for identity: `primary/5` on a selected card, `primary/15` behind a brand badge, `primary/30` for a selection ring. Also the `brand` token under Ember and Ash, so the logo stays on the same hue as the controls.
+- **Coral Ember** (`#d86f4c`): The one interactive accent. Fills the primary button, the checked switch, and the selected filter chip. Alpha-modulated for identity: `primary/5` on a selected card, `primary/15` behind a brand badge, `primary/30` for a selection ring. Also the `brand` token under Ember and Ash, so the logo stays on the same hue as the controls.
 - **Deep Ember** (`#c2410c`): The `primary-hover` token under Ember, and `#a63a08` under Ash. The kit's `Button` does not read it. Its hover is the primary fill at 80% alpha, and the token serves surfaces that want a solid darker step, such as the sign-in callback page.
 - **Ember Flare** (`#e55a22`): The focus ring under Ember and the Ember `info` mark. A slightly hotter step than the accent so a focused control stands apart from a resting primary button.
 
@@ -364,7 +364,7 @@ Touch targets on compact surfaces reach 44 to 48px through padding or a `::after
 
 Rome is flat at rest. Four depths exist, and tone plus a hairline border tell them apart: the canvas (`background`), a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). In dark mode the stack lightens as it rises, so a recessed region is lighter than the canvas, which is why depth names describe position rather than lightness.
 
-Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else casts.
+Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else in the kit casts. A dashboard page that paints `shadow-1` on a resting card is unfinished migration, not a pattern.
 
 ### Shadow Vocabulary
 - **Rest lift** (`box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)`): `shadow-1`, on the checked segment of a segmented control and the active chat row.
@@ -457,7 +457,7 @@ A centered block with a 44px Recessed Linen glyph well (12px radius), a `text-se
 - **Do** give compact surfaces a visible action affordance. Long-press, right-click, hover, and drag are accelerators.
 
 ### Don't:
-- **Don't** name a primitive (`--neutral-500`), a raw color, or a `dark:` override inside a component. It compiles, passes tests, and breaks in every other theme.
+- **Don't** name a primitive (`--neutral-500`) or a raw color inside a component. It compiles, passes tests, and breaks in every other theme. A `dark:` variant is a mode step on a semantic token, as in `dark:bg-input/30`, never a way to reach a raw color, and a component that reads semantic tokens rarely needs one.
 - **Don't** add a marketing hero, a gradient, an orb, or saturated color as ornament inside the app.
 - **Don't** bump a font size to make something important, or invent a size between steps.
 - **Don't** put a shadow on a surface at rest. Shadows mean hover, checked, or floating.
