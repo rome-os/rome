@@ -146,8 +146,12 @@ export function assertSearchPage(data, search) {
     year: "numeric",
     timeZone: "UTC",
   });
+  const displayedDate = (data.date_heading ?? "").replace(
+    /^([A-Z][a-z]{2}, [A-Z][a-z]{2} )0([1-9], \d{4})$/,
+    "$1$2",
+  );
   if (
-    data.date_heading !== dateLabel ||
+    displayedDate !== dateLabel ||
     data.route_text !== `${search.from} ${search.to}` ||
     data.leg !== (search.returnDate ? "Outbound" : "One Way") ||
     !new RegExp(`^${search.adults} Passengers?$`).test(data.traveler_text)

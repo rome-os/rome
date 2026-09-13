@@ -152,6 +152,47 @@ test("mixed cabins do not enter economy and can be excluded", () => {
   );
 });
 
+for (const day of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 31]) {
+  for (const dayFormat of ["numeric", "2-digit"]) {
+    test(`accepts displayed day ${day} with ${dayFormat} formatting`, () => {
+      const depart = `2026-10-${String(day).padStart(2, "0")}`;
+      const data = fixture();
+      data.search.segments[0].departure_date = depart;
+      data.date_heading = new Date(`${depart}T00:00:00Z`).toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: dayFormat,
+        year: "numeric",
+        timeZone: "UTC",
+      });
+      assert.doesNotThrow(() => assertSearchPage(data, search({ depart })));
+    });
+  }
+}
+
+for (const dateHeading of [
+  "Tue, Oct 06, 2026",
+  "Mon, Nov 05, 2026",
+  "Mon, Oct 05, 2027",
+  "Tue, Oct 05, 2026",
+  "Mon, Oct 005, 2026",
+  "Mon, Oct 00, 2026",
+  "Mon, Oct 05, 2026 extra",
+  "",
+  null,
+  undefined,
+]) {
+  test(`rejects mismatched or malformed displayed date: ${dateHeading}`, () => {
+    const data = fixture();
+    data.search.segments[0].departure_date = "2026-10-05";
+    data.date_heading = dateHeading;
+    assert.throws(
+      () => assertSearchPage(data, search({ depart: "2026-10-05" })),
+      /displayed search does not match/,
+    );
+  });
+}
+
 for (const [name, mutate] of Object.entries({
   mode: (d) => (d.price_mode = "$USD"),
   award: (d) => (d.search.award = "false"),

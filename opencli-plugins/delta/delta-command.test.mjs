@@ -61,6 +61,21 @@ test("returns SkyMiles plus cash taxes and a separate card-member offer", async 
   assert.equal(rows[0].card_member_miles, 28300);
 });
 
+for (const day of ["05", "5"]) {
+  test(`returns awards when Delta displays Oct ${day}`, async () => {
+    const data = fixture();
+    data.search.segments[0].departure_date = "2026-10-05";
+    data.date_heading = `Mon, Oct ${day}, 2026`;
+    data.rows = [data.rows[0]];
+    data.total = 1;
+    const rows = await command.func(pageFor(data), { ...args, depart: "2026-10-05" });
+    assert.ok(rows.length > 0);
+    assert.equal(rows[0].departure_date, "2026-10-05");
+    assert.equal(rows[0].miles, 33300);
+    assert.equal(rows[0].taxes, 6);
+  });
+}
+
 test("cash command does not require the miles flag or any account read", async () => {
   const data = fixture();
   data.search.award = "false";
