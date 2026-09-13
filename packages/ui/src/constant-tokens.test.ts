@@ -116,6 +116,12 @@ describe("kit-owned constant tokens", () => {
           "--badge-h",
           "--badge-px",
           "--badge-gap",
+          "--row-h-sm",
+          "--row-h-md",
+          "--row-px-sm",
+          "--row-px-md",
+          "--row-py-sm",
+          "--row-py-md",
         ].map((name) => [name, declarations.get(name)]),
       ),
     ).toEqual({
@@ -153,6 +159,12 @@ describe("kit-owned constant tokens", () => {
       "--badge-h": "22px",
       "--badge-px": "9px",
       "--badge-gap": "6px",
+      "--row-h-sm": "var(--rome-size-36)",
+      "--row-h-md": "var(--rome-size-40)",
+      "--row-px-sm": "var(--rome-space-2)",
+      "--row-px-md": "var(--rome-space-3)",
+      "--row-py-sm": "var(--rome-space-1)",
+      "--row-py-md": "var(--rome-space-2)",
     });
   });
 });

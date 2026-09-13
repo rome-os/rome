@@ -22,6 +22,7 @@
 @source "./button-group.tsx";
 @source "./calendar.tsx";
 @source "./card.tsx";
+@source "./checkbox.tsx";
 @source "./command.tsx";
 @source "./context-menu.tsx";
 @source "./dialog.tsx";
@@ -31,8 +32,10 @@
 @source "./filter-chip-group.tsx";
 @source "./icon-button.tsx";
 @source "./input.tsx";
+@source "./list-row.tsx";
 @source "./markdown.tsx";
 @source "./popover.tsx";
+@source "./radio-group.tsx";
 @source "./segmented-control.tsx";
 @source "./select.tsx";
 @source "./separator.tsx";
@@ -170,6 +173,18 @@
   --badge-h: 22px;
   --badge-px: 9px;
   --badge-gap: 6px;
+
+  /* List row geometry. The height is a floor rather than a fixed size: a row
+     holding a title and a description grows past it, and every step lands on
+     the 4px grid. Two steps, because a list is either dense or comfortable.
+     Each floor is its `--control-h-*` step plus 8px, so a row clears the
+     control it holds by the same margin at either step. */
+  --row-h-sm: var(--rome-size-36);
+  --row-h-md: var(--rome-size-40);
+  --row-px-sm: var(--rome-space-2);
+  --row-px-md: var(--rome-space-3);
+  --row-py-sm: var(--rome-space-1);
+  --row-py-md: var(--rome-space-2);
 }
 
 /* ───────────────────────── TYPOGRAPHY PRIMITIVES ───────────────────────────

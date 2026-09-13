@@ -179,11 +179,12 @@ That block is the single source of truth for every bundle's fonts. Do not paste 
 
 ## Components
 
-**Use shadcn primitives from `@/components/ui`:** Button, Dialog, DropdownMenu, Popover, Select, Tooltip, Switch, Textarea, Badge, Skeleton, Field, IconButton, Tile, Stepper, Sortable, Alert, Breadcrumb, and more. Run `ls src/components/ui` before writing UI. Do not reach for raw `<button>`, `<input>`, or `<select>` when the primitive exists. The primitive carries token wiring, focus rings, size variants, and accessibility, and bypassing it silently drops all of that.
+**Use shadcn primitives from `@/components/ui`:** Button, Dialog, DropdownMenu, Popover, Select, Tooltip, Switch, Checkbox, RadioGroup, ListRow, Textarea, Badge, Skeleton, Field, IconButton, Tile, Stepper, Sortable, Alert, Breadcrumb, and more. Run `ls src/components/ui` before writing UI. Do not reach for raw `<button>`, `<input>`, or `<select>` when the primitive exists. The primitive carries token wiring, focus rings, size variants, and accessibility, and bypassing it silently drops all of that.
 
 **Some `ui/` files are one-line re-export shims.** Three groups live in `@rome-os/ui`, which apps can import too:
 
-- the control primitives — button, badge, input, textarea, switch, separator, skeleton, field, icon-button, tabs, segmented-control
+- the control primitives — button, badge, input, textarea, switch, checkbox, radio-group, separator, skeleton, field, icon-button, tabs, segmented-control
+- the list family — list-row, which exports `List` and `ListRow` with its parts
 - the floating family — dialog, sheet, popover, dropdown-menu, tooltip, context-menu, select
 - the `command` composite, plus `alert` and `card`
 
@@ -192,6 +193,10 @@ Import sites are unchanged. Edit the source in `packages/ui/src/<name>.tsx`, and
 **A missing primitive goes into `ui/`, never hand-rolled in the page.** If `ui/` lacks what you need, check [shadcn's registry](https://ui.shadcn.com/docs/components) first, since most cases already exist as a recipe: Tabs, Avatar, Accordion, Calendar. Drop one in with `pnpm dlx shadcn@latest add <name>`, re-wire its colors to our semantic tokens, and commit it under `ui/`. Only if shadcn lacks it too, write a new `ui/` primitive, Radix-based for anything with interaction, focus, or keyboard semantics.
 
 **`Tabs` against `SegmentedControl` is decided by whether each choice owns a panel.** `Tabs` is underline-only and means the tablist and tabpanel contract, where each `TabsTrigger` reveals its own `TabsContent`. If the choice instead switches, filters, or reframes one view, with no panel per choice, use `SegmentedControl`. It paints a muted track with the active segment lifted onto the canvas. It is a radiogroup rather than a tablist, so assistive tech is not told to look for panels that do not exist. `SegmentedControl` is controlled-only and requires an `aria-label`.
+
+**A one-of-N choice that sets a value is `RadioGroup` (`@rome-os/ui/radio-group`), and a yes/no in a form is `Checkbox` (`@rome-os/ui/checkbox`).** Neither is a `<button role="radio">` or a raw `<input>`: Radix supplies the roving focus and arrow-key movement the radio role promises, and both carry the kit's focus edge and a hit area past their 16px box. `SegmentedControl` stays the answer when the choice switches a view rather than setting a value.
+
+**One record in a list is `ListRow` (`@rome-os/ui/list-row`), inside a `List`.** The row owns its inset, its height floor, the gap between its parts, and its hover paint through the `--row-*` tokens, so a page never writes its own `px-* py-*` for a row. `List` owns the hairline between rows. `TableRow` is for aligned columns under a header, and `Card` for a bordered block of its own. The roles are in [`ui/component-roles.md`](ui/component-roles.md#list-row).
 
 **A pressed toolbar button is `Toggle` (`@rome-os/ui/toggle`), not a `Button` with a hand-rolled `aria-pressed`.** `Toggle` owns `aria-pressed` and the pressed paint, and `variant` only picks the unpressed resting look. `Switch` stays the form control, for a setting the user is editing. There is no `ToggleGroup` — one-of-N is `SegmentedControl`.
 

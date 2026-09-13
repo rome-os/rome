@@ -27,6 +27,7 @@ A component occupies its declared height.
 | Badge | 22 |
 | Avatar | 24, 32, 40 |
 | Icon glyph | 14, 16, 20, 24 |
+| List row | 36 (`sm`), 40 (`md`), each a floor the row grows past |
 
 ## Text inside a component
 

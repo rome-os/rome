@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Field,
@@ -46,6 +48,8 @@ const DENSITY = [
 
 export function ControlsSection() {
   const [pushEnabled, setPushEnabled] = useState(true);
+  const [digest, setDigest] = useState(true);
+  const [access, setAccess] = useState("private");
   const [model, setModel] = useState("opus");
   const [autoStart, setAutoStart] = useState(true);
   const [starredOnly, setStarredOnly] = useState(false);
@@ -381,6 +385,70 @@ export function ControlsSection() {
               <Switch checked disabled aria-label="Push, disabled" />
             </Item>
           </Row>
+        </Specimen>
+      </Component>
+
+      <Component id="checkbox" name="Checkbox" source="@rome-os/ui/checkbox">
+        <Specimen
+          label="Checkbox"
+          note="A yes/no in a form, or one pick where any number may be on. Switch is for a value that takes effect at once. 16px, off the control scale; the hit area reaches past the box."
+        >
+          <Row>
+            <Item label="off">
+              <Checkbox checked={false} aria-label="Digest, off" />
+            </Item>
+            <Item label="on">
+              <Checkbox
+                checked={digest}
+                onCheckedChange={(next) => setDigest(next === true)}
+                aria-label="Digest"
+              />
+            </Item>
+            <Item label="mixed">
+              <Checkbox checked="indeterminate" aria-label="Select all, mixed" />
+            </Item>
+            <Item label="disabled">
+              <Checkbox checked disabled aria-label="Digest, disabled" />
+            </Item>
+            <Item label="with label">
+              <label
+                htmlFor="gallery-checkbox-labelled"
+                className="flex items-center gap-2 text-ui text-foreground"
+              >
+                <Checkbox id="gallery-checkbox-labelled" defaultChecked />
+                Email me a summary
+              </label>
+            </Item>
+          </Row>
+        </Specimen>
+      </Component>
+
+      <Component id="radio-group" name="RadioGroup" source="@rome-os/ui/radio-group">
+        <Specimen
+          label="RadioGroup"
+          note="One pick from a short set that all show. SegmentedControl switches a view; this sets a value. Radix supplies the arrow-key movement a row of role=radio buttons lacks."
+        >
+          <RadioGroup aria-label="Access" value={access} onValueChange={setAccess}>
+            {[
+              { value: "private", label: "Private", hint: "Only you" },
+              { value: "public", label: "Public", hint: "Anyone with the link" },
+              { value: "email", label: "By email", hint: "People you list" },
+            ].map((option) => (
+              <label
+                key={option.value}
+                htmlFor={`gallery-radio-${option.value}`}
+                className="flex items-start gap-3 text-ui text-foreground"
+              >
+                <span className="flex h-5 items-center">
+                  <RadioGroupItem id={`gallery-radio-${option.value}`} value={option.value} />
+                </span>
+                <span>
+                  <span className="block">{option.label}</span>
+                  <span className="block text-aux text-muted-foreground">{option.hint}</span>
+                </span>
+              </label>
+            ))}
+          </RadioGroup>
         </Specimen>
       </Component>
 

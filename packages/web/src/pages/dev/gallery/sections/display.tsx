@@ -35,6 +35,13 @@ import {
   AvatarGroupCount,
 } from "@/components/ui/avatar";
 import { Spinner } from "@rome-os/ui/spinner";
+import {
+  List,
+  ListRow,
+  ListRowContent,
+  ListRowDescription,
+  ListRowTitle,
+} from "@/components/ui/list-row";
 import { Timestamp, TimestampProvider } from "@rome-os/ui/timestamp";
 import { Markdown } from "@rome-os/ui/markdown";
 import { Input } from "@/components/ui/input";
@@ -82,6 +89,12 @@ const ROWS = [
   { id: "ses_01J9Z4", app: "Bookkeeper", status: "Done", duration: "1m 04s" },
   { id: "ses_01J9Z5", app: "Marketer", status: "Running", duration: "12s" },
   { id: "ses_01J9Z6", app: "Inbox", status: "Failed", duration: "3m 41s" },
+];
+
+const PEOPLE = [
+  { name: "Ada Lovelace", handle: "@ada", when: "2m", selected: false },
+  { name: "Grace Hopper", handle: "@grace", when: "1h", selected: true },
+  { name: "Katherine Johnson", handle: "@katherine", when: "3d", selected: false },
 ];
 
 export function DisplaySection() {
@@ -375,6 +388,58 @@ export function DisplaySection() {
               ))}
             </TableBody>
           </Table>
+        </Specimen>
+      </Component>
+
+      <Component id="list-row" name="ListRow" source="@rome-os/ui/list-row">
+        <Specimen
+          label="ListRow — md"
+          note="One record in a list. The row owns its inset, a 40px floor, and the gap between its parts through the --row-* tokens; List owns the hairline between rows. Each floor is its control step plus 8px. Table is for aligned columns under a header, Card for a bordered block of its own."
+        >
+          <List className="overflow-hidden rounded-8 border border-border">
+            {PEOPLE.map((person) => (
+              <ListRow key={person.name} asChild interactive selected={person.selected}>
+                <button type="button">
+                  <span
+                    className="size-8 shrink-0 rounded-full bg-surface-muted text-muted-foreground"
+                    aria-hidden
+                  />
+                  <ListRowContent>
+                    <ListRowTitle>{person.name}</ListRowTitle>
+                    <ListRowDescription>{person.handle}</ListRowDescription>
+                  </ListRowContent>
+                  <span className="font-mono text-aux tabular-nums text-subtle-foreground">
+                    {person.when}
+                  </span>
+                </button>
+              </ListRow>
+            ))}
+          </List>
+        </Specimen>
+
+        <Specimen label="ListRow — sm" note="The 36px floor, for a dense list of one-line records.">
+          <List className="overflow-hidden rounded-8 border border-border">
+            {ROWS.map((row) => (
+              <ListRow key={row.id} size="sm">
+                <span className="font-mono text-aux text-muted-foreground">{row.id}</span>
+                <ListRowContent>
+                  <ListRowTitle>{row.app}</ListRowTitle>
+                </ListRowContent>
+                <Badge
+                  variant={
+                    row.status === "Done"
+                      ? "success"
+                      : row.status === "Failed"
+                        ? "destructive"
+                        : "info"
+                  }
+                >
+                  {row.status}
+                </Badge>
+                <span className="text-aux text-muted-foreground">{row.duration}</span>
+              </ListRow>
+            ))}
+          </List>
         </Specimen>
       </Component>
 
