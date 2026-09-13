@@ -66,18 +66,21 @@ interface ListRowBaseProps extends React.ComponentProps<"div"> {
 export type ListRowProps = ListRowBaseProps &
   (
     | {
-        /** Paints hover and focus states. Set it when the row itself is the click target. */
-        interactive: true;
-        /** Renders the child element as the row, so a `<button>` or an `<a>` can be one. */
-        asChild: true;
-      }
-    | {
-        interactive?: false;
         /**
          * Renders the child element as the row, so a `<button>`, an `<a>` or an
          * `<li>` under a `List asChild` can be one.
          */
-        asChild?: boolean;
+        asChild: true;
+        /**
+         * Paints hover and focus states. Set it when the row itself is the
+         * click target. A row whose interactivity depends on its data passes a
+         * `boolean` here, which is why this arm is not the literal `true`.
+         */
+        interactive?: boolean;
+      }
+    | {
+        asChild?: false;
+        interactive?: false;
       }
   );
 

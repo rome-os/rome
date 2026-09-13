@@ -79,7 +79,7 @@ The role exists for these: any two at the same size, dropped into one row, are t
 A switch or checkbox reads as a glyph, not as a box. Sizing one to a control height makes it the loudest thing in a form row.
 
 - Size is intrinsic and off the control scale. `Switch` is 18×32px at `default`, 14×24px at `sm`. `Checkbox` and `RadioGroupItem` are 16px, one square and one round. `[mech]`
-- The hit area grows through a pseudo-element (`after:-inset-*`), never through the box, so the row height stays the label's. It grows freely on the axis the member has no neighbour on, and by at most half the gap on the axis it is stacked along, so one member's hit area stops before the next member's box begins. A sibling `<label>` is what makes a whole row a target. `[mech]`
+- The hit area grows through a pseudo-element (`after:-inset-*`), never through the box, so the row height stays the label's. It grows freely on the axis the member has no neighbour on, and by at most half the gap on the axis it is stacked along, so one member's hit area stops before the next member's box begins. A group that can be laid out either way reads its own `orientation` for both the layout and the insets, so the axis the items sit on is the axis the insets answer to. A sibling `<label>` is what makes a whole row a target. `[mech]`
 - Width is never fillable, and a member is labelled by a sibling, never by text of its own. `[mech]`
 - The focus edge is the Control clause above, at `outline-offset: 0` for every member. A member fills its box in the checked state, so the inset the Control clause gives a painted border would land the edge on that fill and mark nothing in the one state it exists to report. `[mech]`
 
@@ -128,6 +128,7 @@ A layout component owns the space between its children and has no appearance of 
 - A container with an appearance of its own is not Layout. `SegmentedControl`'s track fills and rounds, so it is one Control, not a layout around three. `[mech]`
 - `ButtonGroup` is the one member permitted to restyle its children, collapsing the adjoining radii and borders of the controls inside it. `[mech]`
 - All spacing between siblings comes from a layout component (`gap-*`, `space-y-*`). No sibling sets a margin to space itself. `[llm]`
+- A layout that carries a role of its own — `RadioGroup` is a radiogroup — requires the accessible name that role needs, in its type rather than in its docs. `[mech]`
 
 > Prefer: `Field` supplying the gap between a label and its input.
 > Over: `FieldLabel` supplying `mb-1`, which every other consumer of that label then has to undo.

@@ -103,6 +103,32 @@ describe("ListRow", () => {
     expect(row().hasAttribute("data-selected")).toBe(false);
   });
 
+  // A row that is a link for some records and plain text for others decides at
+  // render time, so the flag has to be a `boolean` and not the literal `true`.
+  it("takes interactivity from a value the caller computes", () => {
+    function Row({ open }: { open: boolean }) {
+      return (
+        <ListRow asChild interactive={open}>
+          <button type="button" data-testid="row" />
+        </ListRow>
+      );
+    }
+    const { rerender } = render(<Row open={false} />);
+    expect([...row().classList]).not.toContain("cursor-pointer");
+
+    rerender(<Row open />);
+    expect([...row().classList]).toContain("cursor-pointer");
+  });
+
+  // `@ts-expect-error` is the assertion: `pnpm typecheck` covers this file, so
+  // the line fails the build the day the paint is accepted on a bare `div`.
+  it("does not accept interaction paint on a row that takes no focus", () => {
+    // @ts-expect-error `interactive` needs `asChild` with a focusable child
+    render(<ListRow interactive data-testid="row" />);
+
+    expect(row()).not.toBeNull();
+  });
+
   it("renders the child element as the row with asChild", () => {
     const onClick = rs.fn();
     render(

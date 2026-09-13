@@ -127,7 +127,53 @@ describe("RadioGroup", () => {
     render(<Group value="private" />);
 
     const cls = [...screen.getByRole("radiogroup").classList];
-    expect(cls).toEqual(["grid", "gap-2"]);
+    expect(cls).toEqual(["grid", "gap-2", "data-[orientation=horizontal]:grid-flow-col"]);
+  });
+
+  // The layout and the hit area read the same attribute. A group that says
+  // horizontal and stacks downward would give every item the 12px inset on the
+  // axis its neighbour is actually on.
+  // `@ts-expect-error` is the assertion: `pnpm typecheck` covers this file, so
+  // the line fails the build the day an unnamed group starts compiling.
+  it("does not accept a group without an accessible name", () => {
+    render(
+      // @ts-expect-error a radiogroup with no accessible name is unusable
+      <RadioGroup value="private" onValueChange={() => {}}>
+        <RadioGroupItem value="private" aria-label="Private" />
+      </RadioGroup>,
+    );
+
+    expect(screen.getByRole("radiogroup")).not.toBeNull();
+  });
+
+  it("takes a name from aria-labelledby instead", () => {
+    render(
+      <>
+        <span id="access-label">Access</span>
+        <RadioGroup aria-labelledby="access-label" value="private" onValueChange={() => {}}>
+          <RadioGroupItem value="private" aria-label="Private" />
+        </RadioGroup>
+      </>,
+    );
+
+    expect(screen.getByRole("radiogroup", { name: "Access" })).not.toBeNull();
+  });
+
+  it("lays its items out along its own orientation", () => {
+    render(
+      <RadioGroup
+        orientation="horizontal"
+        aria-label="Access"
+        value="private"
+        onValueChange={() => {}}
+      >
+        <RadioGroupItem value="private" aria-label="Private" />
+      </RadioGroup>,
+    );
+
+    const group = screen.getByRole("radiogroup");
+    expect(group.getAttribute("data-orientation")).toBe("horizontal");
+    expect([...group.classList]).toContain("data-[orientation=horizontal]:grid-flow-col");
   });
 
   it("draws focus as an outline outside the box", () => {
