@@ -35,43 +35,43 @@ colors:
   ember-edge: "#fbcda6"
 typography:
   display:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "1.875rem"
     fontWeight: 400
     lineHeight: 1.2
     letterSpacing: "0"
   title:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "1.125rem"
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
   section:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "0.9375rem"
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
   body:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.25
     letterSpacing: "0"
   ui:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.4286
     letterSpacing: "0"
   badge:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "0.8125rem"
     fontWeight: 500
     lineHeight: 1.2308
     letterSpacing: "0"
   aux:
-    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif"
+    fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "0.8125rem"
     fontWeight: 400
     lineHeight: 1.2308
@@ -343,7 +343,7 @@ Every text run takes exactly one of seven roles. A role sets size, line height, 
 - **Badge** (500, 13px/16px): Text inside a compact labeled container: chips, tags, status pills, counters.
 - **Aux** (400, 13px/16px): Metadata that annotates other content: timestamps, uncontained counts, group headers, captions. Columns of times or counts add `tabular-nums`.
 
-The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The roles read 13, 14, 15, 16, 18, and 30 today. Steps 20 to 24 exist for a role that has not been added.
+The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The seven roles read 13, 14, 15, 16, 18, and 30. Steps 20, 22, and 24 back the Markdown heading tokens, not a dashboard role.
 
 ### Named Rules
 **The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-body`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
@@ -404,16 +404,16 @@ Components are precise and restrained. Each one declares its own typography role
 - **Secondary:** Pressed Linen fill, ink label. Hover mixes 5% ink into the fill.
 - **Destructive:** 10% red tint with Signal Red label. Hover deepens to 20%. Never a solid red fill.
 - **Link:** Coral text, underline on hover with a 4px offset.
-- **Press:** Every button drops 1px on active. Focus is the shared 2px ring outline. Disabled is 50% opacity with pointer events off.
+- **Press:** Every button drops 1px on active. Focus is the shared 1px `ring` outline at 50% alpha, outside the box. Disabled is 50% opacity with pointer events off.
 
 ### Badges and Chips
 - **Badge:** 22px pill, 9px horizontal padding, `text-badge`. Variants are tinted: default and muted on Recessed Linen, info, success, warning, and destructive on their tint with their ink, brand on 15% coral with coral text, outline on a hairline.
-- **Filter chip:** Pill with 12px by 4px padding on Warm Paper with a strong hairline. Selected fills Coral Ember with a white label. An optional count trails in `tabular-nums`, muted when unselected.
+- **Filter chip:** Pill with 12px by 4px padding on Warm Paper with a strong hairline. Selected fills Coral Ember with a white label. An optional count trails in `tabular-nums`, in Subtle Ink when unselected.
 
 ### Cards and Tiles
 - **Card:** Warm Paper on the canvas, 12px radius, hairline border, 16px padding, 16px gap between header, content, and footer. Title is `text-section`, description is `text-body` in Muted Ink. No shadow at rest. Interactive cards take `shadow-4` on hover.
 - **Tile:** 8px radius, 12px padding, strong hairline border. Hover recesses the fill. A selected tile takes a coral border, a 5% coral fill, and a 1px coral ring.
-- **Alert:** 8px radius, 12px by 16px padding, `text-ui` in both rows, and a 16px leading icon. Default is Warm Paper with a hairline. Status variants use the tint, ink, and edge of their family.
+- **Alert:** 8px radius, 12px by 16px padding, `text-ui` in both rows with the title at weight 600, and a 16px leading icon. Default is Warm Paper with a hairline and a Muted Ink description. Status variants use the tint, ink, and edge of their family and set the description to `foreground`.
 
 ### Inputs and Fields
 - **Style:** Transparent fill, hairline `input` border, 32px height, 10px radius, 12px start inset, `text-ui`. Placeholder is Muted Ink. A leading glyph sits at the start inset and pushes the text by the glyph width plus 6px.
