@@ -53,6 +53,9 @@ Rome does not inject a CDP endpoint into agent processes.
 
 Settings > Advanced > Computer Use lists OpenCLI browser connections and their last seen times.
 Rome checks the daemon every five seconds and retains observed connections across backend restarts.
+Connection and metadata changes are saved immediately. Timestamp-only changes stay in memory and
+are checkpointed every ten minutes, with a final save during graceful shutdown.
+An unexpected exit can lose timestamp updates since the last checkpoint.
 Last seen records when Rome last observed a live connection. OpenCLI detects lost browser heartbeats,
 so disconnection detection includes its heartbeat timeout and the next Rome check.
 An unreachable daemon makes browser status unknown and preserves the last seen time.

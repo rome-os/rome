@@ -13,6 +13,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("computer-use");
 const CONNECTIONS_SETTING = "computerUse.connections";
 const POLL_INTERVAL_MS = 5_000;
+const CHECKPOINT_INTERVAL_MS = 10 * 60_000;
 const daemonStatusSchema = z.object({
   ok: z.literal(true),
   daemonVersion: z.string().optional(),
@@ -25,6 +26,12 @@ const daemonStatusSchema = z.object({
   ),
 });
 const aliasesSchema = z.object({ aliases: z.record(z.string(), z.string()) });
+
+function serializeMetadata(connections: ComputerUseConnection[]): string {
+  return JSON.stringify(
+    connections.map(({ id, name, cli, status, version }) => ({ id, name, cli, status, version })),
+  );
+}
 
 async function readAliases(): Promise<Record<string, string>> {
   try {
@@ -53,6 +60,9 @@ export class ComputerUseService {
   private inFlight: Promise<ComputerUseStatus> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private persisted = "";
+  private persistedMetadata = "";
+  private lastPersistedAt = 0;
+  private stopped = false;
 
   constructor(
     private readonly settings: Pick<SettingsRepository, "get" | "set">,
@@ -65,6 +75,7 @@ export class ComputerUseService {
 
   start(): void {
     if (this.timer) return;
+    this.stopped = false;
     const poll = () => {
       void this.getStatus().catch((error: unknown) => {
         log.warn("Could not refresh browser connections", { error });
@@ -76,12 +87,18 @@ export class ComputerUseService {
   }
 
   async stop(): Promise<void> {
+    // Reject new probes before awaiting the active one so its write finishes before the final flush.
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await this.inFlight?.catch(() => {});
+    await this.persistConnections(this.snapshotConnections(), true).catch((error: unknown) => {
+      log.warn("Could not save browser connections during shutdown", { error });
+    });
   }
 
   getStatus(): Promise<ComputerUseStatus> {
+    if (this.stopped) return Promise.reject(new Error("Computer use service is stopped"));
     if (!this.inFlight) {
       this.inFlight = this.refresh().finally(() => {
         this.inFlight = null;
@@ -98,6 +115,8 @@ export class ComputerUseService {
       if (stored.success) {
         for (const connection of stored.data) this.connections.set(connection.id, connection);
         this.persisted = JSON.stringify(stored.data);
+        this.persistedMetadata = serializeMetadata(stored.data);
+        this.lastPersistedAt = this.now();
       }
       this.initialized = true;
     }
@@ -141,12 +160,27 @@ export class ComputerUseService {
         lastSeenAt: profile.extensionConnected ? checkedAt : (previous?.lastSeenAt ?? null),
       });
     }
-    const connections = [...this.connections.values()].sort((a, b) => a.id.localeCompare(b.id));
-    const serialized = JSON.stringify(connections);
-    if (serialized !== this.persisted && connections.length > 0) {
-      await this.settings.set(CONNECTIONS_SETTING, connections);
-      this.persisted = serialized;
-    }
+    const connections = this.snapshotConnections();
+    await this.persistConnections(connections);
     return { daemon, checkedAt, connections };
+  }
+
+  private snapshotConnections(): ComputerUseConnection[] {
+    return [...this.connections.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  private async persistConnections(
+    connections: ComputerUseConnection[],
+    force = false,
+  ): Promise<void> {
+    const serialized = JSON.stringify(connections);
+    if (serialized === this.persisted || connections.length === 0) return;
+    const metadata = serializeMetadata(connections);
+    const checkpointDue = this.now() - this.lastPersistedAt >= CHECKPOINT_INTERVAL_MS;
+    if (!force && metadata === this.persistedMetadata && !checkpointDue) return;
+    await this.settings.set(CONNECTIONS_SETTING, connections);
+    this.persisted = serialized;
+    this.persistedMetadata = metadata;
+    this.lastPersistedAt = this.now();
   }
 }
