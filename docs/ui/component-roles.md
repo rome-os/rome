@@ -169,11 +169,11 @@ A list section groups the rows of one list and draws the boundary between them.
 A list row is one record in a list: a person in the directory, a setting beside its control, a run in a history. It is the box around the controls it holds, so it sits on a scale of its own.
 
 - **The vocabulary is two steps: `sm` (36px) and `md` (40px).** Each names a floor, not a height. A row holding one line of `text-ui` sits on the floor, and a row holding a title and a description grows past it. `[mech]`
-- A floor is its `--control-h-*` step plus 8px, so a row clears the control it holds by the same margin at either step, and retuning the control scale carries the row scale with it. `[mech]`
+- A floor is written as its `--control-h-*` step plus 8px, not as the `--rome-size-*` step it equals, so a row clears the control it holds by the same margin at either step and retuning the control scale carries the row scale with it. `[mech]`
 - The floor, the horizontal inset, and the vertical inset each come from a `--row-*` token of the row's step. A row never reads `--control-h-*`: a row on the control scale would be as tall as the button inside it and no taller. `[mech]`
-- A row is a flex row that centers its parts on the cross axis and owns the gap between them. A caller that needs columns lined up down the list passes a grid template in `className`, and keeps the inset, the floor, and the paint. `[mech]`
+- A row is a flex row that centers its parts on the cross axis and owns the gap between them. The gap is one value at either step, so it takes no `--row-*` token of its own. A caller that needs columns lined up down the list passes a grid template in `className`, and keeps the inset, the floor, and the paint. `[mech]`
 - A row draws no border and carries no margin. Separation belongs to the List section. `[mech]`
-- Hover and focus paint appear only on a row that is itself the click target, through `interactive`. The hover fill is `--surface-hover`, and the selected fill is `--primary` at low alpha. `[mech]`
+- Hover and focus paint appear only on a row that is itself the click target, through `interactive`, which the row accepts only alongside `asChild`. A row that takes no focus cannot show the focus edge the paint includes. The hover fill is `--surface-hover`, and the selected fill is `--primary` at low alpha, deepening on hover only where the row is interactive. `[mech]`
 - The focus edge is the Control geometry at `-outline-offset-1`. A row is full-bleed inside a list, and most lists sit in a clipped card, so an edge outside the box would be cut away on both sides. `[mech]`
 - `ListRowTitle` reads `text-ui` and `ListRowDescription` reads `text-aux`. A part never takes a size from the row's step. `[mech]`
 

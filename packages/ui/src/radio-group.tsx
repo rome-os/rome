@@ -32,10 +32,12 @@ function RadioGroup({
 /**
  * One option of a `RadioGroup`. A selection control: 16px round, off the
  * control scale, with the hit area reaching past the box through a
- * pseudo-element — 12px sideways, and 4px vertically, which is half the
+ * pseudo-element. It grows 12px along the axis the group does not stack on,
+ * where there is no neighbour, and 4px along the axis it does — half the
  * group's own gap, so one option's hit area stops before the next option's box
- * begins. It is labelled by a sibling `<label>` or by `aria-label`, never by
- * text of its own.
+ * begins. The two swap when the group is `orientation="horizontal"`. A group
+ * set to a gap below `gap-2` has to narrow the inset itself. It is labelled by
+ * a sibling `<label>` or by `aria-label`, never by text of its own.
  */
 function RadioGroupItem({
   className,
@@ -46,6 +48,9 @@ function RadioGroupItem({
       data-slot="radio-group-item"
       className={cn(
         "peer relative inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-input bg-surface transition-colors outline-none after:absolute after:-inset-x-3 after:-inset-y-1",
+        // Radix hands each item the group's orientation, so the hit area
+        // follows the axis the options are actually stacked along.
+        "data-[orientation=horizontal]:after:-inset-x-1 data-[orientation=horizontal]:after:-inset-y-3",
         "data-[state=checked]:border-primary",
         // Outside the box, for the reason `Checkbox` states: a selection
         // control is a glyph, and its edge has to read against the canvas.

@@ -50,6 +50,23 @@ describe("Checkbox", () => {
     expect(box().getAttribute("data-state")).toBe("indeterminate");
   });
 
+  // A box set indeterminate through `defaultChecked` has no `checked` prop, so
+  // a glyph picked from that prop drew a check over `aria-checked="mixed"`.
+  for (const [origin, props] of [
+    ["controlled", { checked: "indeterminate" }],
+    ["uncontrolled", { defaultChecked: "indeterminate" }],
+  ] as const) {
+    it(`draws the mixed glyph on a ${origin} indeterminate box`, () => {
+      const { container } = render(<Checkbox aria-label="Select all" {...props} />);
+
+      expect(box().getAttribute("data-state")).toBe("indeterminate");
+      expect(container.querySelector(".lucide-minus")).not.toBeNull();
+      expect(container.querySelector(".lucide-check")?.getAttribute("class")).toContain(
+        "group-data-[state=indeterminate]:hidden",
+      );
+    });
+  }
+
   it("does not report a change while disabled", () => {
     const onCheckedChange = rs.fn();
     render(<Checkbox aria-label="Notify" disabled onCheckedChange={onCheckedChange} />);

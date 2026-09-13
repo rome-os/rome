@@ -25,7 +25,11 @@ const sizeClasses: Record<ListRowSize, string> = {
 const interactiveClasses =
   "cursor-pointer transition-colors outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50";
 
-const selectedClasses = "bg-primary/10 hover:bg-primary/15";
+const selectedFill = "bg-primary/10";
+
+/* The deeper fill answers a pointer over the row, so it belongs to a row the
+   pointer can act on. */
+const selectedHoverFill = "hover:bg-primary/15";
 
 /**
  * The rows of one list. Owns the separator between rows, so a row never draws
@@ -37,14 +41,32 @@ export function List({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-export interface ListRowProps extends React.ComponentProps<"div"> {
+interface ListRowBaseProps extends React.ComponentProps<"div"> {
   size?: ListRowSize;
-  /** Paints hover and focus states. Set it when the row itself is the click target. */
-  interactive?: boolean;
   selected?: boolean;
-  /** Renders the child element as the row, so a `<button>`, `<a>` or `<li>` can be one. */
-  asChild?: boolean;
 }
+
+/**
+ * `interactive` is accepted only alongside `asChild`. The paint it turns on
+ * includes a focus edge, and the `div` a row renders by default takes no focus
+ * and answers no key, so on its own it would look clickable to a pointer and
+ * be unreachable without one. Passing a `<button>` or an `<a>` through
+ * `asChild` is what makes the row a real target.
+ */
+export type ListRowProps = ListRowBaseProps &
+  (
+    | {
+        /** Paints hover and focus states. Set it when the row itself is the click target. */
+        interactive: true;
+        /** Renders the child element as the row, so a `<button>` or an `<a>` can be one. */
+        asChild: true;
+      }
+    | {
+        interactive?: false;
+        /** Renders the child element as the row, so a `<button>` or an `<a>` can be one. */
+        asChild?: boolean;
+      }
+  );
 
 /**
  * One record in a list: a fixed horizontal inset, a height floor, and the gap
@@ -76,7 +98,8 @@ export function ListRow({
         "flex w-full min-w-0 items-center gap-3 text-left text-ui text-foreground",
         sizeClasses[size],
         interactive && interactiveClasses,
-        selected && selectedClasses,
+        selected && selectedFill,
+        selected && interactive && selectedHoverFill,
         className,
       )}
       {...props}

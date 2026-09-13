@@ -17,15 +17,16 @@ import { cn } from "./cn.js";
  * area stops before the next box begins. Labelling each with a `<label>` is
  * what makes the whole row a target; the pseudo-element only covers a bare
  * checkbox. It is labelled by a sibling `<label>` or by `aria-label`, never by
- * text of its own. `checked="indeterminate"` renders the mixed state and
- * reports `aria-checked="mixed"`.
+ * text of its own. An indeterminate box renders the mixed state and reports
+ * `aria-checked="mixed"`, whether it was set through `checked` or
+ * `defaultChecked`.
  */
 function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer relative inline-flex size-4 shrink-0 items-center justify-center rounded-4 border border-input bg-surface transition-colors outline-none after:absolute after:-inset-x-3 after:-inset-y-1",
+        "group peer relative inline-flex size-4 shrink-0 items-center justify-center rounded-4 border border-input bg-surface transition-colors outline-none after:absolute after:-inset-x-3 after:-inset-y-1",
         "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
         "data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground",
         // The edge stays outside the box, where a field's sits on its border.
@@ -42,11 +43,19 @@ function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxP
         data-slot="checkbox-indicator"
         className="flex items-center justify-center text-current"
       >
-        {props.checked === "indeterminate" ? (
-          <Minus className="size-3" strokeWidth={3} aria-hidden />
-        ) : (
-          <Check className="size-3" strokeWidth={3} aria-hidden />
-        )}
+        {/* Which glyph shows is decided by the box's own state, not by the
+            `checked` prop: an uncontrolled box has no such prop, and reading it
+            would draw a check over `aria-checked="mixed"`. */}
+        <Check
+          className="size-3 group-data-[state=indeterminate]:hidden"
+          strokeWidth={3}
+          aria-hidden
+        />
+        <Minus
+          className="hidden size-3 group-data-[state=indeterminate]:block"
+          strokeWidth={3}
+          aria-hidden
+        />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

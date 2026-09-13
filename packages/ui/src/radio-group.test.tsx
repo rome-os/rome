@@ -101,6 +101,28 @@ describe("RadioGroup", () => {
     expect(cls).not.toContain("after:-inset-3");
   });
 
+  // The 12px axis is the one with no neighbour on it, so it has to follow the
+  // orientation rather than assume the group stacks downward.
+  it("swaps the hit-area axes when the group runs horizontally", () => {
+    render(
+      <RadioGroup
+        orientation="horizontal"
+        aria-label="Access"
+        value="private"
+        onValueChange={() => {}}
+      >
+        <RadioGroupItem value="private" aria-label="Private" />
+        <RadioGroupItem value="public" aria-label="Public" />
+      </RadioGroup>,
+    );
+
+    const item = screen.getByRole("radio", { name: "Private" });
+    expect(item.getAttribute("data-orientation")).toBe("horizontal");
+    const cls = [...item.classList];
+    expect(cls).toContain("data-[orientation=horizontal]:after:-inset-x-1");
+    expect(cls).toContain("data-[orientation=horizontal]:after:-inset-y-3");
+  });
+
   it("paints nothing on the group beyond the gap", () => {
     render(<Group value="private" />);
 

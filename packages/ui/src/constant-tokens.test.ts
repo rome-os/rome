@@ -21,6 +21,28 @@ function readRootHostDeclarations(): Map<string, string> {
 
 const declarations = readRootHostDeclarations();
 
+/**
+ * Resolves a token to a pixel count by following its `var()` chain and folding
+ * the one `calc()` shape these declarations use. Enough to check a relation
+ * between two tokens without a browser.
+ */
+function resolvePx(name: string): number {
+  const value = declarations.get(name);
+  if (value === undefined) throw new Error(`no declaration for ${name}`);
+
+  const sum = value.matchAll(/var\((--[a-z0-9-]+)\)/g);
+  const terms = [...sum].map((match) => resolvePx(match[1]));
+  if (terms.length > 0) return terms.reduce((total, term) => total + term, 0);
+
+  const rem = value.match(/^([\d.]+)rem$/);
+  if (rem) return Number(rem[1]) * 16;
+
+  const px = value.match(/^([\d.]+)px$/);
+  if (px) return Number(px[1]);
+
+  throw new Error(`cannot resolve ${name}: ${value}`);
+}
+
 function declarationsWithPrefix(prefix: string): Record<string, string> {
   return Object.fromEntries([...declarations].filter(([name]) => name.startsWith(prefix)));
 }
@@ -159,12 +181,25 @@ describe("kit-owned constant tokens", () => {
       "--badge-h": "22px",
       "--badge-px": "9px",
       "--badge-gap": "6px",
-      "--row-h-sm": "var(--rome-size-36)",
-      "--row-h-md": "var(--rome-size-40)",
+      "--row-h-sm": "calc(var(--control-h-sm) + var(--rome-space-2))",
+      "--row-h-md": "calc(var(--control-h-md) + var(--rome-space-2))",
       "--row-px-sm": "var(--rome-space-2)",
       "--row-px-md": "var(--rome-space-3)",
       "--row-py-sm": "var(--rome-space-1)",
       "--row-py-md": "var(--rome-space-2)",
     });
+  });
+
+  // The row scale exists to stop rows drifting from the controls they hold, so
+  // the relation is checked rather than left to the shape of the declaration.
+  // A floor repointed at whichever `--rome-size-*` step it equals today reads
+  // the same until the control scale moves, and then it strands.
+  it("floors each row step 8px above the control step of the same name", () => {
+    for (const step of ["sm", "md"] as const) {
+      expect(resolvePx(`--row-h-${step}`) - resolvePx(`--control-h-${step}`)).toBe(8);
+    }
+
+    expect(resolvePx("--row-h-sm")).toBe(36);
+    expect(resolvePx("--row-h-md")).toBe(40);
   });
 });

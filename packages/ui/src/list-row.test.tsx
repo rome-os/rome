@@ -10,6 +10,18 @@ function row(): HTMLElement {
   return screen.getByTestId("row");
 }
 
+/**
+ * `interactive` is only accepted alongside `asChild`, so the paint it turns on
+ * always sits on something that can take focus and answer a key.
+ */
+function InteractiveRow({ selected = false }: { selected?: boolean }) {
+  return (
+    <ListRow asChild interactive selected={selected}>
+      <button type="button" data-testid="row" />
+    </ListRow>
+  );
+}
+
 describe("ListRow", () => {
   describe.each(SIZES)("at %s", (size) => {
     it("reads its floor and both insets off the row scale", () => {
@@ -30,7 +42,7 @@ describe("ListRow", () => {
   });
 
   it("reads no other role's scale", () => {
-    render(<ListRow data-testid="row" interactive selected />);
+    render(<InteractiveRow selected />);
 
     // The row is the box around a control, not a control: a row on the
     // control scale would be as tall as the button inside it and no taller.
@@ -52,7 +64,7 @@ describe("ListRow", () => {
     expect(cls.some((token) => token.startsWith("hover:"))).toBe(false);
     expect(cls.some((token) => token.startsWith("focus-visible:"))).toBe(false);
 
-    rerender(<ListRow data-testid="row" interactive />);
+    rerender(<InteractiveRow />);
     cls = [...row().classList];
     expect(cls).toContain("hover:bg-surface-hover");
     expect(cls).toContain("outline-1");
@@ -65,13 +77,24 @@ describe("ListRow", () => {
   });
 
   it("marks and paints the selected row, and its hover fill wins", () => {
-    render(<ListRow data-testid="row" interactive selected />);
+    render(<InteractiveRow selected />);
 
     const cls = [...row().classList];
     expect(row().getAttribute("data-selected")).toBe("true");
     expect(cls).toContain("bg-primary/10");
     expect(cls).toContain("hover:bg-primary/15");
     expect(cls).not.toContain("hover:bg-surface-hover");
+  });
+
+  // Hover answers a pointer that can act on the row. A row nothing can do
+  // anything with still marks that it is the selected one.
+  it("gives a selected row that is not interactive the fill without the hover", () => {
+    render(<ListRow data-testid="row" selected />);
+
+    const cls = [...row().classList];
+    expect(row().getAttribute("data-selected")).toBe("true");
+    expect(cls).toContain("bg-primary/10");
+    expect(cls.some((token) => token.startsWith("hover:"))).toBe(false);
   });
 
   it("leaves an unselected row unmarked", () => {
@@ -108,7 +131,7 @@ describe("ListRow", () => {
   });
 
   it("draws no border of its own", () => {
-    render(<ListRow data-testid="row" interactive selected />);
+    render(<InteractiveRow selected />);
 
     // The separator belongs to List, so a row is the same box first and last.
     expect([...row().classList].some((token) => /^border/.test(token))).toBe(false);
