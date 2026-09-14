@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.8](https://github.com/rome-os/rome/compare/ui-v0.2.7...ui-v0.2.8) (2026-09-14)
+
+
+### Features
+
+* **ui:** add row, checkbox, and radio group primitives ([#367](https://github.com/rome-os/rome/issues/367)) ([848376a](https://github.com/rome-os/rome/commit/848376a9eebceb81341b25a323ea345c936ed200))
+* **ui:** retune type weight, control scale, and focus edge ([#365](https://github.com/rome-os/rome/issues/365)) ([d28d695](https://github.com/rome-os/rome/commit/d28d695aa3ad58cd49ebcd44011da453502815a4))
+
 ## [0.2.7](https://github.com/rome-os/rome/compare/ui-v0.2.6...ui-v0.2.7) (2026-09-10)
 
 
