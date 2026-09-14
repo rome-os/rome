@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { loadUnitedFlights, UnitedLoginRequiredError } from "./united-browser.mjs";
-import { buildSearchUrl, normalizeSearch } from "./united-helpers.mjs";
+import { normalizeSearch } from "./united-helpers.mjs";
+import { UNITED_HOME } from "./united-form.mjs";
 
 const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/miles.json", import.meta.url)));
 const search = normalizeSearch({
@@ -30,7 +31,14 @@ function browser(states) {
       time += 1000;
     },
   };
-  return { page, calls, options: { now: () => time } };
+  return {
+    page,
+    calls,
+    options: {
+      now: () => time,
+      submit: async (_page, requested) => calls.push(["submit", requested]),
+    },
+  };
 }
 
 test("waits for loading, expands all flights, and requires stable complete results", async () => {
@@ -45,8 +53,8 @@ test("waits for loading, expands all flights, and requires stable complete resul
   const b = browser([pending, partial, data, data]);
   assert.deepEqual(await loadUnitedFlights(b.page, search, b.options), data);
   assert.deepEqual(b.calls.slice(0, 2), [
-    ["goto", new URL("/", buildSearchUrl(search)).href],
-    ["goto", buildSearchUrl(search)],
+    ["goto", UNITED_HOME],
+    ["submit", search],
   ]);
   assert.equal(b.calls.filter((c) => c[1] === "expandAllFlights").length, 1);
 });
@@ -54,7 +62,7 @@ test("waits for loading, expands all flights, and requires stable complete resul
 test("login wall is a typed error, not a switch to cash", async () => {
   const b = browser([{ ...fixture(), login_required: true }]);
   await assert.rejects(loadUnitedFlights(b.page, search, b.options), UnitedLoginRequiredError);
-  assert.equal(b.calls.filter((c) => c[0] === "goto").length, 2);
+  assert.equal(b.calls.filter((c) => c[0] === "goto").length, 1);
 });
 
 test("access challenge fails immediately without bypassing it", async () => {

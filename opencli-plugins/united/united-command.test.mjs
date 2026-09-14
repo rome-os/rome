@@ -15,8 +15,14 @@ const errorsUrl = `data:text/javascript,${encodeURIComponent(`
     constructor(domain, message) { super(message); this.domain = domain; }
   }
 `)}`;
+const formUrl = new URL("./united-form.mjs", import.meta.url).href;
+const formStubUrl = `data:text/javascript,${encodeURIComponent(`
+  export * from ${JSON.stringify(formUrl)};
+  export async function submitUnitedSearch() {}
+`)}`;
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "./united-form.mjs") return { url: formStubUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/registry")
       return { url: registryUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/errors") return { url: errorsUrl, shortCircuit: true };

@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertSearchPage,
-  buildSearchUrl,
   cabinOf,
   dateFromNote,
   normalizeResults,
@@ -33,21 +32,23 @@ test("normalizes airports and defaults", () => {
   assert.equal(s.returnDate, null);
 });
 
-test("award flag is at, adult count is px", () => {
-  for (const miles of [false, true])
-    for (const adults of [1, 2, 9]) {
-      const p = new URL(buildSearchUrl(search({ miles, adults }))).searchParams;
-      assert.equal(p.get("at"), miles ? "1" : null);
-      assert.equal(p.get("tqp"), miles ? "A" : "R");
-      assert.equal(p.get("px"), String(adults));
-      assert.equal(p.get("r"), "2026-11-15");
-      assert.equal(p.get("sc"), "7,7");
-      assert.equal(p.get("tt"), null);
-    }
-  const oneWay = new URL(buildSearchUrl(search({ return: undefined }))).searchParams;
-  assert.equal(oneWay.get("tt"), "1");
-  assert.equal(oneWay.get("r"), null);
-  assert.equal(oneWay.get("sc"), "7");
+test("accepts homepage passenger categories and preserves United's actual results URL", () => {
+  const data = fixture("cash");
+  const url = new URL(data.url);
+  url.searchParams.set("px", "2,0,0,0,0,0,0,0");
+  url.searchParams.set("pst", "9Y8=-Y-Y");
+  data.url = url.href;
+  assert.equal(results("cash", {}, data)[0].url, data.url);
+});
+
+test("rejects non-adult categories and mismatched adult counts", () => {
+  for (const px of ["1,0,0", "2,1,0", "2,0,1", "2,", "2,00", "2x"]) {
+    const data = fixture("cash");
+    const url = new URL(data.url);
+    url.searchParams.set("px", px);
+    data.url = url.href;
+    assert.throws(() => results("cash", {}, data), /px search condition/);
+  }
 });
 
 for (const invalid of [
@@ -267,6 +268,14 @@ test("cash does not accept a miles-shaped card", () => {
   assert.throws(() => results("cash", {}, data), /mode changed/);
 });
 
+test("parses whole-hour durations displayed without a minutes label", () => {
+  const data = fixture("miles");
+  data.rows[0].duration_text = "8HDuration 8 hours";
+  assert.equal(results("miles", {}, data)[0].duration_minutes, 480);
+  data.rows[0].duration_text = "45MDuration 45 minutes";
+  assert.equal(results("miles", {}, data)[0].duration_minutes, 45);
+});
+
 test("rejects bare numeric options and non-boolean flags", () => {
   for (const invalid of [
     { adults: true },
@@ -282,7 +291,6 @@ test("leaves origin-local date availability to United across UTC midnight", (t) 
   assert.equal(new Date().toISOString().slice(0, 10), "2026-11-14");
   const requested = normalizeSearch({ from: "SFO", to: "IAH", depart: "2026-11-13" });
   assert.equal(requested.depart, "2026-11-13");
-  assert.equal(new URL(buildSearchUrl(requested)).searchParams.get("d"), "2026-11-13");
 });
 
 test("leaves even an old valid date to United instead of guessing an airport timezone", () => {

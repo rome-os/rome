@@ -1,7 +1,8 @@
-import { assertSearchPage, buildSearchUrl } from "./united-helpers.mjs";
+import { assertSearchPage } from "./united-helpers.mjs";
+import { assertUnitedAvailable, submitUnitedSearch, UNITED_HOME } from "./united-form.mjs";
 import { readUnitedPage } from "./united-page.mjs";
 
-export class UnitedLoginRequiredError extends Error {}
+export { UnitedLoginRequiredError } from "./united-form.mjs";
 
 export function expandAllFlights() {
   const button = [...document.querySelectorAll("button")].find(
@@ -15,11 +16,14 @@ export function expandAllFlights() {
   return true;
 }
 
-/** Only navigates and expands search results. Never chooses a fare or reads account state. */
-export async function loadUnitedFlights(page, search, { now = Date.now } = {}) {
-  // A fresh document prevents the SPA from reusing the preceding route or award mode.
-  await page.goto(new URL("/", buildSearchUrl(search)).href);
-  await page.goto(buildSearchUrl(search));
+/** Submits the search form and expands results. Never chooses a fare or reads account state. */
+export async function loadUnitedFlights(
+  page,
+  search,
+  { now = Date.now, submit = submitUnitedSearch } = {},
+) {
+  await page.goto(UNITED_HOME);
+  await submit(page, search, { now });
   const deadline = now() + search.timeout * 1000;
   let previous = "";
   let expanded = false;
@@ -29,14 +33,7 @@ export async function loadUnitedFlights(page, search, { now = Date.now } = {}) {
     const total = data.displayed[1];
     // The counter can disappear during expansion. Its highest total remains the completion bound.
     if (Number.isInteger(total) && total > 0) expectedTotal = Math.max(expectedTotal ?? 0, total);
-    if (data.challenge)
-      throw new Error("United served an access challenge. Clear it in the browser, then retry");
-    if (data.service_error) throw new Error("United could not complete this search. Retry later");
-    if (data.login_required) {
-      throw new UnitedLoginRequiredError(
-        "Sign in to MileagePlus on united.com in this browser, then retry --miles. Cash prices will not be substituted",
-      );
-    }
+    assertUnitedAvailable(data);
     if (!data.loading && (data.rows.length || data.no_results)) {
       assertSearchPage(data, search);
       if (data.no_results && !data.rows.length && expectedTotal === null && !expanded) return data;
