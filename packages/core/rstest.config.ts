@@ -22,10 +22,6 @@ export default defineConfig({
   include: [
     "src/**/*.test.ts",
     "../app-runtime-sdk/src/**/*.test.ts",
-    // One level only. The suites under `cli/store/` and `runtime/` still import
-    // `vitest` and use its `vi` globals, so they have never run under any
-    // script. Migrating them to `@rstest/core` is its own change.
-    "../app-web-sdk/src/cli/*.test.ts",
     "../../rome_apps/*/src/**/*.test.ts",
     "../../scripts/**/*.test.ts",
     "../../infra/**/*.test.ts",
@@ -43,7 +39,6 @@ export default defineConfig({
     include: [
       "src/**/*.ts",
       "../app-runtime-sdk/src/**/*.ts",
-      "../app-web-sdk/src/**/*.ts",
       "../../rome_apps/*/*.ts",
       "../../rome_apps/*/scripts/**/*.ts",
       "../../rome_apps/*/src/**/*.ts",
@@ -51,7 +46,6 @@ export default defineConfig({
     exclude: [
       "src/**/*.test.ts",
       "../app-runtime-sdk/src/**/*.test.ts",
-      "../app-web-sdk/src/**/*.test.ts",
       "../../rome_apps/*/src/**/*.test.ts",
       "src/**/types.ts",
       "src/telemetry.ts",

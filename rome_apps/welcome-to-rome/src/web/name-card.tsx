@@ -30,15 +30,13 @@ function NameCard({ ctx }: { ctx: AppComponentContext }) {
   };
 
   const inputClass =
-    "h-9 w-full rounded-8 border border-border bg-surface px-3 text-sm text-foreground outline-none focus:border-primary disabled:opacity-60";
+    "h-9 w-full rounded-8 border border-border bg-surface px-3 text-ui text-foreground outline-none focus:border-primary disabled:opacity-60";
 
   return (
     <div className="w-full max-w-md rounded-12 border border-border bg-card p-4">
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">
-            {copy.names.guardianLabel}
-          </span>
+        <label className="flex flex-col gap-1">
+          <span className="text-aux text-muted-foreground">{copy.names.guardianLabel}</span>
           <input
             className={inputClass}
             value={guardianName}
@@ -47,8 +45,8 @@ function NameCard({ ctx }: { ctx: AppComponentContext }) {
             onChange={(e) => setGuardianName(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">{copy.names.agentLabel}</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-aux text-muted-foreground">{copy.names.agentLabel}</span>
           <input
             className={inputClass}
             value={agentName}
