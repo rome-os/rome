@@ -1,0 +1,244 @@
+/* Monochrome infographic style, after Evelina Judeikyte's
+   "Hope for Girls and Women in Tanzania". Two inks plus one grey. */
+
+:root {
+  --paper: #f4f4f4;
+  --ink: #111;
+  --grey: #8a8a8a;
+  --hair: #ccc;
+  --sans: "Lato", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html { background: var(--paper); color-scheme: light; }
+
+body {
+  max-width: 62em;
+  margin: 4em auto 3em;
+  padding: 0 1.5em;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings ---------------------------------------------------------- */
+
+h1, h2, h3, h4 {
+  font-family: var(--sans);
+  font-weight: 300;
+  color: var(--ink);
+  margin: 0;
+}
+
+h1 {
+  font-size: 60px;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.35em;
+}
+
+/* Hatched title rule: the reference's texture, used once per page. */
+h1::after {
+  content: "";
+  display: block;
+  height: 8px;
+  margin-top: 0.45em;
+  background: repeating-linear-gradient(45deg, var(--ink) 0 2px, #fff 2px 7px);
+}
+
+h2 {
+  font-size: 30px;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 2.6em 0 0.7em;
+}
+
+h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 2em 0 0.5em;
+}
+
+/* Signature device: white on a solid black box. Applied by the
+   post-processor to the last word(s) of h1 and h2 only. */
+mark, h1 mark, h2 mark {
+  background: var(--ink);
+  color: #fff;
+  padding: 0 0.18em;
+  border-radius: 0;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* Prose ------------------------------------------------------------- */
+
+p { margin: 0 0 1em; }
+
+h1 + p {
+  font-size: 19px;
+  font-weight: 300;
+  line-height: 1.45;
+}
+
+a { color: var(--ink); text-decoration: underline; text-underline-offset: 0.12em; }
+a:hover { background: var(--ink); color: #fff; text-decoration: none; }
+
+/* Bold lead-ins read as all-caps labels, like "FEMALE GENITAL MUTILATION". */
+p > strong:first-child,
+li > strong:first-child,
+td > strong:first-child {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.88em;
+}
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+ul, ol { padding-left: 1.4em; margin: 0 0 1.2em; }
+li { margin: 0 0 0.45em; }
+li::marker { color: var(--ink); }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--ink);
+  margin: 3em 0;
+}
+
+blockquote {
+  margin: 1.5em 0;
+  padding: 0.2em 0 0.2em 1.2em;
+  border-left: 3px solid var(--ink);
+  background: none;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* Big standalone numbers with a small label beside them. */
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 3em;
+  margin: 1.2em 0 2em;
+}
+.stat { display: flex; align-items: baseline; gap: 0.5em; }
+.stat .n { font-size: 60px; font-weight: 300; line-height: 1; letter-spacing: -0.03em; }
+.stat .l { font-size: 14px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Tables ------------------------------------------------------------ */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0 2.2em;
+  font-size: 16px;
+}
+thead th {
+  text-align: left;
+  vertical-align: bottom;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 1.2em 0.7em 0;
+  border-bottom: 1px solid var(--ink);
+  background: none;
+}
+tbody td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.85em 1.2em 0.85em 0;
+  border-bottom: 1px solid var(--hair);
+  background: none;
+}
+tbody tr:last-child td { border-bottom: 1px solid var(--ink); }
+tbody tr:nth-child(even), tbody tr:nth-child(odd) { background: none; }
+th:last-child, td:last-child { padding-right: 0; }
+td:first-child { white-space: nowrap; }
+
+/* Code -------------------------------------------------------------- */
+
+code, pre, kbd, samp {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--ink);
+  background: none;
+}
+
+pre {
+  margin: 1.2em 0 2em;
+  padding: 1em 0;
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+  line-height: 1.45;
+  font-size: 14.5px;
+}
+pre code { font-size: inherit; padding: 0; white-space: inherit; }
+div.sourceCode { margin: 0; background: none; }
+
+/* Pandoc's syntax highlighting is overridden to black, comments grey. */
+pre code span,
+pre code span[class] {
+  color: var(--ink) !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  text-decoration: none !important;
+  background: none !important;
+}
+pre code span.co { color: var(--grey) !important; }
+
+/* Mermaid ----------------------------------------------------------- */
+
+pre.mermaid {
+  border: 0;
+  padding: 0;
+  margin: 1.5em 0 2.5em;
+  background: none;
+  white-space: normal;
+  overflow: visible;
+  font-family: var(--sans);
+}
+pre.mermaid svg { display: block; max-width: 100%; height: auto; }
+/* `actor ann` draws a stick figure on the page, not a black box, so its
+   label must be ink rather than the white used inside actor boxes. */
+pre.mermaid svg text.actor-man,
+pre.mermaid svg text.actor-man tspan { fill: var(--ink) !important; }
+/* Message labels cross lifelines and black activation bars; a paper-coloured
+   halo keeps them legible. */
+pre.mermaid svg .messageText,
+pre.mermaid svg .loopText,
+pre.mermaid svg .loopText tspan {
+  /* !important: mermaid scopes its own rules under the svg id, which outranks this. */
+  paint-order: stroke !important;
+  stroke: var(--paper) !important;
+  stroke-width: 4px !important;
+  stroke-linejoin: round !important;
+}
+
+/* Footer ------------------------------------------------------------ */
+
+footer.colophon {
+  display: flex;
+  justify-content: space-between;
+  gap: 2em;
+  margin-top: 5em;
+  padding-top: 0.8em;
+  border-top: 1px solid var(--ink);
+  font-size: 13px;
+  color: var(--grey);
+}
+
+@media (max-width: 40em) {
+  body { font-size: 16px; margin-top: 2.5em; }
+  h1 { font-size: 40px; }
+  h2 { font-size: 26px; }
+  .stat .n { font-size: 48px; }
+  td:first-child { white-space: normal; }
+}
