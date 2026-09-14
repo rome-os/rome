@@ -184,6 +184,7 @@ cli({
   domain: "google.com",
   strategy: Strategy.PUBLIC,
   browser: true,
+  siteSession: "persistent",
   args: [
     {
       name: "from",

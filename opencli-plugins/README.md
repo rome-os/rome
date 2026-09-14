@@ -285,6 +285,10 @@ The Google plugin adds a browser-backed, read-only flight search command. It acc
 codes, cities, or airport names, supports one-way and round-trip dates, cabin/passenger settings,
 and can filter or sort the returned flight choices without clicking into a booking flow.
 
+The command uses a persistent Google browser session. Results stay open after a search instead of resetting the tab to `about:blank`.
+Later searches reuse that session and navigate directly to the requested Flights search.
+Use `--site-session ephemeral` for an isolated search with automatic tab cleanup.
+
 For multiple airports, pass comma-separated airport codes on either side, such as `SFO,OAK` and
 `IAH,HOU`. Lists accept up to seven distinct codes per side, ignore case and whitespace, and remove duplicates.
 A comma-separated argument that starts with a three-letter airport code uses list syntax. All entries must be airport codes.
