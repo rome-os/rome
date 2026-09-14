@@ -27,6 +27,7 @@ export function readAaPage() {
     ? [...matrix.querySelectorAll("app-slice-details, .flight-row")].filter(visible)
     : [];
   return {
+    url: location.href,
     origin: location.origin,
     path: location.pathname,
     language: document.documentElement?.lang || "",

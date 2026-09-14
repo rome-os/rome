@@ -1,13 +1,20 @@
-import { assertSearchPage, buildSearchUrl } from "./aa-helpers.mjs";
+import { AA_HOME, AaLoginRequiredError, submitAaSearch } from "./aa-form.mjs";
+import { assertSearchPage } from "./aa-helpers.mjs";
 import { readAaPage } from "./aa-page.mjs";
 
-export class AaLoginRequiredError extends Error {}
+export { AaLoginRequiredError } from "./aa-form.mjs";
 
-/** Reads a fresh search without selecting a fare, accessing auth storage, or creating a booking. */
-export async function loadAaFlights(page, search, { now = Date.now } = {}) {
+/** Submits homepage controls and reads results without selecting a fare or creating a booking. */
+export async function loadAaFlights(
+  page,
+  search,
+  { now = Date.now, submit = submitAaSearch } = {},
+) {
+  await page.goto(AA_HOME);
+  // Native controls require the adapter-owned tab to be active.
+  await page.selectTab(0);
+  await submit(page, search, { now });
   const deadline = now() + search.timeout * 1000;
-  await page.goto(new URL("/", buildSearchUrl(search)).href);
-  await page.goto(buildSearchUrl(search));
   let previous = "";
   let expected = null;
   while (now() <= deadline) {

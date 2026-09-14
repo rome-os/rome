@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
-import { expandMoreFlights, prepareSearchForm, submitSearchForm } from "./delta-browser.mjs";
+import { expandMoreFlights } from "./delta-browser.mjs";
 import { normalizeResults, normalizeSearch } from "./delta-helpers.mjs";
 import { readDeltaPage } from "./delta-page.mjs";
 
@@ -193,45 +193,6 @@ test("reads only the search-specific storage key and projects only flight condit
   }
 });
 
-test("public form actions choose the visible duplicate IDs and only submit Find Flights", () => {
-  let html =
-    '<html><body><div hidden><button id="findFilghtsCta">Find Flights</button><input id="shopWithMiles" type="checkbox"></div>';
-  html +=
-    '<button aria-label="Origin, Origin">SFO Origin</button><button aria-label="Destination, Destination">JFK Destination</button>';
-  html +=
-    '<button aria-label="Trip Type, One Way"></button><button aria-label="Passenger Count, 2"></button><button aria-label="Best Fares For, Delta Main"></button>';
-  for (const id of [
-    "shopWithMiles",
-    "flexibleDate",
-    "basicFaresField",
-    "showExtraFareOnly",
-    "includeNearByAirport",
-  ])
-    html += `<input type="checkbox" id="${id}">`;
-  html +=
-    '<button id="findFilghtsCta">Find Flights</button><button>Select Fare</button></body></html>';
-  const dom = domFor(html);
-  try {
-    const d = dom.window.document;
-    let submitted = 0;
-    const buttons = d.querySelectorAll('[id="findFilghtsCta"]');
-    buttons[1].addEventListener("click", () => submitted++);
-    assert.equal(read(dom).form_ready, true);
-    dom.window.eval(
-      `(${prepareSearchForm.toString()})(${JSON.stringify({ from: "SFO", to: "JFK", adults: 2, miles: true, returnDate: null })})`,
-    );
-    assert.equal(submitted, 0);
-    assert.equal(d.querySelectorAll('[id="shopWithMiles"]')[0].checked, false);
-    assert.equal(d.querySelectorAll('[id="shopWithMiles"]')[1].checked, true);
-    assert.equal(d.getElementById("basicFaresField").checked, true);
-    assert.equal(d.getElementById("flexibleDate").checked, false);
-    dom.window.eval(`(${submitSearchForm.toString()})()`);
-    assert.equal(submitted, 1);
-  } finally {
-    dom.window.close();
-  }
-});
-
 test("expansion uses only a visible enabled See More Results button", () => {
   const dom = domFor(
     '<button hidden>See More Results</button><button disabled>See More Results</button><button id="more">See More Results</button><button>Select Flight</button>',
@@ -241,26 +202,6 @@ test("expansion uses only a visible enabled See More Results button", () => {
     dom.window.document.getElementById("more").addEventListener("click", () => clicked++);
     assert.equal(dom.window.eval(`(${expandMoreFlights.toString()})()`), true);
     assert.equal(clicked, 1);
-  } finally {
-    dom.window.close();
-  }
-});
-
-test("disabled search controls are acceptable only when their values already match", () => {
-  const dom = domFor(`<button id="findFilghtsCta">Find Flights</button>
-    <button aria-label="Origin, Origin">SFO Origin</button><button aria-label="Destination, Destination">JFK Destination</button>
-    <button aria-label="Trip Type, One Way"></button><button aria-label="Passenger Count, 1"></button><button aria-label="Best Fares For, Delta Main"></button>
-    <input type="checkbox" id="shopWithMiles" checked><input type="checkbox" id="flexibleDate" disabled>
-    <input type="checkbox" id="basicFaresField" checked><input type="checkbox" id="showExtraFareOnly" disabled>
-    <input type="checkbox" id="includeNearByAirport" disabled>`);
-  try {
-    const run = () =>
-      dom.window.eval(
-        `(${prepareSearchForm.toString()})(${JSON.stringify({ from: "SFO", to: "JFK", adults: 1, miles: true, returnDate: null })})`,
-      );
-    assert.equal(run(), true);
-    dom.window.document.getElementById("flexibleDate").checked = true;
-    assert.throws(run, /control is disabled/);
   } finally {
     dom.window.close();
   }

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { DeltaLoginRequiredError, loadDeltaFlights } from "./delta-browser.mjs";
-import { buildSearchUrl, normalizeSearch } from "./delta-helpers.mjs";
+import { normalizeSearch } from "./delta-helpers.mjs";
+import { DELTA_HOME } from "./delta-form.mjs";
 
 const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/miles.json", import.meta.url)));
 const search = normalizeSearch({
@@ -13,11 +14,11 @@ const search = normalizeSearch({
   miles: true,
   timeout: 10,
 });
-function browser(states, form = true) {
+function browser(states) {
   let i = 0,
     time = 0;
   const calls = [];
-  const queue = form ? [{ ...fixture(), form_ready: true, rows: [] }, ...states] : states;
+  const queue = states;
   const page = {
     async goto(url) {
       assert.match(url, /^https?:\/\//, "Browser Bridge only permits HTTP(S) navigation");
@@ -29,11 +30,18 @@ function browser(states, form = true) {
       if (name !== "readDeltaPage") return true;
       return structuredClone(queue[Math.min(i++, queue.length - 1)]);
     },
+    async selectTab(index) {
+      assert.equal(index, 0);
+    },
     async wait() {
       time += 1000;
     },
   };
-  return { page, calls, options: { now: () => time } };
+  return {
+    page,
+    calls,
+    options: { now: () => time, submit: async () => calls.push(["submit", "homepage"]) },
+  };
 }
 
 test("prepares and submits separately, expands every page, and waits for stable complete results", async () => {
@@ -48,11 +56,10 @@ test("prepares and submits separately, expands every page, and waits for stable 
   assert.deepEqual(await loadDeltaFlights(b.page, search, b.options), data);
   assert.deepEqual(
     b.calls.filter(([method]) => method === "goto"),
-    [["goto", buildSearchUrl(search)]],
+    [["goto", DELTA_HOME]],
   );
   assert.equal(b.calls.filter((c) => c[1] === "expandMoreFlights").length, 2);
-  const prepare = b.calls.findIndex((c) => c[1] === "prepareSearchForm");
-  assert.equal(b.calls[prepare + 1][1], "submitSearchForm");
+  assert.deepEqual(b.calls[1], ["submit", "homepage"]);
 });
 
 test("keeps the highest total when counters vanish or shrink during expansion", async () => {
@@ -95,7 +102,7 @@ for (const [flag, error] of [
   ["login_required", DeltaLoginRequiredError],
 ])
   test(`${flag} fails immediately, without a cash fallback or access bypass`, async () => {
-    const b = browser([{ ...fixture(), [flag]: true }], false);
+    const b = browser([{ ...fixture(), [flag]: true }]);
     await assert.rejects(loadDeltaFlights(b.page, search, b.options), error);
     assert.equal(b.calls.filter((c) => c[1] === "readDeltaPage").length, 1);
     assert.equal(
@@ -111,7 +118,16 @@ test("wrong mode and stale route fail closed", async () => {
   }
 });
 
-test("form readiness has a deadline and never returns old search rows", async () => {
-  const b = browser([fixture()], false);
-  await assert.rejects(loadDeltaFlights(b.page, search, b.options), /form did not become ready/);
+test("submission must finish before results are read", async () => {
+  const b = browser([fixture()]);
+  b.page.evaluate = async () => assert.fail("must not read old results");
+  await assert.rejects(
+    loadDeltaFlights(b.page, search, {
+      ...b.options,
+      submit: async () => {
+        throw new Error("form blocked");
+      },
+    }),
+    /form blocked/,
+  );
 });

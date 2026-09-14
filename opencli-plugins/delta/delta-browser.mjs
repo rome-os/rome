@@ -1,64 +1,7 @@
-import { assertSearchPage, buildSearchUrl } from "./delta-helpers.mjs";
+import { assertSearchPage } from "./delta-helpers.mjs";
+import { assertDeltaAvailable, DELTA_HOME, submitDeltaSearch } from "./delta-form.mjs";
 import { readDeltaPage } from "./delta-page.mjs";
-
-export class DeltaLoginRequiredError extends Error {}
-
-/** Serialized into the browser. Sets only public search controls, never account preferences. */
-export function prepareSearchForm(options) {
-  const visible = (e) =>
-    e && e.getClientRects().length && !e.closest('[hidden], [aria-hidden="true"]');
-  const button = [...document.querySelectorAll('button[id="findFilghtsCta"]')].find(
-    (e) => e.getClientRects().length,
-  );
-  if (!visible(button)) throw new Error("Delta search form is not ready");
-  const get = (prefix) =>
-    [...document.querySelectorAll("button[aria-label]")].find(
-      (e) => visible(e) && e.getAttribute("aria-label").startsWith(prefix),
-    );
-  const origin = get("Origin,");
-  const destination = get("Destination,");
-  if (
-    !origin?.textContent.trim().startsWith(options.from) ||
-    !destination?.textContent.trim().startsWith(options.to)
-  )
-    throw new Error("Delta did not prefill the requested airports");
-  if (
-    get("Trip Type,")?.getAttribute("aria-label") !==
-      `Trip Type, ${options.returnDate ? "Round Trip" : "One Way"}` ||
-    get("Passenger Count,")?.getAttribute("aria-label") !== `Passenger Count, ${options.adults}`
-  )
-    throw new Error("Delta did not prefill the requested trip type or passenger count");
-  if (get("Best Fares For,")?.getAttribute("aria-label") !== "Best Fares For, Delta Main")
-    throw new Error("Set Best Fares For to Delta Main in the browser, then retry");
-  const values = {
-    shopWithMiles: options.miles,
-    flexibleDate: false,
-    basicFaresField: true,
-    showExtraFareOnly: false,
-    includeNearByAirport: false,
-  };
-  for (const [id, value] of Object.entries(values)) {
-    const control = [...document.querySelectorAll(`[id="${id}"]`)].find(visible);
-    if (!control || control.type !== "checkbox" || !visible(control))
-      throw new Error(`Delta search control is unavailable: ${id}`);
-    if (control.checked !== value) {
-      if (control.disabled) throw new Error(`Delta search control is disabled: ${id}`);
-      control.click();
-    }
-    if (control.checked !== value) throw new Error(`Delta did not accept search control: ${id}`);
-  }
-  return true;
-}
-
-export function submitSearchForm() {
-  const button = [...document.querySelectorAll('button[id="findFilghtsCta"]')].find(
-    (e) => e.getClientRects().length,
-  );
-  if (!button || button.disabled || !button.getClientRects().length)
-    throw new Error("Delta Find Flights button is unavailable");
-  button.click();
-  return true;
-}
+export { DeltaLoginRequiredError } from "./delta-form.mjs";
 
 export function expandMoreFlights() {
   const button = [...document.querySelectorAll("button")].find(
@@ -70,42 +13,23 @@ export function expandMoreFlights() {
   return true;
 }
 
-function assertAvailable(data) {
-  if (data.challenge)
-    throw new Error("Delta served an access challenge. Clear it in the browser, then retry");
-  if (data.service_error)
-    throw new Error("Delta could not complete this search or the search expired. Retry later");
-  if (data.login_required)
-    throw new DeltaLoginRequiredError(
-      "Sign in to SkyMiles on delta.com in this browser, then retry. Cash prices will not be substituted",
-    );
-}
-
-/** Navigates, submits a search, and expands results. Never selects a flight or creates a booking. */
-export async function loadDeltaFlights(page, search, { now = Date.now } = {}) {
+/** Submits homepage controls and expands results. Never selects a fare or creates a booking. */
+export async function loadDeltaFlights(
+  page,
+  search,
+  { now = Date.now, submit = submitDeltaSearch } = {},
+) {
+  await page.goto(DELTA_HOME);
+  // Date-picker animations and native controls require the adapter-owned tab to be active.
+  await page.selectTab(0);
+  await submit(page, search, { now });
   const deadline = now() + search.timeout * 1000;
-  await page.goto(buildSearchUrl(search));
-  let submitted = false;
-  while (now() <= deadline) {
-    const data = await page.evaluate(readDeltaPage);
-    assertAvailable(data);
-    if (data.form_ready) {
-      await page.evaluate(`(${prepareSearchForm.toString()})(${JSON.stringify(search)})`);
-      // The click can destroy the JavaScript context. Preparation and result reads are separate calls.
-      await page.evaluate(submitSearchForm);
-      submitted = true;
-      break;
-    }
-    await page.wait({ time: 1 });
-  }
-  if (!submitted)
-    throw new Error(`Delta search form did not become ready within ${search.timeout}s`);
   let expectedTotal = null;
   let expandedAt = -1;
   let previous = "";
   while (now() <= deadline) {
     const data = await page.evaluate(readDeltaPage);
-    assertAvailable(data);
+    assertDeltaAvailable(data);
     if (Number.isInteger(data.total) && data.total > 0)
       expectedTotal = Math.max(expectedTotal || 0, data.total);
     if (!data.loading && (data.rows.length || data.no_results)) {

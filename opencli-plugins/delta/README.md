@@ -11,6 +11,17 @@ opencli delta flights SFO JFK 2026-11-13 --miles --max-miles 50000 --cabin comfo
 opencli delta flights SFO JFK 2026-11-13 --max-price 500 --max-duration 400
 ```
 
+## Homepage search
+
+The command opens delta.com and activates its own browser tab.
+It replaces remembered airports, trip type, dates, adult count, and cash/miles mode through the search controls.
+It chooses exact airport suggestions and visible, enabled calendar days, waits for calendar transitions, and closes the picker before submitting.
+Hidden duplicate controls and outside-month placeholders do not satisfy a requested date.
+The command never constructs a search URL, selects a fare, or books travel.
+
+`--timeout` applies separately to form setup and result loading.
+Keep the tab visible while the form runs so calendar animations and native controls can finish.
+
 ## Browser requirements
 
 Use a desktop browser at least 1024px wide, with Delta set to **United States - English**.
@@ -40,7 +51,7 @@ opencli --cdp-endpoint http://127.0.0.1:9222 delta flights SFO JFK 2026-11-13 --
 | `--exclude-mixed-cabin` | Exclude offers whose segments use different cabins |
 | `--sort ORDER` | `best` (Delta order, default), `price`, `duration`, or `departure` |
 | `--limit N` | Maximum fare rows, from 1–500. Default is 20 |
-| `--timeout SECONDS` | Loading deadline, from 5–180 seconds. Default is 90 |
+| `--timeout SECONDS` | Deadline for each of form setup and result loading, from 5–180 seconds. Default is 90 |
 
 The search includes Basic fares and disables flexible dates, nearby airports, and refundable-only pricing.
 Cabin, stop, price, and duration filters run after every result page has loaded.
@@ -52,7 +63,7 @@ The actual fare product controls this mapping, not the column heading. Delta can
 
 Each output row describes one outbound itinerary and one available fare column.
 `flight_numbers`, `connections`, local dates and times, duration, and stops describe the outbound itinerary.
-Sold-out and not-offered cells do not produce rows. Rows include a reusable search URL and `retrieved_at` timestamp.
+Sold-out and not-offered cells do not produce rows. Rows include Delta's result URL and a `retrieved_at` timestamp. That URL can expire with the search session.
 
 - Cash searches return `price` and `currency: "USD"`. The displayed cash price includes taxes and fees.
 - Award searches return `miles` and separate cash `taxes`. `price` is null.
@@ -79,3 +90,5 @@ opencli validate delta
 Tests cover argument validation, price scope, current versus promotional awards, mixed cabins, search verification, pagination, and DOM extraction.
 The DOM fixtures contain flight-result fragments captured from Delta, without account information.
 The DOM suite uses the web workspace's `jsdom` test dependency and adds no plugin runtime dependency.
+
+Homepage tests cover cash and miles, one-way and round-trip searches, hidden duplicates, disabled dates, exact airports, and failed calendar dismissal.

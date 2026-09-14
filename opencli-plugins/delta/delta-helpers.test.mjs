@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   arrivalDate,
   assertSearchPage,
-  buildSearchUrl,
   cabinOf,
   normalizeResults,
   normalizeSearch,
@@ -17,20 +16,12 @@ const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/miles.json", i
 const args = { from: "SFO", to: "JFK", depart: "2026-11-13", adults: 2, miles: true };
 const search = (patch = {}) => normalizeSearch({ ...args, ...patch });
 
-test("normalizes route and builds separate cash and award deep links", () => {
-  for (const miles of [false, true]) {
-    const s = search({ from: " sfo ", to: "jfk", miles, return: "2026-11-20" });
-    const url = new URL(buildSearchUrl(s));
-    assert.equal(url.origin, "https://www.delta.com");
-    assert.equal(url.searchParams.get("awardTravel"), String(miles));
-    assert.equal(url.searchParams.get("paxCount"), "2");
-    assert.equal(url.searchParams.get("returnDate"), "2026-11-20");
-    assert.equal(url.searchParams.get("tripType"), "ROUND_TRIP");
-    assert.equal(url.searchParams.get("originCity"), "SFO");
-  }
-  const url = new URL(buildSearchUrl(search()));
-  assert.equal(url.searchParams.get("tripType"), "ONE_WAY");
-  assert.equal(url.searchParams.has("returnDate"), false);
+test("normalizes route and preserves the airline-generated result URL", () => {
+  const s = search({ from: " sfo ", to: "jfk" });
+  assert.equal(s.from, "SFO");
+  assert.equal(s.to, "JFK");
+  const data = fixture();
+  assert.equal(normalizeResults(data, s)[0].url, data.url);
 });
 
 for (const [name, patch] of Object.entries({

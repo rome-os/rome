@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertSearchPage,
-  buildSearchUrl,
   normalizeResults,
   normalizeSearch,
   parseClock,
@@ -62,26 +61,9 @@ test("accepts leap days, same-day returns, and nine passengers", () => {
   assert.equal(s.adults, 9);
 });
 for (const mode of ["cash", "award", "round-cash", "round-award"])
-  test(`constructs public ${mode} search link`, () => {
-    const s = searchFor(mode);
-    const u = new URL(buildSearchUrl(s));
-    const p = u.searchParams;
-    const slices = JSON.parse(p.get("slices"));
-    assert.equal(u.origin, "https://www.aa.com");
-    assert.equal(p.get("searchType"), s.miles ? "Award" : "Revenue");
-    assert.equal(p.get("adult"), String(s.adults));
-    assert.equal(p.get("pax"), String(s.adults));
-    assert.equal(slices.length, s.returnDate ? 2 : 1);
-    assert.equal(slices[0].orig, s.from);
-    assert.equal(slices[0].dest, s.to);
-    assert.equal(slices[0].date, s.depart);
-    assert.equal(slices[0].origNearby, false);
-    assert.equal(p.get("carriers"), "ALL");
-    assert.equal(p.get("locale"), "en_US");
-    if (s.returnDate) {
-      assert.equal(slices[1].orig, s.to);
-      assert.equal(slices[1].date, s.returnDate);
-    }
+  test(`preserves the airline-generated ${mode} result URL`, () => {
+    const data = fixture(mode);
+    assert.equal(normalizeResults(data, searchFor(mode))[0].search_url, data.url);
   });
 for (const [input, expected] of [
   ["27K", 27000],
