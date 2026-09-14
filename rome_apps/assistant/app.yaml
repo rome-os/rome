@@ -4,6 +4,7 @@ name: Assistant
 icon: assets/icon.svg
 version: 0.1.6
 description: 'General assistance agents and routine-management guidance. Provides the routine-from-chat skill — reach for it first whenever the guardian wants something to happen automatically: it turns a plain-language "do this automatically" request into an event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am") routine instead of hand-building a trigger.'
+tagline: "Your everyday assistant that runs routines for you."
 
 agents:
   - agents/assistant.yaml

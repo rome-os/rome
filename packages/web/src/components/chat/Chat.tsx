@@ -16,7 +16,7 @@ import {
   MoreHorizontal,
   Pin,
   PinOff,
-  Plus,
+  PanelRightOpen,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -40,6 +40,7 @@ import {
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
+import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -50,9 +51,8 @@ import {
   type HandoffNode,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
-import { WidgetPicker } from "@/pages/free/WidgetPicker";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
-import { useFreeCells, type WidgetType } from "@/pages/free/use-free-cells";
+import { useFreeCells } from "@/pages/free/use-free-cells";
 import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
@@ -258,11 +258,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const navigate = useNavigate();
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
-  // The "+" widget picker that used to float as a desktop FAB now lives in the
-  // top navbar. `useFreeCells` is a module-level store, so calling it here drives
-  // the same workspace layout as FreeGrid — no prop drilling or context needed.
-  const { addWidget, placements } = useFreeCells();
-  const hasApps = placements.length > 0;
+  const { toolView, setToolsCollapsed } = useFreeCells();
+  const isAppsPanelOpen = !toolView.collapsed;
   // Multiple sessions are in scope at once. Pick the right one deliberately:
   //   • mainSessionId  — the session THIS <Chat> owns (the prop). Use for the
   //     owned transcript's load / delete / agent lookup / scroll / navigation.
@@ -322,7 +319,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // The session's bound agent (`null` ⇒ default "main") and display name. The
   // composer renders the agent as a non-removable chip and the navbar shows the
   // name as the title; the mobile header bar (FreeGrid) reuses the same hook.
-  const { sessionName, pinnedAgentMention, archivedAt, pinnedAt } =
+  const { sessionName, model, pinnedAgentMention, archivedAt, pinnedAt } =
     useSessionIdentity(mainSessionId);
   // Local override so archive/unarchive from the navbar flips the read-only
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
@@ -1589,14 +1586,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         onDrop={handleDrop}
       >
         {/* ---- Main Chat Area ---- */}
-        {/* When the trace drawer is open as a side panel (wide / no-apps layout,
+        {/* When the trace drawer is open as a side panel (wide / apps panel closed,
             @5xl/chat) it's `fixed` and out of flow, so reserve its 480px here to
             keep the toolbar, messages, and composer clear of it. In the narrow /
             apps-open layout the drawer covers the chat instead, so no reserve. */}
         <div
           className={`relative flex min-h-0 min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
             traceDrawerTarget !== null,
-            hasApps,
+            isAppsPanelOpen,
           )}`}
         >
           {isDraggingFiles && (
@@ -1604,10 +1601,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               {t("composer.dropFiles")}
             </div>
           )}
-          {/* Top toolbar: the bound agent, the session title, and the "+" widget
-              picker / "⋯" menu. Hidden on mobile, where the global header + tab
-              pill already cover this. The handoff seam lives inline, not here. */}
-          <div className="z-20 flex shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 max-md:hidden">
+
+          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 max-md:hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <AgentAvatar
                 iconUrl={pinnedAgentMention?.iconUrl}
@@ -1618,28 +1613,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               <span className="truncate text-ui text-foreground">
                 {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
               </span>
+              <SessionModelLabel model={model} />
               {sessionName?.trim() && pinnedAgentMention && (
                 <span className="shrink-0 truncate text-aux text-muted-foreground">
                   {pinnedAgentMention.appLabel}
                 </span>
               )}
             </div>
-            <WidgetPicker
-              onSelect={(type: WidgetType, targetId?: string) => addWidget(type, targetId)}
-            >
-              <Button
-                type="button"
-                data-coach="add-widget"
-                variant="outline"
-                size="sm"
-                className="hidden md:inline-flex"
-                aria-label={t("navbar.add")}
-                title={t("navbar.add")}
-              >
-                <Plus data-icon="inline-start" className="size-3.5" />
-                {t("navbar.addShort")}
-              </Button>
-            </WidgetPicker>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
@@ -1675,6 +1655,26 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {toolView.collapsed && (
+              <IconButton
+                size="sm"
+                data-coach="add-widget"
+                aria-expanded={false}
+                onClick={() => setToolsCollapsed(false)}
+                label={t("chat.expandTools", { ns: "common" })}
+                icon={
+                  <span className="relative">
+                    <PanelRightOpen />
+                    {toolView.unreadIds.length > 0 && (
+                      <span
+                        className="absolute -right-1 -top-1 size-1.5 rounded-full bg-info"
+                        aria-label={t("chat.toolUpdated", { ns: "common" })}
+                      />
+                    )}
+                  </span>
+                }
+              />
+            )}
           </div>
           {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
@@ -1842,7 +1842,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         <TraceDrawer
           target={traceDrawerTarget}
           onClose={closeTraceDrawer}
-          hasApps={hasApps}
+          hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
             renderSingleBlock(block as StreamBlock, key, {
               onApprovalResolved: refreshActiveSession,

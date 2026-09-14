@@ -1,0 +1,297 @@
+{
+  "origin": "https://www.aa.com",
+  "path": "/booking/choose-flights/1",
+  "language": "en",
+  "width": 1024,
+  "ready": true,
+  "challenge": false,
+  "login_required": false,
+  "expired": false,
+  "error": "",
+  "no_results": false,
+  "loading": false,
+  "expected_count": 5,
+  "search": {
+    "from": "JFK",
+    "to": "LHR",
+    "depart": "11/13/26",
+    "return_date": "11/20/26",
+    "miles": false,
+    "trip_type": "Round trip",
+    "passengers": [
+      {
+        "type": "adult",
+        "count": 2
+      }
+    ],
+    "header_from": "JFK",
+    "header_to": "LHR",
+    "header_passengers": "2",
+    "direction": "DEPART",
+    "date_label": "Friday, November 13, 2026"
+  },
+  "rows": [
+    {
+      "id": "slice-details-0",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "8:05 AM",
+      "arrival": "8:00 PM",
+      "duration": "6h 55m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 6939",
+          "aircraft": "777-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$697",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main fare list starts at $697 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium Economy",
+          "amount": "$2,391",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$6,416",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium fare list starts at $6,416 Round trip, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-1",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "10:10 AM",
+      "arrival": "10:10 PM",
+      "duration": "7h 0m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 142",
+          "aircraft": "772-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$697",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main fare list starts at $697 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$1,182",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main Extra fare list starts at $1,182 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium Economy",
+          "amount": "$2,053",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium Economy fare list starts at $2,053 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$5,666",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium fare list starts at $5,666 Round trip, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-2",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "5:50 PM",
+      "arrival": "5:50 AM +1 , Arrives on November 14",
+      "duration": "7h 0m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 6881",
+          "aircraft": "777-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$697",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main fare list starts at $697 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium Economy",
+          "amount": "$2,391",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$4,816",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium fare list starts at $4,816 Round trip, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-4",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "6:25 PM",
+      "arrival": "6:20 AM +1 , Arrives on November 14",
+      "duration": "6h 55m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 100",
+          "aircraft": "77W-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$697",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main fare list starts at $697 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$1,182",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main Extra fare list starts at $1,182 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium Economy",
+          "amount": "$2,391",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$5,666",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium fare list starts at $5,666 Round trip, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-12",
+      "origin": "JFK",
+      "destination": "LHR",
+      "departure": "12:30 PM",
+      "arrival": "7:20 AM +1 , Arrives on November 14",
+      "duration": "13h 50m",
+      "stops": "1 stop, CLT, Charlotte Douglas International Airport",
+      "segments": [
+        {
+          "flight_number": "AA 2680",
+          "aircraft": "738-Boeing 737",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 730",
+          "aircraft": "77W-Boeing 777",
+          "operator": ""
+        }
+      ],
+      "alerts": "Overnight travel, Extended layover, The class of service you searched may not be available on one or more flights",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$701",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main fare list starts at $701 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$1,186",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Main Extra fare list starts at $1,186 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium Economy",
+          "amount": "$2,396",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium Economy fare list starts at $2,396 Round trip, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$4,820",
+          "addon": "",
+          "scope": "Round trip from",
+          "description": "The lowest fare in the Premium fare list starts at $4,820 Round trip, per person.",
+          "unavailable": false
+        }
+      ]
+    }
+  ]
+}

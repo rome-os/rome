@@ -1,4 +1,5 @@
 import { loadConfig } from "../config.js";
+import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { ActionRegistryImpl } from "./registry.js";
@@ -152,7 +153,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       },
     },
   );
-  const capabilityDiscovery = new CapabilityDiscovery();
+  const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
   // Fire-and-forget: tailscale-based remote discovery is low-priority, and its
   // initial `tailscale status` probe blocks ~2s when the daemon isn't running.
   // Awaiting it here would put that cost on every forked worker's engine-build
@@ -208,7 +209,16 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         providers: [createCodexImageGenerationProvider({ agentRunner })],
       }),
     },
-    { db, actionEngine, routinesRepo, repositories: appRuntimeRepositories },
+    {
+      db,
+      actionEngine,
+      routinesRepo,
+      repositories: appRuntimeRepositories,
+      hostExecution: new HostExecutionService({
+        socketPath: config.hostExecutionSocket,
+        enabled: config.hostExecutionEnabled,
+      }),
+    },
   );
   if (agentLoader.getRegistryLoadFailures().length > 0) {
     log.warn("some app agents failed to load", {

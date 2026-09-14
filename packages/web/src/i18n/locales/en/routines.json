@@ -8,8 +8,6 @@
     "total": "Total",
     "active": "Active",
     "paused": "Paused",
-    "failingCount": "{{n}} failing",
-    "failingAria": "Show {{n}} failing routines",
     "nextUp": "Next up",
     "noUpcoming": "No upcoming runs",
     "etaOverdue": "due now"

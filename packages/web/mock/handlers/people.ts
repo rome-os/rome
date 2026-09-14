@@ -122,7 +122,7 @@ const HIKES_JID = "120363041948572901@g.us";
  *  it projects off the thread. */
 // LinkedIn addresses a member by its bare member id, which is the
 // `channelUserId` an inbound LinkedIn message resolves through.
-const LI_ARVIND_MEMBER = "ACoAAArvind01";
+export const LI_ARVIND_MEMBER = "ACoAAArvind01";
 const LI_CALEB_MEMBER = "ACoAACaleb02";
 
 const DEVIKA_NAME = "Devika";

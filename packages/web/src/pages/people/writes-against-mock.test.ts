@@ -1,11 +1,12 @@
 // @rstest-environment jsdom
-import { afterAll, beforeAll, describe, expect, it } from "@rstest/core";
+import { afterAll, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";
 import { channelMirrorHandlers } from "../../../mock/handlers/people";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
-import type { OutboxPage } from "@rome/api-types/people";
+import type { OutboxPage, TimelinePage } from "@rome/api-types/people";
+import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
 import {
   createPerson,
@@ -140,6 +141,60 @@ async function outboxUntil(
 const holds = (page: OutboxPage, id: string) => page.messages.some((m) => m.id === id);
 
 describe("Sending, against the contract's own handlers", () => {
+  it("retains delivered send receipts through cleanup and expires them after 24 hours", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    const startedAt = Date.now();
+    rs.setSystemTime(startedAt);
+    try {
+      const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "mock receipt lifecycle" };
+      const sent = await sendMessage(RAY, request, t);
+      expect(sent.ok).toBe(true);
+      if (!sent.ok) return;
+      const removedAt = startedAt + 10_000;
+      rs.setSystemTime(removedAt);
+      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
+      const replayed = await sendMessage(RAY, request, t);
+      expect(replayed).toMatchObject({ ok: true, value: { id: request.id, state: "unconfirmed" } });
+      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
+      expect(await sendMessage(RAY, { ...request, text: "changed" }, t)).toMatchObject({
+        ok: false,
+      });
+      const timeline = await fetchJson<TimelinePage>(`/api/people/${RAY}/messages`, {
+        fallback: "timeline unavailable",
+      });
+      expect(timeline.entries.filter((entry) => entry.body === request.text)).toHaveLength(1);
+
+      rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
+      expect(await sendMessage(RAY, request, t)).toEqual(replayed);
+      rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
+      expect(await sendMessage(RAY, request, t)).toMatchObject({
+        ok: true,
+        value: { state: "sending" },
+      });
+      expect(holds(await readOutbox(RAY), request.id)).toBe(true);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("keeps a receipt when a failed mock send is discarded", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    const startedAt = Date.now();
+    rs.setSystemTime(startedAt);
+    try {
+      const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "fail discarded receipt" };
+      expect(await sendMessage(RAY, request, t)).toMatchObject({ ok: true });
+      rs.setSystemTime(startedAt + 10_000);
+      const failed = (await readOutbox(RAY)).messages.find((message) => message.id === request.id)!;
+      expect(failed.state).toBe("failed");
+      expect(await discardSend(RAY, request.id, t)).toMatchObject({ ok: true });
+      expect(await sendMessage(RAY, request, t)).toEqual({ ok: true, value: failed });
+      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("holds a send in the outbox, and lets it go once it is on the timeline", async () => {
     const sent = await sendMessage(RAY, { ...RAY_TELEGRAM, text: "on my way" }, t);
     expect(sent.ok).toBe(true);
@@ -193,13 +248,14 @@ describe("Sending, against the contract's own handlers", () => {
     expect(holds(await readOutbox(RAY), sent.value.id)).toBe(false);
   });
 
-  it("refuses a channel that cannot be written to, naming which refusal it is", async () => {
-    const refused = await sendMessage("arvind-srivastav", { ...ARVIND, text: "hello" }, t);
-    expect(refused.ok).toBe(false);
-    if (refused.ok || !("conflict" in refused)) throw new Error("expected a refusal");
-    // The state, not a sentence. That is what lets the dashboard localize the
-    // reason, and say the same thing whether it read it or raced it.
-    expect(refused.conflict.send).toBe("unsupported");
+  it("sends a LinkedIn reply through the shared outbox and timeline", async () => {
+    const sent = await sendMessage("arvind-srivastav", { ...ARVIND, text: "LinkedIn reply" }, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    await outboxUntil("arvind-srivastav", (page) => !holds(page, sent.value.id));
+    const response = await fetch("/api/people/arvind-srivastav/messages");
+    const timeline = (await response.json()) as TimelinePage;
+    expect(timeline.entries.some((entry) => entry.body === "LinkedIn reply")).toBe(true);
   });
 
   it("lets one of two retries of a row win, so a double click sends once", async () => {

@@ -1,7 +1,8 @@
-import { and, eq, inArray, lt, or } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, lte, or, type SQL } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { outboundMessages } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import { SEND_IDEMPOTENCY_RETENTION_MS, type OutboxMessage } from "@rome/api-types/people";
+import { outboundMessages, outboundSendReceipts } from "../schema.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 
 /**
  * The outbox: messages Rome has been asked to send and has not yet seen land.
@@ -47,9 +48,22 @@ export class OutboxRepository {
     conversationId: string;
     text: string;
   }): Promise<OutboxRow> {
+    const claimed = await this.openOnce({ ...input, id: uuid() });
+    if (!claimed.created) throw new Error("Generated send id already exists");
+    return claimed.row;
+  }
+
+  /** Only a new claim may call the provider. Active rows and unexpired receipts
+   * both own their ids, including across concurrent cleanup and send requests. */
+  async openOnce(input: {
+    id: string;
+    channel: string;
+    channelUserId: string;
+    conversationId: string;
+    text: string;
+  }): Promise<{ row: OutboxRow; created: true } | { message: OutboxMessage; created: false }> {
     const now = new Date();
     const row = {
-      id: uuid(),
       ...input,
       state: "sending" as const,
       providerMessageId: null,
@@ -57,8 +71,18 @@ export class OutboxRepository {
       createdAt: now,
       updatedAt: now,
     };
-    await this.db.insert(outboundMessages).values(row);
-    return row;
+    // The write lock covers both stores: cleanup cannot retire a row between
+    // checking its receipt and claiming the id in the outbox.
+    return this.db.transaction(
+      (tx) => {
+        tx.delete(outboundSendReceipts).where(lte(outboundSendReceipts.expiresAt, now)).run();
+        const existing = this.recordedSend(tx, input.id, now);
+        if (existing) return { message: existing, created: false as const };
+        tx.insert(outboundMessages).values(row).run();
+        return { row, created: true as const };
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /** The channel took it and named it. Not "delivered" — that is decided by
@@ -119,21 +143,16 @@ export class OutboxRepository {
    * sent with no record of it, which is the thing this table exists to prevent.
    */
   async discard(id: string, settledBefore: Date): Promise<boolean> {
-    const deleted = await this.db
-      .delete(outboundMessages)
-      .where(
+    return this.retire(
+      id,
+      or(
+        eq(outboundMessages.state, "failed"),
         and(
-          eq(outboundMessages.id, id),
-          or(
-            eq(outboundMessages.state, "failed"),
-            and(
-              eq(outboundMessages.state, "unconfirmed"),
-              lt(outboundMessages.updatedAt, settledBefore),
-            ),
-          ),
+          eq(outboundMessages.state, "unconfirmed"),
+          lt(outboundMessages.updatedAt, settledBefore),
         ),
-      );
-    return deleted.changes > 0;
+      ),
+    );
   }
 
   /** A send whose process died before the channel answered, marked so it can
@@ -156,7 +175,49 @@ export class OutboxRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.delete(outboundMessages).where(eq(outboundMessages.id, id));
+    this.retire(id);
+  }
+
+  /** A replayable response, even after delivery cleanup or discard. */
+  async findSend(id: string): Promise<OutboxMessage | null> {
+    return this.recordedSend(this.db, id, new Date());
+  }
+
+  private recordedSend(db: DrizzleDb | DrizzleTx, id: string, now: Date): OutboxMessage | null {
+    const active = db.select().from(outboundMessages).where(eq(outboundMessages.id, id)).get();
+    if (active) return outboxMessage(active);
+    const receipt = db
+      .select()
+      .from(outboundSendReceipts)
+      .where(and(eq(outboundSendReceipts.id, id), gt(outboundSendReceipts.expiresAt, now)))
+      .get();
+    return receipt?.response ?? null;
+  }
+
+  private retire(id: string, condition?: SQL): boolean {
+    const now = new Date();
+    // The response and deletion commit together. A crash or another connection
+    // can observe the active row or its receipt, never an unclaimed id.
+    return this.db.transaction(
+      (tx) => {
+        const row = tx
+          .delete(outboundMessages)
+          .where(and(eq(outboundMessages.id, id), condition))
+          .returning()
+          .get();
+        if (!row) return false;
+        tx.delete(outboundSendReceipts).where(lte(outboundSendReceipts.expiresAt, now)).run();
+        tx.insert(outboundSendReceipts)
+          .values({
+            id: row.id,
+            response: outboxMessage(row),
+            expiresAt: new Date(now.getTime() + SEND_IDEMPOTENCY_RETENTION_MS),
+          })
+          .run();
+        return true;
+      },
+      { behavior: "immediate" },
+    );
   }
 
   /** Every open row for a set of accounts, oldest first — the order they were
@@ -181,4 +242,17 @@ export class OutboxRepository {
       .filter((row) => wanted.has(`${row.channel}\n${row.channelUserId}`))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   }
+}
+
+export function outboxMessage(row: OutboxRow): OutboxMessage {
+  return {
+    id: row.id,
+    channel: row.channel,
+    channelUserId: row.channelUserId,
+    text: row.text,
+    timestamp: Math.floor(row.createdAt.getTime() / 1000),
+    state: row.state,
+    ref: row.providerMessageId ? `${row.conversationId}:${row.providerMessageId}` : null,
+    error: row.error,
+  };
 }

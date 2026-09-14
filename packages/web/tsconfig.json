@@ -19,7 +19,15 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "rsbuild.config.ts", "mock/**/*.ts", "mock/**/*.tsx"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "rsbuild.config.ts",
+    "mock/**/*.ts",
+    "mock/**/*.tsx",
+    ".storybook/**/*.ts",
+    ".storybook/**/*.tsx"
+  ],
   "exclude": [
     "node_modules",
     "dist",

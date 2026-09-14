@@ -1,0 +1,14 @@
+name: execute_root_script
+type: system
+description: >-
+  Submit an unrestricted root shell script on the Linux VM hosting Rome.
+  Requires explicit owner enablement in Rome and host policy. Target must be hosting-vm.
+  Returns bounded output if complete, or an accepted job ID if still running.
+  Accepted host jobs survive Rome action or agent cancellation. Use system:manage_root_script
+  to inspect or cancel a job. A new invocation creates a new job, so inspect an uncertain
+  submission before repeating it. Scripts can change or destroy the entire host.
+complexity: complex
+speed: moderate
+reliability: medium
+sideEffects: write
+cancellable: false

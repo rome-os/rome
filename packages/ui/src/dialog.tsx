@@ -86,13 +86,11 @@ export function DialogHeader({
 }: DialogHeaderProps) {
   return (
     <div
-      className={cn(
-        "flex items-center justify-between border-b border-border px-6 py-4",
-        className,
-      )}
+      data-slot="dialog-header"
+      className={cn("flex items-center justify-between px-6 pt-6 pb-4", className)}
       {...rest}
     >
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">{children}</div>
       {onClose && (
         <IconButton
           label={closeLabel}
@@ -139,23 +137,33 @@ export const DialogDescription = forwardRef<
   return (
     <DialogPrimitive.Description
       ref={ref}
-      className={cn("text-body text-muted-foreground", className)}
+      className={cn("text-ui text-muted-foreground", className)}
       {...rest}
     />
   );
 });
 
+// No rule divides the sections; padding alone spaces the column. A body after
+// a header drops its top padding so the header's bottom padding is the whole
+// gap; a body with no visible header above it, as when the title is
+// `sr-only`, keeps both. The footer's gap above is wider than the header's gap
+// below, in place of a rule.
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("max-h-[70vh] overflow-y-auto px-6 py-4", className)} {...rest} />;
+  return (
+    <div
+      className={cn(
+        "max-h-[70vh] overflow-y-auto px-6 py-4 [[data-slot=dialog-header]+&]:pt-0",
+        className,
+      )}
+      {...rest}
+    />
+  );
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn(
-        "flex items-center justify-end gap-2 border-t border-border px-6 py-4",
-        className,
-      )}
+      className={cn("flex items-center justify-end gap-2 px-6 pt-2 pb-6", className)}
       {...rest}
     />
   );

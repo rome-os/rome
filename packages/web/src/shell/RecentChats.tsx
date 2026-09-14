@@ -180,7 +180,7 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring ${
+          className={`flex h-full min-w-0 flex-1 items-center rounded-8 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
             nested ? "pl-4" : "pl-2"
           }`}
         >
@@ -534,7 +534,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 cancelRename();
               }
             }}
-            className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring ${
+            className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
               nested ? "ml-4" : "ml-2"
             }`}
           />
@@ -669,7 +669,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
             onClick={() => toggleGroup(key)}
             aria-expanded={!collapsed}
             title={label}
-            className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+            className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-8 border border-transparent pl-2 pr-1 text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             {projectLabel}
           </button>
@@ -722,7 +722,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>
@@ -826,7 +826,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 id="recent-chats-pinned-heading"
                 onClick={() => toggleGroup("section:pinned")}
                 aria-expanded={!pinnedCollapsed}
-                className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.pinned")}
                 {pinnedCollapsed ? (
@@ -916,7 +916,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                     type="button"
                     onClick={() => toggleGroup(key)}
                     aria-expanded={!collapsed}
-                    className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                    className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
                   >
                     <span>{label}</span>
                     {collapsed ? (

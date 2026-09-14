@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Parser } from "tar";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { runPublish } from "./publish.js";
 
 async function listTarEntries(bytes: Buffer): Promise<string[]> {
@@ -31,11 +31,11 @@ describe("rome publish source packaging", () => {
     appDir = path.join(workDir, "notes");
     outputPath = path.join(workDir, "notes.tgz");
     await mkdir(appDir, { recursive: true });
-    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    rs.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
+    rs.restoreAllMocks();
     await rm(workDir, { recursive: true, force: true });
   });
 

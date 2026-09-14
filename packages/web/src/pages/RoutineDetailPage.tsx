@@ -6,6 +6,7 @@ import { ArrowLeft, Check, ChevronRight, Clock, Radio, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Badge } from "@/components/ui/badge";
+import { List, ListRow } from "@/components/ui/list-row";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { ActionExecutionTree } from "@/components/agent-trace/ActionExecutionTree";
 import {
@@ -17,7 +18,7 @@ import {
   type RoutineRun,
 } from "@/lib/routine-language";
 import { useRoutines, useRoutineRuns, useRoutineRunTrace } from "@/hooks/use-routines";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // Detail view for one routine: a plain-language header over its run history,
 // where each run expands to the reconstructed action-execution trace.
@@ -72,24 +73,24 @@ function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
   const TriggerIcon = isScheduleTrigger(routine.trigger) ? Clock : Radio;
 
   return (
-    <header className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-title text-foreground">{title}</h1>
-        {!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
-      </div>
-      <p className="flex items-start gap-2 text-body text-muted-foreground">
-        <TriggerIcon className="mt-1 h-4 w-4 flex-shrink-0" aria-hidden />
-        <span className="min-w-0">
-          <span>{triggerPhrase}</span>
-          {hasName && (
-            <>
-              <span className="text-subtle-foreground"> · </span>
-              <span>{outcomePhrase}</span>
-            </>
-          )}
+    <PageHeader
+      title={title}
+      titleAside={!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
+      description={
+        <span className="flex items-center gap-1">
+          <TriggerIcon className="size-3.5 flex-shrink-0" aria-hidden />
+          <span className="min-w-0">
+            <span>{triggerPhrase}</span>
+            {hasName && (
+              <>
+                <span className="text-subtle-foreground"> · </span>
+                <span>{outcomePhrase}</span>
+              </>
+            )}
+          </span>
         </span>
-      </p>
-    </header>
+      }
+    />
   );
 }
 
@@ -107,11 +108,15 @@ function RunHistoryList({ routineId }: { routineId: string }) {
     return <p className="text-aux text-subtle-foreground">{t("history.empty")}</p>;
   }
   return (
-    <ul className="divide-y divide-border-subtle overflow-hidden rounded-12 border border-border">
-      {runs.map((run) => (
-        <RunRow key={run.id} routineId={routineId} run={run} />
-      ))}
-    </ul>
+    // A run history is a list in the document too, so the section is the `<ul>`
+    // rather than a `<div>` beside one, and the hairline stays the section's.
+    <List asChild className="overflow-hidden rounded-12 border border-border">
+      <ul>
+        {runs.map((run) => (
+          <RunRow key={run.id} routineId={routineId} run={run} />
+        ))}
+      </ul>
+    </List>
   );
 }
 
@@ -171,30 +176,29 @@ function RunRow({ routineId, run }: { routineId: string; run: RoutineRun }) {
 
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-ui hover:bg-surface-muted"
-      >
-        <ChevronRight
-          className={`h-4 w-4 flex-none text-subtle-foreground transition-transform ${open ? "rotate-90" : ""}`}
-          aria-hidden
-        />
-        <RunStatusIcon status={run.status} />
-        <span className="min-w-0 flex-1 truncate text-foreground">{runText(run, t)}</span>
-        {duration && (
-          <span className="flex-none font-mono text-aux text-muted-foreground">{duration}</span>
-        )}
-      </button>
+      <ListRow asChild interactive size="sm">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <ChevronRight
+            className={`h-4 w-4 flex-none text-subtle-foreground transition-transform ${open ? "rotate-90" : ""}`}
+            aria-hidden
+          />
+          <RunStatusIcon status={run.status} />
+          <span className="min-w-0 flex-1 truncate text-foreground">{runText(run, t)}</span>
+          {duration && (
+            <span className="flex-none font-mono text-aux text-muted-foreground">{duration}</span>
+          )}
+        </button>
+      </ListRow>
 
-      {/* The run-level error reads even when the trace is collapsed. */}
+      {/* The run-level error reads even when the trace is collapsed. Both this
+          and the trace panel below hang off the row, so they take the row's own
+          `sm` inset on the right and start under its status icon on the left. */}
       {run.error && (
-        <p className="px-3 pb-2 pl-9 font-mono text-aux text-destructive-fg">{run.error}</p>
+        <p className="px-2 pb-2 pl-9 font-mono text-aux text-destructive-fg">{run.error}</p>
       )}
 
       {open && (
-        <div className="border-t border-border-subtle bg-surface-muted/30 px-3 py-3 pl-9">
+        <div className="border-t border-border-subtle bg-surface-muted/30 px-2 py-3 pl-9">
           <h3 className="mb-2 text-aux text-subtle-foreground">{t("detail.trace")}</h3>
           {isLoading ? (
             <p className="text-aux text-subtle-foreground">{t("detail.traceLoading")}</p>

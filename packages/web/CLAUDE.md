@@ -9,6 +9,7 @@ The Rsbuild SPA dashboard, served by the backend. Guardian-only. It owns the the
 - Before adding or editing a mock handler, read [`docs/dashboard-mock-mode.md`](../../docs/dashboard-mock-mode.md).
 - When working without a backend, run `pnpm start:web:mock` and open http://localhost:3200.
 - When changing a `ui/` primitive or a token, open `/dev/gallery` under `pnpm start:web` — a value defined in only one half of a theme shows up as a broken specimen immediately.
+- When debugging Storybook through Codex, prefer its built-in browser over launching another Chrome instance.
 
 ## Traps
 

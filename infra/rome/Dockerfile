@@ -28,6 +28,12 @@ RUN apt-get update \
         ca-certificates \
         curl \
         unzip \
+        # Same Noto set as the production image: the social-card renderer
+        # (packages/core/src/apps/og) draws text with system fonts, and resvg
+        # ships no fallback, so without these the dev cards render blank text.
+        fonts-noto \
+        fonts-noto-cjk \
+        fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 ENV COREPACK_ENABLE_STRICT=0

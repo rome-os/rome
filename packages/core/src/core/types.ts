@@ -97,7 +97,7 @@ export interface ForkRunParams {
 }
 
 /** Maps tier names to full model IDs (Anthropic provider defaults). */
-export const MODEL_MAP: Record<AgentConfig["tier"], string> = {
+export const MODEL_MAP: Record<NonNullable<AgentConfig["tier"]>, string> = {
   large: "claude-opus-4-8[1m]",
   medium: "claude-sonnet-5",
   small: "claude-haiku-4-5-20251001",

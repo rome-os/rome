@@ -21,8 +21,8 @@ Each role names what the text is, never a size or a look. The roster covers a he
 - `text-display` — Used for the one hero moment on a screen, such as the home greeting. Not used for a second element on the same screen.
 - `text-title` — Used for the heading a page or dialog carries once, at the top. Not used for a section inside one.
 - `text-section` — Used for the heading of a section, card, or panel inside a surface. Not used for a single control's label.
-- `text-body` — Used for prose someone reads as content: chat messages, paragraphs, text typed into a field. Not used for controls or labels. A field on the 28px control step is the single exception and reads `text-ui`. Constraints covers why.
-- `text-ui` — Used for controls: sidebar rows, menu items, buttons, tabs, their labels, and both rows of a compact callout such as an alert. Not used for prose.
+- `text-body` — Used for prose someone reads as content: chat messages and paragraphs. Not used for controls, fields, or labels.
+- `text-ui` — Used for controls: sidebar rows, menu items, buttons, tabs, text fields and what is typed into them, their labels, and both rows of a compact callout such as an alert. Not used for prose.
 - `text-badge` — Used for text inside a compact labeled container: chips, tags, badges, status pills, and counters. Not used for metadata that annotates other content, which stays `text-aux`.
 - `text-aux` — Used for metadata that annotates other content: timestamps, uncontained counts, group headers, and captions. Not used for compact labeled containers. A column of times or counts adds `tabular-nums`.
 
@@ -33,7 +33,7 @@ Every role resolves to the same primitives in light and dark. Other tokens in th
 | Role | Font size | Line height | Weight |
 |---|---|---|---|
 | Display | `--rome-font-size-30` | `--rome-line-height-120` | 400 |
-| Title | `--rome-font-size-20` | `--rome-line-height-120` | 400 |
+| Title | `--rome-font-size-18` | `--rome-line-height-133` | 500 |
 | Section | `--rome-font-size-15` | `--rome-line-height-133` | 500 |
 | Body | `--rome-font-size-16` | `--rome-line-height-125` | 400 |
 | UI Item | `--rome-font-size-14` | `--rome-line-height-143` | 400 |
@@ -44,13 +44,13 @@ Letter spacing is 0 in every role.
 
 ## Constraints
 
-- Section and Badge carry the only weight other than 400. A CJK system fallback ships no 500 face, so weight matching resolves both roles to Regular there. The emphasis is Latin-only. A bilingual surface separates Section by size, ink, and position, and Badge by its container geometry. `[mech]`
+- Title, Section, and Badge carry the only weight other than 400. A CJK system fallback ships no 500 face, so weight matching resolves all three roles to Regular there. The emphasis is Latin-only. A bilingual surface separates Title and Section by size, ink, and position, and Badge by its container geometry. `[mech]`
 - Letter spacing is 0 in every role. Every candidate value falls below what a reader can see, and the group encodes only visible differences. `[mech]`
 - Body and UI Item share a line box at two different sizes, 16px and 14px. Prose reads larger than the controls around it, and the shared box keeps both on the same rhythm. `[mech]`
-- Hierarchy comes from size, weight, position, and color. Never compose a second type utility onto a role. For emphasis, use color or position. `[mech]`
+- Hierarchy comes from size, weight, position, and color. A call site never composes a second type utility onto a role. For emphasis there, use color or position. The kit itself lifts two members above the UI role's weight, the primary `Button` label to 500 and `AlertTitle` to 600, because each sits in a box whose other text shares its size and ink. Those lifts live in the component, never at a call site. `[mech]`
 - Every role's line box lands on the 4px spacing grid. Retuning a size means taking the line height step cut for it, never carrying the old one across. `[mech]`
 - If a size feels wrong, the role choice is wrong or the role mapping needs tuning. Retune on the specimen page, never at the call site. `[human]`
-- A field reads Body, which sits at the 16px threshold mobile Safari zooms below. The one exception is the 28px control step: a field there reads UI, because it sits in a compact row beside a Button and a SelectTrigger already on UI, and Body left it two points larger than everything around it. That step is below the 44px touch minimum and so is never a touch target — a field a thumb is meant to hit takes the 36px step, which keeps Body. No surface restores a size exception of its own. `[human]`
+- A field reads UI at every step, like every control on its row. A Button, a SelectTrigger, and an Input of one size name share one font size as well as one height, and a combobox's field matches the options under it. The 16px threshold below which mobile Safari zooms a focused field does not apply here: the dashboard's viewport meta pins `maximum-scale=1`, which suppresses that zoom. No surface restores a field size exception of its own. `[human]`
 - Each role declares all four properties explicitly. A role nested under an inherited weight or letter-spacing utility still renders as drawn. `[mech]`
 - Every control declares a role, including an icon-only one. Without one it falls back to the document size, which an em-sized glyph or tooltip resolves against. `[mech]`
 - The roster of seven is the contract. Components bind to role names, so a value change never touches a call site. An eighth role enters through a roster decision, never as a new size at a call site. `[human]`
@@ -59,5 +59,5 @@ Letter spacing is 0 in every role.
 
 ## Examples
 
-- Positive: an alert with both rows in `text-ui`, the title in the variant foreground and the description in neutral ink — hierarchy from color inside one role, with no second size or weight.
+- Positive: an alert with both rows in `text-ui`, the title at the kit's 600 step in the variant foreground and the description at 400 in neutral ink — hierarchy from weight and color inside one size and line box.
 - Negative: `text-section` on a switch's label inside a settings card, because the label reads faint beside the card heading. A control's label takes `text-ui` and leads by ink. Section gives the card two headings.

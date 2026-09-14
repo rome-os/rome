@@ -709,7 +709,31 @@
       "appsUnhealthy": "{{count}} loaded; failed: {{ids}}"
     },
     "uptimePrefix": "running for {{uptime}}",
-    "buildPrefix": "build {{sha}} · built {{builtAt}}"
+    "buildPrefix": "build {{sha}} · built {{builtAt}}",
+    "computerUse": {
+      "title": "Computer Use",
+      "description": "Browsers connected through OpenCLI. Last seen records when a connection was last confirmed.",
+      "refresh": "Refresh",
+      "loadFailed": "Could not refresh browser connections",
+      "loading": "Checking browser connections…",
+      "daemon": {
+        "running": "Running",
+        "unavailable": "Unavailable"
+      },
+      "daemonUnavailable": "OpenCLI is unreachable. Browser connection status cannot be confirmed.",
+      "empty": "No browser connections have been observed. Install the OpenCLI extension and connect it to this instance.",
+      "browser": "Browser {{id}}",
+      "profile": "Profile {{id}}",
+      "extensionVersion": "Extension v{{version}}",
+      "status": {
+        "connected": "Connected",
+        "disconnected": "Disconnected",
+        "unknown": "Unknown"
+      },
+      "lastSeen": "Last seen",
+      "notReported": "Not reported",
+      "installExtension": "Install OpenCLI extension"
+    }
   },
   "system": {
     "title": "System",

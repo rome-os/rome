@@ -8,6 +8,7 @@ import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/
 import { remixApp } from "./remix.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema, APPS_LOCKFILE_SCHEMA_VERSION, type SpecSource } from "./lockfile.js";
+import type { ResolvedApp } from "./state.js";
 
 const SAMPLE_MANIFEST = `formatVersion: 1
 id: testapp
@@ -335,6 +336,23 @@ describe("AppManager", () => {
     });
 
     expect(existsSync(harness.lockfilePath)).toBe(false);
+  });
+
+  it("install keeps the manifest tagline", async () => {
+    const root = await makeWorkspace(
+      join(harness.profileRoot, "fixture-tagline-app"),
+      `formatVersion: 1
+id: testapp
+version: 0.0.1
+description: behavioral test fixture
+tagline: One line for the card.
+`,
+    );
+    const source: SpecSource = { mode: "bundle", path: await packWorkspace(root) };
+    await harness.appManager.install({ source });
+
+    const view = harness.catalog.get("testapp") as ResolvedApp;
+    expect(view.manifest.tagline).toBe("One line for the card.");
   });
 
   it("a failure inside materialize records state=failed and preserves prior hash", async () => {

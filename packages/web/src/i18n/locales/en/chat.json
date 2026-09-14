@@ -1,4 +1,8 @@
 {
+  "markdown": {
+    "code": "Code",
+    "mermaid": "Mermaid diagram"
+  },
   "title": "Rome",
   "inputState": {
     "queued": "Waiting to be included",
@@ -15,8 +19,7 @@
     "openSidebar": "Open sidebar"
   },
   "navbar": {
-    "add": "Add widget",
-    "addShort": "Add widget",
+    "sessionModel": "Session model: {{model}}",
     "more": "More actions",
     "pin": "Pin chat",
     "unpin": "Unpin chat",
@@ -54,9 +57,7 @@
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
   "timeline": {
-    "label": "Question timeline",
-    "hide": "Hide timeline",
-    "show": "Show timeline"
+    "label": "Question timeline"
   },
   "jumpToLatest": "Jump to the latest message",
   "roles": {

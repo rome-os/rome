@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, SendHorizontal } from "lucide-react";
 import { canSend, type LinkedAccount, type PersonResource } from "@rome/api-types/people";
@@ -15,7 +15,6 @@ import { PAGE_FLOOR } from "@/shell/PageShell";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";
 import { accountHandle } from "./send-model";
-import { usePeopleWrites } from "./use-writes";
 
 /**
  * The composer: one message, to one account the guardian can see it is going
@@ -44,6 +43,7 @@ export function Composer({
   person,
   target,
   onChangeTarget,
+  onSend,
 }: {
   person: PersonResource;
   /** The account this composer writes to, or null when the person holds none
@@ -52,24 +52,12 @@ export function Composer({
   /** Offered where there is something to pick: the merged view. Null inside an
    *  account view, where the view already names the target. */
   onChangeTarget: ((account: LinkedAccount) => void) | null;
+  onSend: (account: LinkedAccount, text: string) => void;
 }) {
   const { t } = useTranslation("people");
-  const writes = usePeopleWrites();
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  // How the last send went, and which account it was addressed to.
-  //
-  // The account is carried so the line can be shown only while it is still
-  // about the target on screen. A refusal names a channel, so one left standing
-  // after the guardian switches accounts is not merely stale — it describes a
-  // channel that is no longer the one being written to, which is worse than
-  // showing nothing. Held together and compared at render rather than cleared
-  // by an effect, so there is no ordering in which the wrong pair can be shown.
-  const [attempt, setAttempt] = useState<{
-    account: { channel: string; channelUserId: string };
-    refusal: RefusedSendState | null;
-    message: string | null;
-  } | null>(null);
+  const draftRef = useRef("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Nothing at all for a person Rome holds no address for. The dossier header
   // already says they have no accounts, and this slot is for a channel giving a
@@ -97,37 +85,14 @@ export function Composer({
 
   const options = person.accounts.filter(canSend);
   const text = draft.trim();
-  // Shown only while it still describes the account being written to. A switch
-  // of target retires it without anything having to remember to.
-  const failed =
-    attempt &&
-    attempt.account.channel === target.channel &&
-    attempt.account.channelUserId === target.channelUserId
-      ? attempt
-      : null;
-
-  async function submit() {
-    // `target` is narrowed above; the closure is re-created every render, so it
-    // is the account rendered beside the box and not an earlier one.
-    if (target === null || text === "" || sending) return;
-    const account = { channel: target.channel, channelUserId: target.channelUserId };
-    setSending(true);
-    setAttempt(null);
-    const outcome = await writes.say(person.id, target, text);
-    setSending(false);
-    if (outcome.ok) {
-      setDraft("");
-      return;
-    }
-    // A 409 raced a disconnect: the account was sendable when the page read it
-    // and is not now. It renders as the line the composer would have shown had
-    // the read been fresh, which is what carrying the state rather than a
-    // sentence buys.
-    setAttempt(
-      "conflict" in outcome
-        ? { account, refusal: outcome.conflict.send, message: null }
-        : { account, refusal: null, message: outcome.message },
-    );
+  function submit() {
+    const message = draftRef.current.trim();
+    if (target === null || message === "") return;
+    // Clear synchronously so repeated submit events cannot send the same draft.
+    draftRef.current = "";
+    setDraft("");
+    onSend(target, message);
+    inputRef.current?.focus();
   }
 
   return (
@@ -142,33 +107,27 @@ export function Composer({
       </p>
       <div className="flex items-center gap-2">
         <Input
+          ref={inputRef}
           size="sm"
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            draftRef.current = event.target.value;
+            setDraft(event.target.value);
+          }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              void submit();
+              submit();
             }
           }}
           placeholder={t("detail.composerPlaceholder", { name: person.displayName })}
           aria-label={t("detail.composerLabel")}
         />
-        <Button
-          type="button"
-          size="sm"
-          disabled={text === "" || sending}
-          onClick={() => void submit()}
-        >
+        <Button type="button" size="sm" disabled={text === ""} onClick={submit}>
           <SendHorizontal aria-hidden="true" />
           {t("send.submit")}
         </Button>
       </div>
-      {failed && (
-        <p className="mt-2 text-aux text-destructive">
-          {failed.refusal ? refusalText(t, failed.refusal, failed.account.channel) : failed.message}
-        </p>
-      )}
     </Floor>
   );
 }
@@ -180,7 +139,7 @@ function refusalText(
   send: RefusedSendState,
   channel: string,
 ): string {
-  return t(sendRefusalKey(send, channel), { channel: channelLabel(t, channel) });
+  return t(sendRefusalKey(send), { channel: channelLabel(t, channel) });
 }
 
 /** One chip's worth of target: the channel's glyph and name, and the handle.
@@ -214,7 +173,7 @@ function TargetMenu({
         <Badge variant="muted" asChild>
           <button
             type="button"
-            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-expanded:text-foreground"
+            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-expanded:text-foreground"
           >
             <ChannelGlyph channel={value.channel} />
             <span className="truncate">

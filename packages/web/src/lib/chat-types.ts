@@ -26,6 +26,8 @@ export interface ChatSession {
   name: string;
   personaId: string | null;
   largeModelSelection?: string | null;
+  /** Concrete model pinned by the session’s last successful turn, when known. */
+  model?: string | null;
   projectName: string;
   projectPath?: string | null;
   agentName?: string | null;

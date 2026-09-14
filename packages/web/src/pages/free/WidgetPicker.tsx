@@ -12,14 +12,15 @@ import {
 import { EmptyState, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useApps } from "@/hooks/use-apps";
-import type { WidgetType } from "./use-free-cells";
+import type { WidgetPlacement, WidgetType } from "./use-free-cells";
 
 interface WidgetPickerProps {
   onSelect: (type: WidgetType, targetId?: string) => void;
   children: React.ReactNode;
+  placements?: WidgetPlacement[];
 }
 
-export function WidgetPicker({ onSelect, children }: WidgetPickerProps) {
+export function WidgetPicker({ onSelect, children, placements = [] }: WidgetPickerProps) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -128,6 +129,11 @@ export function WidgetPicker({ onSelect, children }: WidgetPickerProps) {
                   >
                     {widget.icon}
                     {widget.label}
+                    {placements.some((p) => p.type === widget.type) && (
+                      <span className="ml-auto text-aux text-muted-foreground">
+                        {t("chat.toolOpened")}
+                      </span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -169,6 +175,11 @@ export function WidgetPicker({ onSelect, children }: WidgetPickerProps) {
                       </span>
                     )}
                     <span className="truncate">{app.displayName}</span>
+                    {placements.some((p) => p.type === "app" && p.targetId === app.id) && (
+                      <span className="ml-auto text-aux text-muted-foreground">
+                        {t("chat.toolOpened")}
+                      </span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>

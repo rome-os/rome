@@ -21,6 +21,13 @@ import { AppRemixDialog, canRemixApp } from "@/components/app-remix-dialog";
 import { TileIcon, getStatusDot } from "@/components/app-tile-icon";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import {
+  List,
+  ListRow,
+  ListRowContent,
+  ListRowDescription,
+  ListRowTitle,
+} from "@/components/ui/list-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
@@ -28,7 +35,7 @@ import { getHostAppRoute } from "@/lib/auth-routing";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAppsList } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 type CapabilityKey = keyof AppArtifactDetails;
 
@@ -45,14 +52,14 @@ interface ManageRowProps {
 
 function ManageRow({ icon: Icon, title, description, control }: ManageRowProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-      <Icon className="h-4 w-4 shrink-0 text-subtle-foreground" aria-hidden />
-      <div className="min-w-0 flex-1">
-        <p className="text-ui text-foreground">{title}</p>
-        <p className="mt-1 text-aux text-muted-foreground">{description}</p>
-      </div>
+    <ListRow className="flex-wrap">
+      <Icon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+      <ListRowContent>
+        <ListRowTitle>{title}</ListRowTitle>
+        <ListRowDescription>{description}</ListRowDescription>
+      </ListRowContent>
       <div className="shrink-0">{control}</div>
-    </div>
+    </ListRow>
   );
 }
 
@@ -130,10 +137,11 @@ export default function AppDetailPage() {
         aria-label={t("detail.manage")}
         className="rounded-12 border border-border bg-surface"
       >
-        <div className="border-b border-border-subtle px-4 py-3">
+        {/* px-3 is `--row-px-md`, so the title starts where the rows below it do. */}
+        <div className="border-b border-border-subtle px-3 py-3">
           <h2 className="text-section text-foreground">{t("detail.manage")}</h2>
         </div>
-        <div className="divide-y divide-border-subtle">
+        <List>
           {app.canToggle ? (
             <ManageRow
               icon={Power}
@@ -238,7 +246,7 @@ export default function AppDetailPage() {
               />
             </>
           ) : null}
-        </div>
+        </List>
       </section>
     );
   };
@@ -249,7 +257,7 @@ export default function AppDetailPage() {
     const remixable = canRemixApp(app);
     if (!targetHref && !app.fullHref && !remixable) return null;
     return (
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <>
         {targetHref ? (
           <Button asChild size="sm">
             <Link to={targetHref}>{t("detail.open")}</Link>
@@ -269,7 +277,7 @@ export default function AppDetailPage() {
             {t("installed.remix")}
           </Button>
         ) : null}
-      </div>
+      </>
     );
   };
 
@@ -311,35 +319,39 @@ export default function AppDetailPage() {
           <p className="text-ui text-subtle-foreground">{t("detail.notFound")}</p>
         ) : (
           <>
-            <header className="flex flex-wrap items-start gap-4">
-              <TileIcon
-                kind="image"
-                displayName={app.displayName}
-                iconUrl={app.iconUrl}
-                muted={app.status === "disabled"}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-title text-foreground">{app.displayName}</h1>
-                  <span className="flex shrink-0 items-center gap-2 text-aux text-muted-foreground">
-                    <span
-                      className={cn(
-                        "inline-block h-1.5 w-1.5 rounded-full",
-                        getStatusDot(app.status),
-                      )}
-                    />
-                    {t(`status.${app.status}`)}
+            <PageHeader
+              leading={
+                <TileIcon
+                  kind="image"
+                  displayName={app.displayName}
+                  iconUrl={app.iconUrl}
+                  muted={app.status === "disabled"}
+                />
+              }
+              title={app.displayName}
+              titleAside={
+                <span className="flex shrink-0 items-center gap-2 text-aux text-muted-foreground">
+                  <span
+                    className={cn(
+                      "inline-block h-1.5 w-1.5 rounded-full",
+                      getStatusDot(app.status),
+                    )}
+                  />
+                  {t(`status.${app.status}`)}
+                </span>
+              }
+              description={
+                <>
+                  <span className="block text-subtle-foreground">
+                    {app.id} &middot; v{app.version}
                   </span>
-                </div>
-                <p className="mt-1 text-aux text-subtle-foreground">
-                  {app.id} &middot; v{app.version}
-                </p>
-                {app.description ? (
-                  <p className="mt-2 text-body text-muted-foreground">{app.description}</p>
-                ) : null}
-              </div>
-              {renderHeaderActions(app)}
-            </header>
+                  {app.description ? (
+                    <p className="mt-2 text-body text-muted-foreground">{app.description}</p>
+                  ) : null}
+                </>
+              }
+              actions={renderHeaderActions(app)}
+            />
 
             {app.error ? (
               <p className="rounded-8 bg-destructive-bg px-4 py-3 text-ui text-destructive-fg">

@@ -4,6 +4,7 @@ name: Skills
 icon: assets/icon.svg
 version: 0.2.0
 description: Browse every skill installed on this Rome, start a chat that uses one (each skill is a slash command in webchat), and import or generate new skills with the import-skill skill.
+tagline: "Every skill your Rome knows, one slash command away."
 appRoot: dist
 
 web:

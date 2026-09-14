@@ -8,23 +8,33 @@ import {
   Pencil2Icon,
 } from "@radix-ui/react-icons";
 import {
+  AppWindow,
   Chrome as ChromeIcon,
   Ellipsis,
   FolderKanban,
   GripVertical,
   MessagesSquare,
+  PanelRightOpen,
   Pencil,
+  PinOff,
   Plus,
   Search,
   Store,
   X,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { InstalledAppCard } from "@rome/api-types/apps";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -183,12 +193,12 @@ function isEntryActive(pathname: string, href: string): boolean {
 }
 
 const LINK_CLASS =
-  "rome-sidebar-link group flex h-8 w-full items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring";
+  "rome-sidebar-link group flex h-8 w-full items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 // The rail counterpart of LINK_CLASS: a square tile whose tooltip carries the
 // label. `relative` anchors the status dots that the wide rows render inline.
 const RAIL_LINK_CLASS =
-  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-8 border border-transparent text-foreground transition outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring";
+  "rome-sidebar-link relative flex size-10 items-center justify-center rounded-8 border border-transparent text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 const RAIL_ACTIVE_CLASS = "bg-surface shadow-1 dark:bg-surface-hover";
 const RAIL_IDLE_CLASS = "hover:bg-surface-hover dark:hover:bg-surface";
@@ -217,7 +227,9 @@ interface AppGridProps {
 
 export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProps = {}) {
   const { t } = useTranslation("common");
+  const { t: tApps } = useTranslation("apps");
   const location = useLocation();
+  const navigate = useNavigate();
   const [pins, setPins] = useState<PinnedEntry[]>(() =>
     normalizeSidebarPins(readLocalPins() ?? DEFAULT_SIDEBAR_PINS),
   );
@@ -268,9 +280,56 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       setPins(safe);
       writeLocalPins(safe);
       void saveSetting("sidebarPins", safe).then(() => invalidateSettings());
+      window.dispatchEvent(new Event("rome-pins-changed"));
     },
     [invalidateSettings],
   );
+
+  const openAppInSplitView = useCallback(
+    (appId: string) => {
+      const currentChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
+      const destination = currentChat
+        ? `${location.pathname}${location.search}${location.hash}`
+        : "/chat";
+      navigate(destination, {
+        state: { widgets: [{ type: "app", appId }] },
+      });
+    },
+    [location.hash, location.pathname, location.search, navigate],
+  );
+
+  const withAppContextMenu = (
+    app: InstalledAppCard | CachedApp,
+    trigger: React.ReactNode,
+  ): React.ReactNode => {
+    if (!app.href) return trigger;
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem asChild>
+            <Link to={app.href}>
+              <AppWindow aria-hidden />
+              {tApps("installed.openButton")}
+            </Link>
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
+            <PanelRightOpen aria-hidden />
+            {tApps("installed.openSplitTitle")}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onSelect={() =>
+              persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)))
+            }
+          >
+            <PinOff aria-hidden />
+            {tApps("installed.unpin")}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
 
   const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
 
@@ -415,22 +474,25 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             const active = isEntryActive(location.pathname, app.href);
             return (
               <Tooltip key={`app-${pin.id}`}>
-                <TooltipTrigger asChild>
-                  <Link
-                    to={app.href}
-                    aria-label={app.displayName}
-                    className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
-                  >
-                    {resolveIcon(pin)}
-                    {app.status === "disabled" ? (
-                      <span
-                        className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-border-strong"
-                        role="img"
-                        aria-label={t("sidebar.appDisabled")}
-                      />
-                    ) : null}
-                  </Link>
-                </TooltipTrigger>
+                {withAppContextMenu(
+                  app,
+                  <TooltipTrigger asChild>
+                    <Link
+                      to={app.href}
+                      aria-label={app.displayName}
+                      className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
+                    >
+                      {resolveIcon(pin)}
+                      {app.status === "disabled" ? (
+                        <span
+                          className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-border-strong"
+                          role="img"
+                          aria-label={t("sidebar.appDisabled")}
+                        />
+                      ) : null}
+                    </Link>
+                  </TooltipTrigger>,
+                )}
                 <TooltipContent side="right">{app.displayName}</TooltipContent>
               </Tooltip>
             );
@@ -686,35 +748,39 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             if (!app || !app.hasFrontend || !app.href) return null;
             const active = isEntryActive(location.pathname, app.href);
             return (
-              <Link
-                key={`app-${pin.id}`}
-                to={app.href}
-                title={app.displayName}
-                className={`${LINK_CLASS} ${active ? "bg-surface shadow-1 dark:bg-surface-hover" : "hover:bg-surface-hover dark:hover:bg-surface"}`}
-              >
-                {app.iconUrl ? (
-                  <img
-                    src={app.iconUrl}
-                    alt=""
-                    className="h-4 w-4 shrink-0 rounded-4"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
-                ) : (
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-                    {app.displayName.charAt(0).toUpperCase()}
-                  </span>
+              <Fragment key={`app-${pin.id}`}>
+                {withAppContextMenu(
+                  app,
+                  <Link
+                    to={app.href}
+                    title={app.displayName}
+                    className={`${LINK_CLASS} ${active ? "bg-surface shadow-1 dark:bg-surface-hover" : "hover:bg-surface-hover dark:hover:bg-surface"}`}
+                  >
+                    {app.iconUrl ? (
+                      <img
+                        src={app.iconUrl}
+                        alt=""
+                        className="h-4 w-4 shrink-0 rounded-4"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
+                        {app.displayName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="flex-1 truncate">{app.displayName}</span>
+                    {app.status === "disabled" ? (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong"
+                        role="img"
+                        aria-label={t("sidebar.appDisabled")}
+                      />
+                    ) : null}
+                  </Link>,
                 )}
-                <span className="flex-1 truncate">{app.displayName}</span>
-                {app.status === "disabled" ? (
-                  <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong"
-                    role="img"
-                    aria-label={t("sidebar.appDisabled")}
-                  />
-                ) : null}
-              </Link>
+              </Fragment>
             );
           })}
         </nav>

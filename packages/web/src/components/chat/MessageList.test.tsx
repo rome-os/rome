@@ -351,6 +351,20 @@ function expectBefore(earlier: HTMLElement, later: HTMLElement) {
 }
 
 describe("MessageList streaming input", () => {
+  it("keeps a code fence collapsed when its live block becomes persisted", () => {
+    const text = "```\nlong code\n```";
+    const { rerender } = render(streamingList([], text));
+    const liveToggle = screen.getByRole("button", { name: "Code" });
+    fireEvent.click(liveToggle);
+    expect(liveToggle.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(streamingList([commentary(text)], text));
+
+    expect(screen.getByRole("button", { name: "Code" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("does not repeat persisted commentary after a follow-up input", () => {
     const original = commentary("I am checking the implementation.");
     const followup = humanReply("Please include pseudocode.");

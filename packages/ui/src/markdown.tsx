@@ -117,6 +117,7 @@ export interface MarkdownProps {
   compact?: boolean;
   preserveSoftBreaks?: boolean;
   linkComponent?: Components["a"];
+  preComponent?: Components["pre"];
   theme?: MarkdownTheme;
   controls?: StreamdownProps["controls"];
   lineNumbers?: StreamdownProps["lineNumbers"];
@@ -279,6 +280,7 @@ function MarkdownImpl({
   compact = false,
   preserveSoftBreaks = false,
   linkComponent,
+  preComponent,
   theme,
   controls,
   lineNumbers,
@@ -307,8 +309,9 @@ function MarkdownImpl({
       h4: MarkdownHeading4,
       h5: MarkdownHeading5,
       h6: MarkdownHeading6,
+      ...(preComponent ? { pre: preComponent } : {}),
     }),
-    [linkComponent],
+    [linkComponent, preComponent],
   );
 
   const wrapperClass = cn(

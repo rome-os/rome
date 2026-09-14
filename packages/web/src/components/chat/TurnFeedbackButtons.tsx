@@ -84,7 +84,7 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
           setSubmitted(true);
           setDraftRating(null);
           if (body.processing) {
-            autoPlaceApp(body.processing.appId, body.processing.route);
+            autoPlaceApp(body.processing.appId, body.processing.route, undefined, true);
           }
         } else if (res.status === 409) {
           // Another surface beat us to it — adopt the server's record and lock.

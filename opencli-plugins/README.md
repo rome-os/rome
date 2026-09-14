@@ -41,6 +41,26 @@ directory is its own standalone plugin rather than one plugin holding `<site>/<c
 
 ## Install points (all idempotent)
 
+OpenCLI uses the Browser Bridge extension by default. The container starts the local
+OpenCLI daemon, and the browser image installs the extension through a managed policy.
+The extension download requires access to the Chrome Web Store on first startup.
+The dev browser sidecar shares the Rome container's network namespace and reaches the same daemon.
+
+`opencli profile list` lists connected browsers. Pass `--profile <name-or-id>` to choose
+one explicitly. An unavailable explicit profile fails instead of selecting another browser.
+For manual CDP debugging, pass `--cdp-endpoint http://127.0.0.1:9222`.
+Rome does not inject a CDP endpoint into agent processes.
+
+Settings > Advanced > Computer Use lists OpenCLI browser connections and their last seen times.
+Rome checks the daemon every five seconds and retains observed connections across backend restarts.
+Connection and metadata changes are saved immediately. Timestamp-only changes stay in memory and
+are checkpointed every ten minutes, with a final save during graceful shutdown.
+An unexpected exit can lose timestamp updates since the last checkpoint.
+Last seen records when Rome last observed a live connection. OpenCLI detects lost browser heartbeats,
+so disconnection detection includes its heartbeat timeout and the next Rome check.
+An unreachable daemon makes browser status unknown and preserves the last seen time.
+Remote browsers can reach the daemon through a private SSH tunnel.
+
 - **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
@@ -52,6 +72,22 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 `opencli <site> --help` before use, and plugin commands appear there like any built-in.
 
 ## Rome-owned commands
+
+- `opencli aa flights FROM TO DEPART [--return DATE] [--miles]` — searches American Airlines cash fares
+  or AAdvantage awards, with separate award taxes, fare and stop filters, and explicit per-passenger price scope.
+  See the [American Airlines command reference](aa/README.md) for examples and browser requirements.
+
+- `opencli southwest flights FROM TO DEPART [--return DATE] [--miles]` — searches Southwest cash fares
+  or Rapid Rewards points, with separate award taxes, fare-product and stop filters, and per-person, each-way prices.
+  `--points` also selects award pricing. See the [Southwest command reference](southwest/README.md) for examples and browser requirements.
+
+- `opencli delta flights FROM TO DEPART [--return DATE] [--miles]` — searches Delta cash fares or
+  SkyMiles awards, with separate taxes and card-member offers, cabin and stop filters, and per-passenger prices.
+  See the [Delta command reference](delta/README.md) for examples and browser requirements.
+
+- `opencli united flights FROM TO DEPART [--return DATE] [--miles]` — searches United cash fares or
+  MileagePlus awards with separate taxes, cabin and stop filters, and per-person price scope.
+  See the [United command reference](united/README.md) for examples and browser requirements.
 
 - `opencli chatgpt memory` — opens Personalization > Memory summary in the signed-in ChatGPT
   browser session and returns each learned-memory section with its last-updated label.
@@ -72,6 +108,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   metadata.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
+- `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
+  With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Without `--send`, it only verifies the destination.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -246,6 +285,16 @@ The Google plugin adds a browser-backed, read-only flight search command. It acc
 codes, cities, or airport names, supports one-way and round-trip dates, cabin/passenger settings,
 and can filter or sort the returned flight choices without clicking into a booking flow.
 
+For multiple airports, pass comma-separated airport codes on either side, such as `SFO,OAK` and
+`IAH,HOU`. Lists accept up to seven distinct codes per side, ignore case and whitespace, and remove duplicates.
+A comma-separated argument that starts with a three-letter airport code uses list syntax. All entries must be airport codes.
+Single city and airport names remain supported, including city names with commas such as `Paris, France`.
+
+The command selects each airport through the Google Flights multi-airport picker and verifies the committed search after a reload.
+It fails if Google cannot select or retain an airport, rather than returning results for only part of the requested route.
+Google ranks the combined search. Filters, `--sort`, and `--limit` apply across the displayed choices, not separately to each airport pair.
+Each row retains its actual airport pair in `leg_route`. Google may show only a subset of available flights.
+
 One-way searches return complete one-way itinerary choices. For a round-trip search, Google first
 shows **outbound options only** and does not reveal the return choices until an outbound flight is
 selected. Accordingly, each row is labeled `result_type=outbound_option`: every `leg_*` field and
@@ -257,6 +306,9 @@ finalized round-trip itinerary; follow the returned Google Flights URL to select
 opencli google flights SFO LAX 2026-08-10 --return 2026-08-17 --limit 5
 opencli google flights "San Francisco" Tokyo 2026-09-08 --cabin business --sort price -f json
 opencli google flights JFK LHR 2026-10-01 --stops nonstop --max-price 900 --airline "Delta,Virgin"
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --sort price -f json
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --return 2026-10-20 --stops nonstop
+opencli google flights SFO IAH,HOU 2026-10-15 --limit 5
 ```
 
 ### Google Shopping

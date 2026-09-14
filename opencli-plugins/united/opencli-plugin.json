@@ -1,0 +1,6 @@
+{
+  "name": "rome-united",
+  "description": "United flight prices in money or MileagePlus miles",
+  "version": "0.1.0",
+  "opencli": ">=1.8.0"
+}

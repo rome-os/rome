@@ -97,13 +97,13 @@ Never reference a primitive directly in a component, such as `bg-[var(--neutral-
 
 | Step | `--control-h-*` | `--control-r-*` | `--control-px-start-*` | `--control-px-center-*` | Carried by |
 |---|---|---|---|---|---|
-| `sm` | 28px | 8px | 10px | 8px | every Control member |
-| `md` | 36px | 10px | 12px | 12px | every Control member |
-| `lg` | 44px | 12px | 16px | 16px | `Button` / `IconButton` only |
+| `sm` | 28px | 8px | 10px | 10px | every Control member |
+| `md` | 32px | 10px | 12px | 14px | every Control member |
+| `lg` | 44px | 12px | 16px | 18px | `Button` / `IconButton` only |
 
 The tokens are the whole scale. Which members *offer* a step is a separate question, answered under *Sizes* below.
 
-`--control-gap` is 8px, one value for every size, and `--badge-h/px/gap` covers badges. The role utilities own typography, never the control geometry scale.
+`--control-gap` is 6px, one value for every size, and `--badge-h/px/gap` covers badges. The role utilities own typography, never the control geometry scale.
 
 **Horizontal padding follows the content's alignment, not the component.** There are two groups, and every Control member reads one of them rather than a raw spacing step.
 
@@ -115,7 +115,7 @@ The groups agree at `md` and `lg` and diverge at `sm`, where a start edge takes 
 
 Two members sit outside the groups. `Button size="xs"` is 24px, below the scale, and neither group carries an `xs` step, so it pads from a spacing step. `TabsTrigger` has no size axis and its list is 32px, between the shared heights — it takes the `sm` centred step, recorded as a divergence in [`ui/component-roles.md`](ui/component-roles.md#known-divergences) rather than pretending to fit. The vertical inset on Textarea, the one control that pads vertically at all, is a spacing step too, with nothing to agree with.
 
-Padding is symmetric everywhere: no member trims the icon side. Optically correcting a glyph against the padded edge is a separate change, not a per-component judgement call.
+Padding is symmetric except for one role-level optical correction: a glyph at the edge of centred content sits `--control-gap` from that edge, the same distance it sits from its label. Start-aligned members keep the full inset on every side.
 
 Do not hand-write `justify-start` on a `Button`. Reach for `align`, which carries the matching padding. A start-aligned button with centred padding is 2px off every field above it at `sm`, and nothing catches that by eye.
 
@@ -129,7 +129,7 @@ Controls set an explicit height and pad horizontally only. Height is specified, 
 
 ### Sizes
 
-**The shared size vocabulary is two steps, `sm` (28px) and `md` (36px), and each means the same height on every control.** `Button`, `Toggle`, `Input`, `SelectTrigger`, `SegmentedControl`, and `IconButton` all read the `--control-h-*` step of the name they were given. A row that names one size therefore cannot come out ragged. `Button` and `Input` still accept `default`, and `Button` accepts `icon`, as the older spellings of `md` and `icon-md`. Both resolve to the same geometry. Write `md`.
+**The shared size vocabulary is two steps, `sm` (28px) and `md` (32px), and each means the same height on every control.** `Button`, `Toggle`, `Input`, `SelectTrigger`, `SegmentedControl`, and `IconButton` all read the `--control-h-*` step of the name they were given. A row that names one size therefore cannot come out ragged. `Button` and `Input` still accept `default`, and `Button` accepts `icon`, as the older spellings of `md` and `icon-md`. Both resolve to the same geometry. Write `md`.
 
 **`lg` (44px) and `xs` (24px) belong to the Button family, not the shared vocabulary.** `Button` and `IconButton` carry them. `Input`, `SelectTrigger`, and `SegmentedControl` do not, on purpose.
 
@@ -137,7 +137,7 @@ They are prominence steps. Every `lg` in the tree is a standalone call to action
 
 **Two ladders offer a square icon button at every step, and the overlap is deliberate.** `IconButton`'s steps and `Button`'s `icon-*` variants are value-identical, with the same height and the same radius. Reach for `IconButton` by default, because its required `label` prop makes an icon-only control accessible by construction rather than by reviewer vigilance. Reach for `Button size="icon-sm"` and friends in two cases. The first is a control needing a `Button` variant the icon primitive has no equivalent for, such as `ghost`'s `aria-expanded` paint or `destructive`. The second is a control sitting in a `ButtonGroup`.
 
-**Text inputs use `text-body` at every width.** Body is 16px, so what a reader types matches the prose it becomes rather than the controls around it, and a field clears the threshold below which iOS Safari zooms the viewport on focus. Its line box is 20px, the same as the controls beside it, so a field still sits on their rhythm. Do not introduce a mobile size exception.
+**Text inputs use `text-ui` at every width, like every other control.** A field of one size name matches the Button and SelectTrigger beside it in font size as well as height, and a combobox's field matches its options. iOS Safari's focus zoom below 16px is suppressed by the viewport meta in `index.html` (`maximum-scale=1`), so no mobile size exception is needed. Do not introduce one.
 
 Adding a control step works like adding a token. It goes in `packages/ui/src/styles.css` first, then every primitive that needs it reads it. Do not inline a fourth height.
 
@@ -179,11 +179,12 @@ That block is the single source of truth for every bundle's fonts. Do not paste 
 
 ## Components
 
-**Use shadcn primitives from `@/components/ui`:** Button, Dialog, DropdownMenu, Popover, Select, Tooltip, Switch, Textarea, Badge, Skeleton, Field, IconButton, Tile, Stepper, Sortable, Alert, Breadcrumb, and more. Run `ls src/components/ui` before writing UI. Do not reach for raw `<button>`, `<input>`, or `<select>` when the primitive exists. The primitive carries token wiring, focus rings, size variants, and accessibility, and bypassing it silently drops all of that.
+**Use shadcn primitives from `@/components/ui`:** Button, Dialog, DropdownMenu, Popover, Select, Tooltip, Switch, Checkbox, RadioGroup, ListRow, Textarea, Badge, Skeleton, Field, IconButton, Tile, Stepper, Sortable, Alert, Breadcrumb, and more. Run `ls src/components/ui` before writing UI. Do not reach for raw `<button>`, `<input>`, or `<select>` when the primitive exists. The primitive carries token wiring, focus rings, size variants, and accessibility, and bypassing it silently drops all of that.
 
 **Some `ui/` files are one-line re-export shims.** Three groups live in `@rome-os/ui`, which apps can import too:
 
-- the control primitives — button, badge, input, textarea, switch, separator, skeleton, field, icon-button, tabs, segmented-control
+- the control primitives — button, badge, input, textarea, switch, checkbox, radio-group, separator, skeleton, field, icon-button, tabs, segmented-control
+- the list family — list-row, which exports `List` and `ListRow` with its parts
 - the floating family — dialog, sheet, popover, dropdown-menu, tooltip, context-menu, select
 - the `command` composite, plus `alert` and `card`
 
@@ -192,6 +193,10 @@ Import sites are unchanged. Edit the source in `packages/ui/src/<name>.tsx`, and
 **A missing primitive goes into `ui/`, never hand-rolled in the page.** If `ui/` lacks what you need, check [shadcn's registry](https://ui.shadcn.com/docs/components) first, since most cases already exist as a recipe: Tabs, Avatar, Accordion, Calendar. Drop one in with `pnpm dlx shadcn@latest add <name>`, re-wire its colors to our semantic tokens, and commit it under `ui/`. Only if shadcn lacks it too, write a new `ui/` primitive, Radix-based for anything with interaction, focus, or keyboard semantics.
 
 **`Tabs` against `SegmentedControl` is decided by whether each choice owns a panel.** `Tabs` is underline-only and means the tablist and tabpanel contract, where each `TabsTrigger` reveals its own `TabsContent`. If the choice instead switches, filters, or reframes one view, with no panel per choice, use `SegmentedControl`. It paints a muted track with the active segment lifted onto the canvas. It is a radiogroup rather than a tablist, so assistive tech is not told to look for panels that do not exist. `SegmentedControl` is controlled-only and requires an `aria-label`.
+
+**A one-of-N choice that sets a value is `RadioGroup` (`@rome-os/ui/radio-group`), and a yes/no in a form is `Checkbox` (`@rome-os/ui/checkbox`).** Neither is a `<button role="radio">` or a raw `<input>`: Radix supplies the roving focus and arrow-key movement the radio role promises, and both carry the kit's focus edge and a hit area past their 16px box. `SegmentedControl` stays the answer when the choice switches a view rather than setting a value.
+
+**One record in a list is `ListRow` (`@rome-os/ui/list-row`), inside a `List`.** The row owns its height floor and its inset through the `--row-*` tokens, so a page never writes its own `px-* py-*` for a row. It also owns the gap between its parts and its hover paint, neither of which is on the row scale. `List` owns the hairline between rows. `TableRow` is for aligned columns under a header, and `Card` for a bordered block of its own. The roles are in [`ui/component-roles.md`](ui/component-roles.md#list-row).
 
 **A pressed toolbar button is `Toggle` (`@rome-os/ui/toggle`), not a `Button` with a hand-rolled `aria-pressed`.** `Toggle` owns `aria-pressed` and the pressed paint, and `variant` only picks the unpressed resting look. `Switch` stays the form control, for a setting the user is editing. There is no `ToggleGroup` — one-of-N is `SegmentedControl`.
 
@@ -203,18 +208,20 @@ Import sites are unchanged. Edit the source in `packages/ui/src/<name>.tsx`, and
 
 ## Focus and invalid states
 
-Both are one 2px `outline`, never a translucent halo. It sits just outside the control at `outline-offset: 0`, so it separates from the canvas rather than from the control's own fill. An outline never affects layout:
+Both are one `outline` at `outline-offset: 0`, sitting just outside the control so it separates from the canvas rather than from the control's own fill. Focus is 1px of `ring` at 50% alpha, a hairline that reads as the control lifting rather than as a frame drawn around it. Invalid stays 2px of solid `destructive`, so an error is always louder than focus. The control carries the outline at rest too, 1px and transparent with `outline-style: none`, so gaining focus changes only the style and the color: the style switches on at once and the color fades in over the control's own `transition-colors`, instead of the width snapping from the browser's 3px default. Neither is a box-shadow halo, and an outline never affects layout:
 
 ```
-focus-visible:outline-solid focus-visible:outline-2
-focus-visible:outline-offset-0 focus-visible:outline-ring
+outline-1 outline-offset-0 outline-transparent
+focus-visible:outline-solid focus-visible:outline-ring/50
 ```
 
 Three things are load-bearing and easy to get wrong.
 
-- **`outline-solid` is required.** The base `outline-none` these components carry sets `--tw-outline-style: none`, and Tailwind's `outline-2` emits `outline-style: var(--tw-outline-style)`. Without it the outline computes to `none` and focus renders invisible.
-- **The edge must stay outside the box.** Every theme points `ring` at a neighbouring step of the same ramp as `primary`, `secondary` and `input`, so an inset edge lands on a control's fill at 1.08:1 and disappears. `themes-contrast.test.ts` records those three pairings.
+- **`outline-solid` is required.** The base `outline-none` these components carry sets `--tw-outline-style: none`, and Tailwind's `outline-1` emits `outline-style: var(--tw-outline-style)`. Without it the outline computes to `none` and focus renders invisible.
+- **The edge sits on a painted border, and outside an unpainted one.** A field, and `Button`'s `outline` variant, paint a 1px border, so their ring takes `-outline-offset-1` and lands on that border: focus reads as the border changing color, not as a second line around it. A filled or ghost control has no painted border, so its ring stays at offset 0, outside the box. Every theme points `ring` at a neighbouring step of the same ramp as `primary`, `secondary` and `input`, so an edge inset over a fill lands at 1.08:1 and disappears. `themes-contrast.test.ts` records those three pairings.
 - **Do not draw focus with `ring-*` or with a border recolor.** Forced colors mode drops `box-shadow` and keeps `outline`, so a ring leaves a keyboard user in High Contrast with no indicator at all. A border recolor is layout-safe, but it makes the indicator depend on a border being present, so removing that border for a visual reason halves focus with nothing reporting it.
+
+Fields — `Input`, `Textarea`, `SelectTrigger` — also darken their border to `border-strong` on hover while enabled, a hint that the box takes input before it is focused. Buttons say the same with their background.
 
 `aria-invalid` gets the same treatment in `destructive`. When a field is both invalid and focused, the destructive edge wins, because Tailwind orders the `aria-*` variant after `focus-visible`. That is deliberate: the error stays visible while the user is fixing it.
 

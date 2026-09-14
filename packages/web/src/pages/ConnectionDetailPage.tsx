@@ -12,7 +12,7 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 /**
  * Per-service Connection detail page (`/settings/connections/:serviceId`).
@@ -121,13 +121,11 @@ export default function ConnectionDetailPage() {
             <ArrowLeft className="size-4" aria-hidden />
             Connections
           </Link>
-          <div className="flex items-center gap-3">
-            <ConnectionBrandBadge connection={card.service} />
-            <div className="min-w-0 flex-1">
-              <h1 className="text-title text-foreground">{card.label}</h1>
-              <StatusIndicator card={card} className="mt-1" />
-            </div>
-          </div>
+          <PageHeader
+            leading={<ConnectionBrandBadge connection={card.service} />}
+            title={card.label}
+            description={<StatusIndicator card={card} />}
+          />
         </div>
 
         <ConnectionDetailBody card={card} composio={composio} onRefresh={refresh} onFlash={flash} />

@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useMemo, useState } from "react";
+import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
@@ -6,6 +6,7 @@ import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatBlocks } from "@/components/chat/blocks";
 import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
+import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import {
   DelegatedSubagentGroup,
@@ -286,7 +287,13 @@ const RowView = memo(function RowView({
         const blocks = parseMessageBlocks(m);
         if (m.id !== recapMessageId) {
           return (
-            <div key={m.id}>{renderFlatBlocks(blocks, { ...actions, sessionId: m.sessionId })}</div>
+            <div key={m.id}>
+              {renderFlatBlocks(blocks, {
+                ...actions,
+                sessionId: m.sessionId,
+                turnId: m.turnId ?? undefined,
+              })}
+            </div>
           );
         }
 
@@ -297,6 +304,7 @@ const RowView = memo(function RowView({
             {renderFlatBlocks(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
+              turnId: m.turnId ?? undefined,
             })}
             <TurnSummaryGroup
               plan={summary?.plan}
@@ -315,6 +323,7 @@ const RowView = memo(function RowView({
             {renderFlatBlocks(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
+              turnId: m.turnId ?? undefined,
             })}
           </div>
         );
@@ -323,7 +332,10 @@ const RowView = memo(function RowView({
         // rome-live-caret appends the pulsing live dot after the last rendered
         // character (see globals.css).
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
+          {renderFlatBlocks([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+            ...actions,
+            turnId: live.runningTurnId ?? undefined,
+          })}
         </div>
       ) : null}
       {live ? (
@@ -402,7 +414,10 @@ function StandaloneLiveTail({
     >
       {live.text ? (
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
+          {renderFlatBlocks([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+            ...actions,
+            turnId: live.runningTurnId ?? undefined,
+          })}
         </div>
       ) : null}
       <LiveTurnActivity
@@ -480,6 +495,7 @@ export function MessageList({
   actions,
   feedback,
 }: MessageListProps) {
+  const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
   const sourceText = live.sourceText ?? live.text;
@@ -519,7 +535,7 @@ export function MessageList({
       />
     ) : null;
 
-  return (
+  const content = (
     <div className="flex-1">
       <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
         {rows.flatMap((row) => {
@@ -579,5 +595,10 @@ export function MessageList({
         {!anchorRow ? standalone : null}
       </div>
     </div>
+  );
+  return (
+    <ChatCodeBlockStateContext.Provider value={codeBlockDisclosureState}>
+      {content}
+    </ChatCodeBlockStateContext.Provider>
   );
 }

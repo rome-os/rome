@@ -770,13 +770,8 @@ export interface LinkedAccount {
  * - `not-connected` — no live connection for the channel. The guardian fixes
  *   this in Settings.
  * - `unsupported` — the connection is live but does not do direct messaging.
- *   LinkedIn mirrors an inbox it cannot write to; a channel Rome has not
- *   taught to send reads the same way. Why is a fact about the channel rather
- *   than about this account, so the copy is keyed on the channel name and no
- *   reason string crosses the wire — the dashboard localizes it, the same way
- *   it already localizes every channel's own label.
- * - `no-conversation` — the channel sends, but has no thread that reaches this
- *   account yet, and could not open one. Per account, and recoverable.
+ * - `no-conversation` — the channel cannot identify a direct conversation for
+ *   this account. This includes missing or ambiguous threads.
  */
 export type AccountSendState = "yes" | "not-connected" | "unsupported" | "no-conversation";
 
@@ -1220,6 +1215,11 @@ export function whatsAppDisplayName(contact: {
  * account, and it is a default on screen rather than a decision off it.
  */
 export interface SendMessageRequest {
+  /** Optional UUID v4 idempotency key. A client creates one for each composed
+   * message and reuses it only when repeating that request. The same id,
+   * account, and text returns its recorded response until 24 hours after
+   * outbox removal. */
+  id?: string;
   channel: string;
   channelUserId: string;
   text: string;
@@ -1230,6 +1230,13 @@ export function parseSendMessageRequest(
 ): { request: SendMessageRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "body must be an object" };
   const raw = body as Record<string, unknown>;
+  if (
+    raw.id !== undefined &&
+    (typeof raw.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id))
+  ) {
+    return { error: "id must be a UUID v4" };
+  }
   const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
@@ -1240,8 +1247,27 @@ export function parseSendMessageRequest(
   if (text.length > SEND_MESSAGE_MAX_LENGTH) {
     return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
   }
-  return { request: { channel, channelUserId, text } };
+  return {
+    request: {
+      ...(raw.id === undefined ? {} : { id: raw.id as string }),
+      channel,
+      channelUserId,
+      text,
+    },
+  };
 }
+
+/** A repeated send id may only refer to its original account and text. */
+export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
+  return (
+    message.channel === request.channel &&
+    message.channelUserId === request.channelUserId &&
+    message.text === request.text
+  );
+}
+
+/** Receipt lifetime after delivery cleanup or explicit discard, in milliseconds. */
+export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /** Long enough for anything a person types, short enough that no adapter has to
  *  defend itself against a megabyte. Channels with tighter limits of their own

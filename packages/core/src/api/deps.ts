@@ -16,6 +16,7 @@ import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import type { AppCatalog } from "../apps/catalog.js";
+import type { OgImageStore } from "../apps/og/store.js";
 import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
@@ -48,6 +49,7 @@ import type { ConnectionRegistry } from "../connections/index.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
+import type { ComputerUseService } from "../computer-use/service.js";
 
 export interface ApiConfig {
   port: number;
@@ -103,6 +105,8 @@ export interface ApiDeps {
   routineRunsRepo: RoutineRunsRepository;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
+  /** Social card PNGs rendered by apps/og/subscriber.ts. */
+  ogImageStore: OgImageStore;
   /** AppManager — sole writer for install/uninstall/setEnabled. */
   appManager: AppManager;
   romeCloudListings: RomeCloudListingClient;
@@ -118,6 +122,7 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  computerUse: Pick<ComputerUseService, "getStatus">;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:

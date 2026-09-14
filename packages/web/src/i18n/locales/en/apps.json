@@ -105,6 +105,7 @@
     "loading": "Loading apps...",
     "openLabelAria": "Open {{name}} in full view",
     "openFullTitle": "Open full view",
+    "openSplitTitle": "Open in split view",
     "openButton": "Open",
     "upgradeButton": "Upgrade → v{{version}}",
     "upgradeTitle": "Upgrade {{name}} to v{{version}}",

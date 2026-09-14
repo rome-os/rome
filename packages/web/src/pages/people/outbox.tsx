@@ -29,29 +29,42 @@ import type { WriteOutcome } from "./writes";
 export function Outbox({
   personId,
   messages,
+  localMessages = [],
+  onRetryLocal,
+  onDiscardLocal,
 }: {
   personId: string;
   messages: readonly OutboxMessage[];
+  localMessages?: readonly OutboxMessage[];
+  onRetryLocal?: (id: string) => void;
+  onDiscardLocal?: (id: string) => void;
 }) {
   const { t } = useTranslation("people");
-  if (messages.length === 0) return null;
+  const serverIds = new Set(messages.map((message) => message.id));
+  const visible = [...localMessages.filter((message) => !serverIds.has(message.id)), ...messages];
+  if (visible.length === 0) return null;
 
   return (
     <ul aria-label={t("send.outbox.label")} className="mt-3 rounded-14 border border-border p-1">
-      {messages.map((message) => (
+      {visible.map((message) => (
         <li
           key={message.id}
-          className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-2 py-2"
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 px-2 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
         >
           <ChannelPill channel={message.channel} />
           <p
-            className={`min-w-0 text-ui ${
+            className={`min-w-0 break-words text-ui ${
               message.state === "failed" ? "text-foreground" : "text-muted-foreground"
             }`}
           >
             {message.text}
           </p>
-          <OutboxRowActions personId={personId} message={message} />
+          <OutboxRowActions
+            personId={personId}
+            message={message}
+            onRetryLocal={!serverIds.has(message.id) ? onRetryLocal : undefined}
+            onDiscardLocal={!serverIds.has(message.id) ? onDiscardLocal : undefined}
+          />
         </li>
       ))}
     </ul>
@@ -77,7 +90,17 @@ export function Outbox({
  * row is the one place the attempt can be made, so it has to say what happened
  * and stay usable. Silence there would be a row that looks ignored.
  */
-function OutboxRowActions({ personId, message }: { personId: string; message: OutboxMessage }) {
+function OutboxRowActions({
+  personId,
+  message,
+  onRetryLocal,
+  onDiscardLocal,
+}: {
+  personId: string;
+  message: OutboxMessage;
+  onRetryLocal?: (id: string) => void;
+  onDiscardLocal?: (id: string) => void;
+}) {
   const { t } = useTranslation("people");
   const writes = usePeopleWrites();
   const [busy, setBusy] = useState(false);
@@ -111,19 +134,19 @@ function OutboxRowActions({ personId, message }: { personId: string; message: Ou
   const dismissable = isDismissable(message, Math.floor(Date.now() / 1000));
 
   return (
-    <span className="flex items-center gap-2">
+    <span className="col-start-2 flex flex-wrap items-center gap-2 sm:col-auto">
       {failed ? (
         // `error` is what stopped it, shown as the row's detail. Usually the
         // channel's own words, which this page can neither localize nor promise
         // the shape of. One of them is not: a send whose process died before the
         // channel answered carries the server's own equivocal line, because Rome
         // genuinely does not know whether it went out.
-        <span className="flex items-center gap-1 text-badge text-destructive">
+        <span role="alert" className="flex items-center gap-1 text-badge text-destructive">
           <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
           <span>{message.error ?? t("send.state.stopped")}</span>
         </span>
       ) : (
-        <span className="flex items-center gap-1 text-badge text-subtle-foreground">
+        <span role="status" className="flex items-center gap-1 text-badge text-muted-foreground">
           <Clock className="size-3" aria-hidden="true" />
           {t(message.state === "sending" ? "send.state.sending" : "send.state.unconfirmed")}
         </span>
@@ -134,7 +157,11 @@ function OutboxRowActions({ personId, message }: { personId: string; message: Ou
           variant="ghost"
           size="sm"
           disabled={busy}
-          onClick={act(() => writes.retry(personId, message.id))}
+          onClick={
+            onRetryLocal
+              ? () => onRetryLocal(message.id)
+              : act(() => writes.retry(personId, message.id))
+          }
         >
           <RotateCcw aria-hidden="true" />
           {t("send.retry")}
@@ -147,7 +174,11 @@ function OutboxRowActions({ personId, message }: { personId: string; message: Ou
           size="sm"
           aria-label={t("send.discard")}
           disabled={busy}
-          onClick={act(() => writes.discard(personId, message.id))}
+          onClick={
+            onDiscardLocal
+              ? () => onDiscardLocal(message.id)
+              : act(() => writes.discard(personId, message.id))
+          }
         >
           <X aria-hidden="true" />
         </Button>

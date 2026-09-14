@@ -1,0 +1,221 @@
+{
+  "origin": "https://www.aa.com",
+  "path": "/booking/choose-flights/1",
+  "language": "en",
+  "width": 1024,
+  "ready": true,
+  "challenge": false,
+  "login_required": false,
+  "expired": false,
+  "error": "",
+  "no_results": false,
+  "loading": false,
+  "expected_count": 5,
+  "search": {
+    "from": "SFO",
+    "to": "DFW",
+    "depart": "11/13/26",
+    "return_date": null,
+    "miles": true,
+    "trip_type": "One way",
+    "passengers": [
+      {
+        "type": "adult",
+        "count": 1
+      }
+    ],
+    "header_from": "SFO",
+    "header_to": "DFW",
+    "header_passengers": "1",
+    "direction": "DEPART",
+    "date_label": "Friday, November 13, 2026"
+  },
+  "rows": [
+    {
+      "id": "flight-details-0",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "5:35 AM",
+      "arrival": "11:14 AM",
+      "duration": "3h 39m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 402",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "27K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way Main 27K + $5.60 for SFO to DFW, departing at 5:35 AM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "37K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way First 37K + $5.60 for SFO to DFW, departing at 5:35 AM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-1",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "6:38 AM",
+      "arrival": "12:18 PM",
+      "duration": "3h 40m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 3047",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "32.5K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way Main 32.5K + $5.60 for SFO to DFW, departing at 6:38 AM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "101K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way First 101K + $5.60 for SFO to DFW, departing at 6:38 AM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-9",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "11:23 PM",
+      "arrival": "5:00 AM +1 , Arrives on November 14",
+      "duration": "3h 37m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 939",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "23.5K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way Main 23.5K + $5.60 for SFO to DFW, departing at 11:23 PM Nonstop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "33.5K",
+          "addon": "+ $5.60",
+          "scope": "One way",
+          "description": "One way First 33.5K + $5.60 for SFO to DFW, departing at 11:23 PM Nonstop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-10",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "7:03 AM",
+      "arrival": "9:46 PM",
+      "duration": "12h 43m",
+      "stops": "1 stop, LAX, Los Angeles International",
+      "segments": [
+        {
+          "flight_number": "AA 2211",
+          "aircraft": "738-Boeing 737",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 2900",
+          "aircraft": "32Q-Airbus A321neo",
+          "operator": ""
+        }
+      ],
+      "alerts": "Extended layover",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "10K",
+          "addon": "+ $11.20",
+          "scope": "One way",
+          "description": "One way Main 10K + $11.20 for SFO to DFW, departing at 7:03 AM 1 stop",
+          "unavailable": false
+        },
+        {
+          "group": false,
+          "name": "First",
+          "amount": "43K",
+          "addon": "+ $11.20",
+          "scope": "One way",
+          "description": "One way First 43K + $11.20 for SFO to DFW, departing at 7:03 AM 1 stop",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "flight-details-11",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "7:04 AM",
+      "arrival": "8:28 PM",
+      "duration": "11h 24m",
+      "stops": "1 stop, SAN, San Diego International",
+      "segments": [
+        {
+          "flight_number": "AS 1450",
+          "aircraft": "7M9-Boeing 737 MAX 9 Passenger",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 2438",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "Extended layover",
+      "fares": [
+        {
+          "group": false,
+          "name": "Main",
+          "amount": "12.5K",
+          "addon": "+ $11.20",
+          "scope": "One way",
+          "description": "One way Main 12.5K + $11.20 for SFO to DFW, departing at 7:04 AM 1 stop",
+          "unavailable": false
+        }
+      ]
+    }
+  ]
+}

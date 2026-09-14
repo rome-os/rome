@@ -317,17 +317,14 @@ describe("the shared control size vocabulary", () => {
       expectStartPadding(screen.getByRole("textbox", { name: "Notes" }).className, "md");
     });
 
-    it("pads a CommandInput row from the start group at md", () => {
+    it("pads a CommandInput field from the start group at md", () => {
       render(
         <Command>
           <CommandInput placeholder="Search…" />
         </Command>,
       );
-      const wrapper = screen
-        .getByPlaceholderText("Search…")
-        .closest('[data-slot="command-input-wrapper"]');
 
-      expectStartPadding(wrapper?.className ?? "", "md");
+      expectStartPadding(screen.getByPlaceholderText("Search…").className, "md");
     });
 
     it("pads a TabsTrigger from the centre group's sm step", () => {

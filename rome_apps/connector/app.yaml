@@ -1,5 +1,6 @@
 formatVersion: 1
 id: connector
+name: Connector
 icon: assets/icon.svg
 version: 0.7.0
 # NOTE: the connectable-toolkit slugs below mirror SUPPORTED_CONNECTORS in
@@ -13,6 +14,7 @@ description: |
   For GitHub, prefer the `gh` CLI and `git` directly in the shell (`gh api`, `gh pr`, `git clone/push`) — it's Rome-managed (no Composio). If a `gh`/`git` call reports it is not authenticated, ask the guardian to connect GitHub at `/settings`. To react to GitHub events (push, PRs, issues), use `connector_github_subscribe` (NOT `connector_event_subscribe`, which is Composio-only) — it registers Rome's own webhook on the repo/org and returns the event-bus topic a routine binds to. To stop receiving them, use `connector_github_unsubscribe` with the same repo/org.
 
   Slack is also Rome-managed (no Composio): act on it with `connector_proxy` (toolkit `slack`) against the Slack Web API — e.g. POST `/api/chat.postMessage`, `/api/conversations.list`, `/api/search.messages`. Do NOT use `connector_login`/`connector_connect`/`connector_tool_execute` for Slack. If a Slack call comes back not-connected, ask the guardian to connect Slack at `/settings`.
+tagline: "Give your agent Gmail, Slack, GitHub, Notion, and 15 more, in one click."
 appRoot: dist
 
 web:

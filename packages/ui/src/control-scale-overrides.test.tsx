@@ -47,12 +47,34 @@ describe("control scale", () => {
     );
     const cls = screen.getByRole("button", { name: "Save" }).className;
 
-    // Optical correction for a glyph belongs to the Control role as a whole, so
-    // no member trims the side an icon sits on: `data-icon` marks the glyph, and
-    // nothing reads it for padding.
+    // The glyph correction applies on the shared steps, which have a token
+    // inset; `xs` pads from a raw spacing step and stays symmetric.
     expect(cls).toContain("px-2");
     expect(cls).not.toContain("has-data-[icon=inline-end]:pr-");
     expect(cls).not.toContain("has-data-[icon=inline-start]:pl-");
+  });
+
+  it("trims the glyph edge of a centred Button on the shared steps only", () => {
+    render(
+      <>
+        <Button size="md">
+          <svg data-icon="inline-start" aria-hidden />
+          Leading
+        </Button>
+        <Button size="md" align="start">
+          <svg data-icon="inline-start" aria-hidden />
+          Start
+        </Button>
+        <Button size="icon-md" aria-label="Square">
+          <svg data-icon="inline-start" aria-hidden />
+        </Button>
+      </>,
+    );
+    const trim = "has-data-[icon=inline-start]:pl-[var(--control-gap)]";
+
+    expect(screen.getByRole("button", { name: "Leading" }).className).toContain(trim);
+    expect(screen.getByRole("button", { name: "Start" }).className).not.toContain(trim);
+    expect(screen.getByRole("button", { name: "Square" }).className).not.toContain(trim);
   });
 
   it("lets a caller override an Input's padding and radius", () => {
@@ -93,9 +115,10 @@ describe("control scale", () => {
     const cls = screen.getByRole("button", { name: "Close" }).className;
 
     expect(cls).toContain("focus-visible:outline-solid");
-    expect(cls).toContain("focus-visible:outline-2");
-    expect(cls).toContain("focus-visible:outline-offset-0");
-    expect(cls).toContain("focus-visible:outline-ring");
+    expect(cls).toContain("outline-1");
+    expect(cls).toContain("outline-transparent");
+    expect(cls).toContain("outline-offset-0");
+    expect(cls).toContain("focus-visible:outline-ring/50");
     expect(cls).not.toMatch(/focus-visible:ring-/);
 
     // The reserved width answers to the layout invariant, not to focus: height
@@ -259,14 +282,15 @@ describe("control scale", () => {
     // inset edge measures 1.08:1 against a filled control. An outline rather
     // than a ring because forced colors mode drops box-shadow. `outline-solid` is
     // load-bearing: the base `outline-none` sets --tw-outline-style:none, which
-    // `outline-2` would otherwise inherit and render invisible.
+    // `outline-1` would otherwise inherit and render invisible.
     render(<Input aria-label="Search" />);
     const cls = screen.getByRole("textbox", { name: "Search" }).className;
 
     expect(cls).toContain("focus-visible:outline-solid");
-    expect(cls).toContain("focus-visible:outline-2");
-    expect(cls).toContain("focus-visible:outline-offset-0");
-    expect(cls).toContain("focus-visible:outline-ring");
+    expect(cls).toContain("outline-1");
+    expect(cls).toContain("outline-transparent");
+    expect(cls).toContain("outline-offset-0");
+    expect(cls).toContain("focus-visible:outline-ring/50");
     expect(cls).not.toMatch(/focus-visible:ring-/);
     // No border half: a state that recolors a border is a state that needs the
     // border to exist, which is the coupling this model drops.
@@ -297,7 +321,7 @@ describe("control scale", () => {
     render(<Input aria-label="Search" />);
     const cls = screen.getByRole("textbox", { name: "Search" }).className;
 
-    expect(cls).toContain("text-body");
+    expect(cls).toContain("text-ui");
     expect(cls).not.toContain("md:text-");
   });
 });

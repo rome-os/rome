@@ -398,11 +398,9 @@ describe("RoutinesPage", () => {
     expect(screen.queryByRole("button", { name: /Stop Needs approval/ })).toBeNull();
   });
 
-  it("surfaces a failing count and filters the list to the failing routines when clicked", async () => {
+  it("filters failed routines through the list menu without a page-level failure badge", async () => {
     mockBackend({
       routines: [
-        // Errored last run → counts as failing. Scheduled far out so it isn't the
-        // next-up routine (keeps the name out of the panel's next-up line).
         scheduleRoutine({
           id: "s1",
           name: "Inventory sync",
@@ -426,28 +424,42 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    // The stat panel shows a clickable Failing cell counting the one errored run.
-    const failingCell = await screen.findByRole("button", { name: "Show 1 failing routines" });
-    // All three are listed before filtering.
-    expect(screen.getByText("Morning tidy")).toBeTruthy();
+    expect(await screen.findByText("Morning tidy")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /failing routines/i })).toBeNull();
+    expect(screen.queryByText(/\d+ failing/)).toBeNull();
 
-    await user.click(failingCell);
+    await user.click(screen.getByRole("button", { name: "All routines" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Failing" }));
 
-    // After the click only the failing routine remains in the list.
     await waitFor(() => expect(screen.queryByText("Morning tidy")).toBeNull());
     expect(screen.getByText("Inventory sync")).toBeTruthy();
   });
 
-  it("shows no health indicator at all when nothing is failing", async () => {
+  it("does not show a page-level failure badge for a completed failed one-off", async () => {
     mockBackend({
-      routines: [scheduleRoutine({ id: "s1", name: "Morning tidy" })],
+      routines: [
+        scheduleRoutine({
+          id: "s1",
+          name: "Image test",
+          enabled: false,
+          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-29" },
+          lastFiredAt: "2026-07-29T09:00:00Z",
+          nextRunAt: null,
+          lastRun: { status: "error", firedAt: "2026-07-29T09:00:00Z" },
+        }),
+      ],
     });
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    // The page has loaded (the title is up)...
-    expect(await screen.findByRole("heading", { name: "Routines" })).toBeTruthy();
-    // ...but a confirmed-healthy state carries no pill — nothing to click.
-    expect(screen.queryByRole("button", { name: /failing routines/ })).toBeNull();
+    const done = await screen.findByRole("button", { name: /Done/ });
+    expect(screen.queryByRole("button", { name: /failing routines/i })).toBeNull();
+    expect(screen.queryByText(/\d+ failing/)).toBeNull();
+
+    await user.click(done);
+    expect(screen.getByRole("link", { name: "Image test" }).getAttribute("href")).toBe(
+      "/routines/s1",
+    );
   });
 
   it("deletes a routine after the guardian confirms removal", async () => {

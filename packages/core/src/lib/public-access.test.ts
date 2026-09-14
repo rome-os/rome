@@ -136,10 +136,8 @@ describe("generateCaddyfile", () => {
     expect(inboxShellStart).toBeGreaterThan(-1);
     expect(inboxShellEnd).toBeGreaterThan(inboxShellStart);
     const inboxShell = out.slice(inboxShellStart, inboxShellEnd);
-    expect(inboxShell).toContain("rewrite * /index.html");
-    expect(inboxShell).toContain("encode zstd gzip");
-    expect(inboxShell).toContain('header Cache-Control "no-cache"');
-    expect(inboxShell).toContain("file_server");
+    expect(inboxShell).toContain("reverse_proxy 127.0.0.1:");
+    expect(inboxShell).not.toContain("rewrite * /index.html");
   });
 
   it("emits signed-in visitor routes for cloud-email apps", () => {

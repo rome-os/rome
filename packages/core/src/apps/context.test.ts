@@ -21,6 +21,7 @@ import {
   getCurrentActionContext,
 } from "@rome-os/app-runtime";
 import { registerAppActions, registerLazyAppActions } from "../actions/app-actions-wiring.js";
+import { HostExecutionService } from "../host-execution/service.js";
 import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -39,6 +40,64 @@ type RuntimeContextGlobal = typeof globalThis & {
 
 describe("app runtime context", () => {
   const tempDirs: string[] = [];
+
+  it("injects host execution only into system actions in both main and worker loaders", async () => {
+    for (const register of [registerAppActions, registerLazyAppActions]) {
+      for (const appId of ["system", "ordinary-app"]) {
+        const app = resolvedApp(appId);
+        const actionDir = await tempDir();
+        await writeFile(
+          join(actionDir, "index.js"),
+          `
+export function createAction(config, deps) {
+  return {
+    config,
+    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution) } }),
+  };
+}
+`,
+        );
+        const loader = {
+          getAllRecords: () =>
+            new Map([
+              [
+                "host_probe",
+                {
+                  config: actionConfig("host_probe"),
+                  directory: actionDir,
+                  metadata: {
+                    kind: "action",
+                    ownerType: "app",
+                    ownerId: appId,
+                    publicName: "host_probe",
+                    aliases: [],
+                    sourcePath: actionDir,
+                  },
+                },
+              ],
+            ]),
+        } as unknown as ActionLoader;
+        const registry = new ActionRegistryImpl([]);
+        const loaded = await register(
+          loader,
+          registry,
+          catalogFor(app),
+          {},
+          {
+            db: {} as RomeAppRuntimeServices["db"],
+            actionEngine: {} as ActionEngine,
+            repositories: createRepositories(),
+            hostExecution: new HostExecutionService({ enabled: false }),
+          },
+        );
+        expect(loaded.failed).toEqual([]);
+        expect(await registry.get("host_probe")?.execute({})).toEqual({
+          status: "ok",
+          data: { hasHostExecution: appId === "system" },
+        });
+      }
+    }
+  });
 
   afterEach(async () => {
     delete (globalThis as RuntimeContextGlobal).__romeAppRuntimeContexts;

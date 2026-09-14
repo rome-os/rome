@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.8](https://github.com/rome-os/rome/compare/ui-v0.2.7...ui-v0.2.8) (2026-09-14)
+
+
+### Features
+
+* **ui:** add row, checkbox, and radio group primitives ([#367](https://github.com/rome-os/rome/issues/367)) ([848376a](https://github.com/rome-os/rome/commit/848376a9eebceb81341b25a323ea345c936ed200))
+* **ui:** retune type weight, control scale, and focus edge ([#365](https://github.com/rome-os/rome/issues/365)) ([d28d695](https://github.com/rome-os/rome/commit/d28d695aa3ad58cd49ebcd44011da453502815a4))
+
+## [0.2.7](https://github.com/rome-os/rome/compare/ui-v0.2.6...ui-v0.2.7) (2026-09-10)
+
+
+### Features
+
+* **web:** make chat code blocks and Mermaid diagrams collapsible ([#277](https://github.com/rome-os/rome/issues/277)) ([66178d4](https://github.com/rome-os/rome/commit/66178d4e2d0baa78b336c1161ca0c76cdeef4618))
+
+## [0.2.6](https://github.com/rome-os/rome/compare/ui-v0.2.5...ui-v0.2.6) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ui:** key SegmentedControl selection on aria-checked ([#264](https://github.com/rome-os/rome/issues/264)) ([#265](https://github.com/rome-os/rome/issues/265)) ([b66d473](https://github.com/rome-os/rome/commit/b66d473cce6b47383acb5d0ad50b24ad1f0ba4b5))
+
 ## [0.2.5](https://github.com/rome-os/rome/compare/ui-v0.2.4...ui-v0.2.5) (2026-09-05)
 
 

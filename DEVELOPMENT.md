@@ -50,6 +50,8 @@ pnpm dev:all          # Rome container + obs singleton + Traefik singleton
 
 ## Running processes
 
+For standalone design pages, run `pnpm storybook`. Startup, source HMR, static builds, and browser checks are in [Storybook](docs/storybook.md).
+
 `pnpm dev:all` is the single entry point. It calls `scripts/dev-up.sh`, which:
 
 - Ensures the `rome-traefik` singleton is up (shared across worktrees).
@@ -70,6 +72,13 @@ To run a command inside the worktree's Rome container:
 ./r pnpm test         # any command: ./r <cmd>
 ./r bash              # interactive shell
 ```
+
+Browser automation uses the OpenCLI extension by default. Set
+`ROME_ENABLE_CDP_AUTOMATION=true` in the root `.env` or host shell to enable
+CDP browser discovery, automatic Chrome DevTools MCP servers, and stealth injection.
+Run `pnpm dev:all` after changing the flag so both `rome` and `chrome` receive it.
+With CDP automation enabled, `ROME_CHROME_ENABLE_STEALTH=0` skips stealth injection.
+Chrome's CDP listener stays available for login tabs and URL opening in either mode.
 
 ## Established patterns
 

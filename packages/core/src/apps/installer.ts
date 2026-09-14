@@ -486,6 +486,7 @@ export class AppInstaller {
       id: data.id,
       version: data.version,
       description: data.description,
+      tagline: data.tagline,
       name: data.name,
       icon: data.icon,
       appRoot: data.appRoot,

@@ -175,6 +175,67 @@ describe("useUpgradeStatus", () => {
     unmount();
   });
 
+  it("clears when the target build is running even if a draining server still reports updating", async () => {
+    let runningVersion = "1.1.0";
+    let statusPhase: "idle" | "updating" = "updating";
+    const fetchMock = rs.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/build-info") {
+        return new Response(JSON.stringify({ version: runningVersion }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (init?.method === "POST") return jsonResponse(updatingStatus());
+      return jsonResponse(countdownStatus());
+    });
+    rs.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(() => useUpgradeStatus());
+    await act(async () => {});
+    await act(async () => {
+      await result.current.updateNow();
+    });
+    expect(result.current.state?.phase).toBe("updating");
+
+    // The accepting process is still the only backend available.
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/build-info") {
+        return new Response(JSON.stringify({ version: runningVersion }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return jsonResponse(statusPhase === "updating" ? updatingStatus() : idleStatus);
+    });
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_ACTIVE_POLL_MS);
+    });
+    expect(result.current.state?.phase).toBe("updating");
+
+    // A rolling replacement can route the status request to that draining
+    // process and build-info to the replacement. The target build proves the
+    // update completed even though the in-memory status is stale.
+    runningVersion = "1.2.0";
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_ACTIVE_POLL_MS);
+    });
+    expect(result.current.state).toBeNull();
+
+    // Seeing the replacement's idle hub does not discard the proof. The next
+    // request can still be routed back to the draining process.
+    statusPhase = "idle";
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+    });
+    expect(result.current.state).toBeNull();
+
+    statusPhase = "updating";
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(UPGRADE_STATUS_IDLE_POLL_MS);
+    });
+    expect(result.current.state).toBeNull();
+
+    unmount();
+  });
+
   it("enters updating locally when the countdown deadline crosses zero", async () => {
     // A fixed deadline, but a live serverNow: each poll answers with the same
     // countdown as a real server would while its deadline-path relay to

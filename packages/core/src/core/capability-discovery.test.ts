@@ -7,11 +7,6 @@ rs.mock("node:child_process", () => ({
 }));
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-// We need to mock the promisified version. The module calls promisify(execFile)
-// at import time, so we intercept execFile itself and control its callback behavior.
-
 function mockExecFile(impl: (cmd: string, args: string[]) => { stdout: string; stderr: string }) {
   (execFile as unknown as ReturnType<typeof rs.fn>).mockImplementation(
     (
@@ -51,13 +46,30 @@ describe("CapabilityDiscovery", () => {
 
   beforeEach(() => {
     rs.useFakeTimers();
-    discovery = new CapabilityDiscovery();
+    discovery = new CapabilityDiscovery(true);
+    rs.mocked(execFile).mockClear();
     mockFetch.mockReset();
   });
 
   afterEach(() => {
     discovery.stop();
     rs.useRealTimers();
+  });
+
+  it.each([
+    undefined,
+    false,
+  ])("skips discovery and refreshes when enabled is %s", async (enabled) => {
+    discovery = new CapabilityDiscovery(enabled);
+    mockFetch.mockResolvedValue({ ok: true });
+
+    await discovery.start();
+    await rs.advanceTimersByTimeAsync(120_000);
+
+    expect(execFile).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(discovery.getCdpMcpServers()).toEqual({});
+    expect(discovery.getBrowserEndpoints()).toEqual([]);
   });
 
   describe("no Tailscale installed", () => {

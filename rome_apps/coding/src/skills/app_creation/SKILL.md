@@ -60,6 +60,12 @@ mkdir -p "$REPO" && cd "$REPO"
 #    already list it: the workflow template has no web UI.
 pnpm add @rome-os/app-runtime@latest @rome-os/app-web-sdk@latest @rome-os/ui@latest
 
+# Also fill in app.yaml: `name`, `description` (written for agents), and
+# `tagline` (written for people: one sentence, ≤ 80 chars / 40 CJK,
+# benefit-first, like an App Store subtitle). The tagline is the share card's
+# ONLY description — there is no fallback — so uncomment and fill it in, and
+# update it whenever the app's purpose changes.
+
 # 4. git init AFTER scaffolding. Initializing on top of the freshly
 #    materialized template means commit #1 (next step) is "the scaffold as
 #    shipped" and every subsequent diff is scoped to the agent's own work.
@@ -93,8 +99,9 @@ Run `system:summon` with the `assistant:assistant` agent and tell it to load
 handoff: `appId`, absolute `$REPO`, artifact path, dashboard/API base URL if
 known, the original user intent, expected happy path, and safe sample inputs.
 The verifier must visit or probe the installed app at runtime and return a
-verdict with evidence, issues, gaps, and suggested extra checks. Include that
-verdict in the final handoff.
+verdict with evidence, issues, gaps, and suggested extra checks. It also fails
+an app whose manifest has no `tagline`, so fill that in before handing off.
+Include that verdict in the final handoff.
 
 ## After setup, before writing code
 

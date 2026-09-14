@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "pnpm build:kit && rsbuild dev",
     "dev:mock": "pnpm build:kit && rsbuild dev --config mock/rsbuild.config.ts",
+    "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open",
+    "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
+    "build:mock": "pnpm build:kit && tsc --noEmit && rsbuild build --config mock/rsbuild.static.config.ts",
     "build": "tsc --noEmit && rsbuild build",
     "typecheck": "tsc --noEmit",
     "preview": "rsbuild preview",
     "test": "../../scripts/test-env.sh rstest --silent passed-only",
     "test:desktop-vnc": "playwright test --config playwright.desktop-vnc.config.ts",
     "test:desktop-vnc:docker": "playwright test --config playwright.desktop-vnc.docker.config.ts",
+    "test:storybook": "playwright test --config playwright.storybook.config.ts",
     "test:layout": "playwright test"
   },
   "dependencies": {
@@ -52,7 +56,6 @@
     "recharts": "^3.9.2",
     "sonner": "^2.0.7",
     "streamdown": "^2.5.0",
-    "uuid": "^13.0.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.2"
   },
@@ -63,6 +66,7 @@
     "@rsbuild/plugin-react": "^2.0.0",
     "@rsbuild/plugin-svgr": "^2.0.2",
     "@rstest/core": "^0.11.11",
+    "@storybook/addon-mcp": "10.6.0",
     "@tailwindcss/postcss": "^4.1.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -74,6 +78,8 @@
     "jsdom": "^29.1.1",
     "msw": "^2.15.0",
     "remark-gfm": "^4.0.1",
+    "storybook": "10.6.0",
+    "storybook-react-rsbuild": "3.4.2",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3"
   }

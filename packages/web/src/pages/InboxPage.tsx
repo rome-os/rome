@@ -8,7 +8,7 @@ import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Timestamp } from "@rome-os/ui/timestamp";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
 // The Inbox page reads the same host endpoints the Settings page used before
@@ -133,10 +133,7 @@ export default function InboxPage() {
       <PageBody>
         {/* Header renders above the load switch so a slow read leaves the page
             identity in place instead of blanking the route. */}
-        <div>
-          <h1 className="text-title text-foreground">{t("page.title")}</h1>
-          <p className="mt-1 text-body text-muted-foreground">{t("page.description")}</p>
-        </div>
+        <PageHeader title={t("page.title")} description={t("page.description")} />
 
         {toast && (
           <div className="fixed right-4 top-4 z-50 rounded-8 border border-success-border bg-success-bg px-4 py-2 text-ui text-success-fg shadow-10">

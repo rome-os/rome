@@ -48,6 +48,74 @@ async function waitForCount(path: string, minimum: number) {
 }
 
 describe("rome-start-chrome-cdp.sh", () => {
+  it.each([
+    [undefined, undefined, false],
+    ["false", "1", false],
+    ["true", undefined, true],
+    ["true", "0", false],
+  ] as const)("gates stealth with CDP automation=%s and stealth=%s", async (automationEnabled, stealthEnabled, expectStealth) => {
+    const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
+    tempDirs.push(tempDir);
+    const binDir = join(tempDir, "bin");
+    const countFile = join(tempDir, "chrome-count");
+    const argsFile = join(tempDir, "chrome-args");
+    const stealthFile = join(tempDir, "stealth-started");
+    const scriptPath = join(tempDir, "rome-start-chrome-cdp.sh");
+    mkdirSync(binDir);
+    writeFileSync(countFile, "0\n");
+    writeFileSync(stealthFile, "0\n");
+    writeFileSync(scriptPath, readFileSync(resolve(PROJECT_ROOT, SCRIPT_PATH)));
+    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\necho cdp-ready\n");
+    makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
+    makeExecutable(
+      join(tempDir, "rome-apply-cdp-stealth.sh"),
+      `#!/usr/bin/env bash
+printf '1\\n' >"$FAKE_STEALTH_FILE"
+exec sleep 30
+`,
+    );
+    makeExecutable(
+      join(tempDir, "fake-chrome"),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$@" >"$FAKE_CHROME_ARGS_FILE"
+printf '1\\n' >"$FAKE_CHROME_COUNT_FILE"
+exec sleep 30
+`,
+    );
+
+    supervisor = spawn("bash", [scriptPath], {
+      cwd: PROJECT_ROOT,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        FAKE_CHROME_ARGS_FILE: argsFile,
+        FAKE_CHROME_COUNT_FILE: countFile,
+        FAKE_STEALTH_FILE: stealthFile,
+        ROME_ENABLE_CDP_AUTOMATION: automationEnabled,
+        ROME_CHROME_ENABLE_STEALTH: stealthEnabled,
+        ROME_CHROME_BINARY: join(tempDir, "fake-chrome"),
+        ROME_CHROME_KEEP_ALIVE: "0",
+        ROME_CHROME_STARTUP_WAIT: "1",
+        ROME_CHROME_USER_AGENT: "FakeChrome",
+        ROME_CHROME_USER_DATA_DIR: join(tempDir, "profile"),
+      },
+    });
+    await new Promise<void>((resolveWait, reject) => {
+      supervisor!.stdout.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes("cdp-ready")) resolveWait();
+      });
+      supervisor!.once("exit", (code) => reject(new Error(`Chrome supervisor exited: ${code}`)));
+    });
+
+    const stealthCount = expectStealth
+      ? await waitForCount(stealthFile, 1)
+      : Number(readFileSync(stealthFile, "utf8").trim());
+    expect(supervisor.exitCode).toBeNull();
+    expect(readFileSync(countFile, "utf8").trim()).toBe("1");
+    expect(readFileSync(argsFile, "utf8")).toContain("--remote-debugging-port=");
+    expect(stealthCount).toBe(expectStealth ? 1 : 0);
+  });
+
   it("restarts Chrome when the browser process exits", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "rome-chrome-supervisor-"));
     tempDirs.push(tempDir);

@@ -3,9 +3,10 @@ import { z } from "zod";
 
 export const UPGRADE_STATUS_IDLE_POLL_MS = 15_000;
 export const UPGRADE_STATUS_ACTIVE_POLL_MS = 3_000;
-/** Per-request deadline on each snapshot poll. A restart can leave a request
- * half-open indefinitely, and the next poll is only scheduled once the current
- * one settles — without this bound a single hung request would end the loop. */
+/** Per-request deadline on each status/completion probe. A restart can leave a
+ * request half-open indefinitely, and the next poll is only scheduled once the
+ * current one settles — without this bound a single hung request would end the
+ * loop. */
 export const UPGRADE_STATUS_POLL_TIMEOUT_MS = 10_000;
 /** Deadline on the consent verbs. Sits above the server's 15s Rome Cloud relay
  * budget, so a slow-but-honest ack still lands; past it the request is treated
@@ -63,6 +64,10 @@ const upgradeStatusSchema = z.object({
   serverNow: z.number(),
 });
 
+const buildInfoSchema = z.object({
+  version: z.string().nullable(),
+});
+
 type ServerUpgradeStatus = z.infer<typeof upgradeStatusSchema>;
 
 /** Estimated server clock "now", from the last snapshot's server/local pair —
@@ -78,21 +83,28 @@ function deadlineElapsed(status: UpgradeStatus): boolean {
 /**
  * Single polling loop against `/api/system/upgrade/status/snapshot` — slow
  * (15s) while idle, fast (3s) while a countdown or restart is in flight. The
- * same poll doubles as the post-cutover health probe: during the restart every
- * request fails (expected), and the first 200 from the replacement process
- * reports `idle`, which clears the banner.
+ * same poll doubles as the post-cutover health probe. A replacement process
+ * reports `idle`, which clears the banner. If a rolling replacement still
+ * routes status to a draining process, `/api/build-info` confirming the target
+ * version clears it instead.
  *
  * The restart is tracked as *client-local* state (`updatingSince`), entered on
  * any of: the `now` verb acking, a polled snapshot reporting `updating` (the
  * old process after a deadline-path cutover), or the rendered countdown
  * crossing its deadline (consent-by-silence with no ack to observe). It exits
- * only when a poll reaches a server that reports a resolved phase.
+ * when a poll reports a resolved phase or confirms that the target build is
+ * already running.
  */
 export function useUpgradeStatus(): UseUpgradeStatusResult {
   const [server, setServer] = useState<UpgradeStatus | null>(null);
   /** Local Date.now() when the client concluded a restart began; null when no
    * restart is believed to be in flight. */
   const [updatingSince, setUpdatingSince] = useState<number | null>(null);
+  // A rolling replacement can leave the accepting process serving
+  // `updating` after another process is already serving the target build.
+  // Remember that target so a later response from the draining process cannot
+  // put the completed update back on screen.
+  const [completedTarget, setCompletedTarget] = useState<string | null>(null);
   const [stalledDismissed, setStalledDismissed] = useState(false);
   // A 1s tick drives the countdown re-render, the deadline-crossing check, and
   // the stall-boundary re-render; the value is unused.
@@ -102,6 +114,8 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
   serverRef.current = server;
   const updatingSinceRef = useRef(updatingSince);
   updatingSinceRef.current = updatingSince;
+  const completedTargetRef = useRef(completedTarget);
+  completedTargetRef.current = completedTarget;
   // Bumped on every verb acknowledgement. A poll that started before the bump
   // carries pre-verb state — applying it would let a stale countdown overwrite
   // the `updating` ack (and the banner would then sit on a dead countdown
@@ -124,6 +138,22 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
   const applySnapshot = useCallback((value: ServerUpgradeStatus) => {
     const status: UpgradeStatus = { ...value, receivedAt: Date.now() };
     setServer(status);
+    if (
+      value.phase === "updating" &&
+      value.targetVersion !== null &&
+      value.targetVersion === completedTargetRef.current
+    ) {
+      setUpdatingSince(null);
+      setStalledDismissed(false);
+      return;
+    }
+    // Keep the completion marker through idle snapshots. A rolling deployment
+    // may still route a later request back to the draining process. A new
+    // active phase for any target is the point where the marker is obsolete.
+    if (value.phase !== "idle") {
+      completedTargetRef.current = null;
+      setCompletedTarget(null);
+    }
     if (value.phase === "updating") {
       ambiguousNowUntilRef.current = null;
       setUpdatingSince((current) => current ?? Date.now());
@@ -148,7 +178,10 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
   }, []);
 
   const inUpdating = updatingSince !== null;
-  const serverActive = server !== null && server.phase !== "idle";
+  const serverActive =
+    server !== null &&
+    server.phase !== "idle" &&
+    (server.targetVersion === null || server.targetVersion !== completedTarget);
   const stalled =
     updatingSince !== null && Date.now() - updatingSince >= UPGRADE_RESTART_TIMEOUT_MS;
   // Past the stall boundary the restart is overdue and the fast cadence has
@@ -187,6 +220,30 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
         const parsed = upgradeStatusSchema.parse(await response.json());
         if (disposed || generation !== pollGenerationRef.current) return;
         applySnapshot(parsed);
+        if (parsed.phase === "updating" && parsed.targetVersion !== null) {
+          // The version is a stronger completion signal than this process's
+          // in-memory phase. During a rolling cutover, the status request can
+          // reach the draining process while build-info reaches the replacement.
+          const buildResponse = await fetch("/api/build-info", {
+            credentials: "include",
+            cache: "no-store",
+            signal: request.signal,
+          });
+          if (!buildResponse.ok) {
+            throw new Error(`build info request failed: ${buildResponse.status}`);
+          }
+          const build = buildInfoSchema.parse(await buildResponse.json());
+          if (
+            !disposed &&
+            generation === pollGenerationRef.current &&
+            build.version === parsed.targetVersion
+          ) {
+            completedTargetRef.current = parsed.targetVersion;
+            setCompletedTarget(parsed.targetVersion);
+            setUpdatingSince(null);
+            setStalledDismissed(false);
+          }
+        }
       } catch {
         // Expected while the server restarts mid-upgrade; transient otherwise.
         // Either way the loop keeps going — recovery is the next successful poll.

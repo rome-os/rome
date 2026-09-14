@@ -1,0 +1,275 @@
+{
+  "origin": "https://www.aa.com",
+  "path": "/booking/choose-flights/1",
+  "language": "en",
+  "width": 1024,
+  "ready": true,
+  "challenge": false,
+  "login_required": false,
+  "expired": false,
+  "error": "",
+  "no_results": false,
+  "loading": false,
+  "expected_count": 5,
+  "search": {
+    "from": "SFO",
+    "to": "DFW",
+    "depart": "11/13/26",
+    "return_date": null,
+    "miles": false,
+    "trip_type": "One way",
+    "passengers": [
+      {
+        "type": "adult",
+        "count": 1
+      }
+    ],
+    "header_from": "SFO",
+    "header_to": "DFW",
+    "header_passengers": "1",
+    "direction": "DEPART",
+    "date_label": "Friday, November 13, 2026"
+  },
+  "rows": [
+    {
+      "id": "slice-details-0",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "5:35 AM",
+      "arrival": "11:14 AM",
+      "duration": "3h 39m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 402",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$206",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main fare list starts at $206 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$331",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main Extra fare list starts at $331 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$569",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Premium fare list starts at $569 One way, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-4",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "6:38 AM",
+      "arrival": "12:18 PM",
+      "duration": "3h 40m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 3047",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$301",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main fare list starts at $301 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$409",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main Extra fare list starts at $409 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$816",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Premium fare list starts at $816 One way, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-3",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "11:23 PM",
+      "arrival": "5:00 AM +1 , Arrives on November 14",
+      "duration": "3h 37m",
+      "stops": "Nonstop",
+      "segments": [
+        {
+          "flight_number": "AA 939",
+          "aircraft": "321-Airbus A321",
+          "operator": ""
+        }
+      ],
+      "alerts": "",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$206",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main fare list starts at $206 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$331",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main Extra fare list starts at $331 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$569",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Premium fare list starts at $569 One way, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-12",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "5:50 AM",
+      "arrival": "2:56 PM",
+      "duration": "7h 6m",
+      "stops": "1 stop, PHX, Phoenix Sky Harbor Intl",
+      "segments": [
+        {
+          "flight_number": "AA 6206",
+          "aircraft": "E75-Embraer 175",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 2747",
+          "aircraft": "32Q-Airbus A321neo",
+          "operator": ""
+        }
+      ],
+      "alerts": "Extended layover",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$311",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main fare list starts at $311 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$419",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main Extra fare list starts at $419 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$826",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Premium fare list starts at $826 One way, per person.",
+          "unavailable": false
+        }
+      ]
+    },
+    {
+      "id": "slice-details-13",
+      "origin": "SFO",
+      "destination": "DFW",
+      "departure": "5:50 AM",
+      "arrival": "4:20 PM",
+      "duration": "8h 30m",
+      "stops": "1 stop, PHX, Phoenix Sky Harbor Intl",
+      "segments": [
+        {
+          "flight_number": "AA 6206",
+          "aircraft": "E75-Embraer 175",
+          "operator": ""
+        },
+        {
+          "flight_number": "AA 1999",
+          "aircraft": "738-Boeing 737",
+          "operator": ""
+        }
+      ],
+      "alerts": "Extended layover",
+      "fares": [
+        {
+          "group": true,
+          "name": "Main",
+          "amount": "$311",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main fare list starts at $311 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Main Extra",
+          "amount": "$419",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Main Extra fare list starts at $419 One way, per person.",
+          "unavailable": false
+        },
+        {
+          "group": true,
+          "name": "Premium",
+          "amount": "$826",
+          "addon": "",
+          "scope": "One way from",
+          "description": "The lowest fare in the Premium fare list starts at $826 One way, per person.",
+          "unavailable": false
+        }
+      ]
+    }
+  ]
+}

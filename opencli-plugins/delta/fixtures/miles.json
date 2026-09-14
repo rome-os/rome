@@ -1,0 +1,291 @@
+{
+  "url": "https://www.delta.com/flightsearch/search-results?cacheKeySuffix=test-search",
+  "language": "en",
+  "locale": "United States - English Español Link to change the language Link to change the language",
+  "search": {
+    "trip_type": "ONE_WAY",
+    "segments": [
+      {
+        "origin": "SFO",
+        "destination": "JFK",
+        "departure_date": "2026-11-13",
+        "return_date": null
+      }
+    ],
+    "passengers": [
+      {
+        "type": "ADT",
+        "count": "2"
+      }
+    ],
+    "award": "true",
+    "flexible": false,
+    "refundable": false,
+    "exclude_basic": false
+  },
+  "form_ready": false,
+  "price_mode": "Miles",
+  "leg": "One Way",
+  "route_text": "SFO JFK",
+  "date_heading": "Fri, Nov 13, 2026",
+  "traveler_text": "2 Passengers",
+  "fare_note": "Fares are per passenger, including taxes and fees.",
+  "total": 4,
+  "more": false,
+  "desktop": true,
+  "loading": false,
+  "challenge": false,
+  "service_error": false,
+  "login_required": false,
+  "no_results": false,
+  "rows": [
+    {
+      "id": "flight-results-grid-0",
+      "route_label": "Flight from SFO to JFK",
+      "departure": "7:00 am",
+      "arrival": "3:31 pm",
+      "arrival_note": "",
+      "stop_labels": [],
+      "nonstop": true,
+      "duration_text": "5h 31m",
+      "flight_numbers": ["DL405"],
+      "flight_details": "Nonstop\nFree Wi-Fi for SkyMiles Members\nDL405\n5h 31m\n7:00 am\n3:31 pm\nSFO\nNonstop\nJFK\nDetails\nSeats",
+      "fares": [
+        {
+          "product_id": "BMAIN",
+          "column": "Main",
+          "products": ["Delta Main"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 33,300 miles",
+          "taxes_text": "+$6",
+          "promo_text": "28,300 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Main\nActual Fare\n33,300\nmiles\n+\n$\n6\nOne-Way\nCard Members\n28,300\n+\n$\n6"
+        },
+        {
+          "product_id": "CDCP",
+          "column": "Comfort",
+          "products": ["Delta Comfort Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 47,700 miles",
+          "taxes_text": "+$6",
+          "promo_text": "40,500 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Comfort Classic\nActual Fare\n47,700\nmiles\n+\n$\n6\nOne-Way\nCard Members\n40,500\n+\n$\n6"
+        },
+        {
+          "product_id": "CDPS",
+          "column": "Premium Select",
+          "products": [],
+          "cash_text": "",
+          "miles_text": "",
+          "taxes_text": "",
+          "promo_text": "",
+          "promo_label": "",
+          "trip_type": "",
+          "text": "Not Offered"
+        },
+        {
+          "product_id": "CD1",
+          "column": "Delta One®",
+          "products": ["Delta One® Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 403,000 miles",
+          "taxes_text": "+$6",
+          "promo_text": "342,550 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta One® Classic\nActual Fare\n403,000\nmiles\n+\n$\n6\nOne-Way\nCard Members\n342,550\n+\n$\n6"
+        }
+      ]
+    },
+    {
+      "id": "flight-results-grid-4",
+      "route_label": "Flight from SFO to JFK",
+      "departure": "4:00 pm",
+      "arrival": "12:28 am",
+      "arrival_note": "Sat, Nov 14",
+      "stop_labels": [],
+      "nonstop": true,
+      "duration_text": "5h 28m",
+      "flight_numbers": ["DL363"],
+      "flight_details": "Nonstop\nFree Wi-Fi for SkyMiles Members\nDL363\n5h 28m\n4:00 pm\n12:28 am\nSat, Nov 14\nSFO\nNonstop\nJFK\nDetails\nSeats",
+      "fares": [
+        {
+          "product_id": "BMAIN",
+          "column": "Main",
+          "products": ["Delta Main"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 33,300 miles",
+          "taxes_text": "+$6",
+          "promo_text": "28,300 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Main\nActual Fare\n33,300\nmiles\n+\n$\n6\nOne-Way\nCard Members\n28,300\n+\n$\n6"
+        },
+        {
+          "product_id": "CDCP",
+          "column": "Comfort",
+          "products": ["Delta Comfort Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 47,700 miles",
+          "taxes_text": "+$6",
+          "promo_text": "40,500 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Comfort Classic\nActual Fare\n47,700\nmiles\n+\n$\n6\nOne-Way\nCard Members\n40,500\n+\n$\n6"
+        },
+        {
+          "product_id": "CDPS",
+          "column": "Premium Select",
+          "products": ["Delta Premium Select Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 84,000 miles",
+          "taxes_text": "+$6",
+          "promo_text": "71,400 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Premium Select Classic\nActual Fare\n84,000\nmiles\n+\n$\n6\nOne-Way\nCard Members\n71,400\n+\n$\n6"
+        },
+        {
+          "product_id": "CD1",
+          "column": "Delta One®",
+          "products": ["Delta One® Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 151,900 miles",
+          "taxes_text": "+$6",
+          "promo_text": "129,100 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta One® Classic\nActual Fare\n151,900\nmiles\n+\n$\n6\nOne-Way\nCard Members\n129,100\n+\n$\n6"
+        }
+      ]
+    },
+    {
+      "id": "flight-results-grid-7",
+      "route_label": "Flight from SFO to JFK",
+      "departure": "10:38 am",
+      "arrival": "12:09 am",
+      "arrival_note": "Sat, Nov 14",
+      "stop_labels": ["Layover at SEA, 3h 3m"],
+      "nonstop": false,
+      "duration_text": "10h 31m",
+      "flight_numbers": ["DL3034", "DL849"],
+      "flight_details": "Lowest Fare\nFree Wi-Fi for SkyMiles Members\nDL3034\n, \nDL849\n10h 31m\n10:38 am\n12:09 am\nSat, Nov 14\nSFO\nSEA\n3h 3m\nJFK\nDetails\nSeats",
+      "fares": [
+        {
+          "product_id": "BMAIN",
+          "column": "Main",
+          "products": ["Delta Main"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 21,900 miles",
+          "taxes_text": "+$6",
+          "promo_text": "18,500 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Main\nActual Fare\n21,900\nmiles\n+\n$\n6\nOne-Way\nCard Members\n18,500\n+\n$\n6"
+        },
+        {
+          "product_id": "CDCP",
+          "column": "Comfort",
+          "products": ["Delta Comfort Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 45,600 miles",
+          "taxes_text": "+$6",
+          "promo_text": "38,600 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Comfort Classic\nActual Fare\n45,600\nmiles\n+\n$\n6\nOne-Way\nCard Members\n38,600\n+\n$\n6"
+        },
+        {
+          "product_id": "CFIRST",
+          "column": "Premium Select",
+          "products": ["Delta First Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 114,400 miles",
+          "taxes_text": "+$6",
+          "promo_text": "97,200 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta First Classic\nActual Fare\n114,400\nmiles\n+\n$\n6\nOne-Way\nCard Members\n97,200\n+\n$\n6"
+        },
+        {
+          "product_id": "CD1",
+          "column": "Delta One®",
+          "products": [],
+          "cash_text": "",
+          "miles_text": "",
+          "taxes_text": "",
+          "promo_text": "",
+          "promo_label": "",
+          "trip_type": "",
+          "text": "Sold Out"
+        }
+      ]
+    },
+    {
+      "id": "flight-results-grid-10",
+      "route_label": "Flight from SFO to JFK",
+      "departure": "7:05 am",
+      "arrival": "5:39 pm",
+      "arrival_note": "",
+      "stop_labels": ["Layover at LAX, 41m"],
+      "nonstop": false,
+      "duration_text": "7h 34m",
+      "flight_numbers": ["DL1598", "DL958"],
+      "flight_details": "Free Wi-Fi for SkyMiles Members\nDL1598\n, \nDL958\n7h 34m\n7:05 am\n5:39 pm\nSFO\nLAX\n41m\nJFK\nDetails\nSeats",
+      "fares": [
+        {
+          "product_id": "CMAIN",
+          "column": "Main",
+          "products": ["Delta Main"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 69,300 miles",
+          "taxes_text": "+$6",
+          "promo_text": "58,800 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Main\nActual Fare\n69,300\nmiles\n+\n$\n6\nOne-Way\nCard Members\n58,800\n+\n$\n6"
+        },
+        {
+          "product_id": "CDCP",
+          "column": "Comfort",
+          "products": ["Delta Comfort Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 78,600 miles",
+          "taxes_text": "+$6",
+          "promo_text": "66,700 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta Comfort Classic\nActual Fare\n78,600\nmiles\n+\n$\n6\nOne-Way\nCard Members\n66,700\n+\n$\n6"
+        },
+        {
+          "product_id": "CDPS",
+          "column": "Premium Select",
+          "products": ["Delta First Classic", "Delta Premium Select Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 246,100 miles",
+          "taxes_text": "+$6",
+          "promo_text": "209,100 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta First Classic,\nDelta Premium Select Classic\nActual Fare\n246,100\nmiles\n+\n$\n6\nOne-Way\nCard Members\n209,100\n+\n$\n6"
+        },
+        {
+          "product_id": "CD1",
+          "column": "Delta One®",
+          "products": ["Delta First Classic", "Delta One® Classic"],
+          "cash_text": "",
+          "miles_text": "Actual Fare 370,500 miles",
+          "taxes_text": "+$6",
+          "promo_text": "314,925 + $ 6",
+          "promo_label": "Card Members",
+          "trip_type": "One-Way",
+          "text": "Delta First Classic,\nDelta One® Classic\nActual Fare\n370,500\nmiles\n+\n$\n6\nOne-Way\nCard Members\n314,925\n+\n$\n6"
+        }
+      ]
+    }
+  ]
+}

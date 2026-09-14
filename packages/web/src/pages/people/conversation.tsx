@@ -22,6 +22,7 @@ import {
   segmentOutbox,
 } from "./send-model";
 import { usePersonOutbox, usePersonTimeline } from "./use-roster";
+import { useConversationSends } from "./use-conversation-sends";
 
 /**
  * A person's conversation: what has been said, what Rome is still trying to
@@ -41,6 +42,7 @@ export function PersonConversation({ person }: { person: PersonResource }) {
   const { t } = useTranslation("people");
   const timeline = usePersonTimeline(person.id);
   const outbox = usePersonOutbox(person.id);
+  const sends = useConversationSends(person.id, outbox.messages);
 
   const segments = useMemo(() => accountSegments(person.accounts), [person.accounts]);
   const [segment, setSegment] = useState<string>(ALL_ACCOUNTS);
@@ -92,7 +94,13 @@ export function PersonConversation({ person }: { person: PersonResource }) {
         )}
       </div>
 
-      <Outbox personId={person.id} messages={segmentOutbox(outbox.messages, scoped)} />
+      <Outbox
+        personId={person.id}
+        messages={segmentOutbox(outbox.messages, scoped)}
+        localMessages={segmentOutbox(sends.messages, scoped)}
+        onRetryLocal={sends.retry}
+        onDiscardLocal={sends.discard}
+      />
 
       {timeline.isPending ? (
         <p className="py-8 text-center text-aux text-muted-foreground">{t("page.loading")}</p>
@@ -169,7 +177,12 @@ export function PersonConversation({ person }: { person: PersonResource }) {
         </div>
       )}
 
-      <Composer person={person} target={target} onChangeTarget={scoped ? null : setOverride} />
+      <Composer
+        person={person}
+        target={target}
+        onChangeTarget={scoped ? null : setOverride}
+        onSend={sends.send}
+      />
     </section>
   );
 }

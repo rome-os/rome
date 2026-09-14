@@ -4,7 +4,29 @@
 
 `index.ts` holds the shell probes (`/api/health`, `/api/bootstrap`), chat, and the connection routes. It composes the per-surface modules beside it: `apps.ts`, `activity.ts`, `people.ts`, `routines.ts`, `settings.ts`. The two file browsers go through `file-browser.ts`, an in-memory filesystem the projects tree and the memory dir (`memory-files.ts`) are each served from — `/api/projects` and `/api/memory` are the same routes over a different root, so one factory answers both. The connection ledger itself lives in `connections-store.ts`, because the People page's send routes have to see a grant the Connections page revoked. Unhandled requests pass through the normal dev proxy. With a real backend running on `INTERNAL_API_PORT`, mock mode therefore doubles as an "override one endpoint" tool.
 
-Mock mode is a separate entry (`mock/rsbuild.config.ts` plus `mock/main.tsx`) rather than a dev branch in the SPA. `pnpm build` only reads the root config, so MSW and the fixtures never reach a production bundle.
+Mock mode is a separate entry (`mock/rsbuild.config.ts` plus `mock/main.tsx`) rather than a dev branch in the SPA. `pnpm build` only reads the root config, so the shipping dashboard bundle excludes MSW and the fixtures.
+
+## Static builds and Cloudflare Pages
+
+Run `pnpm build:web:mock` to build the mock dashboard into `packages/web/dist-mock`. The command rebuilds the shared kit and typechecks the dashboard before bundling.
+The static config uses production mode and omits source maps. The `/dev` galleries are excluded, while MSW and its fixtures remain in the mock entry.
+
+The output includes `mockServiceWorker.js` and a Pages `_headers` file that requires the browser to revalidate the worker script.
+Cloudflare Pages supplies the SPA fallback because the output has no top-level `404.html`.
+The static site has no backend proxy. The limitations below apply to the deployed site, and in-memory fixture writes reset on reload.
+
+The [Deploy Dashboard Mock workflow](../.github/workflows/dashboard-mock-deploy.yml) updates the `rome-dashboard-mock` Pages project through Direct Upload.
+It runs manually on `main`, serializes deployments, and reports the deployment URL in the run summary.
+
+To configure the workflow:
+
+1. Create a Cloudflare API token with **Account → Cloudflare Pages → Edit**, restricted to the account that owns `rome-dashboard-mock`.
+2. Store the token in the GitHub repository secret `CLOUDFLARE_API_TOKEN`.
+3. Set the repository variable `CLOUDFLARE_ACCOUNT_ID` to the owning Cloudflare account ID.
+4. In GitHub Actions, select **Deploy Dashboard Mock → Run workflow**, with `main` selected.
+
+The workflow must be present on the default branch before GitHub exposes its manual trigger.
+Credential setup follows [Cloudflare's Direct Upload CI guide](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
 
 ## Never reimplement what core owns
 

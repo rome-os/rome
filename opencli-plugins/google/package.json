@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "test": "../../scripts/test-env.sh node --test flight-labels.test.mjs jobs-helpers.test.mjs maps-helpers.test.mjs shopping-helpers.test.mjs"
+    "test": "../../scripts/test-env.sh node --test flight-labels.test.mjs flight-airports.test.mjs jobs-helpers.test.mjs maps-helpers.test.mjs shopping-helpers.test.mjs"
   }
 }

@@ -157,17 +157,27 @@
     "iframeTitle": "Rome 桌面"
   },
   "chat": {
-    "add": "添加组件",
+    "add": "打开一个应用",
     "addChat": "对话",
     "addDesktop": "浏览器",
     "addProjects": "项目",
     "addApp": "应用",
     "back": "返回",
     "noApps": "暂无可用应用",
-    "searchWidgets": "搜索组件",
-    "noWidgetMatches": "没有组件匹配 “{{query}}”。",
+    "searchWidgets": "搜索应用",
+    "noWidgetMatches": "没有应用匹配 “{{query}}”。",
     "newChat": "新对话",
-    "orPickSession": "或选择已有对话"
+    "orPickSession": "或选择已有对话",
+    "tools": "应用",
+    "toolOpened": "已打开",
+    "toolUpdated": "新内容",
+    "closeTool": "关闭{{name}}",
+    "allTools": "所有已打开应用",
+    "collapseTools": "收起应用",
+    "expandTools": "显示应用",
+    "resizeTools": "调整聊天与应用区宽度",
+    "emptyAppsTitle": "尚未打开应用",
+    "emptyAppsDescription": "打开一个应用，在聊天时查看和使用它。"
   },
   "connectChatApp": {
     "title": "连接你的聊天应用",
