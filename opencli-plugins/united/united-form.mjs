@@ -65,6 +65,9 @@ export function readUnitedSearchForm() {
       disabled:
         element.getAttribute("aria-disabled") === "true" || element.hasAttribute("disabled"),
     }));
+  const closeCalendar = calendarControls("button").find(
+    ({ element }) => !element.disabled && text(element) === "Close",
+  );
   const monthButton = (direction) => {
     const control = calendarControls(`button[aria-label="${direction} month"]`).find(
       ({ element }) => !element.disabled && element.getAttribute("aria-disabled") !== "true",
@@ -112,6 +115,9 @@ export function readUnitedSearchForm() {
     close_travelers: button("Close dialog"),
     cabin: get("#cabinType")?.selectedOptions[0]?.textContent || "",
     calendar_open: !!calendar,
+    close_calendar: closeCalendar
+      ? { selector: closeCalendar.selector, index: closeCalendar.index }
+      : null,
     days,
     previous_month: monthButton("Previous"),
     next_month: monthButton("Next"),
@@ -247,7 +253,9 @@ export async function submitUnitedSearch(page, search, { now = Date.now } = {}) 
       `select ${label.toLowerCase()} date`,
     );
     if (state.calendar_open) {
-      await page.pressKey("Escape");
+      if (state.close_calendar)
+        await page.click(state.close_calendar.selector, { nth: state.close_calendar.index });
+      else await page.pressKey("Escape");
       state = await waitFor((s) => !s.calendar_open, "close the calendar");
     }
   }

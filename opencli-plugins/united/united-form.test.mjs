@@ -79,7 +79,10 @@ function formBrowser(t, { month = "2026-10", unavailable = null, noSuggestions =
       row.append(cell);
     }
   };
-  for (const button of calendar.querySelectorAll("button")) {
+  calendar.querySelector(".atm-c-datepicker__close-btn").addEventListener("click", () => {
+    calendar.hidden = true;
+  });
+  for (const button of calendar.querySelectorAll('button[aria-label$="month"]')) {
     button.addEventListener("click", () => {
       const next = new Date(`${month}-01T00:00:00Z`);
       next.setUTCMonth(
@@ -187,7 +190,7 @@ function formBrowser(t, { month = "2026-10", unavailable = null, noSuggestions =
     },
     async pressKey(key) {
       calls.push(["key", key]);
-      if (key === "Escape") calendar.hidden = true;
+      if (key === "Escape") return;
       else if (key === "Home") document.activeElement.options[0].selected = true;
       else assert.equal(key, "Tab", "Enter can submit the form prematurely");
     },
@@ -233,6 +236,13 @@ test("selects round-trip award dates across the year boundary and nine adults", 
   assert.deepEqual(result.dates, { Departure: "2026-12-31", Return: "2027-01-02" });
   assert.ok(b.calls.some(([, selector]) => selector?.includes("Previous month")));
   assert.ok(b.calls.some(([, selector]) => selector?.includes("Next month")));
+});
+
+test("closes the calendar with its Close button when Escape has no effect", async (t) => {
+  const b = formBrowser(t);
+  await submitUnitedSearch(b.page, search({ return: "2026-11-15" }), { now: b.now });
+  assert.ok(b.submitted());
+  assert.ok(!b.calls.some(([action, key]) => action === "key" && key === "Escape"));
 });
 
 test("selects the same date separately for departure and return", async (t) => {

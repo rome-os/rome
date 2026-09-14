@@ -113,6 +113,7 @@ They cover cash round-trip totals, current award discounts, mixed cabins, unavai
 They contain no account identifiers or authentication data. `fixtures/responsive.html` tests hidden flight rows and fare cells in both responsive layouts.
 `fixtures/search-form.html` is a minimal form fixture based on the homepage controls inspected on 2026-09-13.
 The form tests exercise autocomplete choices, remembered settings, travelers, both calendar dialogs, and submission order.
+Calendar regressions cover hidden month-overlap cells, hidden duplicate dialogs, and the Close button when Escape has no effect.
 The DOM tests reuse the `jsdom` development dependency declared by `packages/web`. Install the workspace dependencies before running the suite.
 CI runs the plugin’s test script after the workspace install.
 
