@@ -9,6 +9,7 @@ import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
 } from "../../routines/guardian-timezone.js";
+import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
@@ -65,6 +66,15 @@ export function settingsRoutes(deps: ApiDeps): Hono {
   // fills it in. It only writes when no zone is stored: a zone the guardian set
   // is never overwritten by whichever browser loads the dashboard next.
   app.post("/settings/guardian-timezone/detected", async (c) => {
+    // Only the guardian's own browser may report it. An allow-listed dashboard
+    // visitor also reaches `phase: "ready"` and the edge passes it through to
+    // `/api/settings/*`, so without this check the first visitor to load the
+    // dashboard would set the zone every floating routine is scheduled in.
+    const session = await resolveGuardianSession(c, deps.db);
+    if (!session) {
+      return c.json({ error: "Guardian session required" }, 403);
+    }
+
     const body = await c.req
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);

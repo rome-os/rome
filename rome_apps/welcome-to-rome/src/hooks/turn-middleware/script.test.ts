@@ -109,6 +109,28 @@ describe("runTurn — greeting and the name card", () => {
     expect(getNode()).toBe("await_ai");
   });
 
+  it("stays parked when the host fails to store the names", async () => {
+    const { fx, writeNames, getNode } = makeEffects("await_names");
+    rs.mocked(writeNames).mockResolvedValue({ ok: false });
+
+    const reply = await runTurn(resolution({ guardianName: "Alexandra", agentName: "Nova" }), fx);
+
+    expect(reply).toMatchObject({ componentId: "name-card" });
+    expect(getNode()).toBe("await_names");
+  });
+
+  // A seat repaired from a legacy instance has no stored name to fall back on.
+  it("stays parked when the card comes back with a blank name and none is stored", async () => {
+    const { fx, writeNames, getNode } = makeEffects("await_names");
+    rs.mocked(fx.getGuardianName).mockResolvedValue(null);
+
+    const reply = await runTurn(resolution({ guardianName: "  ", agentName: "Nova" }), fx);
+
+    expect(writeNames).not.toHaveBeenCalled();
+    expect(reply).toMatchObject({ componentId: "name-card" });
+    expect(getNode()).toBe("await_names");
+  });
+
   it("re-shows the card on typed text and stays parked", async () => {
     const { fx, writeNames, getNode } = makeEffects("await_names");
 

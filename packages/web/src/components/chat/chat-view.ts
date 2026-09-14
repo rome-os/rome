@@ -169,15 +169,22 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
   return `${sessionId}:${toolUseId}`;
 }
 
-// A built-in `ask_question` card (vs an app's inline component or a handoff):
-// the only suspension auto-dismissed by a free-text reply, since the guardian
-// answering in chat is the natural "skip this card" for a Q&A, but not for an
-// app's half-filled form.
-function isQuestionCard(b: StreamBlock): boolean {
+// The host's own built-in cards (vs an app's inline component or a handoff):
+// the only suspensions auto-dismissed by a free-text reply, since typing in
+// chat instead of using the card is the natural "skip this" for a question or a
+// provider sign-in, but not for an app's half-filled form.
+//
+// The connect-AI card has to be here as well as the question card: it resolves
+// itself once a provider signs in, so an earlier copy left open would submit a
+// second `{ connected: true }` and drive the script a step past where the
+// guardian is.
+const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
+
+function isAutoDismissedCard(b: StreamBlock): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render?.builtin === true &&
-    b.render.componentId === "question-card"
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
   );
 }
 
@@ -190,8 +197,8 @@ function isQuestionCard(b: StreamBlock): boolean {
 // interactive forever. Derived from transcript order, so it survives reload.
 function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<string, unknown>> {
   const map = new Map<string, Record<string, unknown>>();
-  // Per-session set of question-card toolUseIds still awaiting a result.
-  const openQuestionCards = new Map<string, Set<string>>();
+  // Per-session set of built-in card toolUseIds still awaiting a result.
+  const openCards = new Map<string, Set<string>>();
   for (const msg of messages) {
     let userTextReply = false;
     for (const b of parseMessageBlocks(msg)) {
@@ -201,10 +208,10 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
         b.toolUseId
       ) {
         map.delete(interactionResultKey(msg.sessionId, b.toolUseId));
-        if (isQuestionCard(b)) {
-          const open = openQuestionCards.get(msg.sessionId) ?? new Set<string>();
+        if (isAutoDismissedCard(b)) {
+          const open = openCards.get(msg.sessionId) ?? new Set<string>();
           open.add(b.toolUseId);
-          openQuestionCards.set(msg.sessionId, open);
+          openCards.set(msg.sessionId, open);
         }
       } else if (
         msg.role === "user" &&
@@ -217,14 +224,14 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
           interactionResultKey(msg.sessionId, b.toolUseId),
           b.output as Record<string, unknown>,
         );
-        openQuestionCards.get(msg.sessionId)?.delete(b.toolUseId);
+        openCards.get(msg.sessionId)?.delete(b.toolUseId);
       } else if (msg.role === "user" && b.type === "text" && (b.content ?? "").trim()) {
         // A genuine typed reply (not a card resolution, which is parts-only).
         userTextReply = true;
       }
     }
     if (userTextReply) {
-      const open = openQuestionCards.get(msg.sessionId);
+      const open = openCards.get(msg.sessionId);
       if (open) {
         for (const toolUseId of open) {
           map.set(interactionResultKey(msg.sessionId, toolUseId), { dismissed: true });

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
@@ -152,9 +152,15 @@ async function readStoredProfile(
   return stored as GuardianProfileInput;
 }
 
+// Only the profile's own keys are written. The input is a JSON body on
+// `/onboard/setup` and an app-supplied object through the SDK repository, so an
+// unfiltered spread would let either write any settings key it likes.
 function definedFields(input: GuardianProfileInput): GuardianProfileInput {
+  const owned = new Set<string>(PROFILE_SETTING_KEYS);
   return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined && value !== null),
+    Object.entries(input).filter(
+      ([key, value]) => owned.has(key) && value !== undefined && value !== null,
+    ),
   ) as GuardianProfileInput;
 }
 
@@ -191,37 +197,83 @@ async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promis
   return id;
 }
 
+/**
+ * Write the fields this module owns into the profile notes, in place.
+ *
+ * `GUARDIAN.md` and `IDENTITY.md` are living memory: `welcome-memory` folds the
+ * guardian's answers into the first and `dream` edits both. Setup is no longer
+ * the only caller — the welcome conversation's name card writes through here on
+ * every confirmation, including a "start over" after the fold — so a write that
+ * rendered the whole file from settings would delete everything the agents
+ * learned. Each owned field is upserted instead: its line or section is
+ * replaced where it exists and inserted where it does not, and every other line
+ * in the file is left alone. A file that does not exist yet is created from the
+ * owned fields alone.
+ */
 function writeProfileNotes(profile: GuardianProfileInput): void {
   try {
     const profileMemoryDir = ensureProfileMemoryInitialized();
     mkdirSync(getRelationshipDir(), { recursive: true });
 
-    const guardianLines = ["# Guardian Profile", "", `**Name:** ${profile.guardianName}`, ""];
-    if (profile.guardianTimezone) {
-      guardianLines.push(`**Timezone:** ${profile.guardianTimezone}`, "");
-    }
-    if (profile.guardianX) {
-      const handle = profile.guardianX.replace(/^@/, "");
-      guardianLines.push(`**X (Twitter):** https://x.com/${handle}`, "");
-    }
-    if (profile.guardianLinkedin) {
-      const handle = profile.guardianLinkedin.replace(/^\/in\//, "");
-      guardianLines.push(`**LinkedIn:** https://www.linkedin.com/in/${handle}`, "");
-    }
-    if (profile.interests && profile.interests.length > 0) {
-      guardianLines.push("## Interests", "", profile.interests.join(", "), "");
-    }
-    writeFileSync(getGuardianProfileFile(), guardianLines.join("\n"));
+    updateNotes(getGuardianProfileFile(), "# Guardian Profile", (lines) => {
+      upsertLabel(lines, "Name", profile.guardianName ?? "");
+      if (profile.guardianTimezone) {
+        upsertLabel(lines, "Timezone", profile.guardianTimezone);
+      }
+      if (profile.guardianX) {
+        upsertLabel(lines, "X (Twitter)", `https://x.com/${profile.guardianX.replace(/^@/, "")}`);
+      }
+      if (profile.guardianLinkedin) {
+        const handle = profile.guardianLinkedin.replace(/^\/in\//, "");
+        upsertLabel(lines, "LinkedIn", `https://www.linkedin.com/in/${handle}`);
+      }
+      if (profile.interests && profile.interests.length > 0) {
+        upsertSection(lines, "## Interests", profile.interests.join(", "));
+      }
+    });
 
-    const identityLines = ["# Identity", ""];
-    if (profile.agentName) identityLines.push(`**Agent Name:** ${profile.agentName}`, "");
-    if (profile.agentPurpose) identityLines.push("## Purpose", "", profile.agentPurpose, "");
-    if (identityLines.length > 2) {
-      writeFileSync(join(profileMemoryDir, "IDENTITY.md"), identityLines.join("\n"));
+    if (profile.agentName || profile.agentPurpose) {
+      updateNotes(join(profileMemoryDir, "IDENTITY.md"), "# Identity", (lines) => {
+        if (profile.agentName) upsertLabel(lines, "Agent Name", profile.agentName);
+        if (profile.agentPurpose) upsertSection(lines, "## Purpose", profile.agentPurpose);
+      });
     }
   } catch (err) {
     log.error("failed to write profile notes", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** Read a notes file (or start one at `title`), apply `edit`, write it back. */
+function updateNotes(path: string, title: string, edit: (lines: string[]) => void): void {
+  const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+  const lines = existing ? existing.split("\n") : [title, ""];
+  edit(lines);
+  writeFileSync(path, lines.join("\n"));
+}
+
+/** Set a `**Label:** value` line. A file without one takes it after the title,
+ *  ahead of the first `## ` section. */
+function upsertLabel(lines: string[], label: string, value: string): void {
+  const prefix = `**${label}:**`;
+  const at = lines.findIndex((line) => line.startsWith(prefix));
+  if (at !== -1) {
+    lines[at] = `${prefix} ${value}`;
+    return;
+  }
+  const firstSection = lines.findIndex((line, i) => i > 0 && line.startsWith("## "));
+  lines.splice(firstSection === -1 ? lines.length : firstSection, 0, `${prefix} ${value}`, "");
+}
+
+/** Set the body of a `## Heading` section, keeping the sections around it. */
+function upsertSection(lines: string[], heading: string, body: string): void {
+  const at = lines.indexOf(heading);
+  if (at === -1) {
+    lines.push(heading, "", body, "");
+    return;
+  }
+  let end = at + 1;
+  while (end < lines.length && !lines[end].startsWith("## ")) end++;
+  lines.splice(at, end - at, heading, "", body, "");
 }

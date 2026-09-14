@@ -212,14 +212,24 @@ export async function runTurn(userText: string, fx: WelcomeEffects): Promise<Tur
       // The name card resolves with `{ guardianName, agentName }`. A dismissal
       // keeps the prefilled names. Free text (typed in the composer instead of
       // the card) re-shows the card and stays parked.
+      //
+      // The step advances only once the names are stored. A seat repaired from a
+      // legacy instance has no stored guardian name and the card can come back
+      // with a blank one, and the host write can fail; either way the rest of
+      // the conversation would go on greeting a guardian Rome cannot name, so
+      // the card comes back instead.
       const res = readResolutionJson(userText);
       if (!res && !isDismissedInteraction(userText)) {
         return namesReply(fx, language);
       }
       const guardianName = field(userText, "guardianName")?.trim() || (await fx.getGuardianName());
       const agentName = field(userText, "agentName")?.trim() || (await fx.getAgentName());
-      if (guardianName) {
-        await fx.writeNames({ guardianName, agentName });
+      if (!guardianName) {
+        return namesReply(fx, language);
+      }
+      const written = await fx.writeNames({ guardianName, agentName });
+      if (!written.ok) {
+        return namesReply(fx, language);
       }
       fx.progress.patch({ node: "await_ai" });
       return connectAiReply(language);

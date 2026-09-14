@@ -6,9 +6,11 @@
  *   - a rename keeps the person row's id and refreshes the notes from the merge
  *     of stored and given fields, so a name-only write does not drop the
  *     timezone or the agent purpose from the notes;
- *   - a timezone goes through the shared timezone write.
+ *   - a timezone goes through the shared timezone write;
+ *   - a later write keeps what the memory agents added to the notes;
+ *   - only the profile's own keys reach the settings KV.
  */
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -53,6 +55,12 @@ function guardianRows() {
   return testDb.db.select().from(persons).where(eq(persons.bondLevel, "guardian")).all();
 }
 
+function writeNotes(relativePath: string, body: string): void {
+  const path = join(state.memoryDir, relativePath);
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, body);
+}
+
 describe("applyGuardianProfile", () => {
   it("rejects a blank name with nothing stored and writes nothing", async () => {
     const result = await applyGuardianProfile({ guardianName: "  ", agentName: "Atlas" }, deps());
@@ -61,6 +69,58 @@ describe("applyGuardianProfile", () => {
     expect(guardianRows()).toHaveLength(0);
     expect(await settingsRepo.get("agentName")).toBeNull();
     expect(existsSync(join(state.memoryDir, "IDENTITY.md"))).toBe(false);
+  });
+
+  it("keeps what the memory agents wrote when a later write updates the names", async () => {
+    // What the box looks like after onboarding: `welcome-memory` has folded the
+    // guardian's answers into GUARDIAN.md and `dream` has added to IDENTITY.md.
+    writeNotes(
+      "relationship/GUARDIAN.md",
+      [
+        "# Guardian Profile",
+        "",
+        "**Name:** Alex",
+        "",
+        "## Goals & current focus",
+        "",
+        "- Shipping the Rome onboarding rewrite",
+        "",
+      ].join("\n"),
+    );
+    writeNotes(
+      "IDENTITY.md",
+      ["# Identity", "", "**Agent Name:** Atlas", "", "## Values", "", "- Answer briefly", ""].join(
+        "\n",
+      ),
+    );
+
+    // The welcome conversation's name card, re-run after a "start over".
+    const result = await applyGuardianProfile(
+      { guardianName: "Alexandra", agentName: "Nova" },
+      deps(),
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    const guardian = readFileSync(join(state.memoryDir, "relationship", "GUARDIAN.md"), "utf8");
+    expect(guardian).toContain("**Name:** Alexandra");
+    expect(guardian).not.toContain("**Name:** Alex\n");
+    expect(guardian).toContain("## Goals & current focus");
+    expect(guardian).toContain("- Shipping the Rome onboarding rewrite");
+    const identity = readFileSync(join(state.memoryDir, "IDENTITY.md"), "utf8");
+    expect(identity).toContain("**Agent Name:** Nova");
+    expect(identity).toContain("## Values");
+    expect(identity).toContain("- Answer briefly");
+  });
+
+  it("writes only the profile's own settings keys", async () => {
+    const result = await applyGuardianProfile(
+      { guardianName: "Alex Doe", onboardingComplete: true } as never,
+      deps(),
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(await settingsRepo.get("guardianName")).toBe("Alex Doe");
+    expect(await settingsRepo.get("onboardingComplete")).toBeNull();
   });
 
   it("creates the guardian person row, the settings, and the profile notes", async () => {
