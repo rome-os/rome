@@ -247,6 +247,48 @@ test("accepts the one-way calendar's zero-padded date label", async (t) => {
   assert.deepEqual(b.submitted().dates, { Departure: "2027-01-02" });
 });
 
+for (const { duplicateFirst, hiddenStyle, returnDate } of [
+  { duplicateFirst: false, hiddenStyle: true, returnDate: "2026-10-02" },
+  { duplicateFirst: true, hiddenStyle: true, returnDate: "2026-10-02" },
+  { duplicateFirst: true, hiddenStyle: false, returnDate: undefined },
+]) {
+  test(`selects real days with overlap duplicates: first=${duplicateFirst}, CSS hidden=${hiddenStyle}, return=${returnDate}`, async (t) => {
+    const b = formBrowser(t, { month: "2026-09" });
+    const calendar = b.document.querySelector('[aria-label="Choose dates"]');
+    const duplicateDays = () => {
+      for (const cell of [...calendar.querySelectorAll('[role="gridcell"][data-day]')]) {
+        const duplicate = cell.cloneNode(true);
+        duplicate.className = "rdp-day rdp-hidden rdp-outside";
+        duplicate.setAttribute("data-hidden", "true");
+        duplicate.setAttribute("data-outside", "true");
+        if (hiddenStyle) duplicate.style.visibility = "hidden";
+        cell[duplicateFirst ? "before" : "after"](duplicate);
+      }
+    };
+    for (const control of b.document.querySelectorAll(
+      'input[aria-label="Departure"], input[aria-label="Return"], [aria-label="Choose dates"] button',
+    ))
+      control.addEventListener("click", duplicateDays);
+    await submitUnitedSearch(b.page, search({ depart: "2026-09-29", return: returnDate }), {
+      now: b.now,
+    });
+    assert.deepEqual(b.submitted().dates, {
+      Departure: "2026-09-29",
+      ...(returnDate ? { Return: returnDate } : {}),
+    });
+  });
+}
+
+test("ignores a hidden calendar before the active calendar during month navigation", async (t) => {
+  const b = formBrowser(t, { month: "2026-10" });
+  const calendar = b.document.querySelector('[aria-label="Choose dates"]');
+  const hidden = calendar.cloneNode(true);
+  hidden.innerHTML += '<table><tr><td role="gridcell" data-day="2026-11-13"></td></tr></table>';
+  calendar.before(hidden);
+  await submitUnitedSearch(b.page, search({ return: "2026-11-13" }), { now: b.now });
+  assert.deepEqual(b.submitted().dates, { Departure: "2026-11-13", Return: "2026-11-13" });
+});
+
 test("does not submit unavailable dates or unresolved airport suggestions", async (t) => {
   for (const options of [{ unavailable: "2026-11-13" }, { noSuggestions: true }]) {
     const b = formBrowser(t, options);

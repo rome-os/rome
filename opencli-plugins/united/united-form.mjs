@@ -1,7 +1,6 @@
 export const UNITED_HOME = "https://www.united.com/en/us";
 const FORM = "#bookFlightForm";
 const TRAVELERS = `${FORM} input[aria-describedby="uaPaxSelectorMainButtonAriaDescription"]`;
-const CALENDAR = '[role="dialog"]:is([aria-label="Choose dates"], [aria-label="Choose a date"])';
 const COOKIE_CLOSE = '[role="dialog"][aria-label="cookieconsent"] [aria-label="Close banner"]';
 
 export class UnitedLoginRequiredError extends Error {}
@@ -48,13 +47,30 @@ export function readUnitedSearchForm() {
   const calendar = dialogs.find((element) =>
     /^Choose (?:dates|a date)$/.test(element.getAttribute("aria-label") || ""),
   );
-  const days = [...(calendar?.querySelectorAll('[role="gridcell"][data-day]') || [])]
-    .filter(visible)
-    .map((element) => ({
+  const calendarSelector =
+    '[role="dialog"]:is([aria-label="Choose dates"], [aria-label="Choose a date"])';
+  const calendarControls = (suffix) => {
+    const selector = `${calendarSelector} ${suffix}`;
+    // OpenCLI's nth counts all selector matches, including hidden calendar copies.
+    return [...document.querySelectorAll(selector)]
+      .map((element, index) => ({ element, selector, index }))
+      .filter(({ element }) => calendar?.contains(element) && visible(element));
+  };
+  const days = calendarControls('[role="gridcell"][data-day]')
+    .filter(({ element }) => !element.matches('[data-hidden="true"], [data-outside="true"]'))
+    .map(({ element, selector, index }) => ({
+      selector,
+      index,
       date: element.getAttribute("data-day"),
       disabled:
         element.getAttribute("aria-disabled") === "true" || element.hasAttribute("disabled"),
     }));
+  const monthButton = (direction) => {
+    const control = calendarControls(`button[aria-label="${direction} month"]`).find(
+      ({ element }) => !element.disabled && element.getAttribute("aria-disabled") !== "true",
+    );
+    return control ? { selector: control.selector, index: control.index } : null;
+  };
   const checked = (id) => get(`#${id}`)?.checked ?? null;
   const body = document.body?.innerText || "";
   return {
@@ -97,12 +113,8 @@ export function readUnitedSearchForm() {
     cabin: get("#cabinType")?.selectedOptions[0]?.textContent || "",
     calendar_open: !!calendar,
     days,
-    previous_month:
-      !!visible(calendar?.querySelector('button[aria-label="Previous month"]')) &&
-      !calendar.querySelector('button[aria-label="Previous month"]').disabled,
-    next_month:
-      !!visible(calendar?.querySelector('button[aria-label="Next month"]')) &&
-      !calendar.querySelector('button[aria-label="Next month"]').disabled,
+    previous_month: monthButton("Previous"),
+    next_month: monthButton("Next"),
     submit_enabled:
       !!get('button[aria-label="Find flights"]') &&
       !get('button[aria-label="Find flights"]').disabled,
@@ -211,18 +223,18 @@ export async function submitUnitedSearch(page, search, { now = Date.now } = {}) 
     for (let turns = 0; !state.days.some((day) => day.date === date); turns++) {
       if (turns >= 24) throw new Error(`United's calendar does not offer ${date}`);
       const previous = date < state.days[0].date;
-      if (!(previous ? state.previous_month : state.next_month))
-        throw new Error(`United's calendar does not offer ${date}`);
+      const control = previous ? state.previous_month : state.next_month;
+      if (!control) throw new Error(`United's calendar does not offer ${date}`);
       const firstDate = state.days[0].date;
-      await page.click(`${CALENDAR} button[aria-label="${previous ? "Previous" : "Next"} month"]`);
+      await page.click(control.selector, { nth: control.index });
       state = await waitFor(
         (s) => s.days.length && s.days[0].date !== firstDate,
         "change calendar month",
       );
     }
-    if (state.days.find((day) => day.date === date).disabled)
-      throw new Error(`United's calendar does not offer ${date}`);
-    await page.click(`${CALENDAR} [role="gridcell"][data-day="${date}"]`);
+    const day = state.days.find((day) => day.date === date && !day.disabled);
+    if (!day) throw new Error(`United's calendar does not offer ${date}`);
+    await page.click(day.selector, { nth: day.index });
     const expected = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
