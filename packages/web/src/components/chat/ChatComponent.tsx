@@ -274,6 +274,7 @@ export function ChatComponent({
 
         const result = await postSessionTurn(newSessionId, formData, {
           onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+          signal: controls.signal,
         });
         if (!result.ok) {
           const message =

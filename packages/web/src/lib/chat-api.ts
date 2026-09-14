@@ -363,6 +363,11 @@ export interface PostSessionTurnOptions {
    * server. `null` means the browser did not expose a computable total.
    */
   onUploadProgress?: (progress: number | null) => void;
+  /**
+   * Aborts the in-flight request. Rejects with an `AbortError`, which callers
+   * treat as a user-initiated cancel rather than a transport failure.
+   */
+  signal?: AbortSignal;
 }
 
 export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | null> {
@@ -434,8 +439,13 @@ function postSessionTurnWithProgress(
   sessionId: string,
   body: FormData,
   onUploadProgress: (progress: number | null) => void,
+  signal?: AbortSignal,
 ): Promise<PostTurnResult> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The request was aborted", "AbortError"));
+      return;
+    }
     const request = new XMLHttpRequest();
     // Attach upload listeners before open(): despite the spec allowing either
     // order, browsers have historically required this ordering for upload
@@ -451,17 +461,27 @@ function postSessionTurnWithProgress(
     request.upload.onload = () => onUploadProgress(1);
     request.open("POST", `/api/chat/sessions/${sessionId}/turns`);
     request.withCredentials = true;
-    request.onload = () => {
-      resolve(
-        parseTurnResponseText(
-          request.status,
-          request.status >= 200 && request.status < 300,
-          request.responseText,
+    // One detach point for every terminal path, so a cancelled turn cannot
+    // leave a listener pinned to a long-lived controller.
+    const abort = () => request.abort();
+    const settle = (run: () => void) => {
+      signal?.removeEventListener("abort", abort);
+      run();
+    };
+    request.onload = () =>
+      settle(() =>
+        resolve(
+          parseTurnResponseText(
+            request.status,
+            request.status >= 200 && request.status < 300,
+            request.responseText,
+          ),
         ),
       );
-    };
-    request.onerror = () => reject(new TypeError("Failed to fetch"));
-    request.onabort = () => reject(new DOMException("The request was aborted", "AbortError"));
+    request.onerror = () => settle(() => reject(new TypeError("Failed to fetch")));
+    request.onabort = () =>
+      settle(() => reject(new DOMException("The request was aborted", "AbortError")));
+    signal?.addEventListener("abort", abort);
     request.send(body);
   });
 }
@@ -473,12 +493,13 @@ export async function postSessionTurn(
 ): Promise<PostTurnResult> {
   if (!body.has("inputId")) body.set("inputId", crypto.randomUUID());
   if (options.onUploadProgress) {
-    return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress);
+    return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress, options.signal);
   }
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
     method: "POST",
     credentials: "include",
     body,
+    signal: options.signal,
   });
   return parseTurnResponse(res);
 }

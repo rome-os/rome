@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Lock, Paperclip, Sparkles } from "lucide-react";
+import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,12 @@ export interface ChatComposerSnapshot {
 export interface ChatComposerSendControls {
   /** `null` means the browser cannot determine the multipart body size. */
   onUploadProgress: (progress: number | null) => void;
+  /**
+   * Aborted when the user cancels an attachment upload. Hosts must forward it
+   * to `postSessionTurn` so the request actually stops, rather than leaving it
+   * to run while the composer pretends it was cancelled.
+   */
+  signal: AbortSignal;
 }
 
 export interface ChatComposerHandle {
@@ -292,6 +298,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // State drives the UI, while the ref closes the same-event gap before React
   // commits that state (for example, two rapid Enter keydown events).
   const uploadInFlightRef = useRef(false);
+  // Live for exactly one upload; `cancelUpload` aborts through it.
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   // Resize the textarea to fit its content. The `onInput` handler below also
   // runs this math, but only on user typing — programmatic clears (e.g. the
@@ -418,8 +426,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const invokeOnSend = useCallback(
     async (snapshot: ChatComposerSnapshot) => {
       const tracksUpload = snapshot.uploads.length > 0;
+      const controller = new AbortController();
       if (tracksUpload) {
         uploadInFlightRef.current = true;
+        uploadAbortRef.current = controller;
         setUploadInFlight(true);
         setUploadProgress(0);
       }
@@ -429,10 +439,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             if (!tracksUpload) return;
             setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
           },
+          signal: controller.signal,
         });
       } finally {
         if (tracksUpload) {
           uploadInFlightRef.current = false;
+          uploadAbortRef.current = null;
           setUploadInFlight(false);
           setUploadProgress(null);
         }
@@ -440,6 +452,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     },
     [onSend],
   );
+
+  // Unmounting mid-upload must not leave the request running behind a composer
+  // that no longer exists.
+  useEffect(
+    () => () => {
+      uploadAbortRef.current?.abort();
+    },
+    [],
+  );
+
+  const cancelUpload = useCallback(() => {
+    uploadAbortRef.current?.abort();
+  }, []);
 
   useImperativeHandle(
     ref,
@@ -555,6 +580,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
 
     const text = inputText.trim();
+    // The textarea holds the untrimmed value; compare against that when
+    // deciding whether the user edited the box during an upload.
+    const rawText = inputText;
     const uploads = pendingUploads;
     const skill = draftSkill;
     const snapshot: ChatComposerSnapshot = {
@@ -571,22 +599,36 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       skillName: skill?.name,
     };
 
-    // Optimistically clear so the user sees the input wipe immediately. The
-    // composer stays locked while attachments upload; if onSend rejects,
-    // restore the snapshot so it can be retried without re-typing.
-    setInputText("");
-    if (uploads.length === 0) setPendingUploads([]);
-    setDraftSkill(null);
+    // A text-only turn clears optimistically — it is accepted or rejected in
+    // one round trip, so the input wipes immediately and is restored on
+    // failure. A turn carrying attachments keeps its text on screen for the
+    // whole upload instead: the request is long enough to cancel, and wiping
+    // text the user may still be reading (or about to cancel) reads as loss.
+    // It clears only once the server has accepted the turn.
+    const clearsOptimistically = uploads.length === 0;
+    if (clearsOptimistically) {
+      setInputText("");
+      setPendingUploads([]);
+      setDraftSkill(null);
+    }
     try {
       await invokeOnSend(snapshot);
-      if (uploads.length > 0) {
+      if (!clearsOptimistically) {
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+        setDraftSkill((current) => (current === skill ? null : current));
+        // Anything typed during the upload is newer than what was sent, so it
+        // survives; only the exact text that went out is cleared.
+        setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
-      setInputText(text);
-      if (uploads.length === 0) setPendingUploads(uploads);
-      setDraftSkill(skill);
+      if (clearsOptimistically) {
+        setInputText(text);
+        setPendingUploads(uploads);
+        setDraftSkill(skill);
+      }
+      // Nothing to restore otherwise — a cancelled or failed upload never
+      // cleared the text or the attachment tray in the first place.
     }
   }, [
     inputText,
@@ -868,11 +910,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // name the same specialist.
   const collaborating =
     designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
-  const sendActionLabel = uploadInFlight
-    ? t("composer.uploadingFiles")
-    : isStreaming
-      ? t("composer.sendWhileRunningTitle")
-      : t("composer.sendTitle");
+  // An in-flight upload renders the cancel control in this slot instead, so the
+  // send label never has to describe one.
+  const sendActionLabel = isStreaming
+    ? t("composer.sendWhileRunningTitle")
+    : t("composer.sendTitle");
+  const showCancelUpload = uploadInFlight;
+  const cancelUploadLabel = t("composer.cancelUpload");
 
   return (
     <>
@@ -1134,23 +1178,37 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
               </Button>
             )}
-            <Button
-              variant={
-                !inputText.trim() && pendingUploads.length === 0 && !draftSkill
-                  ? "secondary"
-                  : "default"
-              }
-              size="icon-sm"
-              onClick={() => void runSend()}
-              disabled={
-                isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
-              }
-              title={sendActionLabel}
-              aria-label={sendActionLabel}
-              className="touch-target"
-            >
-              <ArrowUp aria-hidden />
-            </Button>
+            {showCancelUpload ? (
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                onClick={cancelUpload}
+                title={cancelUploadLabel}
+                aria-label={cancelUploadLabel}
+                className="touch-target"
+              >
+                <X aria-hidden />
+              </Button>
+            ) : (
+              <Button
+                variant={
+                  !inputText.trim() && pendingUploads.length === 0 && !draftSkill
+                    ? "secondary"
+                    : "default"
+                }
+                size="icon-sm"
+                onClick={() => void runSend()}
+                disabled={
+                  isComposerBusy ||
+                  (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
+                }
+                title={sendActionLabel}
+                aria-label={sendActionLabel}
+                className="touch-target"
+              >
+                <ArrowUp aria-hidden />
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -1045,6 +1045,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // bookkeeping (inflight turn set, optimistic user row, stream attach,
   // teardown). Callers supply the post payload + the optimistic user message
   // content (already JSON-serialized MessagePart[]).
+  // DOMException("AbortError") from an aborted XHR/fetch; matched by name so
+  // it survives the structured-clone boundaries these errors cross.
+  const isAbortError = (err: unknown): boolean =>
+    err instanceof DOMException ? err.name === "AbortError" : (err as Error)?.name === "AbortError";
+
   const runTurnLifecycle = useCallback(
     async (
       sendingSessionId: string,
@@ -1069,7 +1074,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // Transport failure posting the turn — a genuine failed submit.
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
-        setStreamError(t("stream.errors.sendInvalidResponse"));
+        // A cancelled attachment upload is a deliberate act, not a failure:
+        // the composer already restored the draft, so an error banner would
+        // just be noise about something the user chose.
+        if (!isAbortError(err)) setStreamError(t("stream.errors.sendInvalidResponse"));
         throw err;
       });
       if (!result.ok) {
@@ -1227,6 +1235,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           // separate GET keyed by turnId.
           return postSessionTurn(sendingSessionId, formData, {
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+            signal: controls.signal,
           });
         },
         optimisticContent,

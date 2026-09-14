@@ -97,4 +97,66 @@ describe("postSessionTurn", () => {
     expect(request.body).toBe(body);
     expect(body.has("inputId")).toBe(true);
   });
+
+  it("aborts the multipart request when the caller's signal fires", async () => {
+    class AbortableXHR {
+      static current: AbortableXHR | null = null;
+      readonly upload = {
+        onprogress: null as ((event: ProgressEvent) => void) | null,
+        onload: null as (() => void) | null,
+      };
+      status = 0;
+      responseText = "";
+      withCredentials = false;
+      aborted = false;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      constructor() {
+        AbortableXHR.current = this;
+      }
+      open() {}
+      send() {}
+      abort() {
+        this.aborted = true;
+        this.onabort?.();
+      }
+    }
+
+    rs.stubGlobal("XMLHttpRequest", AbortableXHR);
+    const controller = new AbortController();
+    const resultPromise = postSessionTurn("session-1", new FormData(), {
+      onUploadProgress: () => {},
+      signal: controller.signal,
+    });
+    const request = AbortableXHR.current;
+    if (!request) throw new Error("XMLHttpRequest was not created");
+
+    controller.abort();
+    expect(request.aborted).toBe(true);
+    // Callers distinguish a user cancel from a transport failure by this name.
+    await expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects without opening a request when the signal is already aborted", async () => {
+    class NeverUsedXHR {
+      static created = 0;
+      readonly upload = { onprogress: null, onload: null };
+      constructor() {
+        NeverUsedXHR.created += 1;
+      }
+      open() {}
+      send() {}
+      abort() {}
+    }
+
+    rs.stubGlobal("XMLHttpRequest", NeverUsedXHR);
+    await expect(
+      postSessionTurn("session-1", new FormData(), {
+        onUploadProgress: () => {},
+        signal: AbortSignal.abort(),
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(NeverUsedXHR.created).toBe(0);
+  });
 });

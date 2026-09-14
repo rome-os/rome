@@ -11,9 +11,42 @@ export interface PendingUploadsListProps {
 }
 
 /**
+ * Split the request's single aggregate fraction into one fraction per file.
+ *
+ * The browser reports progress for the whole multipart body, not per part — but
+ * that body is written sequentially, so the files occupy known, ordered byte
+ * ranges within it. Mapping the aggregate onto those ranges is therefore a real
+ * per-file reading, not a guess: the first file fills, then the second.
+ *
+ * Part headers and boundaries are ignored. They are a fixed couple of hundred
+ * bytes per file against attachment-sized payloads, so the only visible effect
+ * is each ring completing a hair early.
+ */
+function splitProgressByFile(uploads: PendingUpload[], overall: number): number[] {
+  const sizes = uploads.map((upload) => upload.file.size);
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  // Zero-byte files carry no bytes to attribute, so weight them evenly instead
+  // of dividing by zero.
+  if (total === 0) return sizes.map(() => overall);
+
+  const transferred = overall * total;
+  let consumed = 0;
+  return sizes.map((size) => {
+    const start = consumed;
+    consumed += size;
+    if (size === 0) return transferred >= start ? 1 : 0;
+    return Math.max(0, Math.min(1, (transferred - start) / size));
+  });
+}
+
+/**
  * Pending attachments, rendered in the same chip language as the pre-send tray.
  * They share a surface, so a second pill geometry here read as two systems —
  * `ComposerChip` owns height, radius, padding and text size for both.
+ *
+ * Upload progress rides inside the chips as a ring per file, taking the remove
+ * button's slot. A separate progress row would be easier, but it appears and
+ * disappears under the tray and shoves the composer around on every send.
  */
 export function PendingUploadsList({
   uploads,
@@ -24,10 +57,10 @@ export function PendingUploadsList({
   const { t } = useTranslation("chat");
   if (uploads.length === 0) return null;
 
-  const percentage =
-    uploadProgress === undefined || uploadProgress === null
-      ? null
-      : Math.round(uploadProgress * 100);
+  const uploading = uploadProgress !== undefined;
+  const perFile =
+    uploading && uploadProgress !== null ? splitProgressByFile(uploads, uploadProgress) : null;
+
   return (
     <div className="mb-3">
       <div className="flex flex-wrap gap-2">
@@ -38,34 +71,13 @@ export function PendingUploadsList({
             title={upload.file.name}
             onRemove={disabled ? undefined : () => onRemove(upload.id)}
             removeLabel={t("composer.removeFile", { name: upload.file.name })}
+            progress={uploading ? (perFile ? perFile[index] : null) : undefined}
+            progressLabel={t("composer.uploadProgressFor", { name: upload.file.name })}
           >
             {upload.file.name}
           </ComposerChip>
         ))}
       </div>
-      {uploadProgress !== undefined && (
-        <div className="mt-2 flex items-center gap-2 text-aux text-muted-foreground">
-          <span>{t("composer.uploadingFiles")}</span>
-          <span
-            role="progressbar"
-            aria-label={t("composer.uploadProgress")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={percentage ?? undefined}
-            className="h-1 min-w-16 flex-1 overflow-hidden rounded-full bg-surface-muted"
-          >
-            <span
-              className={
-                uploadProgress === null
-                  ? "block h-full w-full animate-pulse bg-primary"
-                  : "block h-full bg-primary transition-[width]"
-              }
-              style={uploadProgress === null ? undefined : { width: `${percentage}%` }}
-            />
-          </span>
-          {percentage !== null && <span className="tabular-nums">{percentage}%</span>}
-        </div>
-      )}
     </div>
   );
 }
