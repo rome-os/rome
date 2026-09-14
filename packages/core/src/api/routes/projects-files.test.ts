@@ -212,6 +212,33 @@ describe("Projects files API", () => {
       const src = demo?.children?.find((node) => node.name === "src");
       expect(src).not.toHaveProperty("children");
     });
+
+    it("keeps a project's dist folder browsable while still skipping node_modules", async () => {
+      mkdirSync(join(projectsRoot, "demo", "dist", "assets"), { recursive: true });
+      mkdirSync(join(projectsRoot, "demo", "node_modules", "library"), { recursive: true });
+      writeFileSync(join(projectsRoot, "demo", "dist", "bundle.js"), "export {};\n");
+      writeFileSync(join(projectsRoot, "demo", "dist", "assets", "logo.svg"), "");
+      writeFileSync(join(projectsRoot, "demo", "node_modules", "library", "index.js"), "");
+
+      const res = await buildApp().request("/projects/tree?depth=3");
+
+      expect(res.status).toBe(200);
+      const tree = (await res.json()) as Array<{
+        children?: Array<{ children?: unknown[]; name: string; type: string }>;
+        name: string;
+        type: string;
+      }>;
+      const demo = tree.find((node) => node.name === "demo");
+      const childNames = demo?.children?.map((node) => node.name) ?? [];
+      expect(childNames).toContain("dist");
+      expect(childNames).not.toContain("node_modules");
+      const dist = demo?.children?.find((node) => node.name === "dist");
+      expect(
+        (dist?.children as Array<{ name: string; type: string }> | undefined)?.map(
+          (child) => child.name,
+        ),
+      ).toEqual(["assets", "bundle.js"]);
+    });
   });
 
   describe("GET /projects/search", () => {
