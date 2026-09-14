@@ -21,6 +21,7 @@ import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
+import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatBlocks — a single bag instead of six loose props.
@@ -261,6 +262,9 @@ const RowView = memo(function RowView({
   // Copy appears once the turn settles (`live` gone) and only when it produced
   // text — a card-only turn has nothing raw to copy.
   const copyText = live ? "" : turnCopyText(row.messages);
+  // A row can group commentary and a final answer, so use its last saved message.
+  const createdAt = live ? undefined : row.messages.at(-1)?.createdAt;
+  const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
   // Feedback rides the same settled action row; it needs the turn identity.
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
@@ -346,10 +350,8 @@ const RowView = memo(function RowView({
         />
       ) : null}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
-      {copyText || showFeedback ? (
-        // Settled-turn action row: copy + feedback + side-chat branch.
-        // Hover-revealed on
-        // pointer devices, always visible on touch — mirrors the affordance
+      {copyText || showFeedback || timestamp ? (
+        // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
         // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
         // the row visible while the feedback draft is open (its popover is
         // portaled, so group-focus-within can't see it) and once a rating is
@@ -369,6 +371,11 @@ const RowView = memo(function RowView({
               sessionId={feedbackTurn.sessionId}
               turnId={feedbackTurn.turnId}
             />
+          ) : null}
+          {timestamp ? (
+            <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
+              {timestamp}
+            </time>
           ) : null}
         </div>
       ) : null}
