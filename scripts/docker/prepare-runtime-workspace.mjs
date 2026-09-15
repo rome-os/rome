@@ -167,6 +167,13 @@ async function main() {
   await copyPath("opencli-plugins");
   copiedTopLevelPaths.add("opencli-plugins");
 
+  // Chrome/Chromium managed-policy JSON the Dockerfile drops into
+  // /etc/opt/chrome/policies/managed (force-installs the OpenCLI extension).
+  // Only the chrome/ subtree is staged: the rest of infra/ is host-side build
+  // material that has no business in the runtime context.
+  await copyPath("infra/chrome");
+  copiedTopLevelPaths.add("infra");
+
   assertForbiddenPackagesAbsent();
 
   const workspacePackages = await listWorkspacePackages(runtimeWorkspace);
