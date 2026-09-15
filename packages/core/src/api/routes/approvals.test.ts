@@ -7,6 +7,7 @@ import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
+import type { TalkRouter } from "@rome-os/app-runtime";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {
@@ -36,6 +37,45 @@ describe("Approvals API", () => {
   afterEach(() => {
     testDb.close();
     rs.restoreAllMocks();
+  });
+
+  it.each([
+    "lookup",
+    "send",
+  ])("returns approval success while notification %s never settles", async (stage) => {
+    const repo = new ApprovalsRepository(testDb.db);
+    const request = repo.requestPairing({
+      channel: "telegram",
+      connectionId: "bot",
+      channelUserId: "123",
+      displayName: "Alice",
+      ...(stage === "send" ? { conversationId: "dm" } : {}),
+    })!;
+    const stalled = () => new Promise<never>(() => {});
+    const send = rs.fn(stalled);
+    const conversationFor = rs.fn(stalled);
+    const deps = {
+      ...(await buildTestDeps(testDb.db)),
+      approvalHandler,
+      talkRouter: { send, feature: () => ({ conversationFor }) } as unknown as TalkRouter,
+    };
+    const guarded = new Hono();
+    guarded.use("*", (_c, next) =>
+      runWithSessionActor({ kind: "guardian", userId: "test-owner", via: "cookie" }, next),
+    );
+    guarded.route("/", approvalsRoutes(deps));
+    const response = await guarded.request(`/approvals/${request.approval.id}/approve`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+    });
+    expect(response.status).toBe(202);
+    expect((await repo.findById(request.approval.id))?.status).toBe("approved");
+    const person = await new PersonMappingRepository(testDb.db).findByChannelUser(
+      "telegram",
+      "123",
+    );
+    expect(person?.bondLevel).toBe("guardian");
+    expect(stage === "send" ? send : conversationFor).toHaveBeenCalledTimes(1);
   });
 
   it("returns a conflict when an account is linked after its pairing request", async () => {

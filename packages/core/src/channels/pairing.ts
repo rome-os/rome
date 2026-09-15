@@ -44,6 +44,7 @@ function pairingSuccess(
 export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
   personMappingRepo: PersonMappingRepository;
+  talkGrants: (service: string) => readonly string[];
 }) {
   return async (
     connectionId: string,
@@ -59,13 +60,16 @@ export function createPairingAdmission(deps: {
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
-          const request = deps.approvalsRepo.requestPairing({
-            channel: pairingChannel,
-            connectionId,
-            channelUserId: message.senderId,
-            displayName: message.senderDisplayName ?? message.senderId,
-            username: message.senderUsername,
-          });
+          const request = deps.approvalsRepo.requestAuthorizedPairing(
+            {
+              channel: pairingChannel,
+              connectionId,
+              channelUserId: message.senderId,
+              displayName: message.senderDisplayName ?? message.senderId,
+              username: message.senderUsername,
+            },
+            deps.talkGrants(service),
+          );
           if (request?.guide)
             await router.send(connectionId, message.conversationId, { text: guidance });
           return false;
@@ -105,14 +109,17 @@ export function createPairingAdmission(deps: {
         !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
       )
         return false;
-      const request = deps.approvalsRepo.requestPairing({
-        channel: pairingChannel,
-        connectionId,
-        channelUserId: message.senderId,
-        displayName: message.senderDisplayName ?? message.senderId,
-        username: message.senderUsername,
-        ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
-      });
+      const request = deps.approvalsRepo.requestAuthorizedPairing(
+        {
+          channel: pairingChannel,
+          connectionId,
+          channelUserId: message.senderId,
+          displayName: message.senderDisplayName ?? message.senderId,
+          username: message.senderUsername,
+          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+        },
+        deps.talkGrants(service),
+      );
       if (request?.guide) {
         await router.send(connectionId, message.conversationId, { text: guidance });
         log.info("pairing guidance sent", { approvalId: request.approval.id, connectionId });

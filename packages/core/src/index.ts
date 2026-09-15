@@ -296,7 +296,12 @@ async function main() {
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
   const talkRouter = createTalkRouter(
     connectionRegistry,
-    createPairingAdmission({ approvalsRepo, personMappingRepo }),
+    createPairingAdmission({
+      approvalsRepo,
+      personMappingRepo,
+      talkGrants: (service) =>
+        connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+    }),
   );
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person

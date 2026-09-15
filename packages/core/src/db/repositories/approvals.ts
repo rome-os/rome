@@ -3,7 +3,7 @@ import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
 import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { approvals, channelMappings } from "../schema.js";
+import { approvals, channelMappings, connections, connectionGrants } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
 import {
   pairingPayload,
@@ -109,6 +109,32 @@ export class ApprovalsRepository {
             .all()
         : [];
     return [...current, ...history].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  requestAuthorizedPairing(
+    input: Parameters<ApprovalsRepository["requestPairing"]>[0],
+    requiredGrants: readonly string[],
+  ) {
+    return this.db.transaction((tx) => {
+      const connection = tx
+        .select()
+        .from(connections)
+        .where(and(eq(connections.id, input.connectionId), eq(connections.service, input.channel)))
+        .get();
+      if (!connection || requiredGrants.length === 0) return null;
+      const grants = tx
+        .select()
+        .from(connectionGrants)
+        .where(eq(connectionGrants.custody, input.connectionId))
+        .all();
+      if (
+        !requiredGrants.every((name) =>
+          grants.some((g) => g.name === name && g.state === "authorized"),
+        )
+      )
+        return null;
+      return this.requestPairing(input);
+    });
   }
 
   requestPairing(

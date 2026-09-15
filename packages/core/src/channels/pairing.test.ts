@@ -3,7 +3,13 @@ import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-ru
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import { approvals, persons, channelMappings } from "../db/schema.js";
+import {
+  approvals,
+  persons,
+  channelMappings,
+  connections,
+  connectionGrants,
+} from "../db/schema.js";
 import { pairingPayload } from "@rome/api-types/approvals";
 import { createPairingAdmission, notifyPairingResolution } from "./pairing.js";
 import { eq } from "drizzle-orm";
@@ -19,6 +25,26 @@ describe("channel pairing approvals", () => {
     channelUserId: "alice",
     displayName: "Alice",
   };
+  const talkGrants = (service: string) => [service === "feishu" ? "app" : "bot"];
+  function seedConnection(service: string) {
+    testDb.db
+      .insert(connections)
+      .values({
+        id: "connection",
+        service,
+        label: service,
+        createdAt: new Date(),
+      })
+      .run();
+    testDb.db
+      .insert(connectionGrants)
+      .values({
+        custody: "connection",
+        name: talkGrants(service)[0],
+        state: "authorized",
+      })
+      .run();
+  }
   beforeEach(() => {
     testDb = createTestDb();
     repo = new ApprovalsRepository(testDb.db, () => key);
@@ -34,6 +60,7 @@ describe("channel pairing approvals", () => {
     "discord",
     "feishu",
   ] as const)("%s privately notifies a group requester after Web approval without undoing approval on delivery failure", async (channel) => {
+    seedConnection(channel);
     const id = channel === "feishu" ? "ou_123" : "123";
     const account =
       channel === "telegram"
@@ -49,6 +76,7 @@ describe("channel pairing approvals", () => {
     const feature = rs.fn(() => ({ conversationFor }));
     const router = { send, feature } as unknown as TalkRouter;
     const admit = createPairingAdmission({
+      talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
     });
@@ -95,11 +123,13 @@ describe("channel pairing approvals", () => {
       '<at user_id="ou_123">Alice &lt;at&gt;&amp;</at> (`ou_123`)',
     ],
   ])("%s mentions only the requester even with special characters in their name", async (channel, id, name, expected) => {
+    seedConnection(channel);
     const send = rs.fn<TalkRouter["send"]>(async () => ({
       messageId: "sent",
       conversationId: "dm" as ConversationId,
     }));
     await createPairingAdmission({
+      talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
     })(
@@ -191,6 +221,7 @@ describe("channel pairing approvals", () => {
     "discord",
     "feishu",
   ] as const)("%s requires dismissed accounts to pair before admission", async (channel) => {
+    seedConnection(channel);
     const accountId = channel === "feishu" ? "ou_123" : "123";
     const people = new PersonMappingRepository(testDb.db);
     testDb.db
@@ -204,7 +235,11 @@ describe("channel pairing approvals", () => {
       .onConflictDoNothing()
       .run();
     await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
-    const admit = createPairingAdmission({ approvalsRepo: repo, personMappingRepo: people });
+    const admit = createPairingAdmission({
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: people,
+    });
     const send = rs.fn<TalkRouter["send"]>(async () => ({
       messageId: "sent",
       conversationId: "dm" as ConversationId,
@@ -249,6 +284,81 @@ describe("channel pairing approvals", () => {
     }
     expect((await people.findByChannelUser(channel, accountId))?.id).toBe("owner");
     expect(await admit("connection", channel, message, router)).toBe(true);
+  });
+
+  it.each([
+    "delete",
+    "revoke",
+  ])("does not recreate a request after %s overtakes admission", async (teardown) => {
+    seedConnection("telegram");
+    const input = { ...identity, connectionId: "connection", channelUserId: "123" };
+    const previous = repo.requestAuthorizedPairing(input, ["bot"])!;
+    const code = (await repo.pairingCode(previous.approval.id))!;
+    const people = new PersonMappingRepository(testDb.db);
+    let resume!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    rs.spyOn(people, "findByChannelUser").mockImplementationOnce(async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      return null;
+    });
+    const send = rs.fn<TalkRouter["send"]>();
+    const admission = createPairingAdmission({
+      approvalsRepo: repo,
+      personMappingRepo: people,
+      talkGrants,
+    })(
+      "connection",
+      "telegram",
+      {
+        senderId: "123",
+        senderDisplayName: "Alice",
+        conversationId: "dm" as ConversationId,
+        messageId: "racing",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(),
+        thread: { kind: "dm" },
+      },
+      { send } as unknown as TalkRouter,
+    );
+    await paused;
+    testDb.db.transaction((tx) => {
+      repo.supersedePairings("connection", tx);
+      if (teardown === "delete") {
+        tx.delete(connections).where(eq(connections.id, "connection")).run();
+      } else {
+        tx.update(connectionGrants)
+          .set({ state: "unauthorized" })
+          .where(eq(connectionGrants.custody, "connection"))
+          .run();
+      }
+    });
+    resume();
+    expect(await admission).toBe(false);
+    expect(await repo.findPending()).toHaveLength(0);
+    expect(await repo.list()).toHaveLength(1);
+    expect(send).not.toHaveBeenCalled();
+    expect((await repo.resolvePending(previous.approval.id, "approve", "owner")).outcome).toBe(
+      "already_resolved",
+    );
+    expect(repo.verifyPairing({ ...input, code }).outcome).toBe("invalid_code");
+    expect(await people.findByChannelUser("telegram", "123")).toBeNull();
+  });
+
+  it("requires the matching service and every Talk grant for request creation", () => {
+    seedConnection("feishu");
+    const input = { ...identity, connectionId: "connection" };
+    expect(repo.requestAuthorizedPairing(input, ["app"])).toBeNull();
+    const feishu = { ...input, channel: "feishu" as const };
+    expect(repo.requestAuthorizedPairing(feishu, [])).toBeNull();
+    expect(repo.requestAuthorizedPairing(feishu, ["app", "missing"])).toBeNull();
+    expect(repo.requestAuthorizedPairing(feishu, ["app"])).not.toBeNull();
   });
 
   it("rejects cross-identity, cross-channel, cross-connection and replayed codes", async () => {
@@ -419,7 +529,9 @@ describe("channel pairing approvals", () => {
     "discord",
     "feishu",
   ])("blocks unknown %s messages and consumes group and replayed verification", async (service) => {
+    seedConnection(service);
     const admit = createPairingAdmission({
+      talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
     });

@@ -32,7 +32,9 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
       409,
     );
   }
-  await notifyPairingResolution(deps.talkRouter, approval);
+  void notifyPairingResolution(deps.talkRouter, approval).catch(() => {
+    log.warn("pairing notification failed", { approvalId });
+  });
   if (action === "approve" && approval.type === "action_execution") {
     approvalHandler.onApproved(approvalId).catch((err) => {
       log.error("approval execution failed", {
