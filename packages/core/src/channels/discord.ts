@@ -113,6 +113,7 @@ function restMessageToNormalized(
     channel: "discord",
     channelUserId: msg.author.id,
     displayName: msg.author.global_name ?? msg.author.username,
+    username: msg.author.username,
     threadId: channelId,
     threadName: `${guildName}/#${channelName}`,
     threadType: "group",
@@ -821,6 +822,7 @@ export class DiscordAdapter implements ProviderAdapter {
       channelUserId: message.author.id,
       displayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
+      username: message.author.username,
       threadId: message.channelId,
       parentThreadId: parentId ?? undefined,
       threadName,
@@ -1312,6 +1314,10 @@ export class DiscordAdapter implements ProviderAdapter {
     this.rest.clearHandlerSweeper();
     await this.client.destroy();
     log.info("bot stopped");
+  }
+
+  async directConversationFor(channelUserId: string): Promise<string> {
+    return (await this.client.users.createDM(channelUserId)).id;
   }
 
   async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {

@@ -75,7 +75,8 @@
       "approve": "Approve",
       "retry": "Retry",
       "pending": "…"
-    }
+    },
+    "resolveFailed": "Could not resolve the approval. Refresh and try again."
   },
   "execution": {
     "errorPrefix": "Error · ",
@@ -151,5 +152,35 @@
       "dumpTitle": "Download raw trace JSON",
       "dumpAriaLabel": "Download raw trace JSON"
     }
+  },
+  "pairing": {
+    "title": "Pairing requests",
+    "account": "Pairing request for {{account}}",
+    "validity": "Valid for {{duration}}",
+    "thisAccount": "this account",
+    "code": "Verification code",
+    "codeAlternative": "Pair with a verification code",
+    "copy": "Copy",
+    "destination": "Send this code to the bot in a private {{channel}} message from {{account}}.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "confirmTitle": "Grant guardian authority?",
+    "confirmBody": "{{account}} on {{channel}} will receive guardian authority over this Rome instance. Approve only an account you control.",
+    "copied": "Code copied",
+    "copyFailed": "Could not copy code",
+    "resolveFailed": "Could not resolve approval. Refresh and check its status.",
+    "loadFailed": "Could not load approvals",
+    "loading": "Loading…",
+    "locked": "Code verification is locked after five failed attempts. The guardian can still approve this request here.",
+    "empty": "No pending pairing requests. Visit <activity>Activity</activity> to see more.",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "expired": "Expired",
+    "requested": "Requested {{time}}",
+    "resolved": "Resolved by {{actor}} · {{time}}",
+    "retry": "Retry",
+    "viewActivity": "View all requests in Activity",
+    "loadHistory": "Load earlier pairing requests"
   }
 }

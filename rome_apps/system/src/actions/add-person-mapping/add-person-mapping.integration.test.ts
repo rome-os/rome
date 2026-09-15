@@ -36,7 +36,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
     expect(approval!.status).toBe("pending");
 
     // Approve it
-    await approvalRepo.approve(result.approvalId);
+    await approvalRepo.resolvePending(result.approvalId, "approve", "test-guardian");
 
     // Verify approval is now approved
     const updatedApproval = await approvalRepo.findById(result.approvalId);
@@ -61,7 +61,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
     });
 
     const approvalRepo = new ApprovalsRepository(testDb.db);
-    await approvalRepo.reject(result.approvalId);
+    await approvalRepo.resolvePending(result.approvalId, "reject", "test-guardian");
 
     const updatedApproval = await approvalRepo.findById(result.approvalId);
     expect(updatedApproval!.status).toBe("rejected");

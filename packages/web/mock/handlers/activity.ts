@@ -1,3 +1,5 @@
+import { pairingPayload, PAIRING_HISTORY_PAGE_SIZE } from "@rome/api-types/approvals";
+import { pairingFixtures, PAIRING_FIXTURE_CODE } from "../../src/pages/dev/pairing-fixtures";
 import { http, HttpResponse } from "msw";
 import type { ApprovalRecord } from "@/lib/chat-types";
 import type {
@@ -29,6 +31,7 @@ const GUARDIAN = { kind: "guardian" as const, userId: "mock-guardian", via: "coo
 // same store (see `approvalCardId`), so approving from either surface is
 // visible in the other.
 const approvals: Approval[] = [
+  ...pairingFixtures(),
   {
     id: "approval-1",
     type: "action_execution",
@@ -330,7 +333,40 @@ function findApproval(id: string): Approval | undefined {
 }
 
 export const activityHandlers = [
-  http.get("/api/approvals", () => HttpResponse.json(approvals)),
+  http.get("/api/approvals", ({ request }) => {
+    for (const approval of approvals) {
+      const payload = pairingPayload(approval);
+      if (payload && approval.status === "pending" && payload.expiresAt <= Date.now()) {
+        approval.status = "rejected";
+        approval.payload = { ...payload, resolution: "expired" };
+        approval.resolvedBy = "system:expiry";
+        approval.resolvedAt = new Date().toISOString();
+      }
+    }
+    const offset = Number(new URL(request.url).searchParams.get("pairingHistoryOffset") ?? "0");
+    const history = approvals.filter((row) => pairingPayload(row) && row.status !== "pending");
+    const current =
+      offset === 0
+        ? approvals.filter((row) => !pairingPayload(row) || row.status === "pending")
+        : [];
+    return HttpResponse.json([
+      ...current,
+      ...history.slice(offset, offset + PAIRING_HISTORY_PAGE_SIZE),
+    ]);
+  }),
+  http.get("/api/approvals/:id/code", ({ params }) => {
+    const approval = findApproval(String(params.id));
+    const payload = approval && pairingPayload(approval);
+    return HttpResponse.json({
+      code:
+        payload &&
+        approval?.status === "pending" &&
+        payload.expiresAt > Date.now() &&
+        payload.failedAttempts < 5
+          ? PAIRING_FIXTURE_CODE
+          : null,
+    });
+  }),
   // Keyed by :id, so it must stay after the collection route above.
   http.get("/api/approvals/:id", ({ params }) => {
     const approval = findApproval(String(params.id));
@@ -355,10 +391,13 @@ export const activityHandlers = [
     approval.executedAt = new Date().toISOString();
     return HttpResponse.json({ ok: true });
   }),
-  http.post("/api/approvals/:id/:intent", ({ params }) => {
+  http.post("/api/approvals/:id/:intent", async ({ params, request }) => {
     const approval = findApproval(String(params.id));
     if (!approval) return HttpResponse.json({ error: "Unknown approval" }, { status: 404 });
-    const intent = String(params.intent);
+    const intent =
+      params.intent === "resolve"
+        ? ((await request.json()) as { action?: string }).action
+        : String(params.intent);
     if (intent !== "approve" && intent !== "reject") {
       return HttpResponse.json({ error: "Unknown intent" }, { status: 400 });
     }
@@ -371,7 +410,11 @@ export const activityHandlers = [
     approval.status = intent === "approve" ? "approved" : "rejected";
     approval.resolvedAt = new Date().toISOString();
     approval.resolvedBy = "mock-guardian";
-    if (intent === "approve") approval.executedAt = approval.resolvedAt;
+    const payload = pairingPayload(approval);
+    if (payload)
+      approval.payload = { ...payload, resolution: intent === "approve" ? "web" : "rejected" };
+    if (intent === "approve" && approval.type === "action_execution")
+      approval.executedAt = approval.resolvedAt;
     return HttpResponse.json({ ok: true });
   }),
   // `limit`/`offset` are ignored: the fixture list is shorter than the page's

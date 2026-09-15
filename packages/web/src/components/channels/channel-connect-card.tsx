@@ -104,7 +104,6 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   telegram: {
     service: "telegram",
     defaultGrant: "bot",
-    guardianLinkedKey: "channels.telegram.guardianLinked",
   },
   telegram_user: {
     service: "telegram_user",
@@ -125,7 +124,6 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   discord: {
     service: "discord",
     defaultGrant: "bot",
-    guardianLinkedKey: "channels.discord.guardianLinked",
     conversationSettings: true,
   },
   wechat: {
@@ -137,7 +135,6 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   feishu: {
     service: "feishu",
     defaultGrant: "app",
-    guardianLinkedKey: "channels.feishu.guardianLinked",
     registry: FEISHU_SETUP_REGISTRY,
     conversationSettings: true,
   },

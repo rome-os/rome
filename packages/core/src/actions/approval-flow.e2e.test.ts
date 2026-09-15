@@ -25,6 +25,7 @@ import {
   createMockAgentRunner,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
+import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
@@ -306,7 +307,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
 
     await h.handler.onApproved(approvalId);
 
@@ -365,6 +366,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       );
 
       const { app } = buildApp(deps, { port: 0, host: "127.0.0.1" });
+      const headers = { Cookie: `${COOKIE_NAME}=${createSession("approval-guardian")}` };
 
       const sessionId = "thread-webchat-delivery";
       await deps.webchatRepo.createSession(sessionId, "Delivery");
@@ -394,14 +396,14 @@ describe("Approval flow E2E — resolving an approval", () => {
 
       // Discover the pending approval the way the guardian's activity page does
       // — over HTTP — instead of peeking at the engine's in-process return.
-      const pendingRes = await app.request(`/api/approvals?status=pending`);
+      const pendingRes = await app.request(`/api/approvals?status=pending`, { headers });
       expect(pendingRes.status).toBe(200);
       const pending = (await pendingRes.json()) as Array<{ id: string; status: string }>;
       expect(pending).toHaveLength(1);
       const approvalId = pending[0]!.id;
 
       // The guardian's open session view subscribes to the live event stream.
-      const events = await app.request(`/api/chat/sessions/${sessionId}/events`);
+      const events = await app.request(`/api/chat/sessions/${sessionId}/events`, { headers });
       expect(events.status).toBe(200);
       const reader = events.body!.getReader();
       const pendingRead = reader.read();
@@ -409,6 +411,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       // Act: the guardian approves over HTTP.
       const approveRes = await app.request(`/api/approvals/${approvalId}/approve`, {
         method: "POST",
+        headers: { ...headers, "sec-fetch-site": "same-origin" },
       });
       expect(approveRes.status).toBe(202);
 
@@ -421,7 +424,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       await reader.cancel();
 
       // Observe (durable): the reply is in the session's message history.
-      const msgsRes = await app.request(`/api/chat/sessions/${sessionId}/messages`);
+      const msgsRes = await app.request(`/api/chat/sessions/${sessionId}/messages`, { headers });
       expect(msgsRes.status).toBe(200);
       const msgs = (await msgsRes.json()) as Array<{ role: string; content: string }>;
       const replies = msgs.filter(
@@ -458,7 +461,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.reject(approvalId);
+    await h.approvalsRepo.resolvePending(approvalId, "reject", "test-guardian");
 
     await expect(h.handler.onRejected(approvalId)).resolves.toBeUndefined();
 
@@ -492,7 +495,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
     await h.handler.onApproved(approvalId);
 
     // Second call should not re-execute — duplicate-execution guard kicks in.

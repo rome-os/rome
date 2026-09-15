@@ -1,3 +1,5 @@
+import { PairingApprovals } from "@/components/PairingApproval";
+import { pairingFixtures, PAIRING_FIXTURE_CODE } from "./pairing-fixtures";
 /**
  * Dev-only gallery of every service's Connection detail dialog, for reviewing
  * the credential-slot card layout/copy across ALL services and auth states at
@@ -46,6 +48,7 @@ const noop = () => {};
 
 /** The API surface the connection ceremonies talk to — everything blocked here. */
 const BLOCKED_API_PREFIXES = [
+  "/api/approvals",
   "/api/channels",
   "/api/integrations",
   "/api/connections",
@@ -71,8 +74,26 @@ function pathnameOf(input: RequestInfo | URL): string {
 function useGalleryFetchGuard() {
   useEffect(() => {
     const realFetch = window.fetch;
+    const approvals = pairingFixtures();
     window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
       const path = pathnameOf(input);
+      if (path === "/api/approvals") return Promise.resolve(Response.json(approvals));
+      const fixture = approvals.find((approval) =>
+        path.startsWith(`/api/approvals/${approval.id}/`),
+      );
+      if (fixture && path.endsWith("/code"))
+        return Promise.resolve(
+          Response.json({ code: fixture.status === "pending" ? PAIRING_FIXTURE_CODE : null }),
+        );
+      if (fixture && path.endsWith("/resolve")) {
+        const action = JSON.parse(String(init?.body)).action;
+        if (fixture.status !== "pending")
+          return Promise.resolve(Response.json({ error: "Already resolved" }, { status: 409 }));
+        fixture.status = action === "approve" ? "approved" : "rejected";
+        fixture.resolvedBy = "gallery-guardian";
+        fixture.resolvedAt = new Date().toISOString();
+        return Promise.resolve(Response.json({ ok: true }));
+      }
       if (BLOCKED_API_PREFIXES.some((prefix) => path.startsWith(prefix))) {
         return Promise.reject(
           new Error(`Blocked by the /dev/connections gallery fetch guard: ${path}`),
@@ -306,6 +327,8 @@ export default function ConnectionGalleryPrototypePage() {
             touch your profile.
           </p>
         </header>
+
+        <PairingApprovals />
 
         {SCENARIOS.map((scenario) => (
           <GallerySection key={scenario.title} scenario={scenario} />

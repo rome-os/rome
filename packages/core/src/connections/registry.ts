@@ -398,6 +398,17 @@ export class ConnectionRegistry {
     });
   }
 
+  /** Commit grant revocation and the caller's cleanup together before stopping capabilities. */
+  revoke(
+    id: ConnectionId,
+    grant: GrantName,
+    opts: { inTx?: (tx: DrizzleTx) => void } = {},
+  ): Promise<void> {
+    const conn = this.connections.get(id);
+    if (!conn) throw new Error(`unknown connection "${id}"`);
+    return conn.revoke(grant, opts);
+  }
+
   /** The terminal conferral write: authorize `grant` with a proven
    *  credential + profile, minting the addressed placeholder connection when it
    *  has no row yet, and running the caller's participant (`opts.inTx` — the
@@ -1314,18 +1325,21 @@ class ConnectionImpl implements Connection {
     await this.syncCustody(grant, cred);
   }
 
-  revoke(grant: GrantName): Promise<void> {
-    return this.withGrantLock(grant, () => this.revokeLocked(grant));
+  revoke(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
+    return this.withGrantLock(grant, () => this.revokeLocked(grant, opts));
   }
 
-  private async revokeLocked(grant: GrantName): Promise<void> {
+  private async revokeLocked(
+    grant: GrantName,
+    opts: { inTx?: (tx: DrizzleTx) => void },
+  ): Promise<void> {
     const scheme = this.descriptor.auth[grant];
     if (!scheme) throw new Error(`connection "${this.id}" has no grant "${grant}"`);
     // Ledger first (the ledger is authoritative): a failed durable
     // write propagates to the caller with nothing revoked in memory — the grant
     // stays authorized and its epoch alive.
-    await this.ledger.updateGrant(this.id, grant, {
-      state: "unauthorized",
+    const patch = {
+      state: "unauthorized" as const,
       credential: undefined,
       // An unauthorized grant records no conferral outcome — clear the profile
       // with the credential so a revoked grant carries no stale identity.
@@ -1335,7 +1349,18 @@ class ConnectionImpl implements Connection {
       // credential from a retained legacy settings row.
       profile: undefined,
       degraded: undefined,
-    });
+    };
+    if (opts.inTx) {
+      const ledger = this.ledger;
+      if (!isTransactionalLedger(ledger))
+        throw new Error("Grant cleanup requires a transactional ledger");
+      ledger.runInTransaction((tx) => {
+        ledger.writeGrant(tx, this.id, grant, patch);
+        opts.inTx!(tx);
+      });
+    } else {
+      await this.ledger.updateGrant(this.id, grant, patch);
+    }
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
     this.renewedSinceLastConfer.delete(grant);

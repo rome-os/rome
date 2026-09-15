@@ -14,6 +14,7 @@
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
@@ -244,7 +245,7 @@ function makeSetupApp() {
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],
-    deleteGuardianChannelMappings: rs.fn(),
+    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as ApiDeps["personMappingRepo"];
   registry.register(
     makeEmailDescriptor({
@@ -260,6 +261,7 @@ function makeSetupApp() {
     connectionRegistry: registry,
     setupManager,
     db: testDb,
+    approvalsRepo: new ApprovalsRepository(testDb),
     personMappingRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));

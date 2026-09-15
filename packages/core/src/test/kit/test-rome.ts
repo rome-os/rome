@@ -308,7 +308,7 @@ async function buildHarness(
       }),
     approvedActionApproval: async (payload) => {
       const id = await seed.pendingActionApproval(payload);
-      const resolved = await repos.approvals.resolvePending(id, "approve");
+      const resolved = await repos.approvals.resolvePending(id, "approve", "test-guardian");
       if (resolved.outcome !== "resolved") {
         throw new Error(`Failed to approve seeded approval ${id}: ${resolved.outcome}`);
       }
