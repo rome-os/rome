@@ -70,7 +70,7 @@ export interface ChatComposerSnapshot {
 
 export interface ChatComposerHandle {
   focus: () => void;
-  insertText: (text: string) => void;
+  insertText: (text: string, options?: { focus?: boolean }) => void;
   setAgentMention: (mention: AgentMention | null) => void;
   setSkillSelection: (skill: SkillSelection | null) => void;
   addFiles: (files: File[]) => void;
@@ -400,13 +400,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     ref,
     () => ({
       focus: () => textareaRef.current?.focus(),
-      insertText: (text: string) => {
+      insertText: (text: string, options?: { focus?: boolean }) => {
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
           if (!el) return;
           clampTextareaHeight(el);
-          el.focus();
+          if (options?.focus !== false) el.focus();
           el.setSelectionRange(text.length, text.length);
         });
       },

@@ -1,12 +1,13 @@
 // @rstest-environment jsdom
+import { createRef, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
+import { ChatComposer, type ChatComposerProps, type ChatComposerHandle } from "./ChatComposer";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -46,6 +47,7 @@ function peopleList(people: PersonResource[]): PeopleList {
 }
 
 interface RenderComposerOptions {
+  composerRef?: Ref<ChatComposerHandle>;
   settings?: Record<string, unknown>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
@@ -87,7 +89,7 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     ...render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <ChatComposer onSend={rs.fn()} {...props} />
+          <ChatComposer onSend={rs.fn()} {...props} ref={options.composerRef} />
         </QueryClientProvider>
       </MemoryRouter>,
     ),
@@ -321,5 +323,25 @@ describe("composer textarea height", () => {
     fireEvent.input(textarea, { target: { value: "hi" } });
 
     expect(textarea.style.height).toBe("1px");
+  });
+});
+
+describe("programmatic draft insertion", () => {
+  it("can update the draft without focus or submission while preserving default focus", async () => {
+    const composerRef = createRef<ChatComposerHandle>();
+    const onSend = rs.fn();
+    renderComposer({ onSend }, { composerRef });
+    const input = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    const focus = rs.spyOn(input, "focus");
+    rs.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    act(() => composerRef.current?.insertText("Build an app", { focus: false }));
+    expect(input.value).toBe("Build an app");
+    expect(focus).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    act(() => composerRef.current?.insertText("Keep editing"));
+    expect(focus).toHaveBeenCalled();
   });
 });

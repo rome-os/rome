@@ -1,4 +1,4 @@
-import { defineConfig } from "@rsbuild/core";
+import { defineConfig, rspack } from "@rsbuild/core";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import baseConfig from "../rsbuild.config";
@@ -30,6 +30,31 @@ export default defineConfig({
   // development review build. Keeping Rsbuild in development mode preserves
   // import.meta.env.DEV and therefore the /dev component-gallery routes.
   mode: "development",
+  tools: {
+    ...baseConfig.tools,
+    rspack: {
+      ...baseConfig.tools?.rspack,
+      plugins: [
+        new rspack.NormalModuleReplacementPlugin(/^\.\/pages\/AppsIndexPage$/, (resource) => {
+          resource.request = resolve(mockDir, "TourAppsPage.tsx");
+        }),
+        new rspack.NormalModuleReplacementPlugin(
+          /^@\/components\/chat\/ChatComposer$/,
+          (resource) => {
+            resource.request = resolve(mockDir, "TourChatComposer.tsx");
+          },
+        ),
+        new rspack.NormalModuleReplacementPlugin(/^@\/hooks\/use-stick-to-bottom$/, (resource) => {
+          resource.request = resolve(mockDir, "use-tour-scroll.ts");
+        }),
+        new rspack.NormalModuleReplacementPlugin(/use-free-cells$/, (resource) => {
+          if (resource.context !== mockDir) {
+            resource.request = resolve(mockDir, "use-tour-workspace.ts");
+          }
+        }),
+      ],
+    },
+  },
   source: {
     ...baseConfig.source,
     entry: { index: resolve(mockDir, "main.tsx") },
