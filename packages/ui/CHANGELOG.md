@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/rome-os/rome/compare/ui-v0.2.8...ui-v0.3.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui:** replace the Body type role with Composer ([#389](https://github.com/rome-os/rome/issues/389))
+
+### Features
+
+* **ui:** replace the Body type role with Composer ([#389](https://github.com/rome-os/rome/issues/389)) ([5ade8d5](https://github.com/rome-os/rome/commit/5ade8d51409d450eeb7c5e4cedbc87f285e81d05))
+
+
+### Bug Fixes
+
+* **ui:** size Markdown inline code to clear the compact line box ([#391](https://github.com/rome-os/rome/issues/391)) ([2c64d74](https://github.com/rome-os/rome/commit/2c64d7422dc7ba28e99bdd6056954010cdbdf0a5))
+
 ## [0.2.8](https://github.com/rome-os/rome/compare/ui-v0.2.7...ui-v0.2.8) (2026-09-14)
 
 
