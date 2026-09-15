@@ -26,25 +26,11 @@ import {
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
+import { PROJECT_FILE_BROWSER_POLICY } from "../../lib/project-file-browser.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import { resolveWebchatLargeModelSelection } from "../../core/model-selector.js";
 import type { ApiDeps } from "../deps.js";
 
-// Directories that must never surface as project roots (top-level entries
-// under the projects root): build outputs and dependency trees are not
-// projects, so they stay out of the "all projects" list.
-const PROJECTS_ROOT_IGNORED_NAMES = [
-  ".next",
-  ".turbo",
-  "build",
-  "coverage",
-  "dist",
-  "node_modules",
-];
-// Directories skipped *inside* a project tree. `dist` is intentionally not in
-// this list: a folder literally named `dist` is a legitimate, browsable part
-// of a project, and hiding it makes the tree (and thus the editor) unusable.
-const PROJECTS_TREE_IGNORED_NAMES = [".next", ".turbo", "build", "coverage", "node_modules"];
 const PROJECT_DASHBOARD_DAYS = 14;
 const PROJECT_DASHBOARD_CHAT_LIMIT = 20;
 const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
@@ -152,7 +138,7 @@ function isSameOrChildProjectPath(relativePath: string, projectPath: string): bo
 }
 
 function shouldSkipProjectEntry(name: string): boolean {
-  return name.startsWith(".") || PROJECTS_ROOT_IGNORED_NAMES.includes(name);
+  return name.startsWith(".");
 }
 
 function listTopLevelShadowProjectPaths(rootDir: string): string[] {
@@ -713,8 +699,8 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
   const projectsRoot = ensureProjectsRootInitialized();
 
   const baseScope: FileBrowserScope = {
+    ...PROJECT_FILE_BROWSER_POLICY,
     assetBasePath: "/api/projects/asset",
-    ignoredNames: PROJECTS_TREE_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir: projectsRoot,
   };
@@ -754,21 +740,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
   app.get("/projects/asset/:fileName", createAssetHandler(baseScope));
   app.get("/projects/download", createDownloadHandler(baseScope));
   app.get("/projects/history", createHistoryHandler(fileScope));
-  app.get(
-    "/projects/search",
-    createSearchHandler({
-      ...baseScope,
-      searchGlobs: [
-        "!**/.git/**",
-        "!**/.next/**",
-        "!**/.turbo/**",
-        "!**/build/**",
-        "!**/coverage/**",
-        "!**/dist/**",
-        "!**/node_modules/**",
-      ],
-    }),
-  );
+  app.get("/projects/search", createSearchHandler(baseScope));
 
   app.get("/projects/dashboard", async (c) => {
     const webchatRepo = deps.webchatRepo;

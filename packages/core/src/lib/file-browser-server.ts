@@ -94,7 +94,13 @@ export interface FileBrowserScope {
     resolvedPath: string;
     type: "directory" | "file";
   }) => Promise<void> | void;
-  ignoredNames?: string[];
+  /** Fallback for entry filters. An operation's list replaces this list, even when empty.
+   * Dot entries remain excluded. These filters do not restrict direct file access. */
+  ignoredNames?: readonly string[];
+  treeIgnoredNames?: readonly string[];
+  watchIgnoredNames?: readonly string[];
+  downloadIgnoredNames?: readonly string[];
+  uploadIgnoredNames?: readonly string[];
   searchGlobs?: string[];
   historyTarget?: (resolvedPath: string, logicalPath: string) => GitTarget | null;
   renameCommitTarget?: (
@@ -290,8 +296,14 @@ function toLogicalPath(scope: FileBrowserScope, fullPath: string): string {
   return relPath ? `${scope.logicalRoot}/${relPath}` : scope.logicalRoot;
 }
 
-function getIgnoredNames(scope: FileBrowserScope): Set<string> {
-  return new Set([...(scope.ignoredNames ?? []), ...DEFAULT_IGNORED_NAMES]);
+function getIgnoredNames(
+  scope: FileBrowserScope,
+  operation: "tree" | "watch" | "download" | "upload",
+): Set<string> {
+  return new Set([
+    ...(scope[`${operation}IgnoredNames`] ?? scope.ignoredNames ?? []),
+    ...DEFAULT_IGNORED_NAMES,
+  ]);
 }
 
 interface FileWatchSseMessage {
@@ -414,7 +426,7 @@ function isIgnoredWatchPath(scope: FileBrowserScope, fullPath: string): boolean 
     return true;
   }
 
-  const ignoredNames = getIgnoredNames(scope);
+  const ignoredNames = getIgnoredNames(scope, "watch");
   return relPath.split(sep).some((segment) => isIgnoredEntryName(ignoredNames, segment));
 }
 
@@ -605,7 +617,7 @@ async function* walkArchiveEntries(
   directoryPath: string,
   archivePath: string,
 ): AsyncGenerator<Buffer | Uint8Array> {
-  const ignoredNames = getIgnoredNames(scope);
+  const ignoredNames = getIgnoredNames(scope, "download");
   const directoryStats = lstatSync(directoryPath);
   yield createTarHeader(`${archivePath}/`, {
     isDirectory: true,
@@ -816,7 +828,7 @@ function parseTreeDepth(value: string | undefined): number {
 }
 
 function buildTree(scope: FileBrowserScope, dirPath: string, depth: number): TreeNode[] {
-  const ignoredNames = getIgnoredNames(scope);
+  const ignoredNames = getIgnoredNames(scope, "tree");
   const entries = readdirSync(dirPath, { withFileTypes: true });
   const nodes: TreeNode[] = [];
 
@@ -1617,7 +1629,7 @@ export function createFilePostHandler(scope: FileBrowserScope): Handler {
     }
 
     const uploadRequests: Array<{ file: File; resolvedPath: string; sanitizedPath: string }> = [];
-    const ignoredNames = getIgnoredNames(scope);
+    const ignoredNames = getIgnoredNames(scope, "upload");
     for (const file of files) {
       const rawUploadPath = uploadPaths.shift();
       const requestedRelativePath =

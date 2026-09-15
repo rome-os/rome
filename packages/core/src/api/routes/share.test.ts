@@ -6,6 +6,7 @@ import { createWebchatRuntime } from "./webchat.js";
 import { shareRoutes } from "./share.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import type { ChatShareSnapshot } from "../share-snapshot.js";
+import { readArchivePaths } from "../../test/file-browser.js";
 
 interface PublicSharePayload {
   id: string;
@@ -200,6 +201,10 @@ describe("Share chat", () => {
     // Two projects on disk; the share is for proj-a, so proj-b must be unreachable.
     mkdirSync(join(projectsRoot, "proj-a"), { recursive: true });
     writeFileSync(join(projectsRoot, "proj-a", "inside.txt"), "in scope");
+    for (const directory of ["build", "coverage", "dist", "node_modules", ".next"]) {
+      mkdirSync(join(projectsRoot, "proj-a", directory));
+      writeFileSync(join(projectsRoot, "proj-a", directory, "output.txt"), directory);
+    }
     mkdirSync(join(projectsRoot, "proj-b"), { recursive: true });
     writeFileSync(join(projectsRoot, "proj-b", "secret.txt"), "out of scope");
 
@@ -223,6 +228,25 @@ describe("Share chat", () => {
     // Rooted at proj-a: its file shows, proj-b's sibling file is not addressable.
     expect(names).toContain("inside.txt");
     expect(names).not.toContain("secret.txt");
+    expect(names).toEqual(["build", "coverage", "dist", "node_modules", "inside.txt"]);
+
+    const archive = await publicApp.request(`/share/${created.id}/projects/download?path=projects`);
+    expect(archive.status).toBe(200);
+    expect(await readArchivePaths(archive)).toEqual([
+      "projects/",
+      "projects/build/",
+      "projects/build/output.txt",
+      "projects/coverage/",
+      "projects/coverage/output.txt",
+      "projects/dist/",
+      "projects/dist/output.txt",
+      "projects/inside.txt",
+    ]);
+    const dependency = await publicApp.request(
+      `/share/${created.id}/projects/file?path=projects/node_modules/output.txt`,
+    );
+    expect(dependency.status).toBe(200);
+    expect(await dependency.json()).toMatchObject({ content: "node_modules" });
 
     // proj-b's file cannot be read through this share's logical space.
     const fileRes = await publicApp.request(

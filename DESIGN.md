@@ -445,6 +445,14 @@ Components are precise and restrained. Each one declares its own typography role
 ### Empty State
 A centered block with a 44px Recessed Linen glyph well (12px radius), a `text-section` title, and a `text-ui` description in Muted Ink. Minimum height 192px.
 
+### File browser
+
+The guardian can inspect generated files and dependencies through the existing tree, editor, and download action. The [project contracts](docs/concepts/data.md#projects) define visibility and archive contents independently.
+
+Directory listings load incrementally. Live updates follow expanded or selected directories through shallow watches. Showing a dependency folder does not require traversing its entire tree.
+
+The read-only shared-project view uses the same browsing and archive policies within its authorized project. Dot-entry visibility follows the existing convention. This surface adds no new controls or visual variants.
+
 ## Do's and Don'ts
 
 ### Do:
