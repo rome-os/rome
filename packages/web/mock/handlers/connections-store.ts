@@ -14,6 +14,42 @@ import type { ApiConnection } from "@/lib/connections-api";
 export const connections: { connections: ApiConnection[] } = {
   connections: [
     {
+      id: "github-demo",
+      service: "github",
+      label: "GitHub · Rome Demo",
+      grants: { user: "authorized" },
+      display: {
+        user: { displayName: "Rome Demo", handle: "rome-demo", email: null, avatarUrl: null },
+      },
+      capabilities: {
+        talk: { state: "unsupported" },
+        act: { state: "unlocked" },
+        watch: { state: "unlocked" },
+      },
+      connect: null,
+    },
+    ...[
+      { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
+      { service: "wechat", label: "WeChat", grant: "account", email: null },
+      { service: "feishu", label: "Feishu", grant: "bot", email: null },
+    ].map(
+      ({ service, label, grant, email }): ApiConnection => ({
+        id: `${service}-demo`,
+        service,
+        label: `${label} · Rome Demo`,
+        grants: { [grant]: "authorized" },
+        display: {
+          [grant]: { displayName: "Rome Demo", handle: null, email, avatarUrl: null },
+        },
+        capabilities: {
+          talk: { state: "unlocked" },
+          act: { state: "unsupported" },
+          watch: { state: "unsupported" },
+        },
+        connect: null,
+      }),
+    ),
+    {
       id: "discord-1",
       service: "discord",
       label: "Discord · Rome",

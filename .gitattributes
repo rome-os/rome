@@ -9,3 +9,5 @@ packages/desktop/lima/images/*.qcow2 filter=lfs diff=lfs merge=lfs -text
 # migration lands thousands of diff lines. linguist-generated collapses them in
 # GitHub diffs. The .sql migrations carry the reviewable change and stay visible.
 **/meta/*_snapshot.json linguist-generated
+
+packages/web/mock/public/recorded-apps/** linguist-vendored

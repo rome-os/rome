@@ -47,6 +47,8 @@ import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
 import { settingsHandlers } from "./settings";
+import { recordedAppHandlers } from "./recorded-apps";
+import { curatedChats } from "../fixtures/chats";
 
 // Fixtures are typed against the same types the fetch sites parse into
 // (@rome/api-types where the contract lives there, the web-local types
@@ -63,7 +65,7 @@ const bootstrap: BootstrapState = { phase: "ready" };
 const identity: DashboardIdentity = {
   kind: "guardian",
   userId: "mock-guardian",
-  displayName: "Mock Guardian",
+  displayName: "Rome Demo",
   avatarUrl: null,
 };
 
@@ -214,7 +216,7 @@ const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string,
+  prompt: string | StreamBlock[],
   reply: StreamBlock[],
   traceBlocks?: TraceBlockDto[],
 ): ChatMessage[] => {
@@ -226,7 +228,7 @@ const turn = (
       sessionId,
       turnId,
       role: "user",
-      content: JSON.stringify([text(prompt)]),
+      content: JSON.stringify(typeof prompt === "string" ? [text(prompt)] : prompt),
       createdAt: startedAt,
     },
   ];
@@ -269,6 +271,14 @@ const turn = (
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
 const transcripts: Record<string, ChatMessage[]> = {
+  ...Object.fromEntries(
+    curatedChats.map((chat) => [
+      chat.id,
+      chat.turns.flatMap((item, index) =>
+        turn(chat.id, index + 1, item.at, item.prompt, [text(item.reply), ...(item.blocks ?? [])]),
+      ),
+    ]),
+  ),
   "mock-chat-1": [
     ...turn(
       "mock-chat-1",
@@ -679,10 +689,8 @@ const session = (
 };
 
 const chatSessions: ChatSession[] = [
-  // Pinned to the Morning Brief app's agent so the pinned-identity surfaces
-  // (navbar avatar/label, composer chip — and their presentation-mode mask)
-  // are exercisable in mock mode.
-  session("mock-chat-1", "Morning brief tweaks", "default", "morning-brief:briefer"),
+  ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
+  session("mock-chat-1", "Morning brief tweaks", "default"),
   session("mock-chat-2", "Draft launch email", "website-redesign"),
   session("mock-chat-3", "Weekly planning"),
   session("mock-chat-4", "Plumber for the leak"),
@@ -745,19 +753,6 @@ const chatAgents: AgentCatalogGroup[] = [
     agents: [
       { name: "main", description: "The guardian's primary agent" },
       { name: "envoy", description: "Handles messages from everyone who isn't the guardian" },
-    ],
-  },
-  {
-    ownerId: "morning-brief",
-    ownerType: "app",
-    label: "Morning Brief",
-    description: "Assembles the daily digest",
-    iconUrl: null,
-    agents: [
-      {
-        name: "morning-brief:briefer",
-        description: "Drafts and schedules the morning brief",
-      },
     ],
   },
 ];
@@ -844,21 +839,12 @@ const actionCatalog: ActionCatalogEntry[] = [
     ownerId: "system",
     inputSchema: null,
   },
-  {
-    name: "daily_summary",
-    description: "Generate the guardian's daily activity summary",
-    type: "custom",
-    sideEffects: "read-only",
-    requiresApproval: false,
-    ownerType: "app",
-    ownerId: "morning-brief",
-    inputSchema: null,
-  },
 ];
 
-// A zone unlikely to match the browser's, so the dashboard's timestamps
-// visibly follow the stored setting rather than the machine's clock.
-const settings: SettingsMap = { guardianTimezone: "Asia/Tokyo" };
+const settings: SettingsMap = {
+  guardianTimezone: "America/Los_Angeles",
+  showAiToolUsage: true,
+};
 
 // Triage activity for the Inbox page. Offsets rather than fixed dates, so the
 // entries stay recent whenever the mock is opened.
@@ -925,8 +911,7 @@ const projectFileHandlers = fileBrowserHandlers({
 });
 
 /**
- * The two remaining reads the Settings page makes. Both are unremarkable
- * "nothing configured" payloads, and both have to exist: the page holds its
+ * The two remaining reads the Settings page makes. The page holds its
  * loading gate until `/api/tailscale/devices` settles, and the Connections tab
  * waits on the Composio status alongside `/api/connections`. Left unhandled
  * they fall through to the dev proxy, which only resolves quickly when a
@@ -937,12 +922,12 @@ const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
 
 const composioStatus: { composio: ComposioCliStatus } = {
   composio: {
-    installed: false,
-    loggedIn: false,
+    installed: true,
+    loggedIn: true,
     loginPending: false,
     webUrl: null,
-    orgId: null,
-    testUserId: null,
+    orgId: "demo-workspace",
+    testUserId: "mock-guardian",
     error: null,
   },
 };
@@ -1255,6 +1240,7 @@ export const handlers = [
   ...peopleHandlers,
   ...routineHandlers,
   ...settingsHandlers,
+  ...recordedAppHandlers,
   ...appKeysHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
   // dir and the memory dir a person's dossier links into.

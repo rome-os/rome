@@ -35,18 +35,13 @@ const disconnectedBrowserLastSeen = fromNow(-2 * HOUR);
 
 // ── AI Tools ───────────────────────────────────────────
 
-/**
- * The two first-party CLIs in their two interesting states. Claude is connected
- * and reporting usage, so the panel's quota meters have data; Codex holds
- * credentials that the server proved revoked, which is the `needsReauth` badge —
- * a distinct state from plain "not connected" and the only one that offers a
- * re-login rather than a first login.
- */
+// Connection states sampled from the source instance. Account identifiers are
+// synthetic and quota windows stay relative to the fixture clock.
 const aiToolStatus: Record<string, AIToolStatus> = {
   claude: {
     loggedIn: true,
     email: "guardian@example.com",
-    authMethod: "claudeai",
+    authMethod: "claude.ai",
     accountType: "max",
     usage: {
       checkedAt: fromNow(-5 * MINUTE),
@@ -55,15 +50,16 @@ const aiToolStatus: Record<string, AIToolStatus> = {
       // past reads as expired and the panel drops the countdown entirely, so a
       // literal timestamp would silently stop exercising these meters the day
       // after it was written.
-      fiveHour: { usedPercent: 42, remainingPercent: 58, resetsAt: fromNow(3 * HOUR) },
-      sevenDay: { usedPercent: 71, remainingPercent: 29, resetsAt: fromNow(4 * DAY) },
+      fiveHour: {
+        usedPercent: 0,
+        remainingPercent: 100,
+        resetsAt: fromNow(4 * HOUR + 33 * MINUTE),
+      },
+      sevenDay: { usedPercent: 0, remainingPercent: 100, resetsAt: fromNow(5 * DAY + 16 * HOUR) },
     },
   },
   codex: {
     loggedIn: false,
-    email: "guardian@example.com",
-    authMethod: "chatgpt",
-    needsReauth: true,
   },
 };
 
@@ -97,8 +93,8 @@ export const publicAccess: { config: PublicAccessConfig } = {
     // Off: turning it on requires a reachable tailnet, which this instance has
     // no fixture for. The per-app allowances below are independent of it.
     enableAccessControl: false,
-    allowedApps: ["notes"],
-    cloudEmailAccess: { "morning-brief": ["partner@example.com"] },
+    allowedApps: [],
+    cloudEmailAccess: {},
   },
 };
 
