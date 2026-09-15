@@ -173,7 +173,7 @@ function TargetMenu({
         <Badge variant="muted" asChild>
           <button
             type="button"
-            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-expanded:text-foreground"
+            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-expanded:text-foreground"
           >
             <ChannelGlyph channel={value.channel} />
             <span className="truncate">

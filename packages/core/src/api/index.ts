@@ -11,6 +11,7 @@ import { attachTerminalServer } from "../terminal-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { computerUseRoutes } from "./routes/computer-use.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
@@ -126,6 +127,7 @@ export function buildApp(
   api.route("/", uptimeRoutes());
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
+  api.route("/", computerUseRoutes(deps));
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));

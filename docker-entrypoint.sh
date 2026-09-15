@@ -445,6 +445,9 @@ fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
 
 CHROME_WRAPPER_PID=""
+if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
+  echo "Warning: OpenCLI could not start. Browser connections are unavailable."
+fi
 if [ "${ROME_ENABLE_CHROME:-1}" != "0" ]; then
   write_chrome_clipboard_policy
   CHROME_CDP_PORT="${ROME_CHROME_CDP_PORT:-9222}"
@@ -481,6 +484,7 @@ if [ "${ROME_ENABLE_CHROME:-1}" != "0" ]; then
       ROME_CHROME_USER_DATA_DIR="${ROME_CHROME_USER_DATA_DIR:-/home/rome/.rome/chrome-profile}" \
       ROME_CHROME_FULLSCREEN="${ROME_CHROME_FULLSCREEN:-0}" \
       ROME_CHROME_DISABLE_SANDBOX="${ROME_CHROME_DISABLE_SANDBOX:-0}" \
+      ROME_ENABLE_CDP_AUTOMATION="${ROME_ENABLE_CDP_AUTOMATION:-false}" \
       ROME_CHROME_ENABLE_STEALTH="${ROME_CHROME_ENABLE_STEALTH:-1}" \
       ROME_CHROME_TIMEZONE="${ROME_CHROME_TIMEZONE:-America/Los_Angeles}" \
       ROME_CHROME_LANG="${ROME_CHROME_LANG:-en-US}" \

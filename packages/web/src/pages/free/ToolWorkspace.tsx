@@ -187,7 +187,7 @@ export function ToolWorkspace({
           aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
           aria-valuenow={Math.round(chatWidth)}
           data-resizing={resizing || undefined}
-          className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-2 focus-visible:outline-ring focus-visible:after:w-1 data-[resizing]:after:w-1"
+          className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
           onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
           onPointerDown={(event) => {
             if (event.button !== 0) return;

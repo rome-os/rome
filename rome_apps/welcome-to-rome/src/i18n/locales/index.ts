@@ -30,10 +30,10 @@ export function genericIdeas(locale: WelcomeLocale): AppIdea[] {
   return messagesFor(locale).genericIdeas;
 }
 
-// The fixed getting-to-know-you questionnaire, shown as the host's built-in
-// ask_question card (one card, mostly tap-to-answer with a free-text box). The
-// set mirrors what the old `introductions` agent asked. Answers return next turn
-// as `{ answers: [{ questionId, value }] }`.
-export function introQuestionsFor(locale: WelcomeLocale): AskQuestion[] {
-  return messagesFor(locale).introQuestions as AskQuestion[];
+// The one getting-to-know-you question, shown as the host's built-in
+// ask_question card (tap-to-answer with a free-text box). Role, interests, and
+// tone are learned from use. The answer returns next turn as
+// `{ answers: [{ questionId, value }] }`.
+export function introQuestionFor(locale: WelcomeLocale): AskQuestion {
+  return messagesFor(locale).introQuestion as AskQuestion;
 }

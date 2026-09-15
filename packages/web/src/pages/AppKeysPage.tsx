@@ -30,7 +30,7 @@ import {
   fetchAppKeys,
   saveAppKey,
 } from "@/lib/app-keys-api";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 /**
  * App keys management page (`/settings/connections/app-keys`).
@@ -128,18 +128,18 @@ export default function AppKeysPage() {
             <ArrowLeft className="size-4" aria-hidden />
             {t("appKeys.back")}
           </Link>
-          <div className="flex flex-wrap items-start gap-3">
-            <AppKeysBadge />
-            <div className="min-w-0 flex-1">
-              <h1 className="text-title text-foreground">{t("appKeys.title")}</h1>
-            </div>
-            {form === null && (
-              <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>
-                <Plus aria-hidden />
-                {t("appKeys.add")}
-              </Button>
-            )}
-          </div>
+          <PageHeader
+            leading={<AppKeysBadge />}
+            title={t("appKeys.title")}
+            actions={
+              form === null && (
+                <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>
+                  <Plus aria-hidden />
+                  {t("appKeys.add")}
+                </Button>
+              )
+            }
+          />
         </div>
 
         {form !== null && (

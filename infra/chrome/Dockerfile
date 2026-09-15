@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation
 
 COPY entrypoint.sh /usr/local/bin/chrome-sidecar-entrypoint.sh
+COPY opencli-policy.json /etc/chromium/policies/managed/rome-opencli.json
 RUN chmod +x /usr/local/bin/chrome-sidecar-entrypoint.sh
 
 # Non-root browser user. /home/chrome/.rome is the chrome-profile volume

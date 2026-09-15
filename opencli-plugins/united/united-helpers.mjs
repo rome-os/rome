@@ -96,28 +96,6 @@ export function normalizeSearch(args) {
   };
 }
 
-export function buildSearchUrl(search) {
-  const url = new URL("https://www.united.com/en/us/fsr/choose-flights");
-  const params = {
-    f: search.from,
-    t: search.to,
-    d: search.depart,
-    px: String(search.adults),
-    tqp: search.miles ? "A" : "R",
-    sc: search.returnDate ? "7,7" : "7",
-    clm: "7",
-    taxng: "1",
-    newHP: "True",
-    st: "bestmatches",
-  };
-  // `at=1` selects award travel, not the adult count. Cash links omit `at`.
-  if (search.miles) params.at = "1";
-  if (search.returnDate) params.r = search.returnDate;
-  else params.tt = "1";
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  return url.toString();
-}
-
 /** Validate the loaded search before attaching the requested route/date to any price. */
 export function assertSearchPage(data, search) {
   const url = new URL(data.url);
@@ -128,11 +106,14 @@ export function assertSearchPage(data, search) {
   ) {
     throw new Error("United did not open its English-US flight results page");
   }
-  const expected = { f: search.from, t: search.to, d: search.depart, px: String(search.adults) };
+  const expected = { f: search.from, t: search.to, d: search.depart };
   for (const [name, value] of Object.entries(expected)) {
     if (params.get(name) !== value)
       throw new Error(`United changed the requested ${name} search condition`);
   }
+  // The homepage includes zero-valued passenger categories after the adult count.
+  if (!new RegExp(`^${search.adults}(?:,0)*$`).test(params.get("px") || ""))
+    throw new Error("United changed the requested px search condition");
   if (
     (params.get("r") || null) !== search.returnDate ||
     (params.get("idx") && params.get("idx") !== "1")
@@ -241,8 +222,10 @@ export function normalizeResults(data, search, retrievedAt = new Date().toISOStr
       : stopsMatch
         ? Number(stopsMatch[1])
         : null;
-    const duration = flight.duration_text.match(/(?:(\d+)\s*H[,\s]*)?(\d+)\s*M/i);
-    const durationMinutes = duration ? Number(duration[1] || 0) * 60 + Number(duration[2]) : null;
+    const duration = flight.duration_text.match(/^(?:(\d+)\s*H(?:[,\s]*(\d+)\s*M)?|(\d+)\s*M)/i);
+    const durationMinutes = duration
+      ? Number(duration[1] || 0) * 60 + Number(duration[2] || duration[3] || 0)
+      : null;
     if (
       stops === null ||
       durationMinutes === null ||
@@ -326,7 +309,7 @@ export function normalizeResults(data, search, retrievedAt = new Date().toISOStr
         adults: search.adults,
         return_date: search.returnDate,
         flight_details: flight.flight_text,
-        url: buildSearchUrl(search),
+        url: data.url,
         retrieved_at: retrievedAt,
       });
     }

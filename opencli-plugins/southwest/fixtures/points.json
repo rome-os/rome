@@ -1,0 +1,330 @@
+{
+  "url": "https://www.southwest.com/air/booking/select-depart.html?adultPassengersCount=2&adultsCount=2&departureDate=2026-11-13&departureTimeOfDay=ALL_DAY&destinationAirportCode=HOU&fareType=POINTS&originationAirportCode=OAK&passengerType=ADULT&returnTimeOfDay=ALL_DAY&tripType=oneway",
+  "language": "en",
+  "ready": true,
+  "loading": false,
+  "expected_count": 4,
+  "available_count": 4,
+  "search": {
+    "adultPassengersCount": "2",
+    "adultsCount": "2",
+    "departureDate": "2026-11-13",
+    "departureTimeOfDay": "ALL_DAY",
+    "destinationAirportCode": "HOU",
+    "fareType": "POINTS",
+    "originationAirportCode": "OAK",
+    "passengerType": "ADULT",
+    "promoCode": null,
+    "returnDate": null,
+    "returnTimeOfDay": "ALL_DAY",
+    "tripType": "oneway",
+    "lapInfantPassengersCount": null
+  },
+  "route_text": "OAKHOU",
+  "selected_date": "2026-11-13",
+  "price_mode": "points",
+  "fare_note": "All fares and fare ranges are subject to change until purchased and are per person for each way of travel.",
+  "rounding_note": "$Points$ + Points",
+  "error": "",
+  "challenge": false,
+  "login_required": false,
+  "no_results": false,
+  "rows": [
+    {
+      "id": "air-booking-select-detail--row-0-1",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T11:55:00.000-08:00",
+      "arrival_at": "2026-11-13T17:30:00.000-06:00",
+      "duration_minutes": 215,
+      "flight_numbers": ["1166"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T11:55:00.000-08:00",
+          "arrival_at": "2026-11-13T17:30:00.000-06:00",
+          "flight_number": "1166",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 215,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 11:55AM",
+      "arrival_text": "Arrives 5:30PM",
+      "stops_text": "Nonstop",
+      "duration_text": "3h 35m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare 13,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "13,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare 17,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "17,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare 23,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "23,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare 27,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "27,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-2",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T09:25:00.000-08:00",
+      "arrival_at": "2026-11-13T16:35:00.000-06:00",
+      "duration_minutes": 310,
+      "flight_numbers": ["1496"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "LAS",
+          "departure_at": "2026-11-13T09:25:00.000-08:00",
+          "arrival_at": "2026-11-13T11:00:00.000-08:00",
+          "flight_number": "1496",
+          "change_planes": false,
+          "stop_minutes": 40,
+          "duration_minutes": 95,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "LAS",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T11:40:00.000-08:00",
+          "arrival_at": "2026-11-13T16:35:00.000-06:00",
+          "flight_number": "1496",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 175,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 9:25AM",
+      "arrival_text": "Arrives 4:35PM",
+      "stops_text": "1 stop",
+      "duration_text": "5h 10m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare 22,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "22,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare 25,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "25,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare 32,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "32,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare 36,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "36,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": "2 seats left"
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-11",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T10:45:00.000-08:00",
+      "arrival_at": "2026-11-13T18:40:00.000-06:00",
+      "duration_minutes": 355,
+      "flight_numbers": ["4596", "45"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "DAL",
+          "departure_at": "2026-11-13T10:45:00.000-08:00",
+          "arrival_at": "2026-11-13T16:05:00.000-06:00",
+          "flight_number": "4596",
+          "change_planes": true,
+          "stop_minutes": 85,
+          "duration_minutes": 200,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "DAL",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T17:30:00.000-06:00",
+          "arrival_at": "2026-11-13T18:40:00.000-06:00",
+          "flight_number": "45",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 70,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 10:45AM",
+      "arrival_text": "Arrives 6:40PM",
+      "stops_text": "1 stop",
+      "duration_text": "5h 55m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": " Basic Unavailable",
+          "unavailable": true,
+          "amount_text": "",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare 58,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "58,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare 65,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "65,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare 71,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "71,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-22",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T21:30:00.000-08:00",
+      "arrival_at": "2026-11-14T06:05:00.000-06:00",
+      "duration_minutes": 395,
+      "flight_numbers": ["3214", "4992"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "LAS",
+          "departure_at": "2026-11-13T21:30:00.000-08:00",
+          "arrival_at": "2026-11-13T23:10:00.000-08:00",
+          "flight_number": "3214",
+          "change_planes": true,
+          "stop_minutes": 125,
+          "duration_minutes": 100,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "LAS",
+          "destination": "HOU",
+          "departure_at": "2026-11-14T01:15:00.000-08:00",
+          "arrival_at": "2026-11-14T06:05:00.000-06:00",
+          "flight_number": "4992",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 170,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 9:30PM",
+      "arrival_text": "Arrives 6:05AM",
+      "stops_text": "1 stop",
+      "duration_text": "6h 35m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare 17,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "17,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare 20,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "20,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare 26,500 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "26,500 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare 31,000 PTS. Additional taxes and fees of dollars 5.60 will be added. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "31,000 Points",
+          "points": true,
+          "taxes_text": "+$5.60",
+          "seats_text": ""
+        }
+      ]
+    }
+  ]
+}

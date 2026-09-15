@@ -99,8 +99,9 @@ Run `system:summon` with the `assistant:assistant` agent and tell it to load
 handoff: `appId`, absolute `$REPO`, artifact path, dashboard/API base URL if
 known, the original user intent, expected happy path, and safe sample inputs.
 The verifier must visit or probe the installed app at runtime and return a
-verdict with evidence, issues, gaps, and suggested extra checks. Include that
-verdict in the final handoff.
+verdict with evidence, issues, gaps, and suggested extra checks. It also fails
+an app whose manifest has no `tagline`, so fill that in before handing off.
+Include that verdict in the final handoff.
 
 ## After setup, before writing code
 

@@ -709,7 +709,31 @@
       "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
     },
     "uptimePrefix": "已运行 {{uptime}}",
-    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}"
+    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",
+    "computerUse": {
+      "title": "计算机操作",
+      "description": "通过 OpenCLI 连接的浏览器。上次在线时间记录最近一次确认连接的时间。",
+      "refresh": "刷新",
+      "loadFailed": "无法刷新浏览器连接",
+      "loading": "正在检查浏览器连接…",
+      "daemon": {
+        "running": "运行中",
+        "unavailable": "不可用"
+      },
+      "daemonUnavailable": "无法访问 OpenCLI。浏览器连接状态无法确认。",
+      "empty": "尚未发现浏览器连接。安装 OpenCLI 扩展并将其连接到此实例。",
+      "browser": "浏览器 {{id}}",
+      "profile": "配置文件 {{id}}",
+      "extensionVersion": "扩展 v{{version}}",
+      "status": {
+        "connected": "已连接",
+        "disconnected": "已断开",
+        "unknown": "未知"
+      },
+      "lastSeen": "上次在线",
+      "notReported": "未提供",
+      "installExtension": "安装 OpenCLI 扩展"
+    }
   },
   "system": {
     "title": "系统",

@@ -32,7 +32,7 @@ const dropdownMenuItemVariants = cva(
       size: {
         default: "gap-2 rounded-8 px-2 py-1 text-ui [&_svg:not([class*='size-'])]:size-4",
         touch:
-          "min-h-12 w-full gap-3 rounded-8 px-3 py-2 text-left text-ui transition-colors hover:bg-accent hover:text-accent-foreground not-data-[variant=destructive]:hover:**:text-accent-foreground data-[variant=destructive]:hover:bg-destructive/10 data-[variant=destructive]:hover:text-destructive dark:data-[variant=destructive]:hover:bg-destructive/20 focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring [&_svg:not([class*='size-'])]:size-5",
+          "min-h-12 w-full gap-3 rounded-8 px-3 py-2 text-left text-ui transition-colors hover:bg-accent hover:text-accent-foreground not-data-[variant=destructive]:hover:**:text-accent-foreground data-[variant=destructive]:hover:bg-destructive/10 data-[variant=destructive]:hover:text-destructive dark:data-[variant=destructive]:hover:bg-destructive/20 outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring/50 [&_svg:not([class*='size-'])]:size-5",
       },
     },
     defaultVariants: { size: "default" },

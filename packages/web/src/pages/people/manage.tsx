@@ -274,7 +274,7 @@ function LinkAccountPicker({ person, onClose }: { person: PersonResource; onClos
                             event.stopPropagation();
                             void link(account);
                           }}
-                          className="block max-w-full truncate text-left outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          className="block max-w-full truncate text-left outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring/50"
                         >
                           {account.displayName}
                         </button>

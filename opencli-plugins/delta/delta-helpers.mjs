@@ -88,24 +88,6 @@ export function normalizeSearch(args) {
   };
 }
 
-export function buildSearchUrl(search) {
-  const url = new URL("https://www.delta.com/flightsearch/book-a-flight");
-  const params = {
-    tripType: search.returnDate ? "ROUND_TRIP" : "ONE_WAY",
-    originCity: search.from,
-    destinationCity: search.to,
-    departureDate: search.depart,
-    paxCount: String(search.adults),
-    awardTravel: String(search.miles),
-    cabinFareClass: "BE",
-    searchByCabin: "true",
-    priceSchedule: "price",
-  };
-  if (search.returnDate) params.returnDate = search.returnDate;
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  return url.toString();
-}
-
 export function assertSearchPage(data, search) {
   const url = new URL(data.url);
   if (url.hostname !== "www.delta.com" || url.pathname !== "/flightsearch/search-results")
@@ -146,8 +128,12 @@ export function assertSearchPage(data, search) {
     year: "numeric",
     timeZone: "UTC",
   });
+  const displayedDate = (data.date_heading ?? "").replace(
+    /^([A-Z][a-z]{2}, [A-Z][a-z]{2} )0([1-9], \d{4})$/,
+    "$1$2",
+  );
   if (
-    data.date_heading !== dateLabel ||
+    displayedDate !== dateLabel ||
     data.route_text !== `${search.from} ${search.to}` ||
     data.leg !== (search.returnDate ? "Outbound" : "One Way") ||
     !new RegExp(`^${search.adults} Passengers?$`).test(data.traveler_text)
@@ -325,7 +311,7 @@ export function normalizeResults(data, search, retrievedAt = new Date().toISOStr
         return_date: search.returnDate,
         flight_details: flight.flight_details,
         total_flights: data.total,
-        url: buildSearchUrl(search),
+        url: data.url,
         retrieved_at: retrievedAt,
       });
     }

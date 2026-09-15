@@ -311,6 +311,8 @@ RUN find /opt/rome \
 
 # Copy Caddyfile for public reverse proxy
 COPY Caddyfile /etc/caddy/Caddyfile
+COPY infra/chrome/opencli-policy.json /etc/opt/chrome/policies/managed/rome-opencli.json
+COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencli.json
 
 # Copy entrypoint
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -389,6 +391,7 @@ ENV ROME_CHROME_USER_DATA_DIR=/home/rome/.rome/chrome-profile
 ENV ROME_CHROME_FULLSCREEN=0
 ENV ROME_CHROME_DISABLE_SANDBOX=0
 ENV ROME_CHROME_ENABLE_STEALTH=1
+ENV ROME_ENABLE_CDP_AUTOMATION=false
 ENV ROME_CHROME_TIMEZONE=America/Los_Angeles
 ENV ROME_CHROME_LANG=en-US
 ENV ROME_CHROME_CLIPBOARD_DEFAULT_SETTING=

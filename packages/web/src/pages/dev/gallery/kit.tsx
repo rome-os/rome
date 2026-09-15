@@ -53,7 +53,7 @@ export function Component({
   return (
     <div id={id} data-gallery-component={name} className="scroll-mt-20">
       <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
-        <h3 className="text-body text-foreground">{name}</h3>
+        <h3 className="text-section text-foreground">{name}</h3>
         <code className="font-mono text-aux text-subtle-foreground">{source}</code>
       </div>
       <div className="space-y-3">{children}</div>

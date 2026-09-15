@@ -4,6 +4,7 @@ import {
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
 import { http, HttpResponse } from "msw";
+import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import type {
   AIToolStatus,
   AnthropicCompatibleConfiguredSummary,
@@ -30,6 +31,7 @@ const DAY = 24 * HOUR;
 /** Fixture clock. Anything the UI compares against "now" — a quota reset, a
  *  next run — has to be generated at load or it decays into the past. */
 const fromNow = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString();
+const disconnectedBrowserLastSeen = fromNow(-2 * HOUR);
 
 // ── AI Tools ───────────────────────────────────────────
 
@@ -264,6 +266,30 @@ const favorPacks: FavorRechargePackView[] = [
 ];
 
 export const settingsHandlers = [
+  http.get("/api/computer-use", () =>
+    HttpResponse.json({
+      daemon: { status: "running", version: "1.8.8" },
+      checkedAt: new Date().toISOString(),
+      connections: [
+        {
+          id: "rome-browser",
+          name: "Rome browser",
+          cli: "opencli",
+          status: "connected",
+          version: "1.0.24",
+          lastSeenAt: fromNow(-10_000),
+        },
+        {
+          id: "mac-browser",
+          name: "Mac Chrome",
+          cli: "opencli",
+          status: "disconnected",
+          version: "1.0.24",
+          lastSeenAt: disconnectedBrowserLastSeen,
+        },
+      ],
+    } satisfies ComputerUseStatus),
+  ),
   http.get("/api/ai-tools/status", () =>
     HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
   ),

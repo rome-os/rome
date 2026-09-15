@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,6 +11,38 @@ import { dockerBundleOptions } from "./bundle-docker-core.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
+
+for (const dockerfile of ["Dockerfile", "infra/rome/Dockerfile"]) {
+  test(`${dockerfile} leaves OpenCLI on its browser extension transport`, async () => {
+    const source = await readFile(join(root, dockerfile), "utf8");
+    assert.doesNotMatch(source, /^ENV OPENCLI_CDP_ENDPOINT=/m);
+  });
+}
+
+for (const endpoint of [undefined, "http://chrome:9333"]) {
+  test(`shell startup does not inject a browser endpoint (${endpoint ?? "unset"})`, () => {
+    const output = execFileSync(
+      "bash",
+      [
+        "--noprofile",
+        "--norc",
+        "-c",
+        'source "$1"; if alias opencli >/dev/null 2>&1; then exit 1; fi; exec "$2" -e "process.stdout.write(process.env.OPENCLI_CDP_ENDPOINT ?? String())"',
+        "opencli-env-test",
+        join(root, "scripts/docker/rome-shell-aliases.sh"),
+        process.execPath,
+      ],
+      {
+        env: {
+          PATH: process.env.PATH,
+          ...(endpoint === undefined ? {} : { OPENCLI_CDP_ENDPOINT: endpoint }),
+        },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(output, endpoint ?? "");
+  });
+}
 
 test("the relocated Caddy generator runs without Core workspace dependencies", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "rome-compiled-caddy-"));

@@ -47,9 +47,14 @@ export const Alert = forwardRef<HTMLDivElement, AlertProps>(function Alert(
   );
 });
 
+// 600 on top of the UI role: both rows share a size and line box, and on a
+// tinted variant the same ink, so weight alone marks the headline. 600 rather
+// than 500 because a CJK system fallback ships a Bold face and no Medium.
 export const AlertTitle = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   function AlertTitle({ className, ...rest }, ref) {
-    return <div ref={ref} className={cn("col-start-2 text-ui", className)} {...rest} />;
+    return (
+      <div ref={ref} className={cn("col-start-2 text-ui font-semibold", className)} {...rest} />
+    );
   },
 );
 

@@ -391,6 +391,16 @@
     scrollbar-gutter: stable;
   }
 
+  /* react-remove-scroll, under every Radix overlay, hides the body's overflow
+     and adds the scrollbar's width as a body margin so content does not widen
+     when the track disappears. The gutter reserved above keeps the track, so
+     that margin is pure shift. Both declarations are `!important`; this one
+     wins because a layered important declaration beats an unlayered one, and
+     the library injects its rule unlayered. */
+  body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+
   /* Default routes use normal document flow and document scrolling. */
   body {
     min-height: 100dvh;

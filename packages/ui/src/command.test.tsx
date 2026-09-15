@@ -33,9 +33,15 @@ describe("Command control geometry", () => {
     const input = screen.getByPlaceholderText("Search…");
     const wrapper = input.closest('[data-slot="command-input-wrapper"]');
 
-    expect(wrapper?.classList).toContain("h-[var(--control-h-md)]");
-    expect(wrapper?.classList).toContain("rounded-[var(--control-r-md)]");
-    expect(wrapper?.classList).toContain("px-[var(--control-px-start-md)]");
+    // A `plain` Input carries the md height, inset and glyph reserve and no
+    // radius, border or fill; the wrapper is the header row with its rule.
+    expect(input.classList).toContain("h-[var(--control-h-md)]");
+    expect(input.classList).toContain("px-[var(--control-px-start-md)]");
+    expect(input.classList).toContain("rounded-none");
+    expect(input.classList).toContain("border-transparent");
+    expect(input.dataset.variant).toBe("plain");
+    expect(wrapper?.classList).toContain("border-b");
+    expect(wrapper?.classList).not.toContain("h-[var(--control-h-md)]");
     expect(input.classList).not.toContain("py-3");
   });
 
@@ -44,21 +50,22 @@ describe("Command control geometry", () => {
   // focus here for the whole life of the surface, so one would never turn off.
   // Asserting the absence keeps a future "every Control gets the focus edge"
   // pass from reinstating it silently. See docs/ui/component-roles.md.
-  it("paints no focus or invalid edge on the input row", () => {
+  it("paints no focus edge on the input row", () => {
     render(
       <Command>
         <CommandInput placeholder="Search…" />
       </Command>,
     );
 
-    const wrapper = screen
-      .getByPlaceholderText("Search…")
-      .closest('[data-slot="command-input-wrapper"]');
+    const input = screen.getByPlaceholderText("Search…");
+    const wrapper = input.closest('[data-slot="command-input-wrapper"]');
 
-    for (const cls of Array.from(wrapper?.classList ?? [])) {
+    // cmdk never marks its field invalid, so the inherited invalid edge never
+    // fires; only the focus edge is asserted absent.
+    for (const cls of [...Array.from(wrapper?.classList ?? []), ...Array.from(input.classList)]) {
       expect(cls).not.toContain("outline-ring");
-      expect(cls).not.toContain("outline-destructive");
     }
+    expect(input.classList).toContain("focus-visible:outline-transparent");
   });
 
   it("lets caller classes override the outer Control geometry", () => {

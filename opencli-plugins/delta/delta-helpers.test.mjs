@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   arrivalDate,
   assertSearchPage,
-  buildSearchUrl,
   cabinOf,
   normalizeResults,
   normalizeSearch,
@@ -17,20 +16,12 @@ const fixture = () => JSON.parse(readFileSync(new URL("./fixtures/miles.json", i
 const args = { from: "SFO", to: "JFK", depart: "2026-11-13", adults: 2, miles: true };
 const search = (patch = {}) => normalizeSearch({ ...args, ...patch });
 
-test("normalizes route and builds separate cash and award deep links", () => {
-  for (const miles of [false, true]) {
-    const s = search({ from: " sfo ", to: "jfk", miles, return: "2026-11-20" });
-    const url = new URL(buildSearchUrl(s));
-    assert.equal(url.origin, "https://www.delta.com");
-    assert.equal(url.searchParams.get("awardTravel"), String(miles));
-    assert.equal(url.searchParams.get("paxCount"), "2");
-    assert.equal(url.searchParams.get("returnDate"), "2026-11-20");
-    assert.equal(url.searchParams.get("tripType"), "ROUND_TRIP");
-    assert.equal(url.searchParams.get("originCity"), "SFO");
-  }
-  const url = new URL(buildSearchUrl(search()));
-  assert.equal(url.searchParams.get("tripType"), "ONE_WAY");
-  assert.equal(url.searchParams.has("returnDate"), false);
+test("normalizes route and preserves the airline-generated result URL", () => {
+  const s = search({ from: " sfo ", to: "jfk" });
+  assert.equal(s.from, "SFO");
+  assert.equal(s.to, "JFK");
+  const data = fixture();
+  assert.equal(normalizeResults(data, s)[0].url, data.url);
 });
 
 for (const [name, patch] of Object.entries({
@@ -151,6 +142,47 @@ test("mixed cabins do not enter economy and can be excluded", () => {
     ),
   );
 });
+
+for (const day of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 31]) {
+  for (const dayFormat of ["numeric", "2-digit"]) {
+    test(`accepts displayed day ${day} with ${dayFormat} formatting`, () => {
+      const depart = `2026-10-${String(day).padStart(2, "0")}`;
+      const data = fixture();
+      data.search.segments[0].departure_date = depart;
+      data.date_heading = new Date(`${depart}T00:00:00Z`).toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: dayFormat,
+        year: "numeric",
+        timeZone: "UTC",
+      });
+      assert.doesNotThrow(() => assertSearchPage(data, search({ depart })));
+    });
+  }
+}
+
+for (const dateHeading of [
+  "Tue, Oct 06, 2026",
+  "Mon, Nov 05, 2026",
+  "Mon, Oct 05, 2027",
+  "Tue, Oct 05, 2026",
+  "Mon, Oct 005, 2026",
+  "Mon, Oct 00, 2026",
+  "Mon, Oct 05, 2026 extra",
+  "",
+  null,
+  undefined,
+]) {
+  test(`rejects mismatched or malformed displayed date: ${dateHeading}`, () => {
+    const data = fixture();
+    data.search.segments[0].departure_date = "2026-10-05";
+    data.date_heading = dateHeading;
+    assert.throws(
+      () => assertSearchPage(data, search({ depart: "2026-10-05" })),
+      /displayed search does not match/,
+    );
+  });
+}
 
 for (const [name, mutate] of Object.entries({
   mode: (d) => (d.price_mode = "$USD"),

@@ -1,9 +1,13 @@
+// The named identities Rome offers a new agent. Onboarding hands one to the
+// guardian as the default name and purpose, and the profile step lets them
+// reroll or edit it. The list is the single source for every setup path.
+
 export interface AgentPreset {
   name: string;
   purpose: string;
 }
 
-export const AGENT_PRESETS: AgentPreset[] = [
+export const AGENT_PRESETS: readonly AgentPreset[] = [
   {
     name: "Atlas",
     purpose:
@@ -156,6 +160,7 @@ export const AGENT_PRESETS: AgentPreset[] = [
   },
 ];
 
-export function getRandomAgentPreset(): AgentPreset {
-  return AGENT_PRESETS[Math.floor(Math.random() * AGENT_PRESETS.length)];
+export function pickRandomAgentPreset(random: () => number = Math.random): AgentPreset {
+  const index = Math.min(AGENT_PRESETS.length - 1, Math.floor(random() * AGENT_PRESETS.length));
+  return AGENT_PRESETS[index];
 }

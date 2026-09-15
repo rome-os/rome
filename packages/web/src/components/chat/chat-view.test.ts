@@ -123,6 +123,36 @@ describe("buildChatView", () => {
     });
   });
 
+  const aiToolsCard = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "core",
+    render: { kind: "inline", componentId: "ai-tools-card", builtin: true, props: {} },
+  });
+
+  // The connect-AI card resolves itself once a provider signs in. Typing in the
+  // composer re-shows it, so an earlier copy left open would submit a second
+  // `{ connected: true }` and push the welcome script past the step the
+  // guardian is on.
+  it("auto-dismisses an open connect-AI card when the guardian replies in chat", () => {
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "assistant", "t1", [aiToolsCard("c_0")]),
+          mk(MAIN, "user", "t2", [{ type: "text", content: "what counts as connected?" }]),
+          mk(MAIN, "assistant", "t3", [aiToolsCard("c_1")]),
+        ],
+      ],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
+    expect(v.interactionResults.get(interactionResultKey(MAIN, "c_0"))).toEqual({
+      dismissed: true,
+    });
+    // The card the guardian is actually looking at stays interactive.
+    expect(v.interactionResults.get(interactionResultKey(MAIN, "c_1"))).toBeUndefined();
+  });
+
   it("keeps a real card answer over auto-dismiss, and leaves unanswered cards open", () => {
     const messages = new Map<string, ChatMessage[]>([
       [

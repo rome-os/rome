@@ -7,8 +7,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { createProgressRepository } from "../../db/repositories/progress.js";
 import { runTurn, type TurnReply, type WelcomeEffects } from "./script.js";
-import { emitComponent, emitAskQuestion } from "./component.js";
-import { checkChatGptLogin, openChatGptTab, scrapeChatGpt } from "./chatgpt.js";
+import { emitComponent, emitAskQuestion, emitConnectAi } from "./component.js";
 import type { SummonResult } from "./script.js";
 import { copyFor } from "./copy.js";
 import { normalizeWelcomeLocale, type WelcomeLocale } from "../../locale.js";
@@ -94,10 +93,11 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
   /** Turn a state-machine reply into emitted events.
    *  - `text`: a final block + terminal `result` (the persisted assistant row).
    *  - `component`: an optional commentary lead-in + one of the app's own inline
-   *    components (intro-choice / browser-step / idea-picker / completion-card).
+   *    components (name-card / scout-suggestions / idea-picker).
    *  - `ask`: an optional lead-in + the host's built-in ask_question card.
-   *  A `component` / `ask` turn emits NO terminal `result` — it parks, and the
-   *  card's result arrives as the next turn. */
+   *  - `connect_ai`: an optional lead-in + the host's built-in AI tools card.
+   *  A parked turn emits NO terminal `result` — the card's result arrives as
+   *  the next turn. */
   private async emitReply(ctx: TurnMiddlewareContext, reply: TurnReply): Promise<void> {
     const emit = (event: AgentMessage) => ctx.emit(event);
     if (reply.kind === "text") {
@@ -110,6 +110,8 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
     }
     if (reply.kind === "ask") {
       emitAskQuestion(emit, reply.questions);
+    } else if (reply.kind === "connect_ai") {
+      emitConnectAi(emit);
     } else {
       emitComponent(emit, reply.componentId, reply.props);
     }
@@ -130,22 +132,46 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
           return "Rome";
         }
       },
+      getGuardianName: async () => {
+        try {
+          const value = await appContext.repositories.settings.get<string>("guardianName");
+          return (typeof value === "string" && value.trim()) || null;
+        } catch {
+          return null;
+        }
+      },
+      writeNames: (names) => this.writeNames(names),
       getLocale: () => this.getLocale(),
       // Intermediate narration, typed out: a commentary block streams in word by
       // word (text_delta previews) then persists, so the UI feels alive while a
-      // slow step (e.g. the ChatGPT scrape) runs. Awaited by callers to keep
+      // slow step (the memory fold) runs. Awaited by callers to keep
       // ordering against the emits that follow.
       say: (text: string) => typeOut((event) => ctx.emit(event), text, "commentary"),
       summon: (agentName, prompt) => this.summon(agentName, prompt),
-      chatgpt: {
-        openTab: () => openChatGptTab(),
-        checkLogin: () => checkChatGptLogin(),
-        scrape: () => scrapeChatGpt(),
-      },
-      email: {
-        send: (to, subject, text) => this.sendEmail(to, subject, text),
-      },
     };
+  }
+
+  /** Write the confirmed names through the host's guardian profile path, which
+   *  updates the settings and the guardian person row together. Without that
+   *  repository (an older host) the settings alone are written. */
+  private async writeNames(names: {
+    guardianName: string;
+    agentName: string;
+  }): Promise<{ ok: boolean }> {
+    const appContext = this.deps.appContext;
+    if (!appContext) return { ok: false };
+    try {
+      const profile = appContext.repositories.guardianProfile;
+      if (profile) return await profile.write(names);
+      await appContext.repositories.settings.set("guardianName", names.guardianName);
+      await appContext.repositories.settings.set("agentName", names.agentName);
+      return { ok: true };
+    } catch (err) {
+      this.deps.logger.warn("welcome-to-rome could not write the names", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { ok: false };
+    }
   }
 
   /** Read the server-side language selected by the guardian. */
@@ -158,26 +184,6 @@ class WelcomeTurnMiddleware implements TurnMiddlewareHook {
       );
     } catch {
       return "en";
-    }
-  }
-
-  /** Send the deterministic onboarding hello through the email action. */
-  private async sendEmail(to: string, subject: string, text: string): Promise<{ ok: boolean }> {
-    const appContext = this.deps.appContext;
-    if (!appContext) return { ok: false };
-    try {
-      const outcome = await appContext.runAction("send_message", {
-        channel: "email",
-        to,
-        subject,
-        text,
-      });
-      return { ok: outcome.status === "ok" };
-    } catch (err) {
-      this.deps.logger.warn("welcome-to-rome hello email failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return { ok: false };
     }
   }
 

@@ -24,6 +24,7 @@ import { Avatar } from "@/pages/people/avatar";
 import { CHANNEL_META, ChannelGlyph, channelLabel } from "@/pages/people/channel-meta";
 import { FILTER_ORDER, type PeopleRow, type RowLevel } from "@/pages/people/people-model";
 import { DirectoryRow, StreamRow, UnknownRow, levelLabelKey } from "@/pages/people/rows";
+import { List } from "@/components/ui/list-row";
 
 // Live specimens for the People-page design note (people-page.mdx).
 //
@@ -131,7 +132,23 @@ function RowMenu({ row: subject }: { row: PeopleRow }) {
   );
 }
 
-function Frame({ children, label }: { children: React.ReactNode; label?: string }) {
+/**
+ * The chrome around one specimen. The padding sits on the frame rather than on
+ * the `List`, which owns the hairline between rows and nothing else.
+ *
+ * `grouped` is for a specimen whose children are sections rather than rows: it
+ * leaves the `List` to the caller, so each group separates its own rows the way
+ * the live page does.
+ */
+function Frame({
+  children,
+  label,
+  grouped = false,
+}: {
+  children: React.ReactNode;
+  label?: string;
+  grouped?: boolean;
+}) {
   return (
     <div className="overflow-hidden rounded-12 border border-border bg-background">
       {label && (
@@ -139,7 +156,7 @@ function Frame({ children, label }: { children: React.ReactNode; label?: string 
           {label}
         </div>
       )}
-      <div className="p-2">{children}</div>
+      <div className="p-2">{grouped ? children : <List>{children}</List>}</div>
     </div>
   );
 }
@@ -308,7 +325,7 @@ export function DirectoryDemo() {
   const { t } = useTranslation("people");
   const [selected, setSelected] = useState<string[]>([]);
   return (
-    <Frame label="Directory">
+    <Frame label="Directory" grouped>
       {DIRECTORY.map((group) => (
         <div key={group.level} className="mb-2 last:mb-0">
           <div className="flex items-baseline gap-2 px-2 py-1">
@@ -317,22 +334,24 @@ export function DirectoryDemo() {
               {group.total}
             </span>
           </div>
-          {group.rows.map((subject) => (
-            <DirectoryRow
-              key={subject.id}
-              row={subject}
-              selected={selected.includes(subject.id)}
-              onOpen={() => {}}
-              onToggleSelect={() =>
-                setSelected((prev) =>
-                  prev.includes(subject.id)
-                    ? prev.filter((id) => id !== subject.id)
-                    : [...prev, subject.id],
-                )
-              }
-              actions={<RowMenu row={subject} />}
-            />
-          ))}
+          <List>
+            {group.rows.map((subject) => (
+              <DirectoryRow
+                key={subject.id}
+                row={subject}
+                selected={selected.includes(subject.id)}
+                onOpen={() => {}}
+                onToggleSelect={() =>
+                  setSelected((prev) =>
+                    prev.includes(subject.id)
+                      ? prev.filter((id) => id !== subject.id)
+                      : [...prev, subject.id],
+                  )
+                }
+                actions={<RowMenu row={subject} />}
+              />
+            ))}
+          </List>
         </div>
       ))}
       {/* The bulk bar is still ahead: one choice applied to every selected

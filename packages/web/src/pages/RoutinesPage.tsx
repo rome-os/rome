@@ -67,7 +67,7 @@ import { Spinner } from "@rome-os/ui/spinner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import { artifactLocalName } from "@/lib/artifact-name";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { describeTrigger, describeOutcome, relativeTime } from "@/lib/routine-language";
 import { useActionCatalog, type ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { buildArgsTemplate, describeArgType, evaluateArgsText } from "@/lib/action-args";
@@ -2220,15 +2220,15 @@ export default function RoutinesPage() {
         {/* Header sits above the load switch, so a slow or failed list read
             leaves the page identity and the create action in place instead of
             blanking the whole route. */}
-        <header className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="text-title text-foreground">{t("header.title")}</h1>
-          </div>
-          <Button onClick={() => setShowCreate(true)} className="flex-shrink-0">
-            <Plus className="size-4" aria-hidden />
-            <span className="hidden sm:inline">{t("header.createButton")}</span>
-          </Button>
-        </header>
+        <PageHeader
+          title={t("header.title")}
+          actions={
+            <Button onClick={() => setShowCreate(true)}>
+              <Plus className="size-4" aria-hidden />
+              <span className="hidden sm:inline">{t("header.createButton")}</span>
+            </Button>
+          }
+        />
 
         {actionError && (
           <div

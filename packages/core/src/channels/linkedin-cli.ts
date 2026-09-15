@@ -42,8 +42,7 @@ function cdpEndpoint(): string {
 
 /**
  * The production runner: `opencli --cdp-endpoint <server-chrome> <args> -f json`.
- * Resolution mirrors the in-container shell alias (scripts/docker/
- * rome-shell-aliases.sh) so the channel sees the same browser agents do.
+ * Uses Rome's configured Chrome host and port.
  * A non-zero exit is NOT a rejection here — callers classify via the parsers
  * below, which need the captured output either way.
  */

@@ -62,17 +62,21 @@ export class RomeAppManifestPlugin implements Rspack.RspackPluginInstance {
   }
 }
 
-function findEntryChunk(compilation: Rspack.Compilation): Rspack.Chunk | null {
-  // Runtime chunks also satisfy canBeInitial(), and cached builds can change
-  // compilation.chunks iteration order. Match the group's entry chunk so
-  // manifest.entry cannot select a runtime file.
-  return (
-    [...compilation.chunks].find((chunk) =>
-      [...chunk.groupsIterable].some(
-        (group) => group.isInitial() && group.getEntrypointChunk() === chunk,
-      ),
-    ) ?? null
-  );
+/** The chunk holding the generated entry module, which is the one that exports
+ *  `mount`. Read it off the entrypoint rather than scanning `compilation.chunks`
+ *  for the first initial chunk: an app whose build splits a runtime chunk out —
+ *  any app with a dynamic import — has two initial chunks, and the runtime one
+ *  exports nothing. Which of them came first depended on the module graph and on
+ *  whether the build was cached, so a source edit could silently repoint the
+ *  manifest at the runtime chunk and the host would fail to mount the app. */
+export function findEntryChunk(compilation: Rspack.Compilation): Rspack.Chunk | null {
+  for (const entrypoint of compilation.entrypoints.values()) {
+    const chunk = entrypoint.getEntrypointChunk();
+    if (chunk) {
+      return chunk;
+    }
+  }
+  return null;
 }
 
 function pickJsFile(files: ReadonlySet<string>): string | null {

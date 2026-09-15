@@ -1,0 +1,814 @@
+<html lang="en">
+<head>
+</head>
+<body>
+<app-modify-search>
+<app-modify-search-header>
+<span class="origin">JFK</span>
+<span class="destination"> LHR,</span>
+<span class="passenger-count">2</span>
+</app-modify-search-header>
+<mat-select role="combobox" aria-haspopup="listbox" name="tripType" class="mat-mdc-select ng-untouched ng-pristine ng-valid" aria-labelledby="mat-select-value-0" id="mat-select-0" tabindex="0" aria-expanded="false" aria-required="false" aria-disabled="false" aria-invalid="false">
+<div cdk-overlay-origin="" class="mat-mdc-select-trigger">
+<div class="mat-mdc-select-value" id="mat-select-value-0">
+<span class="mat-mdc-select-value-text">
+<span class="mat-mdc-select-min-line">Round trip</span>
+</span>
+</div>
+<div class="mat-mdc-select-arrow-wrapper">
+<div class="mat-mdc-select-arrow">
+</div>
+</div>
+</div>
+</mat-select>
+<input type="checkbox" id="redeem-miles" name="redeemMiles" class="ng-untouched ng-pristine ng-valid" value="on" checked="">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Departure airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matOriginAirport" name="orig" aria-invalid="false" aria-required="false" value="JFK">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Arrival airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matDestinationAirport" name="dest" aria-invalid="false" aria-required="false" value="LHR">
+<input autocomplete="off" type="text" class="auto-growing-input agc-date-input-range-display agc-date-input-full-date" spellcheck="false" placeholder="mm/dd/yy" id="date-input-first-agc-date-input-0" aria-labelledby="date-accessible-label-first-agc-date-input-0" aria-label="Depart date, press Enter to open calendar" aria-describedby="date-input-describedby-agc-date-input-0" aria-invalid="false" maxlength="8" style="width: 69px;" value="11/13/26">
+<input autocomplete="off" type="text" class="auto-growing-input agc-date-input-range-display agc-date-input-full-date" spellcheck="false" placeholder="mm/dd/yy" id="date-input-second-agc-date-input-0" aria-labelledby="date-accessible-label-second-agc-date-input-0" aria-label="Return date, press Enter to open calendar" aria-describedby="date-input-describedby-agc-date-input-0" aria-invalid="false" maxlength="8" style="width: 69px;" value="11/20/26">
+<div data-passengers="[{&quot;type&quot;:&quot;adult&quot;,&quot;count&quot;:2}]">
+</div>
+</app-modify-search>
+<app-depart-return-header-desktop>
+<div class="pad-top-xs hide-for-small-only desktop-only">
+<h2>
+<em>
+<app-depart-return-multicity-text>
+<span id="flight-direction-text">DEPART</span>
+</app-depart-return-multicity-text>
+</em>
+<div class="city-pair"> New York, NY to London, United Kingdom </div>
+</h2>
+<h3 class="date">Friday, November 13, 2026</h3>
+<div class="aa-flight-info">
+<span aria-hidden="true" class="icon-error icon-small">
+</span> American Airlines flights may be listed first. </div>
+</div>
+</app-depart-return-header-desktop>
+
+<app-results-grid-desktop>
+<div tabindex="-1" class="results-desktop">
+<div class="results-header">
+<app-filter-container id="filter-container" tabindex="-1">
+<div class="filter-container">
+<h2 id="flights-by-heading" class="show-for-sr">
+<span>Filter flights by </span>
+<span class="filter-flights-by-stops">Stops, </span>
+<span class="filter-flights-by-airlines">Airlines, </span>
+</h2>
+<div class="filters-row">
+<div aria-hidden="true" class="filter-by">Filter by:</div>
+<div class="pills">
+<app-filter-stops>
+<div class="pill-container">
+<button type="button" id="btn-stops-filter" class="pill active" aria-haspopup="dialog">
+<div aria-hidden="true" class="pill-text">Stops</div>
+<span class="show-for-sr pill-text">Filter flights by Stops</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-stops>
+<app-filter-airlines>
+<div class="pill-container">
+<button type="button" id="btn-airlines-filter" class="pill active" aria-haspopup="dialog">
+<div aria-hidden="true" class="pill-text"> Airlines </div>
+<span class="show-for-sr pill-text">Filter flights by Airlines</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-airlines>
+</div>
+<div class="result-clear">
+<span role="status" aria-live="polite" aria-atomic="true" class="result-count">5 results</span>
+</div>
+<div class="clearfix">
+</div>
+</div>
+</div>
+</app-filter-container>
+<div role="group" aria-label="Sorting options" class="cabin-header-row">
+<span id="sort-screen-reader-text" role="status" aria-live="polite" aria-atomic="true" class="show-for-sr">
+</span>
+<div id="sort-by">
+<div class="sort-columns">
+<div id="sort-by-departure">
+<button type="button" id="btn-sort-by-departure">
+<span id="screen-reader-departure" class="show-for-sr"> Sort by depart, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text"> Depart </div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-arrival">
+<button type="button" id="btn-sort-by-arrival">
+<span id="screen-reader-arrival" class="show-for-sr"> Sort by arrive, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text"> Arrive </div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-duration">
+<button type="button" id="btn-sort-by-duration">
+<span id="screen-reader-duration" class="show-for-sr"> Sort by duration, not sorted, press to sort short to long </span>
+<div aria-hidden="true" class="sort-text"> Duration </div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="cabin-headers">
+<div class="cabin-headers-inner">
+<div class="cabin-header cabin-coach cabin-size-4">
+<div class="product-and-sort">
+<div class="product-tooltip">
+<app-cabin-tooltip>
+<button type="button" apptooltip="" aria-expanded="false" aria-haspopup="dialog" class="cabin-tooltip-button coach text-left">Main</button>
+</app-cabin-tooltip>
+</div>
+<div class="product-arrows">
+<button type="button" id="btn-sort-by-product_price_0">
+<span class="show-for-sr" id="screen-reader-product_price_0"> Sort by Main Cabin, not sorted, press to sort low to high </span>
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="cabin-header cabin-premium_economy cabin-size-4">
+<div class="product-and-sort">
+<div class="product-tooltip">
+<app-cabin-tooltip>
+<button type="button" apptooltip="" aria-expanded="false" aria-haspopup="dialog" class="cabin-tooltip-button premium_economy text-left">Premium Economy</button>
+</app-cabin-tooltip>
+</div>
+<div class="product-arrows">
+<button type="button" id="btn-sort-by-product_price_1">
+<span class="show-for-sr" id="screen-reader-product_price_1"> Sort by Premium Economy Fare Products, not sorted, press to sort prices low to high </span>
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="cabin-header cabin-business cabin-size-4">
+<div class="product-and-sort">
+<div class="product-tooltip">
+<app-cabin-tooltip>
+<button type="button" apptooltip="" aria-expanded="false" aria-haspopup="dialog" class="business cabin-tooltip-button text-left">Business</button>
+</app-cabin-tooltip>
+</div>
+<div class="product-arrows">
+<button type="button" id="btn-sort-by-product_price_2">
+<span class="show-for-sr" id="screen-reader-product_price_2"> Sort by Business, not sorted, press to sort low to high </span>
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="cabin-header cabin-first cabin-size-4">
+<div class="product-and-sort">
+<div class="product-tooltip">
+<app-cabin-tooltip>
+<button type="button" apptooltip="" aria-expanded="false" aria-haspopup="dialog" class="cabin-tooltip-button first text-left">First</button>
+</app-cabin-tooltip>
+</div>
+<div class="product-arrows">
+<button type="button" id="btn-sort-by-product_price_3">
+<span class="show-for-sr" id="screen-reader-product_price_3"> Sort by First, not sorted, press to sort low to high </span>
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="results-grid-container">
+<div class="flight-row">
+<div tabindex="-1" class="slice-column" id="flight-details-0">
+<app-slice-info-desktop>
+<div class="slice-info">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="flt-times">8:05 AM</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="flt-times"> 8:00 PM </div>
+</div>
+<div class="duration-stops">
+<div class="duration">6h 55m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details flight-number"> BA 178 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 777-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+<p class="operated-by-desktop">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by British Airways </div>
+<p>
+</p>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="detailsDialogLink btn-link">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 8:05 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-slice-info-desktop>
+</div>
+<div class="products-column">
+<app-available-products-desktop>
+<div class="products-row">
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight0-product0" data-slice="0" data-flightstr="BA178" data-product="Main">
+<span class="show-for-sr hidden-product-type" data-slice="0" data-flightstr="BA178" data-product="Main">Main</span>
+<div class="premium" data-slice="0" data-flightstr="BA178" data-product="Main">
+</div>
+<div class="trip-type regular" data-slice="0" data-flightstr="BA178" data-product="Main">Round trip</div>
+<app-choose-flights-price-desktop data-slice="0" data-flightstr="BA178" data-product="Main">
+<span class="per-pax-amount" data-slice="0" data-flightstr="BA178" data-product="Main">45K</span>
+<div class="per-pax-addon" data-slice="0" data-flightstr="BA178" data-product="Main">+ $549.03</div>
+<span class="show-for-sr hidden-flight-details" data-slice="0" data-flightstr="BA178" data-product="Main">Round trip Main 45K + $549.03 for JFK to LHR, departing at 8:05 AM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight0-product1">Not available</div>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight0-product2">Not available</div>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight0-product3">Not available</div>
+</div>
+</div>
+</app-available-products-desktop>
+</div>
+<div class="divider margin-bottom-xs margin-top-xxs">
+</div>
+</div>
+<div class="flight-row">
+<div tabindex="-1" class="slice-column" id="flight-details-1">
+<app-slice-info-desktop>
+<div class="slice-info">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="flt-times">10:10 AM</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="flt-times"> 10:10 PM </div>
+</div>
+<div class="duration-stops">
+<div class="duration">7h 0m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details flight-number"> AA 142 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 772-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="detailsDialogLink btn-link">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="viewSeatsLink btn-link">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-slice-info-desktop>
+</div>
+<div class="products-column">
+<app-available-products-desktop>
+<div class="products-row">
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight1-product0" data-slice="1" data-flightstr="AA142" data-product="Main">
+<span class="show-for-sr hidden-product-type" data-slice="1" data-flightstr="AA142" data-product="Main">Main</span>
+<div class="premium" data-slice="1" data-flightstr="AA142" data-product="Main">
+</div>
+<div class="trip-type regular" data-slice="1" data-flightstr="AA142" data-product="Main">Round trip</div>
+<app-choose-flights-price-desktop data-slice="1" data-flightstr="AA142" data-product="Main">
+<span class="per-pax-amount" data-slice="1" data-flightstr="AA142" data-product="Main">52.5K</span>
+<div class="per-pax-addon" data-slice="1" data-flightstr="AA142" data-product="Main">+ $222.73</div>
+<span class="show-for-sr hidden-flight-details" data-slice="1" data-flightstr="AA142" data-product="Main">Round trip Main 52.5K + $222.73 for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight1-product1" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">
+<span class="show-for-sr hidden-product-type" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">Premium Economy</span>
+<div class="premium" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">
+</div>
+<div class="trip-type regular" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">Round trip</div>
+<app-choose-flights-price-desktop data-slice="1" data-flightstr="AA142" data-product="Premium Economy">
+<span class="per-pax-amount" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">122K</span>
+<div class="per-pax-addon" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">+ $1,000.53</div>
+<span class="show-for-sr hidden-flight-details" data-slice="1" data-flightstr="AA142" data-product="Premium Economy">Round trip Premium Economy 122K + $1,000.53 for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight1-product2" data-slice="1" data-flightstr="AA142" data-product="Business">
+<span class="show-for-sr hidden-product-type" data-slice="1" data-flightstr="AA142" data-product="Business">Business</span>
+<div class="premium" data-slice="1" data-flightstr="AA142" data-product="Business">
+</div>
+<div class="trip-type regular" data-slice="1" data-flightstr="AA142" data-product="Business">Round trip</div>
+<app-choose-flights-price-desktop data-slice="1" data-flightstr="AA142" data-product="Business">
+<span class="per-pax-amount" data-slice="1" data-flightstr="AA142" data-product="Business">407.5K</span>
+<div class="per-pax-addon" data-slice="1" data-flightstr="AA142" data-product="Business">+ $415.13</div>
+<span class="show-for-sr hidden-flight-details" data-slice="1" data-flightstr="AA142" data-product="Business">Round trip Business 407.5K + $415.13 for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight1-product3">Not available</div>
+</div>
+</div>
+</app-available-products-desktop>
+</div>
+<div class="divider margin-bottom-xs margin-top-xxs">
+</div>
+</div>
+<div class="flight-row">
+<div tabindex="-1" class="slice-column" id="flight-details-2">
+<app-slice-info-desktop>
+<div class="slice-info">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="flt-times">5:50 PM</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="flt-times"> 5:50 AM <span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration-stops">
+<div class="duration">7h 0m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details flight-number"> BA 180 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 777-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+<p class="operated-by-desktop">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by British Airways </div>
+<p>
+</p>
+</div>
+</div>
+<div class="alerts">
+<span class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel</span>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="detailsDialogLink btn-link">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 5:50 PM Nonstop</span>
+</button>
+</div>
+</div>
+</app-slice-info-desktop>
+</div>
+<div class="products-column">
+<app-available-products-desktop>
+<div class="products-row">
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight2-product0" data-slice="2" data-flightstr="BA180" data-product="Main">
+<span class="show-for-sr hidden-product-type" data-slice="2" data-flightstr="BA180" data-product="Main">Main</span>
+<div class="premium" data-slice="2" data-flightstr="BA180" data-product="Main">
+</div>
+<div class="trip-type regular" data-slice="2" data-flightstr="BA180" data-product="Main">Round trip</div>
+<app-choose-flights-price-desktop data-slice="2" data-flightstr="BA180" data-product="Main">
+<span class="per-pax-amount" data-slice="2" data-flightstr="BA180" data-product="Main">45K</span>
+<div class="per-pax-addon" data-slice="2" data-flightstr="BA180" data-product="Main">+ $549.03</div>
+<span class="show-for-sr hidden-flight-details" data-slice="2" data-flightstr="BA180" data-product="Main">Round trip Main 45K + $549.03 for JFK to LHR, departing at 5:50 PM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight2-product1">Not available</div>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight2-product2">Not available</div>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<div class="not-available regular" id="flight2-product3">Not available</div>
+</div>
+</div>
+</app-available-products-desktop>
+</div>
+<div class="divider margin-bottom-xs margin-top-xxs">
+</div>
+</div>
+<div class="flight-row">
+<div tabindex="-1" class="slice-column" id="flight-details-4">
+<app-slice-info-desktop>
+<div class="slice-info">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="flt-times">6:25 PM</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="flt-times"> 6:20 AM <span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration-stops">
+<div class="duration">6h 55m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details flight-number"> AA 100 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 77W-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+<div class="alerts">
+<span class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel</span>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="detailsDialogLink btn-link">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="viewSeatsLink btn-link">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</button>
+</div>
+</div>
+</app-slice-info-desktop>
+</div>
+<div class="products-column">
+<app-available-products-desktop>
+<div class="products-row">
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight4-product0" data-slice="4" data-flightstr="AA100" data-product="Main">
+<span class="show-for-sr hidden-product-type" data-slice="4" data-flightstr="AA100" data-product="Main">Main</span>
+<div class="premium" data-slice="4" data-flightstr="AA100" data-product="Main">
+</div>
+<div class="trip-type regular" data-slice="4" data-flightstr="AA100" data-product="Main">Round trip</div>
+<app-choose-flights-price-desktop data-slice="4" data-flightstr="AA100" data-product="Main">
+<span class="per-pax-amount" data-slice="4" data-flightstr="AA100" data-product="Main">52.5K</span>
+<div class="per-pax-addon" data-slice="4" data-flightstr="AA100" data-product="Main">+ $222.73</div>
+<span class="show-for-sr hidden-flight-details" data-slice="4" data-flightstr="AA100" data-product="Main">Round trip Main 52.5K + $222.73 for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight4-product1" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">
+<span class="show-for-sr hidden-product-type" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">Premium Economy</span>
+<div class="premium" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">
+</div>
+<div class="trip-type regular" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">Round trip</div>
+<app-choose-flights-price-desktop data-slice="4" data-flightstr="AA100" data-product="Premium Economy">
+<span class="per-pax-amount" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">215.5K</span>
+<div class="per-pax-addon" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">+ $1,000.53</div>
+<span class="show-for-sr hidden-flight-details" data-slice="4" data-flightstr="AA100" data-product="Premium Economy">Round trip Premium Economy 215.5K + $1,000.53 for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight4-product2" data-slice="4" data-flightstr="AA100" data-product="Business">
+<span class="show-for-sr hidden-product-type" data-slice="4" data-flightstr="AA100" data-product="Business">Business</span>
+<div class="premium" data-slice="4" data-flightstr="AA100" data-product="Business">
+</div>
+<div class="trip-type regular" data-slice="4" data-flightstr="AA100" data-product="Business">Round trip</div>
+<app-choose-flights-price-desktop data-slice="4" data-flightstr="AA100" data-product="Business">
+<span class="per-pax-amount" data-slice="4" data-flightstr="AA100" data-product="Business">369K</span>
+<div class="per-pax-addon" data-slice="4" data-flightstr="AA100" data-product="Business">+ $415.13</div>
+<span class="show-for-sr hidden-flight-details" data-slice="4" data-flightstr="AA100" data-product="Business">Round trip Business 369K + $415.13 for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight4-product3" data-slice="4" data-flightstr="AA100" data-product="First">
+<span class="show-for-sr hidden-product-type" data-slice="4" data-flightstr="AA100" data-product="First">First</span>
+<div class="premium" data-slice="4" data-flightstr="AA100" data-product="First">
+</div>
+<div class="trip-type regular" data-slice="4" data-flightstr="AA100" data-product="First">Round trip</div>
+<app-choose-flights-price-desktop data-slice="4" data-flightstr="AA100" data-product="First">
+<span class="per-pax-amount" data-slice="4" data-flightstr="AA100" data-product="First">379K</span>
+<div class="per-pax-addon" data-slice="4" data-flightstr="AA100" data-product="First">+ $415.13</div>
+<span class="show-for-sr hidden-flight-details" data-slice="4" data-flightstr="AA100" data-product="First">Round trip First 379K + $415.13 for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+</div>
+</app-available-products-desktop>
+</div>
+<div class="divider margin-bottom-xs margin-top-xxs">
+</div>
+</div>
+<div class="flight-row">
+<div tabindex="-1" class="slice-column" id="flight-details-12">
+<app-slice-info-desktop>
+<div class="slice-info">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="flt-times">6:00 AM</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="flt-times"> 12:05 PM <span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration-stops">
+<div class="duration">25h 5m</div>
+<div class="stops">
+<app-stops-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-stops">1 stop<span class="show-for-sr">, MIA, Miami International</span>
+</button>
+</app-stops-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details cities">JFK - MIA</span>
+<span aria-hidden="true" class="icon-square flight-information">
+</span>
+<span class="connecting-flt-details flight-number"> AA 688 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 738-Boeing 737 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<span class="connecting-flt-details cities">MIA - LHR</span>
+<span aria-hidden="true" class="icon-square flight-information">
+</span>
+<span class="connecting-flt-details flight-number"> AA 56 </span>
+<span aria-hidden="true" class="icon-square flight-number-square">
+</span>
+<span class="connecting-flt-details aircraft-name"> 77W-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+<div class="alerts">
+<span class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel<span>,</span> Extended layover<span>,</span> The class of service you searched may not be available on one or more flights</span>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="detailsDialogLink btn-link">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="viewSeatsLink btn-link">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</button>
+</div>
+</div>
+</app-slice-info-desktop>
+</div>
+<div class="products-column">
+<app-available-products-desktop>
+<div class="products-row">
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight12-product0" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">
+<span class="show-for-sr hidden-product-type" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">Main</span>
+<div class="premium" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">
+</div>
+<div class="trip-type regular" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">Round trip</div>
+<app-choose-flights-price-desktop data-slice="12" data-flightstr="AA688/AA56" data-product="Main">
+<span class="per-pax-amount" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">52.5K</span>
+<div class="per-pax-addon" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">+ $228.33</div>
+<span class="show-for-sr hidden-flight-details" data-slice="12" data-flightstr="AA688/AA56" data-product="Main">Round trip Main 52.5K + $228.33 for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight12-product1" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">
+<span class="show-for-sr hidden-product-type" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">Premium Economy</span>
+<div class="premium" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">
+</div>
+<div class="trip-type regular" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">Round trip</div>
+<app-choose-flights-price-desktop data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">
+<span class="per-pax-amount" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">136K</span>
+<div class="per-pax-addon" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">+ $1,015.93</div>
+<span class="show-for-sr hidden-flight-details" data-slice="12" data-flightstr="AA688/AA56" data-product="Premium Economy">Round trip Premium Economy 136K + $1,015.93 for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight12-product2" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">
+<span class="show-for-sr hidden-product-type" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">Business</span>
+<div class="premium" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">
+</div>
+<div class="trip-type regular" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">Round trip</div>
+<app-choose-flights-price-desktop data-slice="12" data-flightstr="AA688/AA56" data-product="Business">
+<span class="per-pax-amount" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">168.5K</span>
+<div class="per-pax-addon" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">+ $420.73</div>
+<span class="show-for-sr hidden-flight-details" data-slice="12" data-flightstr="AA688/AA56" data-product="Business">Round trip Business 168.5K + $420.73 for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+<div class="product-cell pad-left-xxs pad-right-xxs">
+<button type="button" class="btn-flight" id="flight12-product3" data-slice="12" data-flightstr="AA688/AA56" data-product="First">
+<span class="show-for-sr hidden-product-type" data-slice="12" data-flightstr="AA688/AA56" data-product="First">First</span>
+<div class="premium" data-slice="12" data-flightstr="AA688/AA56" data-product="First">
+</div>
+<div class="trip-type regular" data-slice="12" data-flightstr="AA688/AA56" data-product="First">Round trip</div>
+<app-choose-flights-price-desktop data-slice="12" data-flightstr="AA688/AA56" data-product="First">
+<span class="per-pax-amount" data-slice="12" data-flightstr="AA688/AA56" data-product="First">517.5K</span>
+<div class="per-pax-addon" data-slice="12" data-flightstr="AA688/AA56" data-product="First">+ $420.73</div>
+<span class="show-for-sr hidden-flight-details" data-slice="12" data-flightstr="AA688/AA56" data-product="First">Round trip First 517.5K + $420.73 for JFK to LHR, departing at 6:00 AM 1 stop</span>
+</app-choose-flights-price-desktop>
+</button>
+</div>
+</div>
+</app-available-products-desktop>
+</div>
+<div class="divider margin-bottom-xs margin-top-xxs">
+</div>
+</div>
+</div>
+</div>
+</app-results-grid-desktop>
+</body>
+</html>

@@ -18,7 +18,7 @@ export type Usage = {
   reasoning_output_tokens: number;
 };
 
-// Env vars the codex Rust binary actually needs. Everything else stays in
+// Env vars Codex and its child commands need. Everything else stays in
 // Rome's process so we don't leak secrets into the subprocess.
 export const CODEX_ENV_ALLOWLIST = [
   "HOME",
