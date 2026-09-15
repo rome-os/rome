@@ -50,6 +50,13 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./gallery/ComponentGalleryPage")),
       },
       {
+        path: "/dev/layouts",
+        title: "Page layouts",
+        description:
+          "The page layouts in @rome-os/ui, one at a time against fake content, with the usage statement and the theme and mode switches.",
+        Component: lazy(() => import("./LayoutsPage")),
+      },
+      {
         path: "/dev/connections",
         title: "Connection gallery",
         description: "Prototype gallery of connection / credential-slot card states.",

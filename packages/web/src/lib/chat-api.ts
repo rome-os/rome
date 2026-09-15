@@ -155,6 +155,8 @@ export interface ListRomeSessionsOptions {
   query?: string;
   range?: SessionsRange;
   sort?: SessionsSort;
+  /** Defaults to `desc`, which is the useful end of every field the API sorts by. */
+  sortDirection?: "asc" | "desc";
   source?: SessionSourceFilter;
   timeZone?: string;
   type?: RomeSessionType;
@@ -171,7 +173,7 @@ export async function listRomeSessions(
     body: JSON.stringify({
       scope,
       search: options.query?.trim() || undefined,
-      sort: { field: options.sort ?? "activity", direction: "desc" },
+      sort: { field: options.sort ?? "activity", direction: options.sortDirection ?? "desc" },
       page: { offset: options.offset ?? 0, limit: options.limit ?? 50 },
     }),
   });

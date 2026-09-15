@@ -224,6 +224,8 @@ Naming the gap beats a wrong assignment.
 | `Command` | Composite root. Deliberately takes no role of its own. |
 | `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandList`, `CommandSeparator` | Internal states, grouping, rows, scrolling, and separators of the `Command` composite. The caller-owned popup boundary is its Surface. |
 | `EmptyState`, `Stepper` | Not yet surveyed against the contracts. |
+| The page layout tier | `Page`, `Section`, and the layouts in [layouts.md](layouts.md), with the slot components each layout carries — `ListLayout`'s toolbar, collection, grid, and footer among them. They own the space between regions of a page rather than between a component's children, which is a tier above Layout. Naming that tier is a roster decision the catalogue has not taken yet. |
+| `Toolbar` | Owns the space between its children and paints nothing, which reads as Layout. It also takes keyboard input, which the Layout contract rules out. |
 | `Breadcrumb` | Its default `text-ui` typography violates the Inline content contract. Its `BreadcrumbEllipsis` collapse marker is 20px tall and raises the row at the required `text-aux` line height. The marker only represents omitted crumbs, so its presentation-only semantics do not change the role decision. The 14px separator fits that role, but the composite cannot take a role until all parts fit. |
 
 ## Known divergences

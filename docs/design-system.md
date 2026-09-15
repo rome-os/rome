@@ -204,6 +204,8 @@ Import sites are unchanged. Edit the source in `packages/ui/src/<name>.tsx`, and
 
 **No wrapper layer between `ui/` and Radix.** Business-specific shells such as `RomeConfirmDialog` are fine, but they compose `ui/dialog.tsx` internally. Never import `DialogPrimitive` or another Radix primitive directly to re-style overlay or content. The `ui/` primitive is the only place Radix gets dressed.
 
+**A routed page picks a page layout from [`ui/layouts.md`](ui/layouts.md).** The layout owns the page's padding, widths, breakpoints, and overflow, so the page supplies slot content and no layout classes.
+
 **Icons come from `lucide-react` only.** Do not define `function FooIcon()` returning an `<svg>`, and do not write `<svg>` inline as an icon. If lucide lacks a glyph, check shadcn and lucide first. Brand and logo marks live in their dedicated directories, `components/brand-icons/` and `components/logo/`, rather than scattered in pages.
 
 ## Focus and invalid states

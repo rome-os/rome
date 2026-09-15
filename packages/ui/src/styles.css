@@ -32,8 +32,10 @@
 @source "./filter-chip-group.tsx";
 @source "./icon-button.tsx";
 @source "./input.tsx";
+@source "./layout-list.tsx";
 @source "./list-row.tsx";
 @source "./markdown.tsx";
+@source "./page.tsx";
 @source "./popover.tsx";
 @source "./radio-group.tsx";
 @source "./segmented-control.tsx";
@@ -49,6 +51,7 @@
 @source "./textarea.tsx";
 @source "./timestamp.tsx";
 @source "./toggle.tsx";
+@source "./toolbar.tsx";
 @source "./tooltip.tsx";
 
 @custom-variant dark (&:where(.dark, .dark *));

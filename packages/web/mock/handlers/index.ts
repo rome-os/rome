@@ -46,6 +46,7 @@ import { memoryFileHandlers } from "./memory-files";
 import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
+import { sessionQueryHandlers } from "./sessions";
 import { settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { curatedChats } from "../fixtures/chats";
@@ -1239,6 +1240,10 @@ export const handlers = [
   ...channelMirrorHandlers,
   ...peopleHandlers,
   ...routineHandlers,
+  // The session inventory behind /sessions/all, over the same four seeded
+  // chats the conversation routes serve — one inventory row per chat, its run
+  // and message counts read off that chat's transcript.
+  ...sessionQueryHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,

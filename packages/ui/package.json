@@ -95,6 +95,10 @@
       "types": "./dist/input.d.ts",
       "default": "./dist/input.js"
     },
+    "./layout-list": {
+      "types": "./dist/layout-list.d.ts",
+      "default": "./dist/layout-list.js"
+    },
     "./list-row": {
       "types": "./dist/list-row.d.ts",
       "default": "./dist/list-row.js"
@@ -102,6 +106,10 @@
     "./markdown": {
       "types": "./dist/markdown.d.ts",
       "default": "./dist/markdown.js"
+    },
+    "./page": {
+      "types": "./dist/page.d.ts",
+      "default": "./dist/page.js"
     },
     "./popover": {
       "types": "./dist/popover.d.ts",
@@ -163,6 +171,10 @@
       "types": "./dist/toggle.d.ts",
       "default": "./dist/toggle.js"
     },
+    "./toolbar": {
+      "types": "./dist/toolbar.d.ts",
+      "default": "./dist/toolbar.js"
+    },
     "./tooltip": {
       "types": "./dist/tooltip.d.ts",
       "default": "./dist/tooltip.js"
@@ -198,6 +210,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-toolbar": "^1.1.19",
     "@radix-ui/react-tooltip": "1.2.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
