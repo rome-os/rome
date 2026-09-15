@@ -339,7 +339,7 @@ function ApprovalCard({
             <StatusPill status={displayStatus} />
             <TimeMeta>{timeAgo(t, approval.createdAt)}</TimeMeta>
           </div>
-          <p className="text-body text-foreground">{approval.description}</p>
+          <p className="text-ui text-foreground">{approval.description}</p>
           <p className="mt-1 text-aux text-muted-foreground">
             {t("approval.requestedBy")}{" "}
             <span className="text-foreground">{approval.requestedBy}</span>
@@ -466,7 +466,7 @@ function WebhookInvocationCard({ invocation }: { invocation: WebhookInvocation }
           <StatusPill status={invocation.status} />
           <TimeMeta>{timeAgo(t, invocation.createdAt)}</TimeMeta>
         </div>
-        <p className="text-body text-foreground">
+        <p className="text-ui text-foreground">
           {t("webhook.received")}{" "}
           <span className="font-mono" title={invocation.actionName}>
             {artifactLocalName(invocation.actionName)}

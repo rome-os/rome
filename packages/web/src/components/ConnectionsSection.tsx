@@ -59,7 +59,7 @@ export function ConnectionsSection({
     <div className="space-y-6">
       <div>
         <h2 className="text-title text-foreground">Connections</h2>
-        <p className="mt-1 text-body text-muted-foreground">
+        <p className="mt-1 text-ui text-muted-foreground">
           Every channel and service your agent can use, in one place. Open one to connect it and see
           what it enables.
         </p>

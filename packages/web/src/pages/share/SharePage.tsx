@@ -72,7 +72,7 @@ export default function SharePage() {
         <h1 className="text-title text-foreground">
           {t("share.unavailableTitle", "This shared chat is unavailable")}
         </h1>
-        <p className="max-w-md text-body text-muted-foreground">
+        <p className="max-w-md text-ui text-muted-foreground">
           {t("share.unavailableBody", "The link may have been revoked or is no longer valid.")}
         </p>
       </div>

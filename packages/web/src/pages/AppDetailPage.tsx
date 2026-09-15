@@ -346,7 +346,7 @@ export default function AppDetailPage() {
                     {app.id} &middot; v{app.version}
                   </span>
                   {app.description ? (
-                    <p className="mt-2 text-body text-muted-foreground">{app.description}</p>
+                    <p className="mt-2 text-ui text-muted-foreground">{app.description}</p>
                   ) : null}
                 </>
               }

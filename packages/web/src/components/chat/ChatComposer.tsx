@@ -150,7 +150,7 @@ export interface ChatComposerProps {
 }
 
 // The empty input is one line box tall, expressed as `1lh` so it resolves
-// against whatever `text-body` currently is rather than restating the role's
+// against whatever `text-composer` currently is rather than restating the role's
 // px here. The textarea carries no vertical padding, so that leaves the box's
 // own `p-4` as the only inset above the text and the empty composer reads
 // symmetric top to bottom. `min-height` outranks the height the resize below
@@ -925,7 +925,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         : t("composer.placeholderDefault")
                     }
                     rows={1}
-                    className="block w-full resize-none border-0 bg-transparent text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
                     style={{
                       minHeight: TEXTAREA_MIN_HEIGHT,
                       maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,

@@ -10,7 +10,7 @@ export default function DevIndexPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-surface px-6 py-4">
         <h1 className="text-title text-foreground">Dev pages</h1>
-        <p className="text-body text-muted-foreground">
+        <p className="text-ui text-muted-foreground">
           Dev-only surfaces. This index and every page it links are dropped from production builds.
         </p>
       </header>
@@ -26,7 +26,7 @@ export default function DevIndexPage() {
                 <span className="text-ui text-foreground">{route.title}</span>
                 <code className="text-aux text-muted-foreground">{route.path}</code>
               </div>
-              <p className="mt-1 text-body text-muted-foreground">{route.description}</p>
+              <p className="mt-1 text-ui text-muted-foreground">{route.description}</p>
             </Link>
           </li>
         ))}

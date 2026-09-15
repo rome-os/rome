@@ -254,8 +254,8 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
         <DialogBody className="px-5 py-4">
           <div className="flex flex-col items-center gap-3 py-8 text-center">
             <CircleCheck className="h-12 w-12 text-success-fg" aria-hidden />
-            <p className="text-body text-foreground">{t("codexDeviceLogin.connectedTitle")}</p>
-            <p className="text-body text-muted-foreground">{t("codexDeviceLogin.connectedBody")}</p>
+            <p className="text-ui text-foreground">{t("codexDeviceLogin.connectedTitle")}</p>
+            <p className="text-ui text-muted-foreground">{t("codexDeviceLogin.connectedBody")}</p>
           </div>
         </DialogBody>
       ) : (
@@ -272,7 +272,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
 
             {step === STEP_ENABLE && (
               <div className="flex flex-col gap-4">
-                <p className="text-body text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   <Trans
                     ns="onboard"
                     i18nKey="codexDeviceLogin.enable.body"
@@ -319,7 +319,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
 
             {step === STEP_COPY && (
               <div className="flex flex-col gap-4">
-                <p className="text-body text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   {t("codexDeviceLogin.copyCode.body")}
                 </p>
                 {userCode ? (

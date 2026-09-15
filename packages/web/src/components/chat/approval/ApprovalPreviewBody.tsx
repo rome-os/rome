@@ -15,7 +15,7 @@ export function ApprovalPreviewBody({ preview }: { preview: ApprovalPreviewPaylo
         {preview.reason && (
           <div className="text-aux italic text-muted-foreground">{preview.reason}</div>
         )}
-        <div className="whitespace-pre-wrap rounded-8 border border-warning-border bg-surface px-3 py-2 text-body text-foreground">
+        <div className="whitespace-pre-wrap rounded-8 border border-warning-border bg-surface px-3 py-2 text-ui text-foreground">
           {preview.text}
         </div>
       </div>
@@ -24,7 +24,7 @@ export function ApprovalPreviewBody({ preview }: { preview: ApprovalPreviewPaylo
   return (
     <div className="space-y-2">
       <div className="text-ui text-foreground">{preview.title}</div>
-      <div className="whitespace-pre-wrap text-body text-foreground">{preview.summary}</div>
+      <div className="whitespace-pre-wrap text-ui text-foreground">{preview.summary}</div>
       {preview.fields && preview.fields.length > 0 && (
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-aux">
           {preview.fields.map((field, idx) => (

@@ -47,7 +47,7 @@ export function ComputerUseSection() {
           {t("advanced.computerUse.refresh")}
         </Button>
       </div>
-      <p className="mt-1 mb-4 text-body text-muted-foreground">
+      <p className="mt-1 mb-4 text-ui text-muted-foreground">
         {t("advanced.computerUse.description")}
       </p>
       {query.isError && (

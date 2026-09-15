@@ -192,7 +192,7 @@ export function ConnectionDetailHeader({
       <div className="flex items-center gap-3">
         <ConnectionBrandBadge connection={card.service} />
         <div className="min-w-0 flex-1">
-          <DialogTitle className="text-body">{card.label}</DialogTitle>
+          <DialogTitle className="text-section">{card.label}</DialogTitle>
           <StatusIndicator card={card} className="mt-1" />
         </div>
       </div>

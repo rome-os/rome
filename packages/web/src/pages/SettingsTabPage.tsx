@@ -637,7 +637,7 @@ function FavorRequestRow({
               {favorRequestStatusLabel(request)}
             </span>
           </div>
-          {summary && <p className="mt-1 text-body text-muted-foreground">{summary}</p>}
+          {summary && <p className="mt-1 text-ui text-muted-foreground">{summary}</p>}
           {fields.length > 0 && (
             <dl className="mt-3 grid gap-2 text-ui sm:grid-cols-2">
               {fields.map((field) => (
@@ -806,7 +806,7 @@ function FavorsSection() {
     <div className="space-y-6">
       <div>
         <h2 className="text-section text-foreground">Favors</h2>
-        <p className="mt-1 text-body text-muted-foreground">
+        <p className="mt-1 text-ui text-muted-foreground">
           Balance, payments, and paid app actions settled through Rome Cloud.
         </p>
       </div>
@@ -1050,7 +1050,7 @@ function PresentationModeSection() {
   return (
     <div>
       <h2 className="text-section text-foreground">{t("advanced.presentationMode.title")}</h2>
-      <p className="mt-1 mb-4 text-body text-muted-foreground">
+      <p className="mt-1 mb-4 text-ui text-muted-foreground">
         {t("advanced.presentationMode.description")}
       </p>
       <ToggleSwitch
@@ -1547,7 +1547,7 @@ function AccessControlSection({
   return (
     <div>
       <h2 className="text-section text-foreground">{t("publicAccess.title")}</h2>
-      <p className="mt-1 text-body text-muted-foreground">{t("publicAccess.description")}</p>
+      <p className="mt-1 text-ui text-muted-foreground">{t("publicAccess.description")}</p>
       <div className="mt-6 space-y-6">
         <AllowedCloudEmailsSection />
         <Card>

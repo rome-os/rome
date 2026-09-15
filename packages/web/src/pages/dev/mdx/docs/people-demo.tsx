@@ -463,7 +463,7 @@ export function PersonPageDemo() {
             { text: "perfect — dinner at 7?", at: "09:16", out: true },
             { text: "yes, book it", at: "09:31", out: false },
           ].map((msg) => (
-            <div key={msg.at} className="flex gap-2 text-body">
+            <div key={msg.at} className="flex gap-2 text-ui">
               <span className="w-12 shrink-0 font-mono text-badge tabular-nums text-subtle-foreground">
                 {msg.at}
               </span>

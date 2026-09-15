@@ -802,7 +802,7 @@ export function AiToolsPanel({
             </Button>
           </div>
           {refreshError && (
-            <p role="alert" className="mb-4 text-body text-destructive">
+            <p role="alert" className="mb-4 text-ui text-destructive">
               {refreshError}
             </p>
           )}

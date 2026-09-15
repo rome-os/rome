@@ -133,7 +133,7 @@ export function OAuthConnectionSection({
   // desktop shell no longer navigates the window away.
   const pendingRedirectControls = redirectUrl ? (
     <div className="space-y-2">
-      <p className="text-body text-muted-foreground">
+      <p className="text-ui text-muted-foreground">
         {t("connections.oauth.resumePending", { label })}
       </p>
       <div className="flex gap-2">
@@ -163,7 +163,7 @@ export function OAuthConnectionSection({
           <Button variant="outline" disabled title={reason}>
             {t("common.connect")}
           </Button>
-          <p className="mt-2 text-body text-muted-foreground">{reason}</p>
+          <p className="mt-2 text-ui text-muted-foreground">{reason}</p>
         </div>
       </ConnectionSlotCard>
     );

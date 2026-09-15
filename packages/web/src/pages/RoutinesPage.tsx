@@ -595,7 +595,7 @@ function CalendarView({ routines }: { routines: Routine[] }) {
               </svg>
             }
           />
-          <h3 className="text-body text-foreground">
+          <h3 className="text-section text-foreground">
             {t("calendar.monthYear", { month: monthName, year })}
           </h3>
           <IconButton
@@ -908,7 +908,7 @@ function DoneSection({
       </button>
       {open && (
         <>
-          <p className="text-body text-muted-foreground">{t("sections.done.subtitle")}</p>
+          <p className="text-ui text-muted-foreground">{t("sections.done.subtitle")}</p>
           <div className="space-y-3">
             {routines.map((r) => (
               <RoutineCard
@@ -1203,7 +1203,7 @@ function DeleteRoutineDialog({
         <DialogTitle>{t("delete.dialogTitle")}</DialogTitle>
       </DialogHeader>
       <DialogBody>
-        <p className="text-body text-muted-foreground">{t("delete.dialogBody")}</p>
+        <p className="text-ui text-muted-foreground">{t("delete.dialogBody")}</p>
       </DialogBody>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>
@@ -1962,7 +1962,7 @@ function CreateRoutineModal({
                 )}
 
                 {triggerType === "manual" && (
-                  <p className="text-body text-muted-foreground">{t("modal.hints.manual")}</p>
+                  <p className="text-ui text-muted-foreground">{t("modal.hints.manual")}</p>
                 )}
 
                 <form.Field name="actionName">

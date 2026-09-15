@@ -57,9 +57,7 @@ export default function ConnectPage() {
       </div>
       <div className="w-full max-w-sm">
         <h1 className="mb-2 text-center text-title text-foreground">{t("connect.title")}</h1>
-        <p className="mb-8 text-center text-body text-muted-foreground">
-          {t("connect.description")}
-        </p>
+        <p className="mb-8 text-center text-ui text-muted-foreground">{t("connect.description")}</p>
 
         <div className="rounded-12 border border-border bg-surface p-6 shadow-1 sm:p-8">
           {error && (

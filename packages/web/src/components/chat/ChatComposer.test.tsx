@@ -297,7 +297,7 @@ describe("composer textarea height", () => {
   });
 
   // The empty composer is one line box tall, and that box belongs to the
-  // `text-body` role. A px floor here would hold the old number through a
+  // `text-composer` role. A px floor here would hold the old number through a
   // retune of the role and pull the text off the composer's padding, so the
   // floor is declared in line-box units and the resize below never writes one.
   it("declares its floor in line-box units rather than pixels", () => {

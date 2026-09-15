@@ -179,7 +179,7 @@ function AwaitingInput(props: SetupRenderProps & { labels: SetupLabels }): React
           ) : field.format === "multiline" ? (
             <textarea
               id={`${uid}-${field.name}`}
-              className="w-full rounded-4 border border-border-subtle bg-surface px-2 py-1 text-body"
+              className="w-full rounded-4 border border-border-subtle bg-surface px-2 py-1 text-ui"
               value={values[field.name] ?? ""}
               onChange={(e) => setField(field.name, e.target.value)}
             />

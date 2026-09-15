@@ -240,6 +240,12 @@
    letter spacing are held directly, having too few distinct values across the
    roster to earn a scale.
 
+   The roster is the interface — headings, controls, labels, annotations. Prose
+   is not in it: content read at length is Markdown, sized by the
+   `--markdown-*` tokens below, which carry their own heading ladder and
+   density. Composer is the one 16px member, and it belongs to the chat input
+   alone, whose size matches the Markdown body the sent message renders at.
+
    Title, Section and Badge carry 500; every other role is 400. A CJK system
    fallback ships no 500 face, so CSS weight matching resolves all three back
    to Regular there and the emphasis is Latin-only. Hierarchy on a bilingual
@@ -270,10 +276,11 @@
   --text-section--letter-spacing: 0;
   --text-section--font-weight: 500;
 
-  --text-body: var(--rome-font-size-16);
-  --text-body--line-height: var(--rome-line-height-125);
-  --text-body--letter-spacing: 0;
-  --text-body--font-weight: 400;
+  /* The chat composer's input only — see the roster note above. */
+  --text-composer: var(--rome-font-size-16);
+  --text-composer--line-height: var(--rome-line-height-125);
+  --text-composer--letter-spacing: 0;
+  --text-composer--font-weight: 400;
 
   --text-ui: var(--rome-font-size-14);
   --text-ui--line-height: var(--rome-line-height-143);

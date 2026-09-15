@@ -58,7 +58,7 @@ export function ApprovalCard({
           {statusLabel}
         </span>
       </div>
-      <div className="space-y-2 px-4 py-3 text-body text-foreground">
+      <div className="space-y-2 px-4 py-3 text-ui text-foreground">
         <div className="text-aux text-subtle-foreground">{resolvedActionName}</div>
         <ApprovalPreviewBody preview={preview} />
       </div>

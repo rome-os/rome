@@ -68,7 +68,10 @@ function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
-      className={cn("flex-1 text-body outline-none", className)}
+      // No typography role: the panel is a container, and whatever it holds
+      // declares its own. A role here would size every undeclared descendant
+      // from the panel rather than from the surface author's choice.
+      className={cn("flex-1 outline-none", className)}
       {...props}
     />
   );

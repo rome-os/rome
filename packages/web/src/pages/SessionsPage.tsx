@@ -1004,7 +1004,7 @@ function SessionDetailsSheet({
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div className="min-w-0">
           <SheetTitle className="truncate">Session details</SheetTitle>
-          <SheetDescription className="mt-1 truncate text-body text-muted-foreground">
+          <SheetDescription className="mt-1 truncate text-ui text-muted-foreground">
             {session.displayTitle}
           </SheetDescription>
         </div>
@@ -1045,7 +1045,7 @@ function SessionDetailsSheet({
               {coverage ? <p className="mt-1 text-aux text-muted-foreground">{coverage}</p> : null}
             </div>
           </dl>
-          <p className="mt-4 text-body text-muted-foreground">
+          <p className="mt-4 text-ui text-muted-foreground">
             {formatOutcome(session.stats.outcomes)}
           </p>
         </section>
@@ -1282,7 +1282,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         </Button>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-body text-foreground">
+            <h1 className="truncate text-section text-foreground">
               {session?.displayTitle ?? sessionId}
             </h1>
             {session ? (

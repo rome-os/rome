@@ -45,7 +45,7 @@ A control takes pointer or keyboard input directly. A member is **inline** or **
 - The focus edge is one geometry throughout: a 1px `outline` in `--ring` at 50% alpha, carried at rest as `outline-transparent` with `outline-style: none`, so gaining focus changes the style and the color and never the width. A member that paints a border takes `-outline-offset-1`, which lands the edge on that border. A member with no painted border takes `outline-offset: 0`, outside the box, because `ring` and the control fills sit a step apart on one ramp and an edge inset over a fill does not separate from it. The invalid edge stays 2px of solid `--destructive`, so an error outranks focus. A translucent halo (`focus-visible:ring-*`) never appears. `[mech]`
 - A member carries no margin, and sets no fixed width. Spacing belongs to Layout. `w-full` reaches the outermost element. `[mech]`
 - Geometry is written in bracket form — `h-[var(--control-h-md)]`, never `h-(--control-h-md)` — so `tailwind-merge` classifies it and a caller's `className` wins. `[mech]`
-- Typography is a role utility (`text-ui`, `text-body`), never derived from the size step. `[mech]`
+- Typography is a role utility (`text-ui`, `text-aux`), never derived from the size step. `[mech]`
 
 ### Inline members
 
@@ -113,7 +113,7 @@ Inline content sits inside a line of text or a table cell. It answers to the tex
 
 - The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
-- Typography is `text-aux` or smaller, never `text-body`. `[mech]`
+- Typography is `text-aux` or smaller, never `text-ui`. `[mech]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
 
 > Prefer: a dismissible `Badge` at `--badge-h`, 22px tall in a table cell, carrying a focus edge.

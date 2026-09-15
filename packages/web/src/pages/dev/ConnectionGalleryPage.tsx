@@ -298,7 +298,7 @@ export default function ConnectionGalleryPrototypePage() {
               DEV ONLY
             </span>
           </h1>
-          <p className="text-body text-muted-foreground">
+          <p className="text-ui text-muted-foreground">
             Every service&apos;s connection detail dialog, rendered from mock{" "}
             <code>/api/connections</code> payloads through the real{" "}
             <code>buildConnectionCards</code> presentation adapter. Every tile is <code>inert</code>{" "}
@@ -328,7 +328,7 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
     <section className="space-y-4">
       <div>
         <h2 className="text-section text-foreground">{scenario.title}</h2>
-        {scenario.note && <p className="text-body text-muted-foreground">{scenario.note}</p>}
+        {scenario.note && <p className="text-ui text-muted-foreground">{scenario.note}</p>}
       </div>
       {/* `inert` makes every ceremony inside unclickable/unfocusable — the
           interaction half of the read-only guarantee (the fetch guard covers
@@ -356,7 +356,7 @@ function DialogFrame({ card, scenario }: { card: ConnectionCard; scenario: Galle
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <ConnectionBrandBadge connection={card.service} />
             <div className="min-w-0 flex-1">
-              <p className="text-body">{card.label}</p>
+              <p className="text-ui">{card.label}</p>
               <StatusIndicator card={card} className="mt-1" />
             </div>
           </div>

@@ -11,7 +11,7 @@ const roles = {
   display: { size: 30, lineHeight: 120, weight: 400 },
   title: { size: 18, lineHeight: 133, weight: 500 },
   section: { size: 15, lineHeight: 133, weight: 500 },
-  body: { size: 16, lineHeight: 125, weight: 400 },
+  composer: { size: 16, lineHeight: 125, weight: 400 },
   ui: { size: 14, lineHeight: 143, weight: 400 },
   badge: { size: 13, lineHeight: 123, weight: 500 },
   aux: { size: 13, lineHeight: 123, weight: 400 },

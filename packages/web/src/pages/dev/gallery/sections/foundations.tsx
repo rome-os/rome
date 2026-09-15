@@ -59,7 +59,7 @@ const TYPE_ROLES = [
   { name: "display", className: "text-display", sample: "A stone library at golden hour" },
   { name: "title", className: "text-title", sample: "Today's briefing" },
   { name: "section", className: "text-section", sample: "Access control" },
-  { name: "body", className: "text-body", sample: "Rome runs the marketing, books, and inbox." },
+  { name: "composer", className: "text-composer", sample: "What the chat composer is typed at." },
   { name: "ui", className: "text-ui", sample: "Control labels, list rows, menu items." },
   { name: "badge", className: "text-badge", sample: "Status pills, tags, and counters." },
   { name: "aux", className: "text-aux", sample: "Captions, timestamps, helper text." },
@@ -201,7 +201,7 @@ export function FoundationsSection() {
       >
         <div className="space-y-2">
           <p className="font-serif text-display text-foreground">today's briefing</p>
-          <p className="text-body text-foreground">
+          <p className="text-ui text-foreground">
             Body copy in Funnel Sans. Rome runs the marketing, books, and inbox.
           </p>
           <p className="font-mono text-aux text-muted-foreground">

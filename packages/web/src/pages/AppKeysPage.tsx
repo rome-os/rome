@@ -207,9 +207,9 @@ export default function AppKeysPage() {
                 <p className="mt-1 text-aux text-muted-foreground">{t("appKeys.form.valueHint")}</p>
               </Field>
             </div>
-            {formError && <p className="text-body text-destructive">{formError}</p>}
+            {formError && <p className="text-ui text-destructive">{formError}</p>}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-body text-muted-foreground">{t("appKeys.form.consent")}</p>
+              <p className="text-ui text-muted-foreground">{t("appKeys.form.consent")}</p>
               <div className="flex shrink-0 gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={closeForm}>
                   {t("appKeys.form.cancel")}
@@ -253,7 +253,7 @@ export default function AppKeysPage() {
                 <KeyRound aria-hidden />
               </EmptyStateIcon>
               <EmptyStateTitle>{t("appKeys.emptyTitle")}</EmptyStateTitle>
-              <p className="text-body text-muted-foreground">{t("appKeys.emptyBody")}</p>
+              <p className="text-ui text-muted-foreground">{t("appKeys.emptyBody")}</p>
             </EmptyState>
           )
         ) : (
@@ -294,7 +294,7 @@ export default function AppKeysPage() {
                       ) : (
                         <>
                           <span
-                            className="font-mono text-body tracking-widest text-muted-foreground"
+                            className="font-mono text-ui tracking-widest text-muted-foreground"
                             aria-hidden
                           >
                             ••••••••

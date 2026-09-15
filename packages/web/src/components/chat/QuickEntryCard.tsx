@@ -18,7 +18,7 @@ export function QuickEntryCard({ entry, onActivate }: QuickEntryCardProps) {
       item={entry}
       onActivate={onActivate}
       placeholder={<RomeLogo className="h-6 w-6" aria-hidden />}
-      className="[&_.rome-news-item-subtitle]:!text-body"
+      className="[&_.rome-news-item-subtitle]:!text-ui"
     />
   );
 }
