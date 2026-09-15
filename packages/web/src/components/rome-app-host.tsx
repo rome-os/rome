@@ -17,7 +17,7 @@ export interface RomeAppBootstrap {
   };
   /** Host-resolved caller identity for this mount (advisory, UI gating only). */
   caller?:
-    | { kind: "guardian"; userId: string }
+    | { kind: "guardian"; userId: string; email?: string }
     | { kind: "visitor"; accountId: string; email: string }
     | { kind: "anonymous" };
   globalParams?: {
@@ -174,7 +174,13 @@ export function RomeAppHost({
         // chat surface has its own mount path in AppComponentBlock. Together
         // the two call sites are the complete record of app
         // opens — including surfaces that never change the URL.
-        trackAppOpen(appId, currentBootstrap.shell.mode);
+        trackAppOpen(
+          appId,
+          currentBootstrap.shell.mode,
+          currentBootstrap.caller && "email" in currentBootstrap.caller
+            ? currentBootstrap.caller.email
+            : undefined,
+        );
       } catch (err) {
         if (!disposed) setError(err instanceof Error ? err.message : String(err));
       }
