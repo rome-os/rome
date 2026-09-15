@@ -48,7 +48,7 @@ Letter spacing is 0 in every role.
 
 ## Constraints
 
-- A description sits at the same size as the control it explains, and leads by ink. A section's description, a card's description, and a dialog's description are all `text-ui text-muted-foreground`; a field's helper and error are `text-aux`, one step down, because they annotate a single control rather than introduce a group. A description never takes a heading role, which would give its container two headings. `[human]`
+- A description sits at the same size as the control it explains, and leads by ink. A section's description, a card's description, and a dialog's description are all `text-ui text-muted-foreground`. A field's helper and error are `text-aux`, one step down, because they annotate a single control rather than introduce a group. A description never takes a heading role, which would give its container two headings. `[human]`
 - Title, Section, and Badge carry the only weight other than 400. A CJK system fallback ships no 500 face, so weight matching resolves all three roles to Regular there. The emphasis is Latin-only. A bilingual surface separates Title and Section by size, ink, and position, and Badge by its container geometry. `[mech]`
 - Letter spacing is 0 in every role. Every candidate value falls below what a reader can see, and the group encodes only visible differences. `[mech]`
 - Composer and UI Item share a line box at two different sizes, 16px and 14px. The composer reads larger than the controls around it, and the shared box keeps both on the same rhythm. `[mech]`
@@ -65,5 +65,5 @@ Letter spacing is 0 in every role.
 ## Examples
 
 - Positive: an alert with both rows in `text-ui`, the title at the kit's 600 step in the variant foreground and the description at 400 in neutral ink — hierarchy from weight and color inside one size and line box.
-- Negative: `text-composer` on a settings page's section description, because 14px looked small beside the heading. The description reads UI and leads by ink; Composer belongs to the chat input alone.
+- Negative: `text-composer` on a settings page's section description, because 14px looked small beside the heading. The description reads UI and leads by ink. Composer belongs to the chat input alone.
 - Negative: `text-section` on a switch's label inside a settings card, because the label reads faint beside the card heading. A control's label takes `text-ui` and leads by ink. Section gives the card two headings.
