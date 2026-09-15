@@ -64,6 +64,10 @@
   --markdown-body-font-size: var(--rome-font-size-14);
   --markdown-body-line-height: var(--rome-line-height-143);
 
+  /* The 14px strut leaves the line box at 20px, a pixel under standard's 21px.
+     One step down keeps the tint clear of the line above. */
+  --markdown-inline-code-font-size: var(--rome-font-size-13);
+
   --markdown-heading-1-font-size: var(--rome-font-size-20);
   --markdown-heading-1-line-height: var(--rome-line-height-120);
   --markdown-heading-2-font-size: var(--rome-font-size-18);
@@ -232,12 +236,17 @@
   @apply rounded-16;
 }
 
-/* Inline padding only. Padding on an inline box paints outside the line box
-   without growing it, and at 14px IBM Plex Mono's 1.3em content box already
-   fills 18.2px of a 20px prose line — a vertical step would spill the tint
-   over the lines above and below. The face carries that breathing room
+/* Inline padding only, on a size the prose line can hold. Padding on an inline
+   box paints outside the line box without growing it, so a vertical step would
+   spill the tint over the lines above and below. That leaves the content area
+   as the whole of the tint, and IBM Plex Mono sets it at 1.3em — Streamdown's
+   own fixed 14px paints 18.2px. Standard's line box opens to 21px and holds
+   it; compact's stops at 20px, where inline code on consecutive lines reads as
+   one slab rather than two spans. The token carries that difference, so this
+   rule only has to spend it. The face carries the rest of the breathing room
    itself: its ascent clears the caps by a third of an em. */
 [data-streamdown="inline-code"] {
+  font-size: var(--markdown-inline-code-font-size);
   @apply px-2;
 }
 

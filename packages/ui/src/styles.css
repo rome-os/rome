@@ -310,6 +310,15 @@
   --markdown-body-font-weight: 400;
   --markdown-body-letter-spacing: 0;
 
+  /* Inline code is monospace inside prose, so it is sized against the line box
+     rather than the body size: IBM Plex Mono paints its tint over a 1.3em
+     content area, so a span that fills the line merges with the span on the
+     line above. The two densities declare the same 20px line but do not
+     resolve to the same line box — a 16px strut and a 14px monospace baseline
+     open standard to 21px, which holds an 18.2px tint with room to spare.
+     Compact rebinds one step down for the pixel it does not have. */
+  --markdown-inline-code-font-size: var(--rome-font-size-14);
+
   --markdown-heading-1-font-size: var(--rome-font-size-24);
   --markdown-heading-1-line-height: var(--rome-line-height-133);
   --markdown-heading-2-font-size: var(--rome-font-size-22);

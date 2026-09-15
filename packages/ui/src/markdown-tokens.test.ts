@@ -109,6 +109,19 @@ describe("Markdown semantic tokens", () => {
     );
   });
 
+  it("sizes inline code off the line box each density resolves to", () => {
+    // The tint paints the monospace content area — 1.3em — so 14px paints
+    // 18.2px. Standard's line box opens to 21px and holds it; compact's stops
+    // at 20px, where it merges with the span on the line above.
+    expectToken(normal, "inline-code-font-size", "var(--rome-font-size-14)");
+    expectToken(compact, "inline-code-font-size", "var(--rome-font-size-13)");
+
+    const inlineCode = declarations(markdownCss, '[data-streamdown="inline-code"]');
+    expect(inlineCode).toContain("font-size: var(--markdown-inline-code-font-size);");
+    // Vertical padding would paint outside the line box, over the lines around it.
+    expect(inlineCode).not.toContain("py-");
+  });
+
   it("contains child margins without grid-stretching Markdown media", () => {
     const root = declarations(markdownCss, ".rome-markdown");
     expect(root).toContain("display: flow-root;");
