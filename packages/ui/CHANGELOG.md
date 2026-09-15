@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/rome-os/rome/compare/ui-v0.3.0...ui-v0.3.1) (2026-09-15)
+
+
+### Features
+
+* **ui:** add the page layout tier with List, and migrate two pages onto it ([#392](https://github.com/rome-os/rome/issues/392)) ([be1b7a3](https://github.com/rome-os/rome/commit/be1b7a368f204e66ac0db928e1733836d283b4a3))
+
 ## [0.3.0](https://github.com/rome-os/rome/compare/ui-v0.2.8...ui-v0.3.0) (2026-09-15)
 
 
