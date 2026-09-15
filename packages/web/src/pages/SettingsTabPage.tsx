@@ -38,6 +38,14 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import {
+  FormRow,
+  FormRowControl,
+  FormRowHeading,
+  FormRowIcon,
+  FormRowLabel,
+  FormRows,
+} from "@rome-os/ui/layout-form";
 import { Spinner } from "@rome-os/ui/spinner";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,7 +63,6 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { List, ListRow, ListRowContent, ListRowTitle } from "@/components/ui/list-row";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
@@ -391,10 +398,14 @@ export default function SettingsPage() {
         {/* Tab content. Settings rows are label/control pairs, so this column
           keeps a reading measure while the frame above stays full-bleed — the
           h1 and the nav land at the same x as on every other route, and only
-          the form narrows. Loading and failure swap this column only, and only
-          for the tabs that read the settings payload, so a dead /api/settings
-          still leaves Connections, Channels, Favors and Appearance usable. */}
-        <div className="max-w-3xl">
+          the form narrows. Appearance is the exception: it renders the kit's
+          Form rows, which carry the measure themselves, so the column around
+          them holds none. Each further tab drops out of this width as it moves
+          onto its own layout. Loading and failure swap this column only, and
+          only for the tabs that read the settings payload, so a dead
+          /api/settings still leaves Connections, Channels, Favors and
+          Appearance usable. */}
+        <div className={cn(activeTab !== "Appearance" && "max-w-3xl")}>
           {tabNeedsSettings && loading ? (
             <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
           ) : tabNeedsSettings && loadError ? (
@@ -443,31 +454,19 @@ export default function SettingsPage() {
   );
 }
 
-function AppearanceRow({
-  icon,
-  title,
-  control,
-}: {
-  icon: ReactNode;
-  title: string;
-  control: ReactNode;
-}) {
-  return (
-    <ListRow>
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-8 bg-surface-muted text-muted-foreground [&_svg]:size-4.5">
-        {icon}
-      </div>
-      <ListRowContent>
-        <ListRowTitle>{title}</ListRowTitle>
-      </ListRowContent>
-      <div className="shrink-0">{control}</div>
-    </ListRow>
-  );
-}
-
+/**
+ * The Appearance tab, on the kit's Form layout. The tab's body fills Form's
+ * rows slot — `FormRows` caps the reading measure and each `FormRow` carries
+ * one setting, label left and control right — while the Settings title and tab
+ * strip above stay the shared frame all six tabs render into.
+ *
+ * Rows rather than stacked fields, because a guardian returns here to change
+ * one setting at a time, and every row saves itself the moment it changes.
+ */
 function AppearanceSection() {
   const { t, i18n } = useTranslation("settings");
   const { theme, setTheme, themes, preference, setPreference } = useTheme();
+  const uid = useId();
 
   const currentLang: SupportedLanguage = (SUPPORTED_LANGUAGES as readonly string[]).includes(
     i18n.resolvedLanguage ?? "",
@@ -479,83 +478,93 @@ function AppearanceSection() {
     preference === "dark" ? <Moon /> : preference === "light" ? <Sun /> : <Monitor />;
 
   return (
-    <div className="space-y-6">
-      <div className="overflow-hidden rounded-8 border border-border bg-surface">
-        <List>
-          <AppearanceRow
-            icon={<Languages />}
-            title={t("appearance.language.title")}
-            control={
-              <Select
-                value={currentLang}
-                onValueChange={(next) => {
-                  void i18n.changeLanguage(next);
-                }}
-              >
-                <SelectTrigger className="w-44" aria-label={t("appearance.language.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <SelectItem key={lang} value={lang}>
-                      {LANGUAGE_LABELS[lang]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
+    <FormRows>
+      <FormRow>
+        <FormRowIcon>
+          <Languages />
+        </FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-language`}>{t("appearance.language.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select
+            value={currentLang}
+            onValueChange={(next) => {
+              void i18n.changeLanguage(next);
+            }}
+          >
+            {/* `aria-label` alongside the label element: a Radix trigger is a
+              `button`, and a button takes its accessible name from its own
+              content, so the visible label would leave the name reading as the
+              selected value. */}
+            <SelectTrigger id={`${uid}-language`} aria-label={t("appearance.language.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <SelectItem key={lang} value={lang}>
+                  {LANGUAGE_LABELS[lang]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
 
-          <AppearanceRow
-            icon={<Palette />}
-            title={t("appearance.theme.title")}
-            control={
-              <Select value={theme} onValueChange={(next) => setTheme(next)}>
-                <SelectTrigger className="w-44" aria-label={t("appearance.theme.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  {themes.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
+      <FormRow>
+        <FormRowIcon>
+          <Palette />
+        </FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-theme`}>{t("appearance.theme.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select value={theme} onValueChange={(next) => setTheme(next)}>
+            <SelectTrigger id={`${uid}-theme`} aria-label={t("appearance.theme.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {themes.map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {entry.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
 
-          <AppearanceRow
-            icon={modeIcon}
-            title={t("appearance.mode.title")}
-            control={
-              <Select
-                value={preference}
-                onValueChange={(next) => setPreference(next as ThemePreference)}
-              >
-                <SelectTrigger className="w-44" aria-label={t("appearance.mode.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  <SelectItem value="system">
-                    <Monitor />
-                    {t("appearance.mode.system")}
-                  </SelectItem>
-                  <SelectItem value="light">
-                    <Sun />
-                    {t("appearance.mode.light")}
-                  </SelectItem>
-                  <SelectItem value="dark">
-                    <Moon />
-                    {t("appearance.mode.dark")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            }
-          />
-        </List>
-      </div>
-    </div>
+      <FormRow>
+        <FormRowIcon>{modeIcon}</FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-mode`}>{t("appearance.mode.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select
+            value={preference}
+            onValueChange={(next) => setPreference(next as ThemePreference)}
+          >
+            <SelectTrigger id={`${uid}-mode`} aria-label={t("appearance.mode.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              <SelectItem value="system">
+                <Monitor />
+                {t("appearance.mode.system")}
+              </SelectItem>
+              <SelectItem value="light">
+                <Sun />
+                {t("appearance.mode.light")}
+              </SelectItem>
+              <SelectItem value="dark">
+                <Moon />
+                {t("appearance.mode.dark")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
+    </FormRows>
   );
 }
 

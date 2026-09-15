@@ -106,6 +106,16 @@ export {
 export { IconButton, type IconButtonProps } from "./icon-button.js";
 export { Input } from "./input.js";
 export {
+  FormLayout,
+  FormRow,
+  FormRowControl,
+  FormRowDescription,
+  FormRowHeading,
+  FormRowIcon,
+  FormRowLabel,
+  FormRows,
+} from "./layout-form.js";
+export {
   ListCollection,
   ListFooter,
   ListGrid,

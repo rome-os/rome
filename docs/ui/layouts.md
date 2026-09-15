@@ -4,7 +4,7 @@ A **page layout** is the frame a routed page renders into. It fixes the page as 
 
 A page picks its layout by naming the reader's task, never by how the content looks. A table of rows is a List when the reader leaves with one item, and a different layout when the reader works through the rows one by one without leaving.
 
-The catalogue enters one layout at a time, each landing with a dashboard page migrated onto it, so the rule and a page held to it are read together. [List](#list) is the first.
+The catalogue enters one layout at a time, each landing with a dashboard page migrated onto it, so the rule and a page held to it are read together. [List](#list) came first, then [Form](#form).
 
 ## The shared frame
 
@@ -50,6 +50,23 @@ Search leads the row and grows into the space the other controls leave. More tha
 The split the row reads by is the same one the header takes: a control that changes which rows are shown belongs in the toolbar, and a control that scopes the whole page belongs beside the title.
 
 [`/sessions/all`](../../packages/web/src/pages/SessionsPage.tsx) is the reference for a table, and [`/apps`](../../packages/web/src/pages/AppsIndexPage.tsx) for a grid the reader searches rather than filters: one control narrows it, so the row holds search alone.
+
+## Form
+
+Used for changing settings and seeing the change took: one column at the reading measure, with save state shown where the change was made. Not used for a one-shot linear flow.
+
+| Slot | Component | Holds |
+|---|---|---|
+| Header | `PageHeader` | Title and description |
+| Rows | `FormRows` | `FormRow` blocks, one setting each |
+
+Settings the reader returns to and changes one at a time take rows. A form filled top to bottom and submitted reads as stacked fields instead, and that body is not in the kit yet: it enters with the first data-entry page that needs it.
+
+`FormRows` caps at the reading measure and the header stays full width, so the `h1` sits where it does on every other route. The surface divides its rows with a hairline, so a set of settings reads as one block rather than as separate cards.
+
+A `FormRow` holds an optional `FormRowIcon`, a `FormRowHeading` carrying `FormRowLabel` and an optional `FormRowDescription`, and a `FormRowControl` at the end. The icon column opens only on the rows that carry one, so a set of rows without icons keeps its labels at the inset. `FormRowLabel` renders a `label` when given `htmlFor` and plain text otherwise, because a `for` aimed at nothing names nothing. A row is one line at every width: the heading wraps its own text rather than pushing the control onto a second line, since a row that stacks on a narrow viewport stops reading as a row exactly where the list is longest. A row floors at 64px, the box-size step above a `md` control inside the row's 12px insets, so a row carrying a control and a row carrying only text are the same height.
+
+[`/settings/appearance`](../../packages/web/src/pages/SettingsTabPage.tsx) is the reference. Its six tabs share one `Settings` title and tab strip, so Appearance fills the row body alone and the frame around it stays the shared one.
 
 ## Preview
 

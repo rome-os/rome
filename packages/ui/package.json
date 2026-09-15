@@ -95,6 +95,10 @@
       "types": "./dist/input.d.ts",
       "default": "./dist/input.js"
     },
+    "./layout-form": {
+      "types": "./dist/layout-form.d.ts",
+      "default": "./dist/layout-form.js"
+    },
     "./layout-list": {
       "types": "./dist/layout-list.d.ts",
       "default": "./dist/layout-list.js"
