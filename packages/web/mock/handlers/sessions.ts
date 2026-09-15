@@ -1,4 +1,5 @@
 import type {
+  RomeSessionDetail,
   RomeSessionExplorerRecord,
   RomeSessionOwner,
   RomeSessionsPageResult,
@@ -479,8 +480,12 @@ const facet = (values: (string | null)[]): { value: string | null; count: number
 };
 
 /**
- * `/api/sessions/query` over a fixture inventory: the four seeded chats plus the
- * background sessions above.
+ * The `/api/sessions/*` routes over a fixture inventory: the four seeded chats
+ * plus the background sessions above. `query` lists them, and the id routes open
+ * one — a row that lists but cannot be opened is a list mock mode cannot walk.
+ *
+ * These are a different namespace from the `/api/chat/sessions/*` routes the
+ * chat surface uses, and answering one does not answer the other.
  *
  * `scope.runs` is ignored. Its model and outcome filters only ever arrive from a
  * drill-in on the `/sessions` overview, whose metrics endpoint mock mode does
@@ -495,7 +500,30 @@ export function sessionQueryHandlers(
     ...backgroundSessions,
   ];
 
+  const byId = new Map(inventory.map((session) => [session.id, session]));
+  // The transcript a seeded chat already carries. A background session has none
+  // in the fixture, which reads as a session with nothing recorded rather than
+  // as a missing one.
+  const transcriptFor = (id: string): ChatMessage[] => transcripts[id] ?? [];
+
   return [
+    http.get("/api/sessions/:sessionId", ({ params }) => {
+      const session = byId.get(String(params.sessionId));
+      if (!session) return new HttpResponse(null, { status: 404 });
+      // The fixture records carry no parent pointer, so lineage is empty rather
+      // than derived — a guess here would be the handler deciding.
+      return HttpResponse.json({
+        ...session,
+        lineage: { parent: null, children: [] },
+      } satisfies RomeSessionDetail);
+    }),
+
+    http.get("/api/sessions/:sessionId/messages", ({ params }) => {
+      const id = String(params.sessionId);
+      if (!byId.has(id)) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json(transcriptFor(id));
+    }),
+
     http.post("/api/sessions/query", async ({ request }) => {
       const body = (await request.json()) as SessionQueryRequest;
       const { scope } = body;

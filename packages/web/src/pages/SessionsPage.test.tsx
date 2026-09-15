@@ -151,6 +151,17 @@ function renderIndex(initialEntry = "/sessions") {
   );
 }
 
+/** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
+function renderFullMode(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   setRouterHistoryIndex(0);
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
@@ -192,6 +203,50 @@ describe("sessionsViewportClass", () => {
   it("protects the top edge in full mode without shrinking its bottom surface", () => {
     expect(sessionsViewportClass(true)).toContain("pt-safe");
     expect(sessionsViewportClass(true)).not.toContain("pb-safe");
+  });
+});
+
+describe("SessionsPage landmarks", () => {
+  // The shell owns the one `main` on /sessions/*. /full/apps/sessions/* mounts
+  // outside it, so there the page owns it — on every view, or a reader crossing
+  // overview -> all -> detail passes through a page with no landmark.
+  it("gives each full-mode view one main with the safe-area frame", async () => {
+    rs.mocked(getSessionMetrics).mockResolvedValue({
+      scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
+      totals: {
+        sessionCount: 0,
+        runCount: 0,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 0,
+          costUsd: null,
+          costedRunCount: 0,
+        },
+        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
+      },
+      projections: [],
+    });
+
+    for (const entry of ["/full/apps/sessions", "/full/apps/sessions/all"]) {
+      const view = renderFullMode(entry);
+      await waitFor(() => {
+        const mains = view.container.querySelectorAll("main");
+        expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
+        expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
+        expect(mains[0].className).toContain("pt-safe");
+      });
+      cleanup();
+    }
+  });
+
+  it("leaves the landmark to the shell on the in-shell mount", async () => {
+    const view = renderIndex("/sessions/all");
+    await waitFor(() => {
+      expect(view.container.querySelectorAll("main").length).toBe(0);
+    });
   });
 });
 

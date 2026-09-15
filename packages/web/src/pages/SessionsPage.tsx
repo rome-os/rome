@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   CircleCheck,
@@ -229,6 +229,30 @@ function useSessionsExplorerState() {
 }
 
 type SessionsExplorerState = ReturnType<typeof useSessionsExplorerState>;
+
+/**
+ * The landmark and safe-area frame the shell-less mount needs.
+ *
+ * `/sessions/*` renders inside `RomeShellLayout`, which owns the one `main`, so
+ * a layout that added its own would nest a second one. `/full/apps/sessions/*`
+ * routes outside that shell, so there the page owns the landmark, the top inset,
+ * and the bounded height — the same frame this page's overview and detail views
+ * carry. Without it the inventory is the one full-mode view with no landmark,
+ * and its content sits under the notch.
+ */
+function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children: ReactNode }) {
+  if (!fullMode) return children;
+  return (
+    <main
+      data-safe-area-bounded
+      className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
+    >
+      <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
+        {children}
+      </div>
+    </main>
+  );
+}
 
 export function sessionsViewportClass(fullMode: boolean): string {
   return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
@@ -644,321 +668,324 @@ function SessionsIndexPage({
   if (view === "sessions") {
     return (
       <TooltipProvider delayDuration={150}>
-        <ListLayout>
-          <PageHeader align="end">
-            <PageHeading>
-              <PageTitle>Sessions</PageTitle>
-            </PageHeading>
-            <PageActions>{viewSwitch}</PageActions>
-          </PageHeader>
-          <ListToolbar aria-label="Filter sessions">
-            {/* Search leads and grows: it is the only text control here, and the
+        <SessionsListFrame fullMode={fullMode}>
+          <ListLayout>
+            <PageHeader align="end">
+              <PageHeading>
+                <PageTitle>Sessions</PageTitle>
+              </PageHeading>
+              <PageActions>{viewSwitch}</PageActions>
+            </PageHeader>
+            <ListToolbar aria-label="Filter sessions">
+              {/* Search leads and grows: it is the only text control here, and the
                 one the reader reaches for first. */}
-            <div className="relative min-w-48 flex-1 sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title, App, Agent, context, or ID"
-                className="pl-8"
-              />
-            </div>
-            {/* The range narrows the collection like any other filter, and it
+              <div className="relative min-w-48 flex-1 sm:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search title, App, Agent, context, or ID"
+                  className="pl-8"
+                />
+              </div>
+              {/* The range narrows the collection like any other filter, and it
                 is the one the reader reaches for most, so it stays inline
                 rather than joining the two behind the Filter control. */}
-            <Select value={range} onValueChange={(value) => setRange(value as SessionsRange)}>
-              <ToolbarButton asChild>
-                <SelectTrigger aria-label="Time range" className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-              </ToolbarButton>
-              <SelectContent>{rangeItems}</SelectContent>
-            </Select>
-            {/* Type and Source collapse into one control rather than spending
+              <Select value={range} onValueChange={(value) => setRange(value as SessionsRange)}>
+                <ToolbarButton asChild>
+                  <SelectTrigger aria-label="Time range" className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                </ToolbarButton>
+                <SelectContent>{rangeItems}</SelectContent>
+              </Select>
+              {/* Type and Source collapse into one control rather than spending
                 two slots of the row apiece. What is set shows up in the chip
                 row under the toolbar, so the popover stays closed by default
                 without hiding the state. */}
-            <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-              <ToolbarButton asChild>
-                <PopoverTrigger asChild>
-                  <Button variant="outline">
-                    <ListFilter aria-hidden />
-                    Filter
-                    {popoverFilterCount > 0 ? (
-                      <Badge variant="muted" shape="pill">
-                        {popoverFilterCount}
-                      </Badge>
-                    ) : null}
-                  </Button>
-                </PopoverTrigger>
-              </ToolbarButton>
-              <PopoverContent align="start">
-                <Field>
-                  <FieldLabel htmlFor={typeFieldId}>Type</FieldLabel>
-                  <Select
-                    value={type ?? ALL}
-                    onValueChange={(value) =>
-                      setType(value === ALL ? undefined : (value as RomeSessionType))
-                    }
-                  >
-                    <SelectTrigger id={typeFieldId} className="w-full">
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL}>All types</SelectItem>
-                      {(data?.facets.types ?? []).map((facet) =>
-                        facet.value ? (
-                          <SelectItem key={facet.value} value={facet.value}>
-                            {SESSION_TYPE_LABELS[facet.value as keyof typeof SESSION_TYPE_LABELS] ??
-                              facet.value}{" "}
-                            ({facet.count})
+              <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                <ToolbarButton asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline">
+                      <ListFilter aria-hidden />
+                      Filter
+                      {popoverFilterCount > 0 ? (
+                        <Badge variant="muted" shape="pill">
+                          {popoverFilterCount}
+                        </Badge>
+                      ) : null}
+                    </Button>
+                  </PopoverTrigger>
+                </ToolbarButton>
+                <PopoverContent align="start">
+                  <Field>
+                    <FieldLabel htmlFor={typeFieldId}>Type</FieldLabel>
+                    <Select
+                      value={type ?? ALL}
+                      onValueChange={(value) =>
+                        setType(value === ALL ? undefined : (value as RomeSessionType))
+                      }
+                    >
+                      <SelectTrigger id={typeFieldId} className="w-full">
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All types</SelectItem>
+                        {(data?.facets.types ?? []).map((facet) =>
+                          facet.value ? (
+                            <SelectItem key={facet.value} value={facet.value}>
+                              {SESSION_TYPE_LABELS[
+                                facet.value as keyof typeof SESSION_TYPE_LABELS
+                              ] ?? facet.value}{" "}
+                              ({facet.count})
+                            </SelectItem>
+                          ) : null,
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={sourceFieldId}>Source</FieldLabel>
+                    <Select
+                      value={
+                        source?.kind === "internal"
+                          ? INTERNAL_SOURCE
+                          : source?.kind === "channel"
+                            ? source.channel
+                            : ALL
+                      }
+                      onValueChange={(value) =>
+                        setSource(
+                          value === ALL
+                            ? undefined
+                            : value === INTERNAL_SOURCE
+                              ? { kind: "internal" }
+                              : { kind: "channel", channel: value },
+                        )
+                      }
+                    >
+                      <SelectTrigger id={sourceFieldId} className="w-full">
+                        <SelectValue placeholder="Source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All sources</SelectItem>
+                        {(data?.facets.sourceChannels ?? []).map((facet) => (
+                          <SelectItem
+                            key={facet.value ?? INTERNAL_SOURCE}
+                            value={facet.value ?? INTERNAL_SOURCE}
+                          >
+                            {sourceLabel(facet.value)} ({facet.count})
                           </SelectItem>
-                        ) : null,
-                      )}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={sourceFieldId}>Source</FieldLabel>
-                  <Select
-                    value={
-                      source?.kind === "internal"
-                        ? INTERNAL_SOURCE
-                        : source?.kind === "channel"
-                          ? source.channel
-                          : ALL
-                    }
-                    onValueChange={(value) =>
-                      setSource(
-                        value === ALL
-                          ? undefined
-                          : value === INTERNAL_SOURCE
-                            ? { kind: "internal" }
-                            : { kind: "channel", channel: value },
-                      )
-                    }
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    disabled={activeFilters.length === 0}
+                    onClick={() => {
+                      for (const filter of activeFilters) filter.clear();
+                      setFilterOpen(false);
+                    }}
                   >
-                    <SelectTrigger id={sourceFieldId} className="w-full">
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL}>All sources</SelectItem>
-                      {(data?.facets.sourceChannels ?? []).map((facet) => (
-                        <SelectItem
-                          key={facet.value ?? INTERNAL_SOURCE}
-                          value={facet.value ?? INTERNAL_SOURCE}
-                        >
-                          {sourceLabel(facet.value)} ({facet.count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="self-start"
-                  disabled={activeFilters.length === 0}
-                  onClick={() => {
-                    for (const filter of activeFilters) filter.clear();
-                    setFilterOpen(false);
-                  }}
-                >
-                  Clear filters
-                </Button>
-              </PopoverContent>
-            </Popover>
-            {/* Refresh does not narrow the collection, so it sits at the
+                    Clear filters
+                  </Button>
+                </PopoverContent>
+              </Popover>
+              {/* Refresh does not narrow the collection, so it sits at the
                 trailing end as a glyph rather than competing with the filters
                 for the row's reading order. */}
-            <div className="ml-auto flex items-center gap-2">
-              <Tooltip>
-                <ToolbarButton asChild>
-                  <TooltipTrigger asChild>
-                    <IconButton
-                      label="Refresh"
-                      // The kit's own `title` and a Radix tooltip would both
-                      // fire on hover; the page already carries a tooltip
-                      // provider, so the native one stands down.
-                      title=""
-                      icon={<RefreshCw className={inventory.loading ? "animate-spin" : ""} />}
-                      onClick={() => inventory.refresh()}
-                      disabled={inventory.loading}
-                    />
-                  </TooltipTrigger>
-                </ToolbarButton>
-                <TooltipContent>Refresh</TooltipContent>
-              </Tooltip>
-            </div>
-          </ListToolbar>
-          {/* The filters that are set, including the ones a drill-in from the
+              <div className="ml-auto flex items-center gap-2">
+                <Tooltip>
+                  <ToolbarButton asChild>
+                    <TooltipTrigger asChild>
+                      <IconButton
+                        label="Refresh"
+                        // The kit's own `title` and a Radix tooltip would both
+                        // fire on hover; the page already carries a tooltip
+                        // provider, so the native one stands down.
+                        title=""
+                        icon={<RefreshCw className={inventory.loading ? "animate-spin" : ""} />}
+                        onClick={() => inventory.refresh()}
+                        disabled={inventory.loading}
+                      />
+                    </TooltipTrigger>
+                  </ToolbarButton>
+                  <TooltipContent>Refresh</TooltipContent>
+                </Tooltip>
+              </div>
+            </ListToolbar>
+            {/* The filters that are set, including the ones a drill-in from the
               overview brought here. The row exists only while something is
               set. */}
-          {activeFilters.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {activeFilters.map((filter) => (
-                <Button
-                  key={filter.key}
-                  variant="secondary"
-                  size="sm"
-                  onClick={filter.clear}
-                  aria-label={`Clear ${filter.label}`}
-                >
-                  {filter.label}
-                  <span aria-hidden>×</span>
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          {/* The collection takes a second form below `md`: a table that scrolls
+            {activeFilters.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {activeFilters.map((filter) => (
+                  <Button
+                    key={filter.key}
+                    variant="secondary"
+                    size="sm"
+                    onClick={filter.clear}
+                    aria-label={`Clear ${filter.label}`}
+                  >
+                    {filter.label}
+                    <span aria-hidden>×</span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+            {/* The collection takes a second form below `md`: a table that scrolls
               sideways is a table a phone cannot read, so each row becomes a
               card. Which form renders is a decision about the content, which is
               why it sits at the call site rather than in the layout. */}
-          <ListCollection className="flex flex-col gap-3">
-            {error ? (
-              <div className="rounded-12 border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui text-destructive">
-                {error}
-              </div>
-            ) : null}
-            {/* Order lives on the column headers here, so the toolbar carries no
+            <ListCollection className="flex flex-col gap-3">
+              {error ? (
+                <div className="rounded-12 border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui text-destructive">
+                  {error}
+                </div>
+              ) : null}
+              {/* Order lives on the column headers here, so the toolbar carries no
                 sort control of its own. */}
-            <div className="hidden md:block">
-              <DataTable
-                columns={columns}
-                data={sessions}
-                emptyMessage="No sessions found"
-                getRowKey={(session) => session.id}
-                loading={loading && sessions.length === 0}
-                loadingMessage="Loading sessions"
-                onRowClick={openSession}
-                sort={{ key: sort, direction: sortDirection }}
-                onSortChange={(next) => {
-                  setSort(next.key as SessionsSort);
-                  setSortDirection(next.direction);
-                }}
-              />
-            </div>
-            {/* Cards carry no headers, so the narrow form needs the control the
+              <div className="hidden md:block">
+                <DataTable
+                  columns={columns}
+                  data={sessions}
+                  emptyMessage="No sessions found"
+                  getRowKey={(session) => session.id}
+                  loading={loading && sessions.length === 0}
+                  loadingMessage="Loading sessions"
+                  onRowClick={openSession}
+                  sort={{ key: sort, direction: sortDirection }}
+                  onSortChange={(next) => {
+                    setSort(next.key as SessionsSort);
+                    setSortDirection(next.direction);
+                  }}
+                />
+              </div>
+              {/* Cards carry no headers, so the narrow form needs the control the
                 table does without. It sets the field at its useful end, which is
                 the order the table's first click on a header gives too. */}
-            <div className="flex items-center gap-2 md:hidden">
-              <Select
-                value={sort}
-                onValueChange={(value) => {
-                  setSort(value as SessionsSort);
-                  setSortDirection("desc");
-                }}
-              >
-                <SelectTrigger aria-label="Sort sessions" className="w-full">
-                  <SelectValue placeholder="Sort" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="activity">Last activity</SelectItem>
-                  <SelectItem value="runs">Most runs</SelectItem>
-                  <SelectItem value="tokens">Most tokens</SelectItem>
-                  <SelectItem value="cost">Highest cost</SelectItem>
-                  <SelectItem value="errors">Most errors</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="divide-y divide-border-subtle rounded-12 border border-border md:hidden">
-              {sessions.length === 0 ? (
-                <EmptyState>
-                  {loading ? (
-                    <EmptyStateIcon>
-                      <Spinner label="Loading sessions" />
-                    </EmptyStateIcon>
-                  ) : null}
-                  <EmptyStateTitle>
-                    {loading ? "Loading sessions" : "No sessions found"}
-                  </EmptyStateTitle>
-                </EmptyState>
-              ) : (
-                sessions.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className="block w-full px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
-                    onClick={() => openSession(session)}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <Avatar className="size-9 shrink-0 rounded-8 border border-border bg-muted after:rounded-8">
-                        {session.owner.iconUrl ? (
-                          <AvatarImage src={session.owner.iconUrl} alt="" className="rounded-8" />
-                        ) : null}
-                        <AvatarFallback className="rounded-8">
-                          <RomeLogo className="size-4 [--background:var(--muted)]" aria-hidden />
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{session.displayTitle}</div>
-                        <div className="truncate text-aux text-muted-foreground">
-                          {session.owner.label} · {sessionAgentLabel(session.agentName)}
-                        </div>
-                      </div>
-                      <Badge variant={sessionKindVariant(session.type)} shape="square">
-                        {SESSION_TYPE_LABELS[session.type]}
-                      </Badge>
-                    </div>
-                    <div className="mt-4 grid grid-cols-3 gap-3 text-aux">
-                      <div>
-                        <div className="text-muted-foreground">Runs</div>
-                        <div className="mt-1 tabular-nums">{session.stats.runCount}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Tokens</div>
-                        <div className="mt-1 tabular-nums">
-                          {formatCompactNumber(session.stats.usage.totalTokens)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Estimated cost</div>
-                        <div className="mt-1 tabular-nums">
-                          {formatCost(session.stats.usage.costUsd)}
-                        </div>
-                        {costCoverage(session.stats.usage, session.stats.runCount) ? (
-                          <div className="mt-1 text-muted-foreground">
-                            {costCoverage(session.stats.usage, session.stats.runCount)}
+              <div className="flex items-center gap-2 md:hidden">
+                <Select
+                  value={sort}
+                  onValueChange={(value) => {
+                    setSort(value as SessionsSort);
+                    setSortDirection("desc");
+                  }}
+                >
+                  <SelectTrigger aria-label="Sort sessions" className="w-full">
+                    <SelectValue placeholder="Sort" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="activity">Last activity</SelectItem>
+                    <SelectItem value="runs">Most runs</SelectItem>
+                    <SelectItem value="tokens">Most tokens</SelectItem>
+                    <SelectItem value="cost">Highest cost</SelectItem>
+                    <SelectItem value="errors">Most errors</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="divide-y divide-border-subtle rounded-12 border border-border md:hidden">
+                {sessions.length === 0 ? (
+                  <EmptyState>
+                    {loading ? (
+                      <EmptyStateIcon>
+                        <Spinner label="Loading sessions" />
+                      </EmptyStateIcon>
+                    ) : null}
+                    <EmptyStateTitle>
+                      {loading ? "Loading sessions" : "No sessions found"}
+                    </EmptyStateTitle>
+                  </EmptyState>
+                ) : (
+                  sessions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      className="block w-full px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                      onClick={() => openSession(session)}
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Avatar className="size-9 shrink-0 rounded-8 border border-border bg-muted after:rounded-8">
+                          {session.owner.iconUrl ? (
+                            <AvatarImage src={session.owner.iconUrl} alt="" className="rounded-8" />
+                          ) : null}
+                          <AvatarFallback className="rounded-8">
+                            <RomeLogo className="size-4 [--background:var(--muted)]" aria-hidden />
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{session.displayTitle}</div>
+                          <div className="truncate text-aux text-muted-foreground">
+                            {session.owner.label} · {sessionAgentLabel(session.agentName)}
                           </div>
-                        ) : null}
+                        </div>
+                        <Badge variant={sessionKindVariant(session.type)} shape="square">
+                          {SESSION_TYPE_LABELS[session.type]}
+                        </Badge>
                       </div>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-4 text-aux text-muted-foreground">
-                      <span className="truncate">{formatOutcome(session.stats.outcomes)}</span>
-                      <Timestamp
-                        value={session.activityAt ?? session.createdAt}
-                        className="shrink-0"
-                      />
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </ListCollection>
-          <ListFooter>
-            <span className="text-aux text-muted-foreground">
-              {data
-                ? `Showing ${data.total === 0 ? 0 : data.offset + 1}-${data.offset + sessions.length} of ${data.total}`
-                : "Showing sessions"}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                disabled={loading || offset === 0}
-                onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                disabled={loading || !data || data.nextOffset === null}
-                onClick={() => setOffset(data?.nextOffset ?? offset)}
-              >
-                Next
-              </Button>
-            </div>
-          </ListFooter>
-        </ListLayout>
+                      <div className="mt-4 grid grid-cols-3 gap-3 text-aux">
+                        <div>
+                          <div className="text-muted-foreground">Runs</div>
+                          <div className="mt-1 tabular-nums">{session.stats.runCount}</div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Tokens</div>
+                          <div className="mt-1 tabular-nums">
+                            {formatCompactNumber(session.stats.usage.totalTokens)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground">Estimated cost</div>
+                          <div className="mt-1 tabular-nums">
+                            {formatCost(session.stats.usage.costUsd)}
+                          </div>
+                          {costCoverage(session.stats.usage, session.stats.runCount) ? (
+                            <div className="mt-1 text-muted-foreground">
+                              {costCoverage(session.stats.usage, session.stats.runCount)}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-4 text-aux text-muted-foreground">
+                        <span className="truncate">{formatOutcome(session.stats.outcomes)}</span>
+                        <Timestamp
+                          value={session.activityAt ?? session.createdAt}
+                          className="shrink-0"
+                        />
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </ListCollection>
+            <ListFooter>
+              <span className="text-aux text-muted-foreground">
+                {data
+                  ? `Showing ${data.total === 0 ? 0 : data.offset + 1}-${data.offset + sessions.length} of ${data.total}`
+                  : "Showing sessions"}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  disabled={loading || offset === 0}
+                  onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={loading || !data || data.nextOffset === null}
+                  onClick={() => setOffset(data?.nextOffset ?? offset)}
+                >
+                  Next
+                </Button>
+              </div>
+            </ListFooter>
+          </ListLayout>
+        </SessionsListFrame>
       </TooltipProvider>
     );
   }
