@@ -9,6 +9,9 @@
    overrides). Kept out of the canon above so app bundles that render no prose
    don't carry it — the dashboard does, so it opts in here. */
 @import "@rome-os/ui/markdown.css";
+/* Recorded apps ship their own Shadow DOM styles. Their compiled bundles
+   must not contribute utility classes to the dashboard stylesheet. */
+@source not "../mock/public/recorded-apps";
 @plugin "@tailwindcss/typography";
 
 /* ════════════════════════ THEME CONTRACT ════════════════════════
