@@ -49,7 +49,7 @@ Search leads the row and grows into the space the other controls leave. More tha
 
 The split the row reads by is the same one the header takes: a control that changes which rows are shown belongs in the toolbar, and a control that scopes the whole page belongs beside the title.
 
-[`/sessions/all`](../../packages/web/src/pages/SessionsPage.tsx) is the reference.
+[`/sessions/all`](../../packages/web/src/pages/SessionsPage.tsx) is the reference for a table, and [`/apps`](../../packages/web/src/pages/AppsIndexPage.tsx) for a grid the reader searches rather than filters: one control narrows it, so the row holds search alone.
 
 ## Preview
 

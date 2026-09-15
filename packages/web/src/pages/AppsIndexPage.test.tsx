@@ -132,7 +132,6 @@ function mockBackend(initial: {
   installed: InstalledAppCard[];
   onInstall?: (id: string) => InstalledAppCard;
   upgradable?: FakeUpgradeCandidate[];
-  appsGate?: Promise<void>;
   /** When set, POST /apps/:id/publish fails with this store rejection message. */
   publishError?: string;
   /**
@@ -161,7 +160,6 @@ function mockBackend(initial: {
       return ok({ kind: "guardian", userId: "ray", displayName: "Ray", avatarUrl: null });
     }
     if (url === "/api/apps" && method === "GET") {
-      if (initial.appsGate) await initial.appsGate;
       return ok({ apps: installed });
     }
     if (url === "/api/apps" && method === "POST") {
@@ -848,6 +846,19 @@ describe("AppsIndexPage disabled apps", () => {
 });
 
 describe("AppsIndexPage search", () => {
+  // The toolbar and the field it holds are two named things. Giving them one
+  // name makes every `getByLabelText("Search apps")` in this file ambiguous,
+  // which is how the List migration first broke.
+  it("names the toolbar apart from the search field inside it", async () => {
+    mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const toolbar = screen.getByRole("toolbar", { name: "Filter apps" });
+    expect(toolbar.contains(screen.getByLabelText("Search apps"))).toBe(true);
+  });
+
   it("filters the grid to the apps and built-ins matching the query", async () => {
     const user = userEvent.setup();
     mockBackend({
@@ -871,7 +882,7 @@ describe("AppsIndexPage search", () => {
     expect(screen.queryByText("Projects")).toBeNull();
   });
 
-  it("derives displayed section and header counts from visible search results", async () => {
+  it("derives the displayed section count from visible search results", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
@@ -898,42 +909,10 @@ describe("AppsIndexPage search", () => {
     await screen.findByText("Weather");
     await user.type(screen.getByLabelText("Search apps"), "weath");
 
-    expect(screen.getByText("1 built by you")).toBeTruthy();
-    expect(screen.getByText("0 installed")).toBeTruthy();
-    expect(screen.getByText("0 built-in")).toBeTruthy();
-
     const mySection = screen.getByRole("region", { name: "My apps" });
     expect(within(mySection).getByText("1")).toBeTruthy();
     expect(within(mySection).getByText("Weather")).toBeTruthy();
     expect(within(mySection).queryByText("Calendar")).toBeNull();
-  });
-
-  it("defers the built-in header summary until installed apps have loaded", async () => {
-    let releaseApps: () => void = () => {};
-    const appsGate = new Promise<void>((resolve) => {
-      releaseApps = resolve;
-    });
-    mockBackend({
-      installed: [
-        installedCard({
-          id: "system",
-          displayName: "System",
-          origin: "builtin",
-          canUninstall: false,
-          canPublish: false,
-        }),
-      ],
-      appsGate,
-    });
-
-    renderPage();
-
-    expect(screen.queryByText("1 built-in")).toBeNull();
-    expect(screen.queryByText("2 built-in")).toBeNull();
-
-    releaseApps();
-
-    expect(await screen.findByText("2 built-in")).toBeTruthy();
   });
 
   it("shows an empty state for a query with no matches, and clearing restores the grid", async () => {

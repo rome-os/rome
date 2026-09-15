@@ -2,15 +2,7 @@
   "builtinApps": "Builtin Apps",
   "header": {
     "title": "Apps",
-    "appStore": "App store",
-    "myAppsCount_one": "{{count}} built by you",
-    "myAppsCount_other": "{{count}} built by you",
-    "installedCount_one": "{{count}} installed",
-    "installedCount_other": "{{count}} installed",
-    "builtinCount_one": "{{count}} built-in",
-    "builtinCount_other": "{{count}} built-in",
-    "updatesCount_one": "{{count}} update",
-    "updatesCount_other": "{{count}} updates"
+    "appStore": "App store"
   },
   "sections": {
     "my": {
@@ -30,6 +22,7 @@
   "search": {
     "placeholder": "Search apps",
     "ariaLabel": "Search apps",
+    "toolbarLabel": "Filter apps",
     "clear": "Clear search",
     "resultsCount_one": "{{count}} result",
     "resultsCount_other": "{{count}} results",

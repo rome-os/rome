@@ -29,7 +29,15 @@ import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import { ListLayout, ListToolbar } from "@rome-os/ui/layout-list";
+import {
+  PageActions,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+  Section,
+  SectionTitle,
+} from "@rome-os/ui/page";
 import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
@@ -258,7 +266,7 @@ interface SectionHeaderProps {
 function SectionHeader({ title, count }: SectionHeaderProps) {
   return (
     <div className="flex items-center gap-2">
-      <h2 className="text-section text-foreground">{title}</h2>
+      <SectionTitle>{title}</SectionTitle>
       {count !== null && count > 0 ? (
         <span className="rounded-full bg-primary/10 px-2 py-1 text-badge text-primary">
           {count}
@@ -492,194 +500,174 @@ export default function AppsIndexPage() {
     // the tiles quiet, while Radix's shared skip-delay makes the next tile's
     // name appear instantly once one tooltip is already showing.
     <TooltipProvider delayDuration={300}>
-      <PageShell>
-        <PageBody>
-          <div className="flex flex-col gap-4">
-            <PageHeader
-              title={t("header.title")}
-              description={
-                <span className="flex flex-wrap items-center gap-x-2">
-                  {apps !== null ? (
-                    <>
-                      <span>{t("header.myAppsCount", { count: myAppsCount })}</span>
-                      <span aria-hidden>&middot;</span>
-                      <span>{t("header.installedCount", { count: storeAppsCount })}</span>
-                      <span aria-hidden>&middot;</span>
-                      <span>{t("header.builtinCount", { count: builtinCount })}</span>
-                    </>
-                  ) : null}
-                  {updatesCount > 0 ? (
-                    <>
-                      {apps !== null ? <span aria-hidden>&middot;</span> : null}
-                      <span className="text-foreground">
-                        {t("header.updatesCount", { count: updatesCount })}
-                      </span>
-                    </>
-                  ) : null}
-                </span>
-              }
-              actions={
-                <>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={lifecycle.upgradeAll}
-                    disabled={updatesCount === 0 || menusDisabled}
-                  >
-                    <Download className="h-3.5 w-3.5" aria-hidden />
-                    {lifecycle.bulkUpgradePending
-                      ? t("installed.updateAllUpdating")
-                      : t("installed.updateAll")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setStoreOpen(true)}
-                  >
-                    {t("header.appStore")}
-                  </Button>
-                </>
-              }
+      {/* The launcher is a List: the guardian scans or searches it for one app
+          and opens it. The header carries what the page is, and the toolbar
+          carries what narrows the collection, which is the split in
+          docs/ui/layouts.md. The actions here are two buttons that may wrap, so
+          the header keeps the default `start` alignment rather than the `end`
+          a lone view switch takes. */}
+      <ListLayout>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle>{t("header.title")}</PageTitle>
+          </PageHeading>
+          <PageActions>
+            <Button
+              type="button"
+              size="sm"
+              onClick={lifecycle.upgradeAll}
+              disabled={updatesCount === 0 || menusDisabled}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              {lifecycle.bulkUpgradePending
+                ? t("installed.updateAllUpdating")
+                : t("installed.updateAll")}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setStoreOpen(true)}>
+              {t("header.appStore")}
+            </Button>
+          </PageActions>
+        </PageHeader>
+
+        {/* Search is the only control that narrows the launcher, so it leads the
+            row alone — one filter does not earn the Filter control the toolbar
+            rule collapses three into. The field keeps its own tab stop, which
+            is what typing into a toolbar needs. */}
+        <ListToolbar aria-label={t("search.toolbarLabel")}>
+          <div className="relative w-full sm:max-w-sm">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"
+              aria-hidden
             />
-
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="relative w-full sm:max-w-sm">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"
-                  aria-hidden
-                />
-                <Input
-                  type="text"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    // Escape clears, but not mid-IME-composition: CJK users press
-                    // Escape to cancel the candidate buffer, and clearing the whole
-                    // query then would be destructive. Same guard the chat composer
-                    // uses for Enter.
-                    if (event.key === "Escape" && !isImeCompositionEvent(event)) setQuery("");
-                  }}
-                  placeholder={t("search.placeholder")}
-                  aria-label={t("search.ariaLabel")}
-                  className="h-9 pl-8 pr-8"
-                />
-                {query ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    onClick={() => setQuery("")}
-                    aria-label={t("search.clear")}
-                    title={t("search.clear")}
-                    // Centered with `inset-y-0 my-auto`, not `-translate-y-1/2`:
-                    // Button's base carries an active-press `translate-y-px` on a
-                    // different variant prefix, so a centering transform survives
-                    // the merge and the glyph drops half its height while pressed.
-                    // Auto margins split the 36px field's spare 12px evenly around
-                    // the 24px button without naming an off-scale 6px offset.
-                    className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
-                  >
-                    <X className="size-3.5" aria-hidden />
-                  </Button>
-                ) : null}
-              </div>
-              {isSearching ? (
-                <p className="text-aux text-muted-foreground" aria-live="polite">
-                  {t("search.resultsCount", { count: resultCount })}
-                </p>
-              ) : null}
-            </div>
+            <Input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                // Escape clears, but not mid-IME-composition: CJK users press
+                // Escape to cancel the candidate buffer, and clearing the whole
+                // query then would be destructive. Same guard the chat composer
+                // uses for Enter.
+                if (event.key === "Escape" && !isImeCompositionEvent(event)) setQuery("");
+              }}
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.ariaLabel")}
+              className="h-9 pl-8 pr-8"
+            />
+            {query ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setQuery("")}
+                aria-label={t("search.clear")}
+                title={t("search.clear")}
+                // Centered with `inset-y-0 my-auto`, not `-translate-y-1/2`:
+                // Button's base carries an active-press `translate-y-px` on a
+                // different variant prefix, so a centering transform survives
+                // the merge and the glyph drops half its height while pressed.
+                // Auto margins split the 36px field's spare 12px evenly around
+                // the 24px button without naming an off-scale 6px offset.
+                className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
+              >
+                <X className="size-3.5" aria-hidden />
+              </Button>
+            ) : null}
           </div>
-
-          {loadError ? (
-            <p className="rounded-8 bg-destructive-bg px-4 py-3 text-ui text-destructive-fg">
-              {loadError}
+          {isSearching ? (
+            <p className="text-aux text-muted-foreground" aria-live="polite">
+              {t("search.resultsCount", { count: resultCount })}
             </p>
           ) : null}
+        </ListToolbar>
 
-          {noMatches ? (
-            <EmptyState className="rounded-12 border border-dashed border-border bg-surface/50">
-              <EmptyStateIcon>
-                <Search className="h-5 w-5" aria-hidden />
-              </EmptyStateIcon>
-              <EmptyStateTitle>{t("search.noResults", { query: query.trim() })}</EmptyStateTitle>
-              <EmptyStateDescription>{t("search.noResultsHint")}</EmptyStateDescription>
-              <EmptyStateAction>
-                <Button type="button" variant="outline" size="sm" onClick={() => setQuery("")}>
-                  {t("search.clear")}
-                </Button>
-              </EmptyStateAction>
-            </EmptyState>
-          ) : (
-            <div className="flex flex-col gap-8" aria-busy={apps === null}>
-              {showMySection ? (
-                <section className="flex flex-col gap-3" aria-label={t("sections.my.title")}>
-                  <SectionHeader title={t("sections.my.title")} count={myAppsCount} />
-                  {apps === null ? (
-                    <div className={tileGridClass}>{renderSkeletonTiles("my", 4)}</div>
-                  ) : (
-                    <div className={tileGridClass}>
-                      {visibleMyApps.map((app) => renderInstalledTile(app))}
-                      {/* Hidden while searching so the grid holds only matches. */}
-                      {isSearching ? null : (
-                        <GhostTile
-                          icon={<Plus className="h-6 w-6 sm:h-7 sm:w-7" />}
-                          label={t("sections.my.newApp")}
-                          onClick={startNewAppDraft}
-                        />
-                      )}
-                    </div>
-                  )}
-                </section>
-              ) : null}
+        {loadError ? (
+          <p className="rounded-8 bg-destructive-bg px-4 py-3 text-ui text-destructive-fg">
+            {loadError}
+          </p>
+        ) : null}
 
-              {showStoreSection ? (
-                <section className="flex flex-col gap-3" aria-label={t("sections.appstore.title")}>
-                  <SectionHeader title={t("sections.appstore.title")} count={storeAppsCount} />
-                  {apps === null ? (
-                    <div className={tileGridClass}>{renderSkeletonTiles("appstore", 4)}</div>
-                  ) : (
-                    <div className={tileGridClass}>
-                      {visibleStoreApps.map((app) => renderInstalledTile(app))}
-                      {isSearching ? null : (
-                        <GhostTile
-                          icon={<Store className="h-6 w-6 sm:h-7 sm:w-7" />}
-                          label={t("sections.appstore.browseStore")}
-                          onClick={() => setStoreOpen(true)}
-                        />
-                      )}
-                    </div>
-                  )}
-                </section>
-              ) : null}
-
-              {showBuiltinSection ? (
-                <section className="flex flex-col gap-3" aria-label={t("sections.builtin.title")}>
-                  <SectionHeader title={t("sections.builtin.title")} count={builtinCount} />
+        {noMatches ? (
+          <EmptyState className="rounded-12 border border-dashed border-border bg-surface/50">
+            <EmptyStateIcon>
+              <Search className="h-5 w-5" aria-hidden />
+            </EmptyStateIcon>
+            <EmptyStateTitle>{t("search.noResults", { query: query.trim() })}</EmptyStateTitle>
+            <EmptyStateDescription>{t("search.noResultsHint")}</EmptyStateDescription>
+            <EmptyStateAction>
+              <Button type="button" variant="outline" size="sm" onClick={() => setQuery("")}>
+                {t("search.clear")}
+              </Button>
+            </EmptyStateAction>
+          </EmptyState>
+        ) : (
+          <div className="flex flex-col gap-6" aria-busy={apps === null}>
+            {showMySection ? (
+              <Section aria-label={t("sections.my.title")}>
+                <SectionHeader title={t("sections.my.title")} count={myAppsCount} />
+                {apps === null ? (
+                  <div className={tileGridClass}>{renderSkeletonTiles("my", 4)}</div>
+                ) : (
                   <div className={tileGridClass}>
-                    {visibleBuiltins.map((entry) => renderBuiltinTile(entry))}
-                    {visibleBuiltinApps.map((app) => renderInstalledTile(app))}
+                    {visibleMyApps.map((app) => renderInstalledTile(app))}
+                    {/* Hidden while searching so the grid holds only matches. */}
+                    {isSearching ? null : (
+                      <GhostTile
+                        icon={<Plus className="h-6 w-6 sm:h-7 sm:w-7" />}
+                        label={t("sections.my.newApp")}
+                        onClick={startNewAppDraft}
+                      />
+                    )}
                   </div>
-                </section>
-              ) : null}
-            </div>
-          )}
+                )}
+              </Section>
+            ) : null}
 
-          {lifecycle.dialogs}
+            {showStoreSection ? (
+              <Section aria-label={t("sections.appstore.title")}>
+                <SectionHeader title={t("sections.appstore.title")} count={storeAppsCount} />
+                {apps === null ? (
+                  <div className={tileGridClass}>{renderSkeletonTiles("appstore", 4)}</div>
+                ) : (
+                  <div className={tileGridClass}>
+                    {visibleStoreApps.map((app) => renderInstalledTile(app))}
+                    {isSearching ? null : (
+                      <GhostTile
+                        icon={<Store className="h-6 w-6 sm:h-7 sm:w-7" />}
+                        label={t("sections.appstore.browseStore")}
+                        onClick={() => setStoreOpen(true)}
+                      />
+                    )}
+                  </div>
+                )}
+              </Section>
+            ) : null}
 
-          <AppRemixDialog app={remixTarget} onClose={closeRemixDialog} />
+            {showBuiltinSection ? (
+              <Section aria-label={t("sections.builtin.title")}>
+                <SectionHeader title={t("sections.builtin.title")} count={builtinCount} />
+                <div className={tileGridClass}>
+                  {visibleBuiltins.map((entry) => renderBuiltinTile(entry))}
+                  {visibleBuiltinApps.map((app) => renderInstalledTile(app))}
+                </div>
+              </Section>
+            ) : null}
+          </div>
+        )}
 
-          <AppStoreSheet
-            open={storeOpen}
-            onClose={() => setStoreOpen(false)}
-            onInstalled={() => {
-              void invalidateApps.list();
-              void invalidateApps.updates();
-            }}
-          />
-        </PageBody>
-      </PageShell>
+        {lifecycle.dialogs}
+
+        <AppRemixDialog app={remixTarget} onClose={closeRemixDialog} />
+
+        <AppStoreSheet
+          open={storeOpen}
+          onClose={() => setStoreOpen(false)}
+          onInstalled={() => {
+            void invalidateApps.list();
+            void invalidateApps.updates();
+          }}
+        />
+      </ListLayout>
     </TooltipProvider>
   );
 }
