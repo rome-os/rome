@@ -42,6 +42,7 @@ import {
   isWechatUserSessionRejected,
   WechatUserReader,
   WechatUserRuntime,
+  WechatUserStorePending,
   type WechatUserConversation,
   type WechatUserMessage,
   type WechatUserStatus,
@@ -272,8 +273,8 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       if (!initial.installed) {
         interact.show(installingView());
         await runtime.install(signal);
-        await runtime.installReader(signal);
       }
+      await runtime.installReader(signal);
       // The client is deliberately not started here — recovery launches it under
       // gdb to own it from birth and catch the first login. Only the session it
       // draws into and the capture driver are readied.
@@ -309,8 +310,18 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           qr.stop = true;
           await qrLoop;
           interact.show(keysView());
+          await waitFor(signal, (s) => s.loggedIn);
           // Derive and verify the per-database keys from the captured passphrase.
-          await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
+          const deadline = Date.now() + loginTimeoutMs;
+          for (;;) {
+            try {
+              await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
+              break;
+            } catch (error) {
+              if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline) throw error;
+              await abortableDelay(pollIntervalMs, signal);
+            }
+          }
           return waitFor(signal, (s) => s.keysReady);
         } catch (error) {
           qr.stop = true;

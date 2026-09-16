@@ -36,6 +36,7 @@ const log = createLogger("wechat-user");
  */
 export const WECHAT_CLIENT_URL =
   "https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb";
+const WECHAT_CLIENT_SHA256 = "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
 
 /**
  * The reader's understanding of WeChat's on-disk formats — SQLCipher page
@@ -189,6 +190,9 @@ export class WechatUserRuntimeError extends Error {
   }
 }
 
+/** The client has not finished creating the message databases after login. */
+export class WechatUserStorePending extends WechatUserRuntimeError {}
+
 export function isWechatUserSessionRejected(error: unknown): boolean {
   return error instanceof WechatUserSessionRejected;
 }
@@ -309,11 +313,9 @@ export class WechatUserRuntime {
     if (!windowId) return null;
     // import writes the window's pixels; base64 -w0 keeps it a single line for
     // the data URL. A window that is not yet viewable fails, and we return null.
-    const shot = await this.run(
-      "sh",
-      ["-c", `import -window ${windowId} png:- | base64 -w0`],
-      { env },
-    ).catch(() => null);
+    const shot = await this.run("sh", ["-c", `import -window ${windowId} png:- | base64 -w0`], {
+      env,
+    }).catch(() => null);
     const encoded = shot?.stdout.trim();
     if (!shot || shot.code !== 0 || !encoded) return null;
     return `data:image/png;base64,${encoded}`;
@@ -323,7 +325,17 @@ export class WechatUserRuntime {
     const installed = await exists(join(this.clientDir, "wechat"));
     const pid = installed ? await this.pid() : null;
     const account = installed ? await this.accountDir() : null;
-    const keysReady = account !== null && (await exists(this.keysFile));
+    let keysReady = false;
+    if (account !== null && (await exists(this.keysFile))) {
+      try {
+        const checked = z
+          .object({ keysReady: z.literal(true) })
+          .parse(await this.readerCommand(["check"]));
+        keysReady = checked.keysReady;
+      } catch (error) {
+        if (!isWechatUserSessionRejected(error)) throw error;
+      }
+    }
 
     let state: WechatUserState;
     if (!installed) state = "absent";
@@ -373,6 +385,15 @@ export class WechatUserRuntime {
     }
 
     if (!(await exists(join(this.clientDir, "wechat")))) {
+      const checksum = await this.run("sha256sum", [deb], {
+        ...(signal ? { signal } : {}),
+      });
+      if (checksum.code !== 0 || checksum.stdout.trim().split(/\s+/)[0] !== WECHAT_CLIENT_SHA256) {
+        throw new WechatUserRuntimeError(
+          "The WeChat client checksum does not match the supported 4.1.13.9 build. " +
+            "Install the supported archive or update Rome before connecting.",
+        );
+      }
       log.info("wechat_user.unpacking_client", { prefix: clientRoot });
       await mkdir(clientRoot, { recursive: true });
       const unpacked = await this.run("dpkg-deb", ["-x", deb, clientRoot], {
@@ -493,6 +514,11 @@ export class WechatUserRuntime {
     if (result.code === 3) {
       throw new WechatUserSessionRejected(
         result.stderr.trim() || "The WeChat account is signed out, or its key no longer fits.",
+      );
+    }
+    if (result.code === 4) {
+      throw new WechatUserStorePending(
+        result.stderr.trim() || "The WeChat store is not ready yet.",
       );
     }
     if (result.code !== 0) {

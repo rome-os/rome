@@ -7,10 +7,11 @@
 //
 // Skipped unless `WECHAT_USER_TEST=1` and a client is installed, signed in, and
 // unlocked in this container:
-//   WECHAT_USER_TEST=1 pnpm --filter @rome/core test:integration
+//   scripts/test-env.sh env WECHAT_USER_TEST=1 pnpm exec rstest -c packages/core/rstest.config.ts packages/core/src/channels/wechat-user.integration.test.ts
 
 import { describe, expect, it } from "@rstest/core";
 import { WechatUserReader, WechatUserRuntime } from "./wechat-user.js";
+import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.js";
 
 const enabled = process.env.WECHAT_USER_TEST === "1";
 const withClient = enabled ? describe : describe.skip;
@@ -29,6 +30,31 @@ withClient("the WeChat reader contract", () => {
       expect(status.loggedIn).toBe(true);
       expect(status.keysReady).toBe(true);
       expect(status.wxid).toBeTruthy();
+    },
+    TIMEOUT_MS,
+  );
+
+  it(
+    "reads a direct contact's body, latest message, and count through the People store",
+    async () => {
+      const directory = wechatUserAccounts(reader);
+      const store = wechatUserMessages(reader);
+      const { accounts } = await directory.listAccounts({ limit: 100 });
+      expect(accounts.length).toBeGreaterThan(0);
+      let checked = false;
+      for (const account of accounts) {
+        const selected = [{ channel: "wechat_user", addresses: account.addresses }];
+        if ((await store.count(selected)) === 0) continue;
+        const messages = await store.read({ accounts: selected, limit: 5 });
+        expect(messages.length).toBeGreaterThan(0);
+        expect(messages.some((message) => Boolean(message.body))).toBe(true);
+        expect(await store.latest(selected)).toEqual(messages[0]);
+        checked = true;
+        break;
+      }
+      expect(checked, "The clean login needs at least one direct conversation with messages").toBe(
+        true,
+      );
     },
     TIMEOUT_MS,
   );

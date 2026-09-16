@@ -13,6 +13,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
+import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
@@ -179,8 +180,44 @@ describe("makeWechatUserSetup", () => {
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(runtime.install).not.toHaveBeenCalled();
+    expect(runtime.installReader).toHaveBeenCalledTimes(1);
     expect(runtime.start).not.toHaveBeenCalled();
     expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not confer when the message shard cannot be unlocked", async () => {
+    const locked = { ...READY, state: "awaiting-keys" as const, keysReady: false };
+    const runtime = fakeRuntime({
+      statuses: [locked],
+      onDerive: () => {
+        throw new Error("message/message_0.db has no valid key");
+      },
+    });
+    const { fn } = setupWith(runtime);
+    const commit = rs.fn(async () => {});
+    const session = new SetupSession({ fn, commit });
+    await session.started();
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the captured passphrase while the client creates message shards", async () => {
+    let attempts = 0;
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, state: "awaiting-keys", keysReady: false }, READY],
+      onDerive: () => {
+        if (++attempts === 1)
+          throw new WechatUserStorePending("Message database is not available yet");
+      },
+    });
+    const { fn, recoverPassphrase } = setupWith(runtime);
+    const commit = rs.fn(async () => {});
+    const session = new SetupSession({ fn, commit });
+    await session.started();
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    expect(attempts).toBe(2);
+    expect(recoverPassphrase).toHaveBeenCalledTimes(1);
+    expect(commit).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Reads the signed-in WeChat account's own store, for channels/wechat-user.ts.
 
-Three commands, each answering JSON on stdout:
+Commands answer JSON on stdout:
 
     derive --passphrase <hex>   turn the recovered passphrase into per-database
                                 keys, verify each, and write them where the
                                 reader looks
     conversations --limit N [--query Q]
     messages [--conversation ID] [--since UNIX] --limit N
+    count --conversation ID
+    check                     verify stored keys against the current databases
 
 Exit 3 means the account is not readable — signed out, or a key that no longer
-fits. The caller maps that to a rejected credential; every other non-zero exit
-is a transient failure.
+fits. Exit 4 means the client is still creating the databases after login.
+The caller retries that state with the captured passphrase. Other non-zero
+exits are transient failures.
 
 This exists because WeChat's formats are not something to re-derive: SQLCipher
 page layout, zstd message bodies, sharded per-chat tables, rich-message
@@ -27,6 +30,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -46,6 +50,10 @@ CONFIG_FILE = os.path.join(HOME, ".wechat-cli", "config.json")
 
 class Unavailable(Exception):
     """The account cannot be read. Reported as exit 3."""
+
+
+class Pending(Exception):
+    """The client is still creating its message store. Reported as exit 4."""
 
 
 def fail(message):
@@ -122,7 +130,7 @@ def cmd_derive(args):
 
     databases = collect_databases(db_dir)
     if not databases:
-        fail("The signed-in account has no message databases yet.")
+        raise Pending("The signed-in account has no message databases yet.")
 
     by_salt = {}
     for db in databases:
@@ -133,9 +141,9 @@ def cmd_derive(args):
         enc_key = hashlib.pbkdf2_hmac(
             "sha512", passphrase, bytes.fromhex(salt_hex), PBKDF2_ITERATIONS, dklen=KEY_SIZE
         )
-        if not verify_key(enc_key, group[0]["page1"]):
-            continue
         for db in group:
+            if not verify_key(enc_key, db["page1"]):
+                continue
             keys[db["rel"]] = {
                 "enc_key": enc_key.hex(),
                 "salt": salt_hex,
@@ -144,6 +152,8 @@ def cmd_derive(args):
 
     if not keys:
         fail("The recovered passphrase does not open this account's databases.")
+
+    validate_keys(db_dir, keys)
 
     os.makedirs(os.path.dirname(KEYS_FILE), exist_ok=True)
     with open(KEYS_FILE, "w", encoding="utf-8") as f:
@@ -158,6 +168,52 @@ def cmd_derive(args):
     }))
 
 
+def validate_keys(db_dir, keys):
+    """Authenticate the session and every message shard before exposing history."""
+    required = [os.path.join(db_dir, "session", "session.db")]
+    shards = sorted(glob.glob(os.path.join(db_dir, "message", "message_*.db")))
+    shards = [path for path in shards if re.fullmatch(r"message_\d+\.db", os.path.basename(path))]
+    if not shards:
+        raise Pending("The WeChat message databases are not available yet.")
+    required.extend(shards)
+    for path in required:
+        rel = os.path.relpath(path, db_dir)
+        if not os.path.exists(path) or os.path.getsize(path) < PAGE_SIZE:
+            raise Pending(f"The WeChat client is still creating {rel}.")
+        entry = keys.get(rel, {})
+        try:
+            key = bytes.fromhex(entry.get("enc_key", ""))
+            with open(path, "rb") as f:
+                page = f.read(PAGE_SIZE)
+            valid = len(key) == KEY_SIZE and len(page) == PAGE_SIZE and verify_key(key, page)
+        except (OSError, ValueError, TypeError, AttributeError):
+            valid = False
+        if not valid:
+            raise Unavailable(f"The WeChat message store is locked: {rel} has no valid key.")
+
+
+def check_keys():
+    account = account_dir()
+    if not account:
+        raise Unavailable("The WeChat account is signed out on this instance.")
+    try:
+        with open(KEYS_FILE, encoding="utf-8") as f:
+            keys = json.load(f)
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            config = json.load(f)
+    except (FileNotFoundError, ValueError):
+        raise Unavailable("The WeChat message store has not been unlocked yet.")
+    db_dir = os.path.join(account, "db_storage")
+    if not isinstance(keys, dict) or not isinstance(config, dict) or config.get("db_dir") != db_dir:
+        raise Unavailable("The WeChat reader keys do not belong to this account.")
+    validate_keys(db_dir, keys)
+    return {"keysReady": True, "wxid": os.path.basename(account)}
+
+
+def cmd_check(_args):
+    print(json.dumps(check_keys()))
+
+
 # ── reads ─────────────────────────────────────────────────────────────────
 
 
@@ -167,10 +223,7 @@ _app = None
 def app_context():
     """wechat-cli's own context, which owns decrypting the databases."""
     global _app
-    if not account_dir():
-        raise Unavailable("The WeChat account is signed out on this instance.")
-    if not os.path.exists(KEYS_FILE):
-        raise Unavailable("The WeChat message store has not been unlocked yet.")
+    check_keys()
     if _app is None:
         try:
             from wechat_cli.core.context import AppContext
@@ -181,10 +234,10 @@ def app_context():
 
 
 def cmd_conversations(args):
+    app = app_context()
     from wechat_cli.core.contacts import get_contact_names
     from wechat_cli.core.messages import decompress_content
 
-    app = app_context()
     path = app.cache.get(os.path.join("session", "session.db"))
     if not path:
         raise Unavailable("The WeChat session database could not be decrypted.")
@@ -318,9 +371,9 @@ def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit
 
 
 def cmd_messages(args):
+    app = app_context()
     from wechat_cli.core.contacts import get_contact_names, get_self_username
 
-    app = app_context()
     names = get_contact_names(app.cache, app.decrypted_dir)
     self_username = get_self_username(app.db_dir, app.cache, app.decrypted_dir)
 
@@ -360,13 +413,13 @@ def cmd_count(args):
     tables. A COUNT(*) — no decrypt — so a directory can show a per-chat count
     cheaply. Slightly above the readable count when a row's body cannot be
     decoded, which the message read skips."""
+    app = app_context()
     from wechat_cli.core.messages import (
         _is_safe_msg_table_name,
         _iter_table_contexts,
         resolve_chat_context,
     )
 
-    app = app_context()
     ctx = resolve_chat_context(args.conversation, app.msg_db_keys, app.cache, app.decrypted_dir)
     total = 0
     if ctx and ctx.get("db_path"):
@@ -387,6 +440,9 @@ def cmd_count(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    check = sub.add_parser("check")
+    check.set_defaults(func=cmd_check)
 
     derive = sub.add_parser("derive")
     derive.add_argument("--passphrase", required=True)
@@ -413,6 +469,9 @@ def main():
         args.func(args)
     except Unavailable as e:
         fail(str(e))
+    except Pending as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(4)
 
 
 if __name__ == "__main__":

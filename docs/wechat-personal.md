@@ -1,0 +1,43 @@
+# Personal WeChat
+
+The personal WeChat connection reads the guardian's account through the Linux desktop client. The [channel contracts](architecture/channels.md#wechat-personal-account) define its read-only behavior.
+
+## Runtime requirements
+
+- An x86-64 Linux VM running the Rome container.
+- The [host helper](../packages/host-helper/README.md) installed and enabled on that VM, with its socket directory mounted into the container.
+- `WECHAT_USER_ENABLED=true` and `ROME_HOST_EXECUTION_ENABLED=true` in the container environment.
+- `ROME_HOST_EXECUTION_SOCKET` set to the mounted helper socket.
+- `ROME_DOCKER_USER_MODE=root` so the client and the reader can access the same files under `/home/rome`.
+- At least 1 GB of container shared memory (`shm_size: 1gb` in Compose).
+
+The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
+
+## Connect
+
+1. Open Settings → Connections → WeChat.
+2. Select **Connect** under **Your account**.
+3. Scan the QR with WeChat on the phone and confirm the login.
+4. Sync recent messages to the desktop, or send a test message to the File Transfer chat from the phone.
+5. Open People and link a direct WeChat contact to a person.
+6. Open that person's timeline and check the message bodies, latest message, and count.
+
+Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
+
+The client can create the message databases after key capture finishes. Setup keeps the captured passphrase and waits for those files. An unlocked but empty store needs messages synced from the phone before People can show history.
+
+## Clean-login verification
+
+Use a separate instance with a new home volume. Keep existing account stores intact. Complete one login, then check a direct conversation that contains messages.
+
+From a source checkout inside the signed-in container, run the live contract test with the same home as the runtime:
+
+```sh
+HOME=/home/rome scripts/test-env.sh env WECHAT_USER_TEST=1 pnpm exec rstest \
+  -c packages/core/rstest.config.ts \
+  packages/core/src/channels/wechat-user.integration.test.ts
+```
+
+The test checks readiness, reader output, and the message store used by People. It requires development dependencies. The environment flag must be set inside the test launcher because the launcher removes runtime configuration.
+
+If setup reports a database without a valid key, retain that diagnostic. Do not count the connection as verified or delete the store to hide the failure.

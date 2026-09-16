@@ -9,11 +9,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { messageCursor, parseMessageCursor } from "@rome/api-types/message";
-import type {
-  WechatUserConversation,
-  WechatUserMessage,
-  WechatUserReader,
-} from "./wechat-user.js";
+import type { WechatUserConversation, WechatUserMessage, WechatUserReader } from "./wechat-user.js";
 import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.js";
 
 const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
@@ -134,8 +130,9 @@ describe("wechatUserMessages", () => {
 
   it("answers nothing for a set naming no wechat address", async () => {
     const store = wechatUserMessages(fakeReader({}));
-    expect(await store.read({ accounts: [{ channel: "linkedin", addresses: ["x"] }], limit: 5 }))
-      .toEqual([]);
+    expect(
+      await store.read({ accounts: [{ channel: "linkedin", addresses: ["x"] }], limit: 5 }),
+    ).toEqual([]);
     expect(await store.latest([])).toBeNull();
     expect(await store.count([])).toBe(0);
   });

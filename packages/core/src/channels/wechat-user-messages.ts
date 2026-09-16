@@ -12,18 +12,10 @@
 // address book lists one-to-one contacts and never groups: a group is addressed
 // by the group, not by a person on it.
 
-import {
-  compareMessages,
-  isAfterMessageCursor,
-  type Message,
-} from "@rome/api-types/message";
+import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
-import type {
-  WechatUserConversation,
-  WechatUserMessage,
-  WechatUserReader,
-} from "./wechat-user.js";
+import type { WechatUserConversation, WechatUserMessage, WechatUserReader } from "./wechat-user.js";
 
 /** The channel name every stored WeChat-account row spells, matching the
  *  connection service and the person mappings that link to it. */
@@ -162,9 +154,7 @@ export function wechatUserAccounts(reader: WechatUserReader): Accounts {
         limit,
       });
       return {
-        accounts: conversations
-          .filter((conversation) => !conversation.isGroup)
-          .map(toAccount),
+        accounts: conversations.filter((conversation) => !conversation.isGroup).map(toAccount),
       };
     },
 

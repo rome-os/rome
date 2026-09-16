@@ -144,7 +144,7 @@ function rootScript(
     `anchor=${anchorPid}`,
     "host_pid=''",
     "for st in /proc/[0-9]*/status; do",
-    "  ns=\"$(awk '/^NSpid:/{print $NF}' \"$st\" 2>/dev/null || true)\"",
+    '  ns="$(awk \'/^NSpid:/{print $NF}\' "$st" 2>/dev/null || true)"',
     '  if [ "$ns" = "$anchor" ]; then host_pid="$(basename "$(dirname "$st")")"; break; fi',
     "done",
     '[ -n "$host_pid" ] || { echo "no host pid for container pid $anchor" >&2; exit 4; }',

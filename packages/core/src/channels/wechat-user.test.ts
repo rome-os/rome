@@ -73,7 +73,7 @@ describe("WechatUserRuntime.status", () => {
     expect(status.pid).toBe(1234);
   });
 
-  it("reads ready once signed in with a key file", async () => {
+  it("reads ready once the helper verifies the message-store keys", async () => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
@@ -81,6 +81,7 @@ describe("WechatUserRuntime.status", () => {
         pgrep: () => ok("1234\n"),
         // accountDir lists xwechat_files
         sh: (args) => (args[1]?.includes("xwechat_files") ? ok("wxid_guardian\n") : ok()),
+        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
       }).run,
     });
     await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
@@ -92,6 +93,25 @@ describe("WechatUserRuntime.status", () => {
     expect(status.loggedIn).toBe(true);
     expect(status.keysReady).toBe(true);
     expect(status.wxid).toBe("wxid_guardian");
+  });
+
+  it("keeps a partial key file awaiting keys", async () => {
+    const h = await tempHome();
+    const runtime = new WechatUserRuntime({
+      home: h,
+      run: scriptedRun({
+        sh: () => ok("wxid_guardian\n"),
+        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ({
+          code: 3,
+          stdout: "",
+          stderr: "The WeChat message store is locked: message/message_0.db has no valid key.",
+        }),
+      }).run,
+    });
+    await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
+    await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
+    await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
+    expect(await runtime.status()).toMatchObject({ state: "awaiting-keys", keysReady: false });
   });
 });
 
@@ -108,13 +128,22 @@ describe("WechatUserRuntime.captureLoginQr", () => {
   it("returns null when no login window is present", async () => {
     const runtime = new WechatUserRuntime({
       home: await tempHome(),
-      run: scriptedRun({ xwininfo: () => ok("0x1 \"desktop\": ()  100x100+0+0") }).run,
+      run: scriptedRun({ xwininfo: () => ok('0x1 "desktop": ()  100x100+0+0') }).run,
     });
     expect(await runtime.captureLoginQr()).toBeNull();
   });
 });
 
 describe("WechatUserRuntime.install", () => {
+  it("refuses a client archive that differs from the supported build", async () => {
+    const h = await tempHome();
+    await writeFile(await ensureFile(join(h, ".local/share/wechat/wechat.deb")), "different build");
+    const { run, calls } = scriptedRun({ sha256sum: () => ok(`${"0".repeat(64)}  wechat.deb`) });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+    await expect(runtime.install()).rejects.toThrow(/checksum/);
+    expect(calls.some((call) => call[0] === "dpkg-deb")).toBe(false);
+  });
+
   it("downloads then unpacks, and unpacking is skipped when already present", async () => {
     const h = await tempHome();
     // Pre-create the unpacked binary so install() only needs the download.

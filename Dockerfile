@@ -220,13 +220,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # recovery runs gdb only through host root, which enters this container's
 # namespaces from the VM (channels/wechat-user-keys.ts) and keeps its capability
 # across the entry — the gdb binary simply has to exist in this mount namespace.
-RUN apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
       libegl1 libgl1-mesa-dri libglx-mesa0 libgbm1 libatomic1 \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb && \
-    rm -rf /var/lib/apt/lists/*
+      python3-venv gdb x11-utils imagemagick
 
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
