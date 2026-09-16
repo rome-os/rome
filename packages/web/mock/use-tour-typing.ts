@@ -16,19 +16,6 @@ export function useTourTyping(insertText: (text: string) => void) {
     } catch {
       return;
     }
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let count = 0;
-    let target = 0;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    const stop = () => {
-      clearInterval(timer);
-      timer = undefined;
-    };
-    const advance = () => {
-      count = Math.min(TOUR_PROMPT.length, Math.max(count + 2, target));
-      insertText(TOUR_PROMPT.slice(0, count));
-      if (count === TOUR_PROMPT.length) stop();
-    };
     const receive = (event: MessageEvent) => {
       if (event.source !== window.parent || event.origin !== parentOrigin) return;
       const data = event.data;
@@ -39,21 +26,12 @@ export function useTourTyping(insertText: (text: string) => void) {
         !Number.isFinite(data.progress)
       )
         return;
-      if (!data.active) {
-        stop();
-        return;
-      }
-      target = Math.floor(Math.max(0, Math.min(1, data.progress)) * TOUR_PROMPT.length);
-      if (reducedMotion.matches) target = TOUR_PROMPT.length;
-      if (count < TOUR_PROMPT.length) {
-        advance();
-        if (!timer && count < TOUR_PROMPT.length) timer = setInterval(advance, 24);
-      }
+      const count = Math.floor(Math.max(0, Math.min(1, data.progress)) * TOUR_PROMPT.length);
+      insertText(TOUR_PROMPT.slice(0, count));
     };
     window.addEventListener("message", receive);
     window.parent.postMessage({ type: "rome:tour-composer-ready" }, parentOrigin);
     return () => {
-      stop();
       window.removeEventListener("message", receive);
     };
   }, [insertText]);

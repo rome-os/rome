@@ -36,20 +36,30 @@ function control(
 }
 
 describe("tour prompt typing", () => {
-  it("types the build conversation's exact prompt and pauses when hidden", () => {
+  it("maps scroll position to prompt text in both directions without continuing on its own", () => {
     const insert = rs.fn();
     renderHook(() => useTourTyping(insert));
-    act(() => rs.advanceTimersByTime(1000));
-    expect(insert).not.toHaveBeenCalled();
-    control(true);
-    act(() => rs.advanceTimersByTime(120));
-    expect(insert.mock.calls.at(-1)?.[0]).toBe(TOUR_PROMPT.slice(0, 12));
-    control(false);
+    for (const progress of [0, 0.25, 0.8, 1, 0.8, 0.25, 0]) {
+      control(true, progress);
+      expect(insert).toHaveBeenLastCalledWith(
+        TOUR_PROMPT.slice(0, Math.floor(progress * TOUR_PROMPT.length)),
+      );
+    }
     const calls = insert.mock.calls.length;
     act(() => rs.advanceTimersByTime(1000));
     expect(insert.mock.calls.length).toBe(calls);
-    control(true, 1);
-    expect(insert.mock.calls.at(-1)?.[0]).toBe(TOUR_PROMPT);
+    expect(rs.getTimerCount()).toBe(0);
+  });
+
+  it("clamps overscroll and restores the latest position while hidden", () => {
+    const insert = rs.fn();
+    renderHook(() => useTourTyping(insert));
+    control(true, 2);
+    expect(insert).toHaveBeenLastCalledWith(TOUR_PROMPT);
+    control(false, -1);
+    expect(insert).toHaveBeenLastCalledWith("");
+    control(true, Number.NaN);
+    expect(insert).toHaveBeenCalledTimes(2);
   });
 
   it("ignores messages from another origin or window", () => {
@@ -60,12 +70,14 @@ describe("tour prompt typing", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 
-  it("shows the entire prompt immediately with reduced motion", () => {
+  it("preserves scroll position with reduced motion", () => {
     rs.stubGlobal("matchMedia", () => ({ matches: true }));
     const insert = rs.fn();
     renderHook(() => useTourTyping(insert));
-    control(true);
-    expect(insert).toHaveBeenLastCalledWith(TOUR_PROMPT);
+    control(true, 0.5);
+    expect(insert).toHaveBeenLastCalledWith(
+      TOUR_PROMPT.slice(0, Math.floor(TOUR_PROMPT.length / 2)),
+    );
     expect(rs.getTimerCount()).toBe(0);
   });
 
