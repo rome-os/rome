@@ -20,6 +20,18 @@ describe("channelLabel", () => {
     expect(channelLabel(t, "rome-app")).toBe("Rome App");
   });
 
+  it("titles an id on every separator a channel name can carry", () => {
+    // A channel name is any non-empty string without a colon (isChannelIdentifier),
+    // so the separators an app picks are its own.
+    expect(channelLabel(t, "moonlight.wall")).toBe("Moonlight Wall");
+    expect(channelLabel(t, "moonlight/wall")).toBe("Moonlight Wall");
+    expect(channelLabel(t, "moonlight wall 2")).toBe("Moonlight Wall 2");
+  });
+
+  it("keeps an id with no name in it rather than rendering an empty badge", () => {
+    expect(channelLabel(t, "__")).toBe("__");
+  });
+
   it("carries a localized name for every channel it knows", () => {
     for (const [channel, meta] of Object.entries(CHANNEL_META)) {
       expect(meta.labelKey, channel).toMatch(/^channels\./);

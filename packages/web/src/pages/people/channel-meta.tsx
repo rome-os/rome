@@ -141,12 +141,17 @@ export function channelLabel(t: TFunction<"people">, channel: string): string {
   return meta ? t(meta.labelKey) : humanizeChannel(channel);
 }
 
+/** Which separator an id spells its words with is the channel's own business —
+ *  a channel name is any string without a colon — so every run of characters
+ *  that is neither a letter nor a digit is one. An id holding no letter or
+ *  digit at all has no name in it to title, and stands as it is: a badge
+ *  reading nothing says less than one reading the id. */
 function humanizeChannel(channel: string): string {
-  return channel
-    .split(/[_\-\s]+/)
+  const words = channel
+    .split(/[^\p{L}\p{N}]+/u)
     .filter((word) => word.length > 0)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+  return words.length > 0 ? words.join(" ") : channel;
 }
 
 export function ChannelGlyph({ channel, className }: { channel: string; className?: string }) {
