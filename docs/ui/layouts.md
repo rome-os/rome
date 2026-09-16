@@ -14,6 +14,8 @@ The catalogue enters one layout at a time, each landing with a dashboard page mi
 
 `PageHeader` holds the identity block. `PageHeaderNav` takes a breadcrumb or a back link on its own line, `PageHeading` groups `PageTitle` with `PageDescription`, and `PageActions` sits opposite the heading. `PageTitle` is the one `h1` a page carries. A `Section` inside the page carries an `h2` through `SectionTitle`. The roles come from [typography.md](semantic-token/typography.md), so a layout writes `text-title`, `text-section`, `text-ui`, and `text-aux` and never a raw size.
 
+`PageNav` is the strip of sibling views under the header, one `PageNavLink` per route. It is a `nav` of links rather than a tablist, because each entry is a route change and the view it reveals renders as the page's body, not inside a `TabsContent` — `role="tab"` would point `aria-controls` at ids that do not exist. `active` both paints the underline and sets `aria-current="page"`. The strip belongs to the frame, not to any one layout: a page keeps one `h1` and one header whichever view is showing, and the body under the strip is whatever that view's task calls for.
+
 `Measure` caps content at the reading measure. It sits below the header rather than around it, so the `h1` stays at the same spot across routes. `Page` holds its regions 24px apart, and content inside a block sits 12px to 16px apart.
 
 No layout renders `main`. The dashboard shell owns that landmark, and a second one nested inside it breaks landmark navigation. Layouts render `div`, `section`, `header`, `aside`, and `nav`.
@@ -64,7 +66,7 @@ Used for changing settings and seeing the change took: one column at the reading
 | Header | `PageHeader` | Title and description | the skeleton |
 | Rows | `FormRows` | `FormRow` blocks, one setting each | Form |
 
-Form contributes one region. A page that already owns a header — `/settings/appearance` renders under a title and a tab strip six tabs share — stacks `FormRows` under what it has, because there is no Form frame to get in the way.
+Form contributes one region. A page that already owns a header stacks `FormRows` under what it has, because there is no Form frame to get in the way. [`/settings/appearance`](../../packages/web/src/pages/SettingsTabPage.tsx) is that page: one `Page`, one `PageHeader`, a `PageNav` its six tabs share, and then the body of whichever tab is showing.
 
 Settings the reader returns to and changes one at a time take rows. A form filled top to bottom and submitted reads as stacked fields instead, and that body is not in the kit yet: it enters with the first data-entry page that needs it.
 
@@ -72,7 +74,6 @@ Settings the reader returns to and changes one at a time take rows. A form fille
 
 A `FormRow` holds an optional `FormRowIcon`, a `FormRowHeading` carrying `FormRowLabel` and an optional `FormRowDescription`, and a `FormRowControl` at the end. The icon column opens only on the rows that carry one, so a set of rows without icons keeps its labels at the inset. `FormRowLabel` renders a `label` when given `htmlFor` and plain text otherwise, because a `for` aimed at nothing names nothing. A row is one line at every width: the heading wraps its own text rather than pushing the control onto a second line, since a row that stacks on a narrow viewport stops reading as a row exactly where the list is longest. A row floors at 64px, the box-size step above a `md` control inside the row's 12px insets, so a row carrying a control and a row carrying only text are the same height.
 
-[`/settings/appearance`](../../packages/web/src/pages/SettingsTabPage.tsx) is the reference.
 
 ## Preview
 

@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
 
 /*
@@ -113,6 +114,77 @@ export function PageActions({ className, ...props }: ComponentProps<"div">) {
       className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
       {...props}
     />
+  );
+}
+
+export interface PageNavProps extends ComponentProps<"nav"> {
+  /** Required: a page may carry more than one `nav`, and each needs its own name. */
+  "aria-label": string;
+}
+
+/**
+ * The strip of sibling views under the header, one entry per route. The view an
+ * entry leads to replaces the page's body, so a page carrying this still has
+ * one `h1` and one header.
+ *
+ * A `nav` of links, not a Radix `Tabs`. Each entry is a route change, and the
+ * view it reveals renders as the body rather than inside a `TabsContent`, so
+ * `role="tab"` would point `aria-controls` at tabpanel ids that do not exist.
+ *
+ * Renders its own `ul`, because a strip of links is a list and every entry is a
+ * `PageNavLink`. The row scrolls sideways rather than wrapping: a second line of
+ * entries reads as two strips, and the underline no longer marks one row.
+ */
+export function PageNav({ className, children, ...props }: PageNavProps) {
+  return (
+    <nav data-slot="page-nav" className={className} {...props}>
+      <ul className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border">
+        {children}
+      </ul>
+    </nav>
+  );
+}
+
+export interface PageNavLinkProps extends ComponentProps<"a"> {
+  /** Marks the entry the page is currently showing, as `aria-current="page"`. */
+  active?: boolean;
+  /** Renders the caller's element — a router `Link` — in place of the `a`. */
+  asChild?: boolean;
+}
+
+/**
+ * One entry in the strip. Renders its own `li`, so a caller cannot put the link
+ * and the list item out of step.
+ *
+ * `active` both paints the underline and sets `aria-current="page"`, because a
+ * strip that marks the current view only in ink names nothing for a reader who
+ * is not looking at it.
+ */
+export function PageNavLink({
+  active = false,
+  asChild = false,
+  className,
+  ...props
+}: PageNavLinkProps) {
+  const Comp = asChild ? Slot : "a";
+  return (
+    <li data-slot="page-nav-item">
+      <Comp
+        data-slot="page-nav-link"
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors",
+          // A 2px border on a zero-content pseudo-element, not a sized box, so
+          // it authors no off-scale edge length.
+          "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",
+          active
+            ? "text-foreground after:opacity-100"
+            : "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground",
+          className,
+        )}
+        {...props}
+      />
+    </li>
   );
 }
 

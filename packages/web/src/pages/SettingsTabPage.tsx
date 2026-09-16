@@ -109,7 +109,7 @@ import {
   type SessionHandoffPayload,
 } from "@/lib/access-control-client";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
@@ -358,99 +358,76 @@ export default function SettingsPage() {
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
   return (
-    <PageShell>
-      <PageBody>
-        <PageHeader title={t("page.title")} />
+    <Page>
+      <PageHeader>
+        <PageHeading>
+          <PageTitle>{t("page.title")}</PageTitle>
+        </PageHeading>
+      </PageHeader>
 
-        {/* Navigation, not a tablist: each entry is a route change, and the
-          section it reveals renders outside this element rather than in a
-          `TabsContent`. Using `Tabs` here would emit `role="tab"` with
-          `aria-controls` pointing at tabpanel ids that don't exist. Styled as
-          the same underline bar; `aria-current="page"` marks the active route. */}
-        <nav aria-label={t("page.title")}>
-          <ul className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border">
-            {VISIBLE_TABS.map((tab) => {
-              const slug = tabToSlug(tab);
-              const isActive = tab === activeTab;
-              return (
-                <li key={tab}>
-                  <Link
-                    to={`/settings/${slug}`}
-                    aria-current={isActive ? "page" : undefined}
-                    className={cn(
-                      "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors",
-                      // A 2px border on a zero-content pseudo-element, not a
-                      // sized box, so it authors no off-scale edge length.
-                      "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",
-                      isActive
-                        ? "text-foreground after:opacity-100"
-                        : "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground",
-                    )}
-                  >
-                    {t(`tabs.${tab}` as const)}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+      <PageNav aria-label={t("page.title")}>
+        {VISIBLE_TABS.map((tab) => (
+          <PageNavLink asChild key={tab} active={tab === activeTab}>
+            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
+          </PageNavLink>
+        ))}
+      </PageNav>
 
-        {/* Tab content. Settings rows are label/control pairs, so this column
-          keeps a reading measure while the frame above stays full-bleed — the
-          h1 and the nav land at the same x as on every other route, and only
-          the form narrows. Appearance is the exception: it renders the kit's
-          Form rows, which carry the measure themselves, so the column around
-          them holds none. Each further tab drops out of this width as it moves
-          onto its own layout. Loading and failure swap this column only, and
-          only for the tabs that read the settings payload, so a dead
-          /api/settings still leaves Connections, Channels, Favors and
-          Appearance usable. */}
-        <div className={cn(activeTab !== "Appearance" && "max-w-3xl")}>
-          {tabNeedsSettings && loading ? (
-            <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-          ) : tabNeedsSettings && loadError ? (
-            <Card>
-              <CardContent className="flex flex-col items-start gap-3">
-                <p className="text-ui text-destructive">{loadError}</p>
-                <Button type="button" size="sm" onClick={() => void loadAll()}>
-                  <RefreshCw />
-                  {t("page.retry")}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              {activeTab === "Appearance" && <AppearanceSection />}
-              {activeTab === "Connections" && (
-                <ConnectionsSection
-                  connections={connections}
-                  composio={composio}
-                  loading={connectionsLoading}
-                  error={connectionsError}
-                  onRetry={loadConnections}
-                  onRefresh={loadConnections}
-                  onFlash={(message) => toast.error(message)}
-                />
-              )}
-              {activeTab === "Channels" && <ChannelsSettingsPage />}
-              {activeTab === "Favors" && <FavorsSection />}
-              {activeTab === "AI Tools" && (
-                <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
-              )}
-              {activeTab === "Advanced" && (
-                <AdvancedSection
-                  settings={settings}
-                  onSave={saveSettings}
-                  saving={saving}
-                  tailscale={tailscale}
-                  onRefresh={loadAll}
-                />
-              )}
-            </>
-          )}
-        </div>
-      </PageBody>
-    </PageShell>
+      {/* Tab content. Settings rows are label/control pairs, so this column
+        keeps a reading measure while the frame above stays full-bleed — the
+        h1 and the nav land at the same x as on every other route, and only
+        the form narrows. Appearance is the exception: it renders the kit's
+        Form rows, which carry the measure themselves, so the column around
+        them holds none. Each further tab drops out of this width as it moves
+        onto its own layout. Loading and failure swap this column only, and
+        only for the tabs that read the settings payload, so a dead
+        /api/settings still leaves Connections, Channels, Favors and
+        Appearance usable. */}
+      <div className={cn(activeTab !== "Appearance" && "max-w-3xl")}>
+        {tabNeedsSettings && loading ? (
+          <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+        ) : tabNeedsSettings && loadError ? (
+          <Card>
+            <CardContent className="flex flex-col items-start gap-3">
+              <p className="text-ui text-destructive">{loadError}</p>
+              <Button type="button" size="sm" onClick={() => void loadAll()}>
+                <RefreshCw />
+                {t("page.retry")}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {activeTab === "Appearance" && <AppearanceSection />}
+            {activeTab === "Connections" && (
+              <ConnectionsSection
+                connections={connections}
+                composio={composio}
+                loading={connectionsLoading}
+                error={connectionsError}
+                onRetry={loadConnections}
+                onRefresh={loadConnections}
+                onFlash={(message) => toast.error(message)}
+              />
+            )}
+            {activeTab === "Channels" && <ChannelsSettingsPage />}
+            {activeTab === "Favors" && <FavorsSection />}
+            {activeTab === "AI Tools" && (
+              <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+            )}
+            {activeTab === "Advanced" && (
+              <AdvancedSection
+                settings={settings}
+                onSave={saveSettings}
+                saving={saving}
+                tailscale={tailscale}
+                onRefresh={loadAll}
+              />
+            )}
+          </>
+        )}
+      </div>
+    </Page>
   );
 }
 
