@@ -1,3 +1,12 @@
+import {
+  Measure,
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionDescription,
+} from "@rome-os/ui/page";
+import { ListCollection } from "@rome-os/ui/layout-list";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
@@ -56,78 +65,86 @@ export function ConnectionsSection({
   const selected = cards.find((card) => card.service === selectedService) ?? null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-title text-foreground">Connections</h2>
-        <p className="mt-1 text-ui text-muted-foreground">
-          Every channel and service your agent can use, in one place. Open one to connect it and see
-          what it enables.
-        </p>
-      </div>
+    <Measure>
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>Connections</SectionTitle>
+            <SectionDescription>
+              Every channel and service your agent can use, in one place. Open one to connect it and
+              see what it enables.
+            </SectionDescription>
+          </SectionHeading>
+        </SectionHeader>
 
-      <div className="flex flex-col gap-2">
-        {loading ? (
-          <div className="flex flex-col gap-2" role="status" aria-label={t("connections.loading")}>
-            {[0, 1, 2].map((index) => (
-              <Skeleton key={index} className="h-16 w-full" />
-            ))}
-          </div>
-        ) : error ? (
-          <Alert variant="destructive">
-            <CircleAlert aria-hidden />
-            <AlertTitle>{t("connections.errorTitle")}</AlertTitle>
-            <AlertDescription>
-              <p>{error}</p>
+        <ListCollection className="flex flex-col gap-2">
+          {loading ? (
+            <div
+              className="flex flex-col gap-2"
+              role="status"
+              aria-label={t("connections.loading")}
+            >
+              {[0, 1, 2].map((index) => (
+                <Skeleton key={index} className="h-16 w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <Alert variant="destructive">
+              <CircleAlert aria-hidden />
+              <AlertTitle>{t("connections.errorTitle")}</AlertTitle>
+              <AlertDescription>
+                <p>{error}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => void onRetry?.()}
+                >
+                  <RefreshCw aria-hidden />
+                  {t("page.retry")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : cards.length === 0 ? (
+            <EmptyState className="rounded-8 border border-dashed border-border bg-surface/50">
+              <EmptyStateIcon>
+                <Unplug aria-hidden />
+              </EmptyStateIcon>
+              <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
+            </EmptyState>
+          ) : (
+            cards.map((card) => (
               <Button
+                key={card.service}
                 type="button"
                 variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => void onRetry?.()}
+                size="default"
+                align="between"
+                onClick={() => setSelectedService(card.service)}
+                className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
+                aria-label={`Open ${card.label}`}
               >
-                <RefreshCw aria-hidden />
-                {t("page.retry")}
+                <span className="flex min-w-0 items-center gap-3">
+                  <ConnectionBrandBadge connection={card.service} />
+                  <span className="truncate text-ui text-foreground">{card.label}</span>
+                </span>
+                <StatusIndicator card={card} />
               </Button>
-            </AlertDescription>
-          </Alert>
-        ) : cards.length === 0 ? (
-          <EmptyState className="rounded-8 border border-dashed border-border bg-surface/50">
-            <EmptyStateIcon>
-              <Unplug aria-hidden />
-            </EmptyStateIcon>
-            <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
-          </EmptyState>
-        ) : (
-          cards.map((card) => (
-            <Button
-              key={card.service}
-              type="button"
-              variant="outline"
-              size="default"
-              align="between"
-              onClick={() => setSelectedService(card.service)}
-              className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
-              aria-label={`Open ${card.label}`}
-            >
-              <span className="flex min-w-0 items-center gap-3">
-                <ConnectionBrandBadge connection={card.service} />
-                <span className="truncate text-ui text-foreground">{card.label}</span>
-              </span>
-              <StatusIndicator card={card} />
-            </Button>
-          ))
-        )}
-        <AppKeysRow />
-      </div>
+            ))
+          )}
+          <AppKeysRow />
+        </ListCollection>
 
-      <ConnectionDetailDialog
-        card={selected}
-        composio={composio}
-        onClose={() => setSelectedService(null)}
-        onRefresh={() => void onRefresh?.()}
-        onFlash={(message) => onFlash?.(message)}
-      />
-    </div>
+        <ConnectionDetailDialog
+          card={selected}
+          composio={composio}
+          onClose={() => setSelectedService(null)}
+          onRefresh={() => void onRefresh?.()}
+          onFlash={(message) => onFlash?.(message)}
+        />
+      </Section>
+    </Measure>
   );
 }
 

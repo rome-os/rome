@@ -1,3 +1,11 @@
+import {
+  Measure,
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionDescription,
+} from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
 import { Trans, useTranslation } from "react-i18next";
@@ -41,6 +49,7 @@ import {
 import {
   FormRow,
   FormRowControl,
+  FormRowDescription,
   FormRowHeading,
   FormRowIcon,
   FormRowLabel,
@@ -373,20 +382,10 @@ export default function SettingsPage() {
         ))}
       </PageNav>
 
-      {/* Tab content. Settings rows are label/control pairs, so this column
-        keeps a reading measure while the frame above stays full-bleed — the
-        h1 and the nav land at the same x as on every other route, and only
-        the form narrows. Appearance is the exception: it renders the kit's
-        Form rows, which carry the measure themselves, so the column around
-        them holds none. Each further tab drops out of this width as it moves
-        onto its own layout. Loading and failure swap this column only, and
-        only for the tabs that read the settings payload, so a dead
-        /api/settings still leaves Connections, Channels, Favors and
-        Appearance usable. */}
-      <div className={cn(activeTab !== "Appearance" && "max-w-3xl")}>
-        {tabNeedsSettings && loading ? (
-          <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-        ) : tabNeedsSettings && loadError ? (
+      {tabNeedsSettings && loading ? (
+        <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+      ) : tabNeedsSettings && loadError ? (
+        <Measure>
           <Card>
             <CardContent className="flex flex-col items-start gap-3">
               <p className="text-ui text-destructive">{loadError}</p>
@@ -396,37 +395,41 @@ export default function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
-        ) : (
-          <>
-            {activeTab === "Appearance" && <AppearanceSection />}
-            {activeTab === "Connections" && (
-              <ConnectionsSection
-                connections={connections}
-                composio={composio}
-                loading={connectionsLoading}
-                error={connectionsError}
-                onRetry={loadConnections}
-                onRefresh={loadConnections}
-                onFlash={(message) => toast.error(message)}
-              />
-            )}
-            {activeTab === "Channels" && <ChannelsSettingsPage />}
-            {activeTab === "Favors" && <FavorsSection />}
-            {activeTab === "AI Tools" && (
-              <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
-            )}
-            {activeTab === "Advanced" && (
-              <AdvancedSection
-                settings={settings}
-                onSave={saveSettings}
-                saving={saving}
-                tailscale={tailscale}
-                onRefresh={loadAll}
-              />
-            )}
-          </>
-        )}
-      </div>
+        </Measure>
+      ) : (
+        <>
+          {activeTab === "Appearance" && <AppearanceSection />}
+          {activeTab === "Connections" && (
+            <ConnectionsSection
+              connections={connections}
+              composio={composio}
+              loading={connectionsLoading}
+              error={connectionsError}
+              onRetry={loadConnections}
+              onRefresh={loadConnections}
+              onFlash={(message) => toast.error(message)}
+            />
+          )}
+          {activeTab === "Channels" && (
+            <div className="max-w-3xl">
+              <ChannelsSettingsPage />
+            </div>
+          )}
+          {activeTab === "Favors" && <FavorsSection />}
+          {activeTab === "AI Tools" && (
+            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+          )}
+          {activeTab === "Advanced" && (
+            <AdvancedSection
+              settings={settings}
+              onSave={saveSettings}
+              saving={saving}
+              tailscale={tailscale}
+              onRefresh={loadAll}
+            />
+          )}
+        </>
+      )}
     </Page>
   );
 }
@@ -789,172 +792,180 @@ function FavorsSection() {
   const history = requests.filter((request) => request.status !== "pending");
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-section text-foreground">Favors</h2>
-        <p className="mt-1 text-ui text-muted-foreground">
-          Balance, payments, and paid app actions settled through Rome Cloud.
-        </p>
-      </div>
+    <Measure>
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>Favors</SectionTitle>
+            <SectionDescription>
+              Balance, payments, and paid app actions settled through Rome Cloud.
+            </SectionDescription>
+          </SectionHeading>
+        </SectionHeader>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Card>
-          <CardContent>
-            <div className="flex items-center gap-2 text-ui text-muted-foreground">
-              <WalletCards className="size-4" />
-              Balance
-            </div>
-            <p className="mt-2 text-title tabular-nums text-foreground">{balance.available}</p>
-            <p className="mt-1 text-aux text-muted-foreground">available favors</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="flex items-center gap-2 text-ui text-muted-foreground">
-              <Coins className="size-4" />
-              Earned
-            </div>
-            <p className="mt-2 text-title tabular-nums text-foreground">{balance.lifetimeEarned}</p>
-            <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="flex items-center gap-2 text-ui text-muted-foreground">
-              <History className="size-4" />
-              Spent
-            </div>
-            <p className="mt-2 text-title tabular-nums text-foreground">{balance.lifetimeSpent}</p>
-            <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <section className="rounded-8 border border-border bg-surface">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <h3 className="text-section text-foreground">Recharge</h3>
-          <CreditCard className="size-4 text-muted-foreground" />
-        </div>
-        {packs.length === 0 ? (
-          <p className="px-4 py-4 text-ui text-muted-foreground">No recharge packs configured.</p>
-        ) : (
-          <div className="grid gap-2 p-4 sm:grid-cols-2">
-            {packs.map((pack) => (
-              <Button
-                key={pack.id}
-                type="button"
-                variant="outline"
-                className="justify-between"
-                onClick={() => void startRecharge(pack)}
-                disabled={busyPack !== null}
-                aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
-              >
-                <span>{pack.favors.toLocaleString()} favors</span>
-                {pack.displayPrice ? (
-                  <span className="ml-auto text-aux text-muted-foreground">
-                    {pack.displayPrice}
-                  </span>
-                ) : null}
-                {busyPack === pack.id ? (
-                  <Spinner label={t("favors.startingPackPurchase")} />
-                ) : (
-                  <CreditCard />
-                )}
-              </Button>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-8 border border-border bg-surface">
-        <div className="border-b border-border px-4 py-3">
-          <h3 className="text-section text-foreground">Awaiting your payment decision</h3>
-        </div>
-        {pending.length === 0 ? (
-          <p className="px-4 py-4 text-ui text-muted-foreground">No pending favor requests.</p>
-        ) : (
-          pending.map((request) => (
-            <FavorRequestRow
-              key={request.id}
-              request={request}
-              canDecide
-              busy={busyRequest}
-              onPay={(next) => void resolveRequest(next, "pay")}
-              onDecline={(next) => void resolveRequest(next, "decline")}
-            />
-          ))
-        )}
-      </section>
-
-      {failed.length > 0 && (
-        <section className="rounded-8 border border-border bg-surface">
-          <div className="border-b border-border px-4 py-3">
-            <h3 className="text-section text-foreground">Failed owner-side actions</h3>
-          </div>
-          {failed.map((request) => (
-            <FavorRequestRow
-              key={request.id}
-              request={request}
-              canDecide={false}
-              busy={busyRequest}
-              onPay={(next) => void resolveRequest(next, "pay")}
-              onDecline={(next) => void resolveRequest(next, "decline")}
-            />
-          ))}
-        </section>
-      )}
-
-      <section className="rounded-8 border border-border bg-surface">
-        <div className="border-b border-border px-4 py-3">
-          <h3 className="text-section text-foreground">Paid action requests</h3>
-        </div>
-        {history.length === 0 ? (
-          <p className="px-4 py-4 text-ui text-muted-foreground">No paid action requests yet.</p>
-        ) : (
-          history.map((request) => (
-            <FavorRequestRow
-              key={request.id}
-              request={request}
-              canDecide={false}
-              busy={busyRequest}
-              onPay={(next) => void resolveRequest(next, "pay")}
-              onDecline={(next) => void resolveRequest(next, "decline")}
-            />
-          ))
-        )}
-      </section>
-
-      <section className="rounded-8 border border-border bg-surface">
-        <div className="border-b border-border px-4 py-3">
-          <h3 className="text-section text-foreground">Ledger</h3>
-        </div>
-        {ledger.length === 0 ? (
-          <p className="px-4 py-4 text-ui text-muted-foreground">No ledger entries yet.</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {ledger.map((entry) => (
-              <div key={entry.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-ui text-foreground">
-                    {favorLedgerKindLabel(entry.kind)}
-                  </p>
-                  <p className="text-aux text-muted-foreground">{favorDate(entry.createdAt)}</p>
-                </div>
-                <span
-                  className={cn(
-                    "shrink-0 text-ui",
-                    entry.amount >= 0 ? "text-success-fg" : "text-foreground",
-                  )}
-                >
-                  {entry.amount >= 0 ? "+" : ""}
-                  {entry.amount}
-                </span>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card>
+            <CardContent>
+              <div className="flex items-center gap-2 text-ui text-muted-foreground">
+                <WalletCards className="size-4" />
+                Balance
               </div>
-            ))}
+              <p className="mt-2 text-title tabular-nums text-foreground">{balance.available}</p>
+              <p className="mt-1 text-aux text-muted-foreground">available favors</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent>
+              <div className="flex items-center gap-2 text-ui text-muted-foreground">
+                <Coins className="size-4" />
+                Earned
+              </div>
+              <p className="mt-2 text-title tabular-nums text-foreground">
+                {balance.lifetimeEarned}
+              </p>
+              <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent>
+              <div className="flex items-center gap-2 text-ui text-muted-foreground">
+                <History className="size-4" />
+                Spent
+              </div>
+              <p className="mt-2 text-title tabular-nums text-foreground">
+                {balance.lifetimeSpent}
+              </p>
+              <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <h3 className="text-section text-foreground">Recharge</h3>
+            <CreditCard className="size-4 text-muted-foreground" />
           </div>
+          {packs.length === 0 ? (
+            <p className="px-4 py-4 text-ui text-muted-foreground">No recharge packs configured.</p>
+          ) : (
+            <div className="grid gap-2 p-4 sm:grid-cols-2">
+              {packs.map((pack) => (
+                <Button
+                  key={pack.id}
+                  type="button"
+                  variant="outline"
+                  className="justify-between"
+                  onClick={() => void startRecharge(pack)}
+                  disabled={busyPack !== null}
+                  aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
+                >
+                  <span>{pack.favors.toLocaleString()} favors</span>
+                  {pack.displayPrice ? (
+                    <span className="ml-auto text-aux text-muted-foreground">
+                      {pack.displayPrice}
+                    </span>
+                  ) : null}
+                  {busyPack === pack.id ? (
+                    <Spinner label={t("favors.startingPackPurchase")} />
+                  ) : (
+                    <CreditCard />
+                  )}
+                </Button>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-section text-foreground">Awaiting your payment decision</h3>
+          </div>
+          {pending.length === 0 ? (
+            <p className="px-4 py-4 text-ui text-muted-foreground">No pending favor requests.</p>
+          ) : (
+            pending.map((request) => (
+              <FavorRequestRow
+                key={request.id}
+                request={request}
+                canDecide
+                busy={busyRequest}
+                onPay={(next) => void resolveRequest(next, "pay")}
+                onDecline={(next) => void resolveRequest(next, "decline")}
+              />
+            ))
+          )}
+        </Section>
+
+        {failed.length > 0 && (
+          <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+            <div className="border-b border-border px-4 py-3">
+              <h3 className="text-section text-foreground">Failed owner-side actions</h3>
+            </div>
+            {failed.map((request) => (
+              <FavorRequestRow
+                key={request.id}
+                request={request}
+                canDecide={false}
+                busy={busyRequest}
+                onPay={(next) => void resolveRequest(next, "pay")}
+                onDecline={(next) => void resolveRequest(next, "decline")}
+              />
+            ))}
+          </Section>
         )}
-      </section>
-    </div>
+
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-section text-foreground">Paid action requests</h3>
+          </div>
+          {history.length === 0 ? (
+            <p className="px-4 py-4 text-ui text-muted-foreground">No paid action requests yet.</p>
+          ) : (
+            history.map((request) => (
+              <FavorRequestRow
+                key={request.id}
+                request={request}
+                canDecide={false}
+                busy={busyRequest}
+                onPay={(next) => void resolveRequest(next, "pay")}
+                onDecline={(next) => void resolveRequest(next, "decline")}
+              />
+            ))
+          )}
+        </Section>
+
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-section text-foreground">Ledger</h3>
+          </div>
+          {ledger.length === 0 ? (
+            <p className="px-4 py-4 text-ui text-muted-foreground">No ledger entries yet.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {ledger.map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-ui text-foreground">
+                      {favorLedgerKindLabel(entry.kind)}
+                    </p>
+                    <p className="text-aux text-muted-foreground">{favorDate(entry.createdAt)}</p>
+                  </div>
+                  <span
+                    className={cn(
+                      "shrink-0 text-ui",
+                      entry.amount >= 0 ? "text-success-fg" : "text-foreground",
+                    )}
+                  >
+                    {entry.amount >= 0 ? "+" : ""}
+                    {entry.amount}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      </Section>
+    </Measure>
   );
 }
 
@@ -989,9 +1000,12 @@ function AdvancedSection({
   }, []);
 
   return (
-    <div className="space-y-8">
-      <h2 className="text-section text-foreground">{t("advanced.title")}</h2>
-      {/* Not rendered in the Mac app. Its check and upgrade actions relay to
+    <Measure>
+      <Section className="gap-6">
+        <SectionHeader>
+          <SectionTitle>{t("advanced.title")}</SectionTitle>
+        </SectionHeader>
+        {/* Not rendered in the Mac app. Its check and upgrade actions relay to
           Rome Cloud, which resolves them against the account's *hosted*
           instance — a machine other than the one showing the page. The version
           card above them is read from the local build and is correct on
@@ -1002,26 +1016,15 @@ function AdvancedSection({
           This is a mitigation. It keys on which window is rendering, not on
           what kind of backend is behind the page, so the same dashboard opened
           in a browser at the loopback port still shows it. */}
-      {!isElectronShell() && (
-        <div className="border-b border-border pb-8">
-          <SystemUpgradeSection />
-        </div>
-      )}
-      <div className="border-b border-border pb-8">
+        {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
-      </div>
-      <div className="border-b border-border pb-8">
         <SystemDiagnosisSection />
-      </div>
-      <div className="border-b border-border pb-8">
         <ComputerUseSection />
-      </div>
-      <div className="border-b border-border pb-8">
         <PresentationModeSection />
-      </div>
-      <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
-      {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
-    </div>
+        <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
+        {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
+      </Section>
+    </Measure>
   );
 }
 
@@ -1034,17 +1037,53 @@ function PresentationModeSection() {
   const enabled = usePresentationMode();
 
   return (
-    <div>
-      <h2 className="text-section text-foreground">{t("advanced.presentationMode.title")}</h2>
-      <p className="mt-1 mb-4 text-ui text-muted-foreground">
-        {t("advanced.presentationMode.description")}
-      </p>
-      <ToggleSwitch
+    <FormRows>
+      <SettingsToggleRow
+        title={t("advanced.presentationMode.title")}
+        description={t("advanced.presentationMode.description")}
+        label={t("advanced.presentationMode.toggleLabel")}
         checked={enabled}
         onChange={setPresentationMode}
-        label={t("advanced.presentationMode.toggleLabel")}
       />
-    </div>
+    </FormRows>
+  );
+}
+
+function SettingsToggleRow({
+  title,
+  description,
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description?: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <FormRow>
+      <FormRowHeading>
+        <FormRowLabel htmlFor={id}>{title}</FormRowLabel>
+        {description && <FormRowDescription>{description}</FormRowDescription>}
+        <FormRowLabel htmlFor={id} className="text-aux text-muted-foreground">
+          {label}
+        </FormRowLabel>
+      </FormRowHeading>
+      <FormRowControl>
+        <Switch
+          id={id}
+          aria-label={label}
+          checked={checked}
+          onCheckedChange={onChange}
+          disabled={disabled}
+        />
+      </FormRowControl>
+    </FormRow>
   );
 }
 
@@ -1069,13 +1108,15 @@ function DeveloperSettingsSection({
           {t("advanced.developerSettings.title")}
         </span>
       </summary>
-      <div className="mt-6 space-y-8">
-        <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+      <Section className="mt-3">
+        <FormRows>
+          <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+        </FormRows>
         {open && <RelayHealthSection />}
-      </div>
+      </Section>
     </details>
   );
 }
@@ -1098,16 +1139,14 @@ function FableAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-2 text-ui text-foreground">{t("advanced.fable.title")}</h3>
-      <p className="mb-4 text-aux text-muted-foreground">{t("advanced.fable.description")}</p>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.fable.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.fable.title")}
+      description={t("advanced.fable.description")}
+      label={t("advanced.fable.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1360,15 +1399,13 @@ function ModelSelectorAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-4 text-ui text-foreground">{t("advanced.modelSelector.title")}</h3>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.modelSelector.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.modelSelector.title")}
+      label={t("advanced.modelSelector.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1390,15 +1427,13 @@ function ImpersonationAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-4 text-ui text-foreground">{t("advanced.impersonation.title")}</h3>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.impersonation.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.impersonation.title")}
+      label={t("advanced.impersonation.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1420,16 +1455,14 @@ function AiToolUsageAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-2 text-ui text-foreground">{t("advanced.aiToolUsage.title")}</h3>
-      <p className="mb-4 text-aux text-muted-foreground">{t("advanced.aiToolUsage.description")}</p>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.aiToolUsage.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.aiToolUsage.title")}
+      description={t("advanced.aiToolUsage.description")}
+      label={t("advanced.aiToolUsage.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1531,19 +1564,21 @@ function AccessControlSection({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div>
-      <h2 className="text-section text-foreground">{t("publicAccess.title")}</h2>
-      <p className="mt-1 text-ui text-muted-foreground">{t("publicAccess.description")}</p>
-      <div className="mt-6 space-y-6">
-        <AllowedCloudEmailsSection />
-        <Card>
-          <CardContent>
-            <TailscaleSection tailscale={tailscale} onRefresh={onRefresh} />
-            <TailnetRestrictionSection />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("publicAccess.title")}</SectionTitle>
+          <SectionDescription>{t("publicAccess.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <AllowedCloudEmailsSection />
+      <Card>
+        <CardContent>
+          <TailscaleSection tailscale={tailscale} onRefresh={onRefresh} />
+          <TailnetRestrictionSection />
+        </CardContent>
+      </Card>
+    </Section>
   );
 }
 

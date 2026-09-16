@@ -1,3 +1,11 @@
+import {
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionDescription,
+  SectionActions,
+} from "@rome-os/ui/page";
 import { useQuery } from "@tanstack/react-query";
 import { computerUseStatusSchema } from "@rome/api-types/computer-use";
 import { ExternalLink, Monitor, RefreshCw } from "lucide-react";
@@ -32,24 +40,24 @@ export function ComputerUseSection() {
   const data = query.data;
 
   return (
-    <section aria-labelledby="computer-use-title">
-      <div className="flex items-center justify-between gap-4">
-        <h2 id="computer-use-title" className="text-section text-foreground">
-          {t("advanced.computerUse.title")}
-        </h2>
-        <Button
-          variant="outline"
-          size="xs"
-          disabled={query.isFetching}
-          onClick={() => void query.refetch()}
-        >
-          <RefreshCw className="size-3.5" aria-hidden="true" />
-          {t("advanced.computerUse.refresh")}
-        </Button>
-      </div>
-      <p className="mt-1 mb-4 text-ui text-muted-foreground">
-        {t("advanced.computerUse.description")}
-      </p>
+    <Section aria-labelledby="computer-use-title">
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle id="computer-use-title">{t("advanced.computerUse.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.computerUse.description")}</SectionDescription>
+        </SectionHeading>
+        <SectionActions>
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={query.isFetching}
+            onClick={() => void query.refetch()}
+          >
+            <RefreshCw className="size-3.5" aria-hidden="true" />
+            {t("advanced.computerUse.refresh")}
+          </Button>
+        </SectionActions>
+      </SectionHeader>
       {query.isError && (
         <p role="alert" className="mb-4 text-ui text-destructive-fg">
           {t("advanced.computerUse.loadFailed")}
@@ -146,6 +154,6 @@ export function ComputerUseSection() {
           <ExternalLink className="size-3.5" aria-hidden="true" />
         </a>
       </Button>
-    </section>
+    </Section>
   );
 }

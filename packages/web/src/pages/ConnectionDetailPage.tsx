@@ -12,7 +12,15 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import {
+  Page,
+  PageHeader,
+  PageHeaderNav,
+  PageHeading,
+  PageTitle,
+  Measure,
+  Section,
+} from "@rome-os/ui/page";
 
 /**
  * Per-service Connection detail page (`/settings/connections/:serviceId`).
@@ -76,8 +84,8 @@ export default function ConnectionDetailPage() {
 
   if (connectionsQuery.isError) {
     return (
-      <PageShell>
-        <div className="max-w-2xl">
+      <Page>
+        <Measure>
           <Alert variant="destructive">
             <AlertTitle>Couldn&apos;t load this connection</AlertTitle>
             <AlertDescription className="space-y-3">
@@ -96,8 +104,8 @@ export default function ConnectionDetailPage() {
               </Button>
             </AlertDescription>
           </Alert>
-        </div>
-      </PageShell>
+        </Measure>
+      </Page>
     );
   }
 
@@ -111,9 +119,9 @@ export default function ConnectionDetailPage() {
   }
 
   return (
-    <PageShell>
-      <PageBody className="max-w-2xl">
-        <div className="space-y-4">
+    <Page>
+      <PageHeader>
+        <PageHeaderNav>
           <Link
             to={BACK_TO_LIST}
             className="inline-flex items-center gap-2 text-ui text-muted-foreground hover:text-foreground"
@@ -121,38 +129,41 @@ export default function ConnectionDetailPage() {
             <ArrowLeft className="size-4" aria-hidden />
             Connections
           </Link>
-          <PageHeader
-            leading={<ConnectionBrandBadge connection={card.service} />}
-            title={card.label}
-            description={<StatusIndicator card={card} />}
-          />
+        </PageHeaderNav>
+        <div className="flex items-center gap-3">
+          <ConnectionBrandBadge connection={card.service} />
+          <PageHeading>
+            <PageTitle>{card.label}</PageTitle>
+            <StatusIndicator card={card} />
+          </PageHeading>
         </div>
-
+      </PageHeader>
+      <Measure>
         <ConnectionDetailBody card={card} composio={composio} onRefresh={refresh} onFlash={flash} />
-      </PageBody>
-    </PageShell>
+      </Measure>
+    </Page>
   );
 }
 
 function DetailSkeleton() {
   return (
-    <PageShell>
-      {/* Same rhythm as the loaded view's PageBody, so settling from skeleton
-          to content does not shift the rows. */}
-      <PageBody className="max-w-2xl">
-        <div className="space-y-4">
-          <Skeleton className="h-5 w-28" />
-          <div className="flex items-center gap-3">
-            <Skeleton className="size-9 rounded-8" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-4 w-24" />
+    <Page>
+      <Measure>
+        <Section>
+          <div className="space-y-4">
+            <Skeleton className="h-5 w-28" />
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-9 rounded-8" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-24" />
+              </div>
             </div>
           </div>
-        </div>
-        <Skeleton className="h-28 w-full rounded-8" />
-        <Skeleton className="h-16 w-full rounded-8" />
-      </PageBody>
-    </PageShell>
+          <Skeleton className="h-28 w-full rounded-8" />
+          <Skeleton className="h-16 w-full rounded-8" />
+        </Section>
+      </Measure>
+    </Page>
   );
 }
