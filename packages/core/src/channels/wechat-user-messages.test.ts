@@ -45,13 +45,20 @@ function fakeReader(opts: {
   conversations?: WechatUserConversation[];
 }): WechatUserReader {
   return {
-    async messages(input: { conversationId?: string; before?: Date; since?: Date; limit: number }) {
+    async messages(input: {
+      conversationId?: string;
+      before?: Date;
+      since?: Date;
+      limit: number;
+      includeBoundaryTies?: boolean;
+    }) {
       let rows = opts.byConversation?.[input.conversationId ?? ""] ?? [];
       if (input.before) {
         const before = Math.floor(input.before.getTime() / 1000);
         rows = rows.filter((m) => m.timestamp <= before);
       }
       const sorted = [...rows].sort((a, b) => b.timestamp - a.timestamp);
+      if (!input.includeBoundaryTies) return sorted.slice(0, input.limit);
       const older = input.before
         ? sorted.filter((row) => row.timestamp < input.before!.getTime() / 1000)
         : sorted;

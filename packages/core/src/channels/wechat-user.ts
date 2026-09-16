@@ -563,10 +563,17 @@ export class WechatUserReader {
   }
 
   async messages(
-    input: { conversationId?: string; since?: Date; before?: Date; limit: number },
+    input: {
+      conversationId?: string;
+      since?: Date;
+      before?: Date;
+      limit: number;
+      includeBoundaryTies?: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<WechatUserMessage[]> {
     const args = ["messages", "--limit", String(input.limit)];
+    if (input.includeBoundaryTies) args.push("--include-boundary-ties");
     if (input.conversationId) args.push("--conversation", input.conversationId);
     if (input.since) args.push("--since", String(Math.floor(input.since.getTime() / 1000)));
     if (input.before) args.push("--before", String(Math.floor(input.before.getTime() / 1000)));

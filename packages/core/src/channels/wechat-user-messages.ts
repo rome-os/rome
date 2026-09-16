@@ -78,7 +78,12 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
     const perConversation = await Promise.all(
       addresses.map((conversationId) =>
         reader
-          .messages({ conversationId, ...(before ? { before } : {}), limit: opts.limit })
+          .messages({
+            conversationId,
+            ...(before ? { before } : {}),
+            limit: opts.limit,
+            includeBoundaryTies: true,
+          })
           .then((messages) => messages.map(toMessage))
           .catch(() => [] as Message[]),
       ),
@@ -121,6 +126,7 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
       const messages = await reader
         .messages({
           conversationId: conversation.id,
+          includeBoundaryTies: true,
           ...(before ? { before } : {}),
           limit: windowSize(limit),
         })

@@ -338,7 +338,7 @@ def query_message_window(query, conn, table, since_ts, before_ts, limit):
     return rows
 
 
-def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit):
+def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit, include_boundary_ties=False):
     from wechat_cli.core.messages import (
         _format_message_text,
         _iter_table_contexts,
@@ -358,9 +358,13 @@ def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit
         try:
             with closing(sqlite3.connect(table["db_path"])) as conn:
                 id_to_username = _load_name2id_maps(conn)
-                rows = query_message_window(
-                    _query_messages, conn, table["table_name"], since_ts, before_ts, limit
-                )
+                if include_boundary_ties:
+                    rows = query_message_window(
+                        _query_messages, conn, table["table_name"], since_ts, before_ts, limit
+                    )
+                else:
+                    rows = _query_messages(conn, table["table_name"], start_ts=since_ts,
+                                           end_ts=before_ts, limit=limit, offset=0)
                 for row in rows:
                     local_id, local_type, created, real_sender, content, ct = row
                     try:
@@ -397,7 +401,7 @@ def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit
             continue
 
     collected.sort(key=lambda m: m["timestamp"])
-    return collected
+    return collected if include_boundary_ties else collected[-limit:]
 
 
 def cmd_messages(args):
@@ -409,7 +413,8 @@ def cmd_messages(args):
 
     if args.conversation:
         out = chat_messages(
-            app, args.conversation, names, self_username, args.since, args.before, args.limit
+            app, args.conversation, names, self_username, args.since, args.before, args.limit,
+            args.include_boundary_ties
         )
     else:
         # No chat named: read across the most recently active ones. Bounded on
@@ -486,6 +491,7 @@ def main():
     messages.add_argument("--since", type=int, default=None)
     messages.add_argument("--before", type=int, default=None)
     messages.add_argument("--limit", type=int, default=50)
+    messages.add_argument("--include-boundary-ties", action="store_true")
     messages.set_defaults(func=cmd_messages)
 
     count = sub.add_parser("count")
