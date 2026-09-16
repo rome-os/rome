@@ -51,7 +51,6 @@ import {
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
 import type { RootScriptRunner } from "../../host-execution/root-script-runner.js";
 import { createLogger } from "../../logger.js";
-import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type {
@@ -267,7 +266,19 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
   return async (interact, ctx) => {
     const ready = await ctx.step("ensure-runtime", async (signal) => {
       const initial = await runtime.status();
-      if (initial.state === "ready") return initial;
+      if (initial.state === "ready" && initial.running) return initial;
+      if (initial.keysReady) {
+        interact.show({
+          title: "Resuming WeChat",
+          body: [
+            "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
+          ],
+          links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+          progress: true,
+        });
+        await runtime.start(signal);
+        return waitFor(signal, (status) => status.running && status.state === "ready");
+      }
       deps.ensureRecoveryAvailable?.();
       if (!initial.installed) {
         interact.show(installingView());
@@ -321,7 +332,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
               await abortableDelay(pollIntervalMs, signal);
             }
           }
-          return waitFor(signal, (s) => s.keysReady);
+          return waitFor(signal, (s) => s.running && s.state === "ready");
         } catch (error) {
           qr.stop = true;
           await qrLoop.catch(() => {});
@@ -446,7 +457,9 @@ export function createWechatUserDescriptor(
         needs: ["session"] as const,
         build(_creds, kit): Talker {
           let degradation: CapabilityDegradation | null = null;
-          let probe: ReturnType<typeof setInterval> | null = null;
+          let probe: ReturnType<typeof setTimeout> | null = null;
+          let controller: AbortController | null = null;
+          let pending: Promise<void> | null = null;
 
           const directory: TalkDirectory = {
             async listConversations(input) {
@@ -481,41 +494,70 @@ export function createWechatUserDescriptor(
           const talker: WechatUserTalker = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
-            start(_deliver, fault): void {
+            start(): void {
+              if (controller) return;
+              const epoch = new AbortController();
+              controller = epoch;
+              degradation = { reason: "Rome is checking the WeChat desktop session." };
+              // Each epoch runs one probe at a time. stop() aborts pending work
+              // so stale probes cannot publish health or launch another client.
               const tick = async (): Promise<void> => {
                 try {
-                  const status = await runtime.status();
-                  if (status.state === "ready") {
+                  let status = await runtime.status();
+                  if (epoch.signal.aborted) return;
+                  if (status.installed && !status.running) {
+                    degradation = {
+                      reason:
+                        "The WeChat desktop client is stopped. Rome is restarting it; saved history remains readable.",
+                    };
+                    await runtime.start(epoch.signal);
+                    if (epoch.signal.aborted) return;
+                    status = await runtime.status();
+                  }
+                  if (epoch.signal.aborted) return;
+                  if (!status.running) {
+                    degradation = {
+                      reason:
+                        "The WeChat desktop client is not running. New messages cannot sync. Rome will retry.",
+                    };
+                  } else if (status.state === "awaiting-scan") {
+                    degradation = {
+                      reason:
+                        "WeChat needs sign-in confirmation. Open Rome's desktop and confirm on your phone if asked. Saved history remains available.",
+                    };
+                  } else if (status.state === "ready") {
                     degradation = null;
-                  } else if (!status.loggedIn) {
-                    degradation = { reason: "The WeChat account is signed out on your instance." };
-                    fault(
-                      new CredentialRejected({
-                        grant: "session",
-                        cause: new Error("WeChat signed out"),
-                      }),
-                    );
                   } else {
-                    degradation = { reason: "The WeChat message store is locked." };
+                    degradation = { reason: "The WeChat message store is not ready." };
                   }
                 } catch (error) {
+                  if (epoch.signal.aborted) return;
                   degradation = {
-                    reason: `Rome cannot read the WeChat client: ${
+                    reason: `Rome cannot resume the WeChat client: ${
                       error instanceof Error ? error.message : String(error)
                     }`,
                   };
                   log.warn("wechat_user.probe_failed", {
                     error: error instanceof Error ? error.message : String(error),
                   });
+                } finally {
+                  if (!epoch.signal.aborted) {
+                    probe = setTimeout(() => {
+                      pending = tick();
+                    }, deps.probeIntervalMs ?? SESSION_PROBE_INTERVAL_MS);
+                    probe.unref?.();
+                  }
                 }
               };
-              void tick();
-              probe = setInterval(() => void tick(), SESSION_PROBE_INTERVAL_MS);
-              probe.unref?.();
+              pending = tick();
             },
-            stop(): void {
-              if (probe) clearInterval(probe);
+            async stop(): Promise<void> {
+              controller?.abort();
+              if (probe) clearTimeout(probe);
               probe = null;
+              await pending;
+              pending = null;
+              controller = null;
             },
             async send(): Promise<never> {
               throw new Error("The WeChat personal connection is read-only");

@@ -114,6 +114,20 @@ describe("makeWechatUserSetup", () => {
     expect(conferral.summary?.body?.join(" ")).toContain("read-only");
   });
 
+  it("resumes readable cached history without recapturing keys", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, state: "stopped", running: false }, READY],
+    });
+    const { fn, recoverPassphrase, stageDriver } = setupWith(runtime);
+    const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
+    await session.started();
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    expect(runtime.start).toHaveBeenCalledTimes(1);
+    expect(recoverPassphrase).not.toHaveBeenCalled();
+    expect(stageDriver).not.toHaveBeenCalled();
+    expect(runtime.install).not.toHaveBeenCalled();
+  });
+
   it("installs, launches under gdb to capture the passphrase, then derives it once", async () => {
     const runtime = fakeRuntime({
       statuses: [
@@ -271,8 +285,9 @@ describe("the WeChat personal Talker", () => {
   function buildTalker(
     runtime: WechatUserRuntime,
     fault: (err: StreamFault) => void = () => {},
-  ): { talker: Talker; deliver: ReturnType<typeof rs.fn> } {
-    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs: 60_000 });
+    probeIntervalMs = 60_000,
+  ) {
+    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs });
     const kit = {
       connectionId: "conn-wechat-user",
       persist: async () => {},
@@ -285,8 +300,88 @@ describe("the WeChat personal Talker", () => {
     const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
     const deliver = rs.fn();
     talker.start(deliver as unknown as (msg: InboundMessage) => void, fault);
-    return { talker, deliver };
+    return {
+      talker,
+      deliver,
+      degradation: () => descriptor.capabilities.talker!.degradation!(talker),
+    };
   }
+
+  it("resumes a stopped client even when the cached store is readable", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, running: false, pid: undefined }, READY],
+    });
+    const fault = rs.fn();
+    const { talker } = buildTalker(runtime, fault);
+    try {
+      await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
+      expect(fault).not.toHaveBeenCalled();
+      expect(runtime.installReader).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("keeps history available and retries a failed client launch without rejecting the grant", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, state: "stopped", running: false }],
+      readerJson: { messages: [] },
+    });
+    rs.mocked(runtime.start).mockRejectedValue(new Error("desktop unavailable"));
+    const fault = rs.fn();
+    const { talker, degradation } = buildTalker(runtime, fault, 5);
+    try {
+      await rs.waitFor(() =>
+        expect(rs.mocked(runtime.start).mock.calls.length).toBeGreaterThanOrEqual(2),
+      );
+      expect(degradation()?.reason).toContain("desktop unavailable");
+      expect(await talker.feature("history")!.query({ limit: 1 })).toEqual([]);
+      expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("reports phone confirmation without restarting a running client", async () => {
+    const runtime = fakeRuntime({ statuses: [{ ...READY, state: "awaiting-scan" }] });
+    const fault = rs.fn();
+    const { talker, degradation } = buildTalker(runtime, fault);
+    try {
+      await rs.waitFor(() => expect(degradation()?.reason).toContain("phone"));
+      expect(runtime.start).not.toHaveBeenCalled();
+      expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("recovers a later crash and clears degradation after the client resumes", async () => {
+    const runtime = fakeRuntime({ statuses: [READY, { ...READY, running: false }, READY] });
+    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    try {
+      await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("drains an in-flight probe on stop without launching the client", async () => {
+    const runtime = fakeRuntime({ statuses: [READY] });
+    let resolve!: (status: WechatUserStatus) => void;
+    rs.mocked(runtime.status).mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const { talker } = buildTalker(runtime, undefined, 1);
+    const stopped = talker.stop();
+    resolve({ ...READY, running: false });
+    await stopped;
+    expect(runtime.start).not.toHaveBeenCalled();
+    expect(runtime.status).toHaveBeenCalledTimes(1);
+  });
 
   it("is read-only: send throws, direct messaging is absent, nothing delivered", async () => {
     const { talker, deliver } = buildTalker(fakeRuntime({ statuses: [READY] }));

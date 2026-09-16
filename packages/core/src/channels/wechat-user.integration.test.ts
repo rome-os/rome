@@ -27,6 +27,8 @@ withClient("the WeChat reader contract", () => {
     async () => {
       const status = await runtime.status();
       expect(status.installed).toBe(true);
+      expect(status.running).toBe(true);
+      expect(status.state).toBe("ready");
       expect(status.loggedIn).toBe(true);
       expect(status.keysReady).toBe(true);
       expect(status.wxid).toBeTruthy();

@@ -107,18 +107,20 @@ export const runCommand: RunCommand = (file, args, opts = {}) =>
 // ── status ────────────────────────────────────────────────────────────────
 
 /**
- * What the client is doing, as a linear progression through connecting. The
- * setup renders each state; nothing else needs to distinguish them.
+ * Local desktop and store readiness for setup and connection health. A ready
+ * client can still be offline. Receipt of a new message proves synchronization.
  *   absent          — the client is not installed in this container yet
  *   installing      — fetching and unpacking it
+ *   stopped         — installed, but no desktop client process exists
  *   starting        — launched, not yet drawing
- *   awaiting-scan   — showing a login QR on the desktop
+ *   awaiting-scan   — showing a login or confirmation window on the desktop
  *   awaiting-keys   — signed in, but the message store is still locked
- *   ready           — signed in with a working key; reads work
+ *   ready           — running with a readable store and no visible login prompt
  */
 export type WechatUserState =
   | "absent"
   | "installing"
+  | "stopped"
   | "starting"
   | "awaiting-scan"
   | "awaiting-keys"
@@ -128,7 +130,7 @@ export interface WechatUserStatus {
   state: WechatUserState;
   installed: boolean;
   running: boolean;
-  /** True once the client has written an account store, which it does on login. */
+  /** An account store exists. This does not prove the desktop session is signed in. */
   loggedIn: boolean;
   keysReady: boolean;
   /** The account's own directory name, which is its WeChat id. */
@@ -251,6 +253,7 @@ export class WechatUserRuntime {
   readonly display: string;
   readonly canonicalPrefix: string;
   private readonly run: RunCommand;
+  private starting: Promise<void> | null = null;
 
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
@@ -274,7 +277,7 @@ export class WechatUserRuntime {
     return join(this.home, ".wechat-cli", "all_keys.json");
   }
 
-  /** The signed-in account's store directory, or null when signed out. */
+  /** The cached account store directory, or null when no store exists. */
   async accountDir(): Promise<string | null> {
     const root = join(this.home, "xwechat_files");
     const listed = await this.run("sh", ["-c", `ls -1 ${root} 2>/dev/null`]).catch(() => null);
@@ -290,9 +293,7 @@ export class WechatUserRuntime {
 
   /** The client's pid in this container, or null when it is not running. */
   async pid(): Promise<number | null> {
-    const found = await this.run("pgrep", ["-f", `${WECHAT_CANONICAL_PREFIX}/wechat`]).catch(
-      () => null,
-    );
+    const found = await this.run("pgrep", ["-x", "wechat"]).catch(() => null);
     const first = (found?.stdout ?? "").split("\n")[0]?.trim();
     const pid = first ? Number(first) : Number.NaN;
     return Number.isInteger(pid) && pid > 0 ? pid : null;
@@ -325,6 +326,24 @@ export class WechatUserRuntime {
     return `data:image/png;base64,${encoded}`;
   }
 
+  private async hasLoginWindow(): Promise<boolean> {
+    const tree = await this.run("xwininfo", ["-root", "-tree"], {
+      env: { DISPLAY: this.display },
+    });
+    if (tree.code !== 0) {
+      throw new WechatUserRuntimeError("Could not inspect the WeChat desktop session.");
+    }
+    const windowId = loginWindowId(tree.stdout);
+    if (!windowId) return false;
+    const window = await this.run("xwininfo", ["-id", windowId], {
+      env: { DISPLAY: this.display },
+    });
+    if (window.code !== 0) {
+      throw new WechatUserRuntimeError("Could not inspect the WeChat login window.");
+    }
+    return /Map State: IsViewable/.test(window.stdout);
+  }
+
   async status(): Promise<WechatUserStatus> {
     const installed = await exists(join(this.clientDir, "wechat"));
     const pid = installed ? await this.pid() : null;
@@ -344,9 +363,10 @@ export class WechatUserRuntime {
 
     let state: WechatUserState;
     if (!installed) state = "absent";
+    else if (!pid) state = "stopped";
+    else if (await this.hasLoginWindow()) state = "awaiting-scan";
     else if (keysReady) state = "ready";
     else if (account) state = "awaiting-keys";
-    else if (pid) state = "awaiting-scan";
     else state = "starting";
 
     return {
@@ -412,6 +432,10 @@ export class WechatUserRuntime {
       }
     }
 
+    await this.ensureClientLink();
+  }
+
+  private async ensureClientLink(): Promise<void> {
     if (!(await exists(this.canonicalPrefix))) {
       await symlink(this.clientDir, this.canonicalPrefix).catch((error: unknown) => {
         throw new WechatUserRuntimeError(
@@ -448,24 +472,35 @@ export class WechatUserRuntime {
     await mkdir("/run/user/0", { recursive: true, mode: 0o700 }).catch(() => {});
     await this.run("sh", [
       "-c",
-      "pgrep -f 'dbus-daemon --session' >/dev/null || " +
+      "pgrep -f '[d]bus-daemon --session' >/dev/null || " +
         "dbus-daemon --session --fork --address=unix:path=/run/user/0/bus >/dev/null 2>&1 || true",
     ]).catch(() => {});
   }
 
-  /** Start the client the ordinary way if it is not already running. Idempotent.
-   *  The connection setup does not use this — it launches the client under gdb
-   *  to catch the first login's key — but it is kept for running the client
-   *  outside a key recovery. */
-  async start(signal?: AbortSignal): Promise<void> {
+  /** Resume the saved desktop session without capturing keys or replacing account data. */
+  start(signal?: AbortSignal): Promise<void> {
+    // Setup and a live capability share this runtime. One launch owns the
+    // client link and process creation until its command completes.
+    this.starting ??= this.startClient(signal).finally(() => {
+      this.starting = null;
+    });
+    return this.starting;
+  }
+
+  private async startClient(signal?: AbortSignal): Promise<void> {
     if (await this.pid()) return;
+    if (signal?.aborted) throw signal.reason;
+    await this.ensureClientLink();
     await this.prepareSession();
 
     const started = await this.run(
       "sh",
       [
         "-c",
-        `cd ${this.canonicalPrefix} && setsid ./wechat >${join(this.prefix, "client.log")} 2>&1 &`,
+        `cd "$1" && setsid "$1/wechat" >"$2" 2>&1 </dev/null &`,
+        "wechat-start",
+        this.canonicalPrefix,
+        join(this.prefix, "client.log"),
       ],
       { env: this.clientEnv(), ...(signal ? { signal } : {}) },
     );
@@ -478,7 +513,7 @@ export class WechatUserRuntime {
   }
 
   async stop(): Promise<void> {
-    await this.run("pkill", ["-f", `${this.canonicalPrefix}/wechat`]).catch(() => {});
+    await this.run("pkill", ["-x", "wechat"]).catch(() => {});
   }
 
   /** Install the reader's python dependencies into the volume. */

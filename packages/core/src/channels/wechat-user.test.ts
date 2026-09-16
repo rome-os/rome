@@ -9,7 +9,7 @@
 //   3. The reader parses the helper's JSON and classifies a signed-out account
 //      (exit 3) as terminal, everything else as transient.
 
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -59,7 +59,15 @@ describe("WechatUserRuntime.status", () => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
-      run: scriptedRun({ pgrep: () => ok("1234\n") }).run,
+      run: scriptedRun({
+        pgrep: () => ok("1234\n"),
+        xwininfo: (args) =>
+          ok(
+            args[0] === "-id"
+              ? "Map State: IsViewable"
+              : '0x123 "Weixin": ("wechat" "wechat") 280x380+0+0',
+          ),
+      }).run,
     });
     await mkdir(join(h, ".local", "share", "wechat", "client", "opt", "wechat"), {
       recursive: true,
@@ -73,12 +81,23 @@ describe("WechatUserRuntime.status", () => {
     expect(status.pid).toBe(1234);
   });
 
-  it("reads ready once the helper verifies the message-store keys", async () => {
+  it.each([
+    false,
+    true,
+  ])("distinguishes cached keys from a visible login prompt (%s)", async (login) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
       run: scriptedRun({
         pgrep: () => ok("1234\n"),
+        xwininfo: (args) =>
+          ok(
+            args[0] === "-id"
+              ? login
+                ? "Map State: IsViewable"
+                : "Map State: IsUnMapped"
+              : '0x123 "Weixin": ("wechat" "wechat") 280x380+0+0',
+          ),
         // accountDir lists xwechat_files
         sh: (args) => (args[1]?.includes("xwechat_files") ? ok("wxid_guardian\n") : ok()),
         [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
@@ -89,10 +108,31 @@ describe("WechatUserRuntime.status", () => {
     await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
 
     const status = await runtime.status();
-    expect(status.state).toBe("ready");
+    expect(status.state).toBe(login ? "awaiting-scan" : "ready");
     expect(status.loggedIn).toBe(true);
     expect(status.keysReady).toBe(true);
     expect(status.wxid).toBe("wxid_guardian");
+  });
+
+  it("keeps readable cached history separate from a stopped client", async () => {
+    const h = await tempHome();
+    const runtime = new WechatUserRuntime({
+      home: h,
+      run: scriptedRun({
+        pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
+        sh: () => ok("wxid_guardian\n"),
+        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
+      }).run,
+    });
+    await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
+    await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
+    await writeFile(await ensureFile(runtime.keysFile), "{}");
+    expect(await runtime.status()).toMatchObject({
+      state: "stopped",
+      running: false,
+      loggedIn: true,
+      keysReady: true,
+    });
   });
 
   it.each([3, 4])("keeps unreadable or pending keys awaiting keys (exit %s)", async (code) => {
@@ -100,6 +140,7 @@ describe("WechatUserRuntime.status", () => {
     const runtime = new WechatUserRuntime({
       home: h,
       run: scriptedRun({
+        pgrep: () => ok("1234\n"),
         sh: () => ok("wxid_guardian\n"),
         [join(h, ".local/share/wechat/cli/bin/python3")]: () => ({
           code,
@@ -112,6 +153,27 @@ describe("WechatUserRuntime.status", () => {
     await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
     await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
     expect(await runtime.status()).toMatchObject({ state: "awaiting-keys", keysReady: false });
+  });
+});
+
+describe("WechatUserRuntime.start", () => {
+  it("restores the client link and coalesces concurrent launches without installing", async () => {
+    const h = await tempHome();
+    const { run, calls } = scriptedRun({});
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "opt-wechat"), run });
+    await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
+    await Promise.all([runtime.start(), runtime.start()]);
+    expect(await readlink(runtime.canonicalPrefix)).toBe(runtime.clientDir);
+    expect(calls.filter((call) => call.some((arg) => arg.includes("setsid")))).toHaveLength(1);
+    expect(calls).toContainEqual(["pgrep", "-x", "wechat"]);
+    expect(calls.some((call) => ["curl", "dpkg-deb", "pkill"].includes(call[0]!))).toBe(false);
+  });
+
+  it("leaves an existing desktop process alone", async () => {
+    const { run, calls } = scriptedRun({ pgrep: () => ok("42\n") });
+    const runtime = new WechatUserRuntime({ home: await tempHome(), run });
+    await runtime.start();
+    expect(calls).toEqual([["pgrep", "-x", "wechat"]]);
   });
 });
 

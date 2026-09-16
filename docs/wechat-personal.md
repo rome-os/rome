@@ -30,6 +30,23 @@ Setup verifies the session database and every message shard before reporting rea
 
 The client can create the message databases after key capture finishes. Setup keeps the captured passphrase and waits for those files. An unlocked but empty store needs messages synced from the phone before People can show history.
 
+## Desktop recovery
+
+Rome checks the desktop client when the connection starts and every five minutes after each check finishes. If the client stops, Rome starts it with the saved session and keys. Startup restores the client link after a container rebuild. It does not capture keys, delete the account store, or force a new login.
+
+A readable store proves that cached history is available. It does not prove that new messages can sync. A stopped client, a failed restart, or a visible login window appears as connection degradation. Cached history remains available through People and Talk history.
+
+If WeChat shows a login window, open Rome's desktop and complete the sign-in there. Confirm on the phone if asked. Rome does not repeat key capture when the saved keys still unlock the message store.
+
+After a restart, check both stored history and live reception:
+
+1. Open a linked person's timeline and read an existing message.
+2. Complete any desktop sign-in confirmation.
+3. Send a uniquely named test message to File Transfer from the phone.
+4. Check that the test message appears in the desktop store through the reader.
+
+A running process and no visible login window are local readiness checks. Only receipt of a new message verifies live synchronization.
+
 ## Clean-login verification
 
 Use a separate instance with a new home volume. Keep existing account stores intact. Complete one login, then check a direct conversation that contains messages.
