@@ -1,24 +1,16 @@
 import type { ComponentProps } from "react";
 import { cn } from "./cn.js";
-import { Page } from "./page.js";
 import { Toolbar, type ToolbarProps } from "./toolbar.js";
 
 /*
- * The list layout. Slot table and responsive behaviour: docs/ui/layouts.md.
- */
-
-/**
- * Used for a collection the reader scans or searches to find one item and then
- * leaves. Not used when the reader processes items one by one while keeping the
- * list in view, which is `SplitLayout`.
+ * The List body: what a page stacks inside `Page` when the reader's task is to
+ * scan or search a collection, find one item, and leave. Slot table and
+ * responsive behaviour: docs/ui/layouts.md.
  *
- * Slots: `PageHeader`, `ListToolbar`, `ListCollection`, `ListFooter`.
+ * There is no `ListLayout`. A List renders into `Page` — the same padding and
+ * the same rhythm every other page takes — so a wrapper here would name the
+ * layout without owning any of it.
  */
-export function ListLayout({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <Page data-slot="list-layout" className={cn("flex flex-col gap-6", className)} {...props} />
-  );
-}
 
 /**
  * Search, filters, and the controls that narrow the collection. One tab stop for

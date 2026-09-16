@@ -1,6 +1,8 @@
 # Page Layouts
 
-A **page layout** is the frame a routed page renders into. It fixes the page as a set of named slots and owns every measurement those slots need: padding, column widths, breakpoints, and which region scrolls. A page fills the slots and writes no `max-w-*`, `space-y-*`, or `p-*` of its own. The kit ships each one as `packages/ui/src/layout-*.tsx`, on the shared frame in `packages/ui/src/page.tsx`.
+A **page layout** is the skeleton a routed page fills: the regions it stacks and every measurement those regions need — padding, column widths, breakpoints, and which one scrolls. A page fills the regions and writes no `max-w-*`, `space-y-*`, or `p-*` of its own.
+
+The skeleton itself is `Page`, in `packages/ui/src/page.tsx`: a header, then a body, at one padding and one rhythm. What differs between layouts is the body, and that is what the kit ships as `packages/ui/src/layout-*.tsx` — `ListCollection` and its toolbar, `FormRows` and its rows. A layout ships a frame component of its own only when its frame differs from `Page`, which is why neither List nor Form has one.
 
 A page picks its layout by naming the reader's task, never by how the content looks. A table of rows is a List when the reader leaves with one item, and a different layout when the reader works through the rows one by one without leaving.
 
@@ -8,11 +10,11 @@ The catalogue enters one layout at a time, each landing with a dashboard page mi
 
 ## The shared frame
 
-A layout renders inside `Page`, which carries the padding `p-4 sm:p-6 lg:p-8` at full width and centers nothing.
+`Page` is the frame a routed page renders into. It carries the padding `p-4 sm:p-6 lg:p-8` at full width, centers nothing, and stacks the regions inside it 24px apart. A page that needs a different frame — full-bleed, or centered on both axes — takes a layout that ships one. Every other page takes `Page` directly and stacks its body under the header.
 
 `PageHeader` holds the identity block. `PageHeaderNav` takes a breadcrumb or a back link on its own line, `PageHeading` groups `PageTitle` with `PageDescription`, and `PageActions` sits opposite the heading. `PageTitle` is the one `h1` a page carries. A `Section` inside the page carries an `h2` through `SectionTitle`. The roles come from [typography.md](semantic-token/typography.md), so a layout writes `text-title`, `text-section`, `text-ui`, and `text-aux` and never a raw size.
 
-`Measure` caps content at the reading measure. It sits below the header rather than around it, so the `h1` stays at the same spot across routes. Blocks inside a page sit 24px apart and content inside a block sits 12px to 16px apart.
+`Measure` caps content at the reading measure. It sits below the header rather than around it, so the `h1` stays at the same spot across routes. `Page` holds its regions 24px apart, and content inside a block sits 12px to 16px apart.
 
 No layout renders `main`. The dashboard shell owns that landmark, and a second one nested inside it breaks landmark navigation. Layouts render `div`, `section`, `header`, `aside`, and `nav`.
 
@@ -34,12 +36,13 @@ A toolbar slot is `Toolbar`, on Radix Toolbar. It takes one tab stop for the who
 
 Used for a collection the reader scans or searches to find one item and then leaves. Not used when the reader processes items one by one while keeping the list in view.
 
-| Slot | Component | Holds |
-|---|---|---|
-| Header | `PageHeader` | Title, description, and the action that creates an item |
-| Toolbar | `ListToolbar` | Search, filters, and sort, in one tab stop |
-| Collection | `ListCollection` | A `Table`, or a `ListGrid` of cards |
-| Footer | `ListFooter` | Pagination, a count, or a load-more control |
+| Region | Component | Holds | From |
+|---|---|---|---|
+| Frame | `Page` | The padding and the 24px rhythm | the skeleton |
+| Header | `PageHeader` | Title, description, and the action that creates an item | the skeleton |
+| Toolbar | `ListToolbar` | Search, filters, and sort, in one tab stop | List |
+| Collection | `ListCollection` | A `Table`, or a `ListGrid` of cards | List |
+| Footer | `ListFooter` | Pagination, a count, or a load-more control | List |
 
 `ListCollection` scrolls sideways rather than widening the page, so a wide table leaves the header in place. `ListGrid` runs one column, two from `sm`, and three from `xl`.
 
@@ -55,18 +58,21 @@ The split the row reads by is the same one the header takes: a control that chan
 
 Used for changing settings and seeing the change took: one column at the reading measure, with save state shown where the change was made. Not used for a one-shot linear flow.
 
-| Slot | Component | Holds |
-|---|---|---|
-| Header | `PageHeader` | Title and description |
-| Rows | `FormRows` | `FormRow` blocks, one setting each |
+| Region | Component | Holds | From |
+|---|---|---|---|
+| Frame | `Page` | The padding and the 24px rhythm | the skeleton |
+| Header | `PageHeader` | Title and description | the skeleton |
+| Rows | `FormRows` | `FormRow` blocks, one setting each | Form |
+
+Form contributes one region. A page that already owns a header — `/settings/appearance` renders under a title and a tab strip six tabs share — stacks `FormRows` under what it has, because there is no Form frame to get in the way.
 
 Settings the reader returns to and changes one at a time take rows. A form filled top to bottom and submitted reads as stacked fields instead, and that body is not in the kit yet: it enters with the first data-entry page that needs it.
 
-`FormRows` caps at the reading measure and the header stays full width, so the `h1` sits where it does on every other route. The surface divides its rows with a hairline, so a set of settings reads as one block rather than as separate cards.
+`FormRows` caps at the reading measure and the frame stays full width, so the `h1` sits where it does on every other route. The surface divides its rows with a hairline, so a set of settings reads as one block rather than as separate cards.
 
 A `FormRow` holds an optional `FormRowIcon`, a `FormRowHeading` carrying `FormRowLabel` and an optional `FormRowDescription`, and a `FormRowControl` at the end. The icon column opens only on the rows that carry one, so a set of rows without icons keeps its labels at the inset. `FormRowLabel` renders a `label` when given `htmlFor` and plain text otherwise, because a `for` aimed at nothing names nothing. A row is one line at every width: the heading wraps its own text rather than pushing the control onto a second line, since a row that stacks on a narrow viewport stops reading as a row exactly where the list is longest. A row floors at 64px, the box-size step above a `md` control inside the row's 12px insets, so a row carrying a control and a row carrying only text are the same height.
 
-[`/settings/appearance`](../../packages/web/src/pages/SettingsTabPage.tsx) is the reference. Its six tabs share one `Settings` title and tab strip, so Appearance fills the row body alone and the frame around it stays the shared one.
+[`/settings/appearance`](../../packages/web/src/pages/SettingsTabPage.tsx) is the reference.
 
 ## Preview
 

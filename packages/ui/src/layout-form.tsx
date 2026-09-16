@@ -1,29 +1,19 @@
 import type { ComponentProps } from "react";
 import { cn } from "./cn.js";
-import { Page } from "./page.js";
 
 /*
- * The form, or settings, layout. Slot table and responsive behaviour:
- * docs/ui/layouts.md.
- */
-
-/**
- * Used for changing settings and seeing the change took: one column at the
- * reading measure, with save state shown where the change was made. Not used
- * for a one-shot linear flow, which is `WizardLayout`.
+ * The Form body: what a page stacks inside `Page` when the reader's task is to
+ * change a setting and see the change took. Slot table and responsive
+ * behaviour: docs/ui/layouts.md.
  *
- * Slots: `PageHeader` and `FormRows`.
- */
-export function FormLayout({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <Page data-slot="form-layout" className={cn("flex flex-col gap-6", className)} {...props} />
-  );
-}
-
-/*
- * The settings-row body. Settings a reader returns to and changes one at a time
- * read as rows — a label on the left, its control on the right, stacked in one
- * surface with hairline dividers.
+ * There is no `FormLayout`. A Form renders into `Page` — the same padding and
+ * the same rhythm every other page takes — so a wrapper here would name the
+ * layout without owning any of it. That is also what lets a Form body sit under
+ * a header and a nav the route already owns, as `/settings/appearance` does.
+ *
+ * Settings a reader returns to and changes one at a time read as rows — a label
+ * on the left, its control on the right, stacked in one surface with hairline
+ * dividers.
  */
 
 /**

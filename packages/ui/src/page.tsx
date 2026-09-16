@@ -16,9 +16,24 @@ import { cn } from "./cn.js";
  * header through `Measure`, so the `h1` sits at the same spot on every route.
  */
 
-/** The outer frame of a routed page. Owns the padding no page restates. */
+/**
+ * The skeleton of a routed page: the regions a page stacks, top to bottom, at
+ * the padding and the 24px rhythm no page restates. A header, then whatever
+ * body the page's task calls for — a `ListCollection`, a set of `FormRows`, a
+ * column of `Section` blocks.
+ *
+ * The rhythm sits here rather than in a per-layout wrapper because it is the
+ * same rhythm whatever the body is. A layout ships a frame of its own only when
+ * that frame differs from this one.
+ */
 export function Page({ className, ...props }: ComponentProps<"div">) {
-  return <div data-slot="page" className={cn("w-full p-4 sm:p-6 lg:p-8", className)} {...props} />;
+  return (
+    <div
+      data-slot="page"
+      className={cn("flex w-full min-w-0 flex-col gap-6 p-4 sm:p-6 lg:p-8", className)}
+      {...props}
+    />
+  );
 }
 
 /**
@@ -96,17 +111,6 @@ export function PageActions({ className, ...props }: ComponentProps<"div">) {
     <div
       data-slot="page-actions"
       className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
-      {...props}
-    />
-  );
-}
-
-/** The column below the header. Holds its blocks 24px apart. */
-export function PageBody({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="page-body"
-      className={cn("flex min-w-0 flex-col gap-6", className)}
       {...props}
     />
   );

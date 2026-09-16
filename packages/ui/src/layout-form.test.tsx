@@ -1,7 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import {
-  FormLayout,
   FormRow,
   FormRowControl,
   FormRowDescription,
@@ -10,13 +9,13 @@ import {
   FormRowLabel,
   FormRows,
 } from "./layout-form.js";
-import { PageHeader, PageHeading, PageTitle } from "./page.js";
+import { Page, PageHeader, PageHeading, PageTitle } from "./page.js";
 
 afterEach(cleanup);
 
 function ExampleSettings() {
   return (
-    <FormLayout data-testid="layout">
+    <Page data-testid="page">
       <PageHeader>
         <PageHeading>
           <PageTitle>Settings</PageTitle>
@@ -48,29 +47,30 @@ function ExampleSettings() {
           </FormRowControl>
         </FormRow>
       </FormRows>
-    </FormLayout>
+    </Page>
   );
 }
 
-describe("FormLayout", () => {
-  it("renders on the shared page frame with no main landmark", () => {
+describe("the Form body", () => {
+  it("stacks on the shared page frame, with no layout wrapper of its own", () => {
     const { container } = render(<ExampleSettings />);
 
-    expect([...screen.getByTestId("layout").classList]).toEqual(
+    expect([...screen.getByTestId("page").classList]).toEqual(
       expect.arrayContaining(["w-full", "p-4", "gap-6"]),
     );
+    expect(container.querySelector('[data-slot="form-layout"]')).toBeNull();
     expect(container.querySelector("main")).toBeNull();
   });
 
-  it("caps the rows at the reading measure and leaves the header full width", () => {
+  it("caps the rows at the reading measure and leaves the frame full width", () => {
     render(<ExampleSettings />);
 
     expect([...screen.getByTestId("rows").classList]).toContain("max-w-2xl");
-    expect([...screen.getByTestId("layout").classList]).not.toContain("max-w-2xl");
+    expect([...screen.getByTestId("page").classList]).not.toContain("max-w-2xl");
   });
 });
 
-describe("FormLayout settings rows", () => {
+describe("settings rows", () => {
   it("divides the rows in one surface with a hairline", () => {
     render(<ExampleSettings />);
 

@@ -34,9 +34,9 @@ import {
 } from "@/components/ui/select";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
-import { ListCollection, ListFooter, ListLayout, ListToolbar } from "@rome-os/ui/layout-list";
+import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import { Spinner } from "@rome-os/ui/spinner";
-import { PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { Page, PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
 import { ToolbarButton } from "@rome-os/ui/toolbar";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import {
@@ -669,7 +669,7 @@ function SessionsIndexPage({
     return (
       <TooltipProvider delayDuration={150}>
         <SessionsListFrame fullMode={fullMode}>
-          <ListLayout>
+          <Page>
             <PageHeader align="end">
               <PageHeading>
                 <PageTitle>Sessions</PageTitle>
@@ -984,7 +984,7 @@ function SessionsIndexPage({
                 </Button>
               </div>
             </ListFooter>
-          </ListLayout>
+          </Page>
         </SessionsListFrame>
       </TooltipProvider>
     );

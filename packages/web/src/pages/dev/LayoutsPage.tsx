@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Bell, Languages, Plus } from "lucide-react";
 import {
-  FormLayout,
   FormRow,
   FormRowControl,
   FormRowDescription,
@@ -10,9 +9,10 @@ import {
   FormRowLabel,
   FormRows,
 } from "@rome-os/ui/layout-form";
-import { ListCollection, ListFooter, ListLayout, ListToolbar } from "@rome-os/ui/layout-list";
+import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import {
   Measure,
+  Page,
   PageActions,
   PageDescription,
   PageHeader,
@@ -68,7 +68,7 @@ const APPS = [
 
 function ListSpecimen() {
   return (
-    <ListLayout>
+    <Page>
       <PageHeader>
         <PageHeading>
           <PageTitle>Apps</PageTitle>
@@ -139,7 +139,7 @@ function ListSpecimen() {
           Show more
         </Button>
       </ListFooter>
-    </ListLayout>
+    </Page>
   );
 }
 
@@ -147,7 +147,7 @@ function FormSpecimen() {
   const [sounds, setSounds] = useState(true);
 
   return (
-    <FormLayout>
+    <Page>
       <PageHeader>
         <PageHeading>
           <PageTitle>Settings</PageTitle>
@@ -198,7 +198,7 @@ function FormSpecimen() {
           </FormRowControl>
         </FormRow>
       </FormRows>
-    </FormLayout>
+    </Page>
   );
 }
 

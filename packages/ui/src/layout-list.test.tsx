@@ -1,13 +1,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { ListCollection, ListFooter, ListGrid, ListLayout, ListToolbar } from "./layout-list.js";
-import { PageHeader, PageHeading, PageTitle } from "./page.js";
+import { ListCollection, ListFooter, ListGrid, ListToolbar } from "./layout-list.js";
+import { Page, PageHeader, PageHeading, PageTitle } from "./page.js";
 
 afterEach(cleanup);
 
 function ExampleList() {
   return (
-    <ListLayout data-testid="layout">
+    <Page data-testid="page">
       <PageHeader>
         <PageHeading>
           <PageTitle>Apps</PageTitle>
@@ -22,25 +22,26 @@ function ExampleList() {
         </ListGrid>
       </ListCollection>
       <ListFooter>1 of 40</ListFooter>
-    </ListLayout>
+    </Page>
   );
 }
 
-describe("ListLayout", () => {
-  it("renders on the shared page frame with no main landmark", () => {
+describe("the List body", () => {
+  it("stacks on the shared page frame, with no layout wrapper of its own", () => {
     const { container } = render(<ExampleList />);
 
-    expect([...screen.getByTestId("layout").classList]).toEqual(
+    expect([...screen.getByTestId("page").classList]).toEqual(
       expect.arrayContaining(["w-full", "p-4", "gap-6"]),
     );
+    expect(container.querySelector('[data-slot="list-layout"]')).toBeNull();
     expect(container.querySelector("main")).toBeNull();
   });
 
-  it("holds the toolbar, the collection, and the footer as its own slots", () => {
+  it("puts the toolbar, the collection, and the footer straight under the header", () => {
     const { container } = render(<ExampleList />);
 
-    const layout = container.querySelector('[data-slot="list-layout"]');
-    expect([...(layout?.children ?? [])].map((child) => child.getAttribute("data-slot"))).toEqual([
+    const page = container.querySelector('[data-slot="page"]');
+    expect([...(page?.children ?? [])].map((child) => child.getAttribute("data-slot"))).toEqual([
       "page-header",
       "list-toolbar",
       "list-collection",

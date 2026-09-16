@@ -4,7 +4,6 @@ import {
   Measure,
   Page,
   PageActions,
-  PageBody,
   PageDescription,
   PageHeader,
   PageHeaderNav,
@@ -33,32 +32,31 @@ function ExamplePage() {
           <button type="button">New routine</button>
         </PageActions>
       </PageHeader>
-      <PageBody>
-        <Section>
-          <SectionHeader>
-            <SectionHeading>
-              <SectionTitle>Daily</SectionTitle>
-              <SectionDescription>Runs every morning.</SectionDescription>
-            </SectionHeading>
-            <SectionActions>
-              <button type="button">Pause</button>
-            </SectionActions>
-          </SectionHeader>
-          <Measure data-testid="measure">Body</Measure>
-        </Section>
-      </PageBody>
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>Daily</SectionTitle>
+            <SectionDescription>Runs every morning.</SectionDescription>
+          </SectionHeading>
+          <SectionActions>
+            <button type="button">Pause</button>
+          </SectionActions>
+        </SectionHeader>
+        <Measure data-testid="measure">Body</Measure>
+      </Section>
     </Page>
   );
 }
 
 describe("Page", () => {
-  it("owns the shared page padding and centers nothing", () => {
+  it("owns the shared padding and the 24px rhythm, and centers nothing", () => {
     render(<ExamplePage />);
 
     const page = screen.getByTestId("page");
     expect([...page.classList]).toEqual(
-      expect.arrayContaining(["w-full", "p-4", "sm:p-6", "lg:p-8"]),
+      expect.arrayContaining(["w-full", "p-4", "sm:p-6", "lg:p-8", "flex", "flex-col", "gap-6"]),
     );
+    expect([...page.classList]).not.toContain("mx-auto");
   });
 
   it("renders no main landmark, which the shell owns", () => {
@@ -79,7 +77,7 @@ describe("Page", () => {
     expect([...sectionTitle.classList]).toContain("text-section");
   });
 
-  it("places the header slots inside the header and the rest inside the body", () => {
+  it("places the header slots inside the header and the body straight under it", () => {
     const { container } = render(<ExamplePage />);
 
     const header = container.querySelector('[data-slot="page-header"]');
@@ -88,7 +86,7 @@ describe("Page", () => {
       expect(header?.querySelector(`[data-slot="${slot}"]`)).not.toBeNull();
     }
 
-    const section = container.querySelector('[data-slot="page-body"] [data-slot="section"]');
+    const section = container.querySelector('[data-slot="page"] > [data-slot="section"]');
     expect(section?.tagName).toBe("SECTION");
     expect(section?.querySelector('[data-slot="section-actions"]')).not.toBeNull();
   });

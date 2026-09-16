@@ -29,8 +29,9 @@ import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
-import { ListLayout, ListToolbar } from "@rome-os/ui/layout-list";
+import { ListToolbar } from "@rome-os/ui/layout-list";
 import {
+  Page,
   PageActions,
   PageHeader,
   PageHeading,
@@ -506,7 +507,7 @@ export default function AppsIndexPage() {
           docs/ui/layouts.md. The actions here are two buttons that may wrap, so
           the header keeps the default `start` alignment rather than the `end`
           a lone view switch takes. */}
-      <ListLayout>
+      <Page>
         <PageHeader>
           <PageHeading>
             <PageTitle>{t("header.title")}</PageTitle>
@@ -667,7 +668,7 @@ export default function AppsIndexPage() {
             void invalidateApps.updates();
           }}
         />
-      </ListLayout>
+      </Page>
     </TooltipProvider>
   );
 }
