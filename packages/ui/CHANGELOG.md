@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/rome-os/rome/compare/ui-v0.3.0...ui-v0.3.1) (2026-09-16)
+
+
+### Features
+
+* **ui:** add the page layout tier with List, and migrate two pages onto it ([#392](https://github.com/rome-os/rome/issues/392)) ([be1b7a3](https://github.com/rome-os/rome/commit/be1b7a368f204e66ac0db928e1733836d283b4a3))
+* **ui:** retune Markdown rhythm for headings, tables, and lists ([#402](https://github.com/rome-os/rome/issues/402)) ([cf2d106](https://github.com/rome-os/rome/commit/cf2d106044a26b63c204d903b15f995e1d1f6de6))
+* **ui:** turn the layout tier into bodies on a Page skeleton, and migrate /settings ([#396](https://github.com/rome-os/rome/issues/396)) ([6dbed23](https://github.com/rome-os/rome/commit/6dbed234e140d2ea986c3b7dce1bd6dbfcdab7b1))
+
 ## [0.3.0](https://github.com/rome-os/rome/compare/ui-v0.2.8...ui-v0.3.0) (2026-09-15)
 
 
