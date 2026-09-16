@@ -126,7 +126,7 @@ export function TurnSummaryGroup({
               <>
                 <PlanStateMarker complete={allComplete} progress={progress} />
                 <span className="flex min-w-0 items-baseline gap-2">
-                  <h3 className="shrink-0 text-ui font-medium text-foreground">Plan</h3>
+                  <h3 className="shrink-0 text-ui text-foreground">Plan</h3>
                   <p
                     className={cn(
                       "truncate text-aux",
@@ -189,7 +189,7 @@ export function TurnSummaryGroup({
                 >
                   <AlignLeft className="size-3.5" strokeWidth={2.25} />
                 </span>
-                <h3 className="truncate text-ui font-medium text-foreground">Recap</h3>
+                <h3 className="truncate text-ui text-foreground">Recap</h3>
               </>
             }
             meta={

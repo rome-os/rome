@@ -26,8 +26,13 @@ export function CollapsibleCard({ className, ...props }: ComponentProps<"div">) 
 
 // A row of 32px: the header names what is folded and gets out of the way,
 // so it sits a step below the controls around it and the content it opens.
+//
+// Focus is the design system's outline recipe, inset by one pixel: the row
+// fills the card to its clipped edge, so a ring drawn outside the box would
+// never be painted. The full recipe is in docs/design-system.md, and
+// `outline-solid` is the part that makes it visible at all.
 const HEADER_CLASS =
-  "flex min-h-8 w-full items-center justify-between gap-3 px-4 py-1 text-left transition-colors hover:bg-surface-muted/60 focus-visible:bg-surface-muted/60 focus-visible:outline-none";
+  "flex min-h-8 w-full items-center justify-between gap-3 px-4 py-1 text-left outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-muted/60 focus-visible:bg-surface-muted/60 focus-visible:outline-solid focus-visible:outline-ring/50";
 
 export interface CollapsibleSectionProps extends Omit<ComponentProps<"div">, "title"> {
   open: boolean;
