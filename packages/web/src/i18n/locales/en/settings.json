@@ -110,6 +110,15 @@
             "reply": "Reply when people message you on WeChat",
             "start": "Start a task when a new message arrives"
           }
+        },
+        "session": {
+          "title": "Your account",
+          "bullets": {
+            "read": "Read your own WeChat chats, groups and message history",
+            "recap": "Recap what you missed while you were away",
+            "search": "Find what someone told you, without scrolling for it"
+          },
+          "privacyNote": "Read-only — Rome never sends WeChat messages. WeChat runs on your own instance and your chats are read there; they never leave it. Disconnect anytime."
         }
       },
       "linkedin": {
@@ -406,6 +415,10 @@
     "feishu": {
       "title": "Feishu",
       "guardianLinked": "Your Feishu account is linked as guardian."
+    },
+    "wechatUser": {
+      "fallbackName": "WeChat account",
+      "disconnectFailedFallback": "Failed to disconnect the WeChat account."
     }
   },
   "favors": {

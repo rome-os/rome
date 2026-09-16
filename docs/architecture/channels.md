@@ -23,3 +23,18 @@ LinkedIn replies use the shared [People outbox](../concepts/people.md#outbox) an
 - A send receipt and a history read identify the same provider message. A successful click or a matching message body cannot establish acceptance.
 - Once LinkedIn accepts a reply, a local mirror failure cannot turn it into a failed send. Unknown send outcomes require an explicit retry.
 - A retry keeps the original conversation. A changed destination requires a new reply.
+
+## WeChat personal account
+
+WeChat has two connections. The `wechat` service is Tencent's official bot channel: it sends and receives, scoped to a bot. The `wechat_user` service is the guardian's own account, read through the official desktop client Rome runs in its own container, on the desktop it serves at `/desktop`.
+
+The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in, which the container itself cannot do, so that one step runs as a root script on the hosting VM: host root enters the container's namespaces and launches the client under gdb, catches the key the first login derives, and hands back only the passphrase. Everything else — the client, the store, the reads — is unprivileged and local to the container.
+
+### Invariants
+
+- The personal account is read-only. Rome answers what a chat contains and has no way to post to the account. A surface that could post would be a different connection.
+- A personal account's history is never delivered as inbound turns. An archive of every conversation the guardian has ever had is something to consult, not something to answer.
+- Recovering the store key is the only privileged step, and it produces a passphrase, not standing access. The ledger records where the authority lives, never the key itself.
+- Recovery launches the client under gdb rather than attaching to a running one. The key is derived once, at the first login, so owning the client from its first instruction lets a single login both sign the guardian in and yield the key — attaching after it is up would miss that derivation and demand a second login.
+- A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
+- A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.

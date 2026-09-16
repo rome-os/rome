@@ -57,6 +57,7 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
+import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -246,7 +247,17 @@ async function main() {
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
+  // The personal WeChat account contributes a people-timeline source only when
+  // the connection is enabled; its store is the client's own database, read live.
+  const wechatUserReader = config.wechatUserEnabled
+    ? new WechatUserReader(new WechatUserRuntime())
+    : undefined;
+  const channels = channelList({
+    db,
+    whatsAppAccounts,
+    linkedInAccounts,
+    ...(wechatUserReader ? { wechatUserReader } : {}),
+  });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
@@ -1008,6 +1019,10 @@ async function main() {
     // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
+    // The personal WeChat connection is opt-in; its key recovery drives a
+    // host-root script through the action engine.
+    wechatUserEnabled: config.wechatUserEnabled,
+    actionEngine,
   });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();

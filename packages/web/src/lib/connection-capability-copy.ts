@@ -59,6 +59,7 @@ const BULLET_KEYS: Record<string, string[]> = {
   "telegram.session": ["send", "read", "notice"],
   "whatsapp.bot": ["reply", "start"],
   "wechat.bot": ["reply", "start"],
+  "wechat.session": ["read", "recap", "search"],
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
@@ -127,7 +128,13 @@ export function slotCardCopy(
 const SUBTITLE_SLOTS = new Set(["telegram.bot", "telegram.session"]);
 
 /** Slots that carry a `privacyNote` lock box. */
-const PRIVACY_SLOTS = new Set(["telegram.session", "github.user", "google.user", "slack.user"]);
+const PRIVACY_SLOTS = new Set([
+  "telegram.session",
+  "wechat.session",
+  "github.user",
+  "google.user",
+  "slack.user",
+]);
 
 /** The card heading for a slot given its connected/primary/secondary role. */
 export function slotHeadingKey(role: "connected" | "primary" | "secondary"): string {

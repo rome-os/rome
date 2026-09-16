@@ -35,6 +35,9 @@ services:
       # - SSH_USER_PASSWORD=changeme
     cap_add:
       - SYS_ADMIN
+    # Chromium-based clients on the desktop map far more shared memory than
+    # Docker's 64 MB default allows, and fault during startup when they cannot.
+    shm_size: 1gb
     devices:
       - /dev/fuse:/dev/fuse
     security_opt:

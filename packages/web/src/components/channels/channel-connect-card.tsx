@@ -87,9 +87,9 @@ export interface ChannelConnectConfig {
   conversationSettings?: boolean;
 }
 
-/** The telegram personal-account glyph — a muted user circle instead of the
- *  Telegram brand badge (the bot slot owns the brand mark on the same card). */
-function TelegramUserIcon() {
+/** The personal-account glyph — a muted user circle instead of the brand badge,
+ *  which the bot slot on the same card owns. */
+function PersonalAccountIcon() {
   return (
     <div className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
       <User className="size-5" aria-hidden />
@@ -110,7 +110,7 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     service: "telegram_user",
     copyService: "telegram",
     defaultGrant: "session",
-    icon: <TelegramUserIcon />,
+    icon: <PersonalAccountIcon />,
     identityFallbackKey: "channels.telegramUser.fallbackName",
     disconnectFailedKey: "channels.telegramUser.disconnectFailedFallback",
   },
@@ -133,6 +133,14 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     defaultGrant: "account",
     guardianLinkedKey: "channels.wechat.guardianLinked",
     conversationSettings: true,
+  },
+  wechat_user: {
+    service: "wechat_user",
+    copyService: "wechat",
+    defaultGrant: "session",
+    icon: <PersonalAccountIcon />,
+    identityFallbackKey: "channels.wechatUser.fallbackName",
+    disconnectFailedKey: "channels.wechatUser.disconnectFailedFallback",
   },
   feishu: {
     service: "feishu",

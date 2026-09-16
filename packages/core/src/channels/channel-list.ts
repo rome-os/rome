@@ -9,6 +9,12 @@ import type { DrizzleDb } from "../db/index.js";
 import type { Accounts } from "./accounts.js";
 import type { Channels } from "./channel.js";
 import { linkedInMessages } from "./linkedin-messages.js";
+import type { WechatUserReader } from "./wechat-user.js";
+import {
+  WECHAT_USER_CHANNEL,
+  wechatUserAccounts,
+  wechatUserMessages,
+} from "./wechat-user-messages.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 
 /**
@@ -30,9 +36,22 @@ export function channelList(deps: {
   db: DrizzleDb;
   whatsAppAccounts: Accounts;
   linkedInAccounts: Accounts;
+  /** The personal WeChat reader, present only when that connection is enabled.
+   *  It contributes a live store and an address book of the guardian's own
+   *  contacts, read straight from the client's database rather than a sync. */
+  wechatUserReader?: WechatUserReader;
 }): Channels {
   return [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
     { name: "linkedin", accounts: deps.linkedInAccounts, messages: linkedInMessages(deps.db) },
+    ...(deps.wechatUserReader
+      ? [
+          {
+            name: WECHAT_USER_CHANNEL,
+            accounts: wechatUserAccounts(deps.wechatUserReader),
+            messages: wechatUserMessages(deps.wechatUserReader),
+          },
+        ]
+      : []),
   ];
 }
