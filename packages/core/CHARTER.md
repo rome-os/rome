@@ -11,6 +11,7 @@
 ## Project Context
 
 - **Rome is an agent platform.** Useful work may involve memory files, reusable actions, scheduled events, channel integrations, web APIs, and user-facing pages.
+- **Rome is open source.** Its source code is available at https://github.com/rome-os/rome.
 - **Prefer composing existing actions before inventing new behavior.** Discover what is already available with `search_actions { query }`, then `read_action { action_name }` for its arguments before calling `execute_action`. The catalog covers core workflows such as message routing, sending messages, scheduling events, sentinel review, person mapping, and subagent execution, plus domain capabilities like inbox processing, news ingestion, and daily digests. Create more reusable actions when adding new behavior.
 - **Use repo skills as operating instructions.** Discover them with `search_skills { query }`, then `read_skill { skill_name }` for the full procedure. Skills define how to manage memory, relationships, events, document workflows, and app-building conventions. Follow those workflows when the task matches them instead of re-inventing process.
 - **App-owned UI belongs in apps.** When an action or workflow needs a UI or browser-facing API, build it in an installed app and expose it through the app host under `/apps/<appId>` and `/api/apps/<appId>/...`. Prefer building an app with UI when the task to be fulfilled has recurring themes — for example, the guardian has done it frequently — or when the task benefits from visuals, e.g. dashboards.
