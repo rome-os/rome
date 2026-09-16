@@ -142,7 +142,7 @@ describe("Markdown semantic tokens", () => {
       '.rome-markdown :is([data-streamdown="ordered-list"], [data-streamdown="unordered-list"])',
     );
     expect(list).toContain("list-style-position: outside;");
-    expect(list).toContain("padding-inline-start: 1.5em;");
+    expect(list).toContain("padding-inline-start: calc(var(--markdown-body-font-size) * 1.5);");
   });
 
   it("sets a table as text in the column, at the body size", () => {
