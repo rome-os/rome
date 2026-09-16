@@ -415,7 +415,11 @@ export default function SettingsPage() {
               <ChannelsSettingsPage />
             </div>
           )}
-          {activeTab === "Favors" && <FavorsSection />}
+          {activeTab === "Favors" && (
+            <Measure>
+              <FavorsSection />
+            </Measure>
+          )}
           {activeTab === "AI Tools" && (
             <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
           )}
@@ -792,180 +796,174 @@ function FavorsSection() {
   const history = requests.filter((request) => request.status !== "pending");
 
   return (
-    <Measure>
-      <Section>
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle>Favors</SectionTitle>
-            <SectionDescription>
-              Balance, payments, and paid app actions settled through Rome Cloud.
-            </SectionDescription>
-          </SectionHeading>
-        </SectionHeader>
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>Favors</SectionTitle>
+          <SectionDescription>
+            Balance, payments, and paid app actions settled through Rome Cloud.
+          </SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Card>
-            <CardContent>
-              <div className="flex items-center gap-2 text-ui text-muted-foreground">
-                <WalletCards className="size-4" />
-                Balance
-              </div>
-              <p className="mt-2 text-title tabular-nums text-foreground">{balance.available}</p>
-              <p className="mt-1 text-aux text-muted-foreground">available favors</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent>
-              <div className="flex items-center gap-2 text-ui text-muted-foreground">
-                <Coins className="size-4" />
-                Earned
-              </div>
-              <p className="mt-2 text-title tabular-nums text-foreground">
-                {balance.lifetimeEarned}
-              </p>
-              <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent>
-              <div className="flex items-center gap-2 text-ui text-muted-foreground">
-                <History className="size-4" />
-                Spent
-              </div>
-              <p className="mt-2 text-title tabular-nums text-foreground">
-                {balance.lifetimeSpent}
-              </p>
-              <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
-            </CardContent>
-          </Card>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card>
+          <CardContent>
+            <div className="flex items-center gap-2 text-ui text-muted-foreground">
+              <WalletCards className="size-4" />
+              Balance
+            </div>
+            <p className="mt-2 text-title tabular-nums text-foreground">{balance.available}</p>
+            <p className="mt-1 text-aux text-muted-foreground">available favors</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <div className="flex items-center gap-2 text-ui text-muted-foreground">
+              <Coins className="size-4" />
+              Earned
+            </div>
+            <p className="mt-2 text-title tabular-nums text-foreground">{balance.lifetimeEarned}</p>
+            <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <div className="flex items-center gap-2 text-ui text-muted-foreground">
+              <History className="size-4" />
+              Spent
+            </div>
+            <p className="mt-2 text-title tabular-nums text-foreground">{balance.lifetimeSpent}</p>
+            <p className="mt-1 text-aux text-muted-foreground">lifetime favors</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <h3 className="text-section text-foreground">Recharge</h3>
+          <CreditCard className="size-4 text-muted-foreground" />
         </div>
-
-        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <h3 className="text-section text-foreground">Recharge</h3>
-            <CreditCard className="size-4 text-muted-foreground" />
-          </div>
-          {packs.length === 0 ? (
-            <p className="px-4 py-4 text-ui text-muted-foreground">No recharge packs configured.</p>
-          ) : (
-            <div className="grid gap-2 p-4 sm:grid-cols-2">
-              {packs.map((pack) => (
-                <Button
-                  key={pack.id}
-                  type="button"
-                  variant="outline"
-                  className="justify-between"
-                  onClick={() => void startRecharge(pack)}
-                  disabled={busyPack !== null}
-                  aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
-                >
-                  <span>{pack.favors.toLocaleString()} favors</span>
-                  {pack.displayPrice ? (
-                    <span className="ml-auto text-aux text-muted-foreground">
-                      {pack.displayPrice}
-                    </span>
-                  ) : null}
-                  {busyPack === pack.id ? (
-                    <Spinner label={t("favors.startingPackPurchase")} />
-                  ) : (
-                    <CreditCard />
-                  )}
-                </Button>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
-          <div className="border-b border-border px-4 py-3">
-            <h3 className="text-section text-foreground">Awaiting your payment decision</h3>
-          </div>
-          {pending.length === 0 ? (
-            <p className="px-4 py-4 text-ui text-muted-foreground">No pending favor requests.</p>
-          ) : (
-            pending.map((request) => (
-              <FavorRequestRow
-                key={request.id}
-                request={request}
-                canDecide
-                busy={busyRequest}
-                onPay={(next) => void resolveRequest(next, "pay")}
-                onDecline={(next) => void resolveRequest(next, "decline")}
-              />
-            ))
-          )}
-        </Section>
-
-        {failed.length > 0 && (
-          <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
-            <div className="border-b border-border px-4 py-3">
-              <h3 className="text-section text-foreground">Failed owner-side actions</h3>
-            </div>
-            {failed.map((request) => (
-              <FavorRequestRow
-                key={request.id}
-                request={request}
-                canDecide={false}
-                busy={busyRequest}
-                onPay={(next) => void resolveRequest(next, "pay")}
-                onDecline={(next) => void resolveRequest(next, "decline")}
-              />
-            ))}
-          </Section>
-        )}
-
-        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
-          <div className="border-b border-border px-4 py-3">
-            <h3 className="text-section text-foreground">Paid action requests</h3>
-          </div>
-          {history.length === 0 ? (
-            <p className="px-4 py-4 text-ui text-muted-foreground">No paid action requests yet.</p>
-          ) : (
-            history.map((request) => (
-              <FavorRequestRow
-                key={request.id}
-                request={request}
-                canDecide={false}
-                busy={busyRequest}
-                onPay={(next) => void resolveRequest(next, "pay")}
-                onDecline={(next) => void resolveRequest(next, "decline")}
-              />
-            ))
-          )}
-        </Section>
-
-        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
-          <div className="border-b border-border px-4 py-3">
-            <h3 className="text-section text-foreground">Ledger</h3>
-          </div>
-          {ledger.length === 0 ? (
-            <p className="px-4 py-4 text-ui text-muted-foreground">No ledger entries yet.</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {ledger.map((entry) => (
-                <div key={entry.id} className="flex items-center justify-between gap-4 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-ui text-foreground">
-                      {favorLedgerKindLabel(entry.kind)}
-                    </p>
-                    <p className="text-aux text-muted-foreground">{favorDate(entry.createdAt)}</p>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 text-ui",
-                      entry.amount >= 0 ? "text-success-fg" : "text-foreground",
-                    )}
-                  >
-                    {entry.amount >= 0 ? "+" : ""}
-                    {entry.amount}
+        {packs.length === 0 ? (
+          <p className="px-4 py-4 text-ui text-muted-foreground">No recharge packs configured.</p>
+        ) : (
+          <div className="grid gap-2 p-4 sm:grid-cols-2">
+            {packs.map((pack) => (
+              <Button
+                key={pack.id}
+                type="button"
+                variant="outline"
+                className="justify-between"
+                onClick={() => void startRecharge(pack)}
+                disabled={busyPack !== null}
+                aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
+              >
+                <span>{pack.favors.toLocaleString()} favors</span>
+                {pack.displayPrice ? (
+                  <span className="ml-auto text-aux text-muted-foreground">
+                    {pack.displayPrice}
                   </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
+                ) : null}
+                {busyPack === pack.id ? (
+                  <Spinner label={t("favors.startingPackPurchase")} />
+                ) : (
+                  <CreditCard />
+                )}
+              </Button>
+            ))}
+          </div>
+        )}
       </Section>
-    </Measure>
+
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-section text-foreground">Awaiting your payment decision</h3>
+        </div>
+        {pending.length === 0 ? (
+          <p className="px-4 py-4 text-ui text-muted-foreground">No pending favor requests.</p>
+        ) : (
+          pending.map((request) => (
+            <FavorRequestRow
+              key={request.id}
+              request={request}
+              canDecide
+              busy={busyRequest}
+              onPay={(next) => void resolveRequest(next, "pay")}
+              onDecline={(next) => void resolveRequest(next, "decline")}
+            />
+          ))
+        )}
+      </Section>
+
+      {failed.length > 0 && (
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-section text-foreground">Failed owner-side actions</h3>
+          </div>
+          {failed.map((request) => (
+            <FavorRequestRow
+              key={request.id}
+              request={request}
+              canDecide={false}
+              busy={busyRequest}
+              onPay={(next) => void resolveRequest(next, "pay")}
+              onDecline={(next) => void resolveRequest(next, "decline")}
+            />
+          ))}
+        </Section>
+      )}
+
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-section text-foreground">Paid action requests</h3>
+        </div>
+        {history.length === 0 ? (
+          <p className="px-4 py-4 text-ui text-muted-foreground">No paid action requests yet.</p>
+        ) : (
+          history.map((request) => (
+            <FavorRequestRow
+              key={request.id}
+              request={request}
+              canDecide={false}
+              busy={busyRequest}
+              onPay={(next) => void resolveRequest(next, "pay")}
+              onDecline={(next) => void resolveRequest(next, "decline")}
+            />
+          ))
+        )}
+      </Section>
+
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-section text-foreground">Ledger</h3>
+        </div>
+        {ledger.length === 0 ? (
+          <p className="px-4 py-4 text-ui text-muted-foreground">No ledger entries yet.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {ledger.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-ui text-foreground">
+                    {favorLedgerKindLabel(entry.kind)}
+                  </p>
+                  <p className="text-aux text-muted-foreground">{favorDate(entry.createdAt)}</p>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 text-ui",
+                    entry.amount >= 0 ? "text-success-fg" : "text-foreground",
+                  )}
+                >
+                  {entry.amount >= 0 ? "+" : ""}
+                  {entry.amount}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+    </Section>
   );
 }
 

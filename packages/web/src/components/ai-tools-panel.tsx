@@ -6,7 +6,7 @@ import {
   SectionTitle,
   SectionActions,
 } from "@rome-os/ui/page";
-import { lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -785,9 +785,12 @@ export function AiToolsPanel({
     if (!loadingStatus) onConnectedChange?.(anyConnected);
   }, [anyConnected, loadingStatus, onConnectedChange]);
 
+  const PanelMeasure = showHeader ? Measure : Fragment;
+  const PanelSection = showHeader ? Section : Fragment;
+
   return (
-    <Measure>
-      <Section>
+    <PanelMeasure>
+      <PanelSection>
         {showHeader && (
           <>
             <SectionHeader>
@@ -1360,7 +1363,7 @@ export function AiToolsPanel({
             onCancel={() => setRemoveAnthropicProviderOpen(false)}
           />
         )}
-      </Section>
-    </Measure>
+      </PanelSection>
+    </PanelMeasure>
   );
 }

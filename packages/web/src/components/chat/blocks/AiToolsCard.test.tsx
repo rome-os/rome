@@ -61,6 +61,15 @@ describe("AiToolsCard", () => {
     expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
   });
 
+  it("lets the chat card own the embedded provider panel width", async () => {
+    mockStatus({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+    const { container } = render(<AiToolsCard toolUseId="wide-card" onSubmit={rs.fn()} />);
+
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    expect(container.querySelector('[data-slot="measure"]')).toBeNull();
+    expect(container.querySelector('[data-slot="section"]')).toBeNull();
+  });
+
   it("shows neither the options nor a verdict while the probe is in flight", async () => {
     let release!: (response: Response) => void;
     const pending = new Promise<Response>((resolve) => {
