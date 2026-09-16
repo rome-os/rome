@@ -193,7 +193,25 @@ function scanView(qr?: string): SetupView {
   };
 }
 
-function keysView(): SetupView {
+/** A cached account opens a sign-in button, not a QR. A screenshot of that
+ *  button cannot be clicked from here, so the guardian signs in on the desktop. */
+function rememberedView(): SetupView {
+  return {
+    title: "Sign in to WeChat",
+    body: [
+      "WeChat remembers this account on your instance, so it asks you to sign in instead of showing a QR code. Open Rome's desktop, select the sign-in button in the WeChat window, then confirm on your phone.",
+    ],
+    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    steps: [
+      { text: "Open Rome's desktop" },
+      { text: "Select the sign-in button in the WeChat window" },
+      { text: "Confirm the sign-in on your phone" },
+    ],
+    progress: true,
+  };
+}
+
+function keysView(remembered: boolean): SetupView {
   return {
     title: "Unlocking your message history",
     body: [
@@ -202,7 +220,10 @@ function keysView(): SetupView {
     ],
     links: [{ label: "Open Rome's desktop", url: "/desktop" }],
     steps: [
-      { text: "Scan the QR code with WeChat", done: true },
+      {
+        text: remembered ? "Sign in on Rome's desktop" : "Scan the QR code with WeChat",
+        done: true,
+      },
       { text: "Confirm the sign-in on your phone", done: true },
       { text: "Rome unlocks your message history" },
     ],
@@ -302,9 +323,12 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         // window and stream it into the view as the scannable QR, so the
         // guardian scans inside Rome rather than opening the desktop. The
         // passphrase comes back the moment that first login derives the key.
-        interact.show(scanView());
+        // A cached account store makes the client show a sign-in button, which
+        // needs the desktop, so that case skips the QR stream.
+        const remembered = (await runtime.status()).loggedIn;
+        interact.show(remembered ? rememberedView() : scanView());
         const recovery = deps.recoverPassphrase(signal);
-        const qr = { stop: false };
+        const qr = { stop: remembered };
         const qrLoop = (async () => {
           let last: string | undefined;
           while (!qr.stop && !signal.aborted) {
@@ -320,7 +344,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           const passphrase = await recovery;
           qr.stop = true;
           await qrLoop;
-          interact.show(keysView());
+          interact.show(keysView(remembered));
           await waitFor(signal, (s) => s.loggedIn);
           // Derive and verify the per-database keys from the captured passphrase.
           const deadline = Date.now() + loginTimeoutMs;

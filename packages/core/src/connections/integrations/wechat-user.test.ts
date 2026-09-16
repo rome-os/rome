@@ -245,6 +245,30 @@ describe("makeWechatUserSetup", () => {
     expect(recoverPassphrase).toHaveBeenCalledTimes(1);
     expect(commit).toHaveBeenCalledTimes(1);
   });
+
+  it("sends a remembered account to the desktop instead of streaming a QR", async () => {
+    const signedOut = { ...READY, state: "awaiting-scan" as const, keysReady: false };
+    const runtime = fakeRuntime({
+      statuses: [signedOut, signedOut, READY],
+      qr: "data:image/png;base64,button",
+    });
+    let finishLogin!: (passphrase: string) => void;
+    const recoverPassphrase = rs.fn(
+      (_signal: AbortSignal) => new Promise<string>((resolve) => (finishLogin = resolve)),
+    );
+    const { fn } = setupWith(runtime, recoverPassphrase);
+    const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
+    await session.started();
+
+    await rs.waitFor(() => expect(recoverPassphrase).toHaveBeenCalled());
+    const state = session.state;
+    expect(state.status === "presenting" && state.view.title).toBe("Sign in to WeChat");
+    expect(state.status === "presenting" && state.view.qr).toBeUndefined();
+    expect(runtime.captureLoginQr).not.toHaveBeenCalled();
+
+    finishLogin("a".repeat(64));
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+  });
 });
 
 describe("toWechatUserInboundMessage", () => {

@@ -28,7 +28,7 @@ Capture files live in a private directory under `/run` and are removed after rec
 
 Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
 
-The client can create the message databases after key capture finishes. Setup keeps the captured passphrase and waits for those files. An unlocked but empty store needs messages synced from the phone before People can show history.
+The client can create the message databases after key capture finishes, and it can finish writing a database after creating it. Setup keeps the captured passphrase and waits while it opens some databases but not yet every required one. A passphrase that opens none of them fails immediately. An unlocked but empty store needs messages synced from the phone before People can show history.
 
 ## Desktop recovery
 

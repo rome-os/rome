@@ -56,11 +56,29 @@ describe("WeChat key readiness", () => {
     expect(result.status, result.stderr).toBe(4);
   });
 
-  it("rejects a recovered passphrase that cannot open the message shard", async () => {
-    const { home } = await store("cd".repeat(32));
-    const result = run(home, ["derive", "--passphrase", passphrase]);
+  it("rejects a recovered passphrase that opens none of the databases", async () => {
+    const { home } = await store();
+    const result = run(home, ["derive", "--passphrase", "cd".repeat(32)]);
     expect(result.status, result.stderr).toBe(3);
-    expect(result.stderr).toContain("message/message_0.db");
+  });
+
+  it("waits for a message shard the client has not finished writing", async () => {
+    const { home, dbDir } = await store("cd".repeat(32));
+    const unfinished = run(home, ["derive", "--passphrase", passphrase]);
+    expect(unfinished.status, unfinished.stderr).toBe(4);
+    expect(unfinished.stderr).toContain("message/message_0.db");
+    await expect(stat(join(home, ".wechat-cli"))).rejects.toThrow();
+
+    await writeFile(join(dbDir, "message/message_0.db"), Buffer.alloc(8192));
+    expect(run(home, ["derive", "--passphrase", passphrase]).status).toBe(4);
+
+    const { dbDir: written } = await store();
+    await writeFile(
+      join(dbDir, "message/message_0.db"),
+      await readFile(join(written, "message/message_0.db")),
+    );
+    const derived = run(home, ["derive", "--passphrase", passphrase]);
+    expect(derived.status, derived.stderr).toBe(0);
   });
 
   it("verifies persisted keys against every required database", async () => {

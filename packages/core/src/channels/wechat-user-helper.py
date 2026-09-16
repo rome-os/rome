@@ -12,8 +12,9 @@ Commands answer JSON on stdout:
     check                     verify stored keys against the current databases
 
 Exit 3 means the account is not readable — signed out, or a key that no longer
-fits. Exit 4 means the client is still creating the databases after login.
-The caller retries that state with the captured passphrase. Other non-zero
+fits. Exit 4 means the client is still creating the databases after login,
+including a required database the passphrase does not open yet while it opens
+others. The caller retries that state with the captured passphrase. Other non-zero
 exits are transient failures.
 
 This exists because WeChat's formats are not something to re-derive: SQLCipher
@@ -154,7 +155,10 @@ def cmd_derive(args):
     if not keys:
         fail("The recovered passphrase does not open this account's databases.")
 
-    validate_keys(db_dir, keys)
+    # The passphrase has opened at least one database, so it is the account's.
+    # A required database it does not open yet is one the client created but
+    # has not finished writing. Its first page is still being laid down.
+    validate_keys(db_dir, keys, invalid=Pending)
 
     write_private_json(KEYS_FILE, keys)
     write_private_json(CONFIG_FILE, {"db_dir": db_dir})
@@ -182,8 +186,12 @@ def write_private_json(path, value):
             os.unlink(temporary)
 
 
-def validate_keys(db_dir, keys):
-    """Authenticate the session and every message shard before exposing history."""
+def validate_keys(db_dir, keys, invalid=Unavailable):
+    """Authenticate the session and every message shard before exposing history.
+
+    `invalid` is raised for a database no key opens. Stored keys that stop
+    fitting are a locked store, while a fresh derive waits for the client.
+    """
     required = [os.path.join(db_dir, "session", "session.db")]
     shards = sorted(glob.glob(os.path.join(db_dir, "message", "message_*.db")))
     shards = [path for path in shards if re.fullmatch(r"message_\d+\.db", os.path.basename(path))]
@@ -203,7 +211,7 @@ def validate_keys(db_dir, keys):
         except (OSError, ValueError, TypeError, AttributeError):
             valid = False
         if not valid:
-            raise Unavailable(f"The WeChat message store is locked: {rel} has no valid key.")
+            raise invalid(f"The WeChat message store is locked: {rel} has no valid key.")
 
 
 def check_keys():
