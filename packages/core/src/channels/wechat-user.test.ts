@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  loginWindowId,
   WechatUserReader,
   WechatUserRuntime,
   WechatUserRuntimeError,
@@ -49,6 +50,19 @@ async function tempHome(): Promise<string> {
   return home;
 }
 
+const LOGIN_HINTS =
+  "\nProgram supplied minimum size: 280 by 380\nProgram supplied maximum size: 280 by 380";
+
+describe("loginWindowId", () => {
+  it("skips a same-title chat window before the pinned login window", () => {
+    expect(
+      loginWindowId(
+        '0x1 "Weixin": ("wechat" "wechat") 900x700+0+0\n0x2 "Weixin": ("wechat" "wechat") 280x380+0+0',
+      ),
+    ).toBe("0x2");
+  });
+});
+
 describe("WechatUserRuntime.status", () => {
   it("reads absent before the client is installed", async () => {
     const runtime = new WechatUserRuntime({ home: await tempHome(), run: scriptedRun({}).run });
@@ -64,7 +78,7 @@ describe("WechatUserRuntime.status", () => {
         xwininfo: (args) =>
           ok(
             args[0] === "-id"
-              ? "Map State: IsViewable"
+              ? `Map State: IsViewable${LOGIN_HINTS}`
               : '0x123 "Weixin": ("wechat" "wechat") 280x380+0+0',
           ),
       }).run,
@@ -82,22 +96,25 @@ describe("WechatUserRuntime.status", () => {
   });
 
   it.each([
-    false,
-    true,
-  ])("distinguishes cached keys from a visible login prompt (%s)", async (login) => {
+    "login",
+    "hidden",
+    "main",
+    "vanished",
+  ])("distinguishes cached keys from a visible login prompt (%s)", async (kind) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
       run: scriptedRun({
         pgrep: () => ok("1234\n"),
-        xwininfo: (args) =>
-          ok(
-            args[0] === "-id"
-              ? login
-                ? "Map State: IsViewable"
-                : "Map State: IsUnMapped"
-              : '0x123 "Weixin": ("wechat" "wechat") 280x380+0+0',
-          ),
+        xwininfo: (args) => {
+          if (args[0] !== "-id") return ok('0x123 "Weixin": ("wechat" "wechat") 280x380+0+0');
+          if (kind === "vanished") return { code: 1, stdout: "", stderr: "BadWindow" };
+          return ok(
+            kind === "hidden"
+              ? `Map State: IsUnMapped${LOGIN_HINTS}`
+              : `Map State: IsViewable${kind === "main" ? "" : LOGIN_HINTS}`,
+          );
+        },
         // accountDir lists xwechat_files
         sh: (args) => (args[1]?.includes("xwechat_files") ? ok("wxid_guardian\n") : ok()),
         [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
@@ -108,7 +125,7 @@ describe("WechatUserRuntime.status", () => {
     await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
 
     const status = await runtime.status();
-    expect(status.state).toBe(login ? "awaiting-scan" : "ready");
+    expect(status.state).toBe(kind === "login" ? "awaiting-scan" : "ready");
     expect(status.loggedIn).toBe(true);
     expect(status.keysReady).toBe(true);
     expect(status.wxid).toBe("wxid_guardian");

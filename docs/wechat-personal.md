@@ -34,7 +34,7 @@ The client can create the message databases after key capture finishes. Setup ke
 
 Rome checks the desktop client when the connection starts and every five minutes after each check finishes. If the client stops, Rome starts it with the saved session and keys. Startup restores the client link after a container rebuild. It does not capture keys, delete the account store, or force a new login.
 
-A readable store proves that cached history is available. It does not prove that new messages can sync. A stopped client, a failed restart, or a visible login window appears as connection degradation. Cached history remains available through People and Talk history.
+A readable store proves that cached history is available. It does not prove that new messages can sync. A stopped client, a failed restart, or a login window with a cached account appears as connection degradation. Cached history remains available through People and Talk history. A running login window without an account store rejects the session grant.
 
 If WeChat shows a login window, open Rome's desktop and complete the sign-in there. Confirm on the phone if asked. Rome does not repeat key capture when the saved keys still unlock the message store.
 

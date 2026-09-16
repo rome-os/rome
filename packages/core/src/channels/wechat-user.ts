@@ -233,11 +233,9 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** Pick the client's visible login window from `xwininfo -root -tree` output.
- *  The login window's title is "Weixin"; the tiny helper windows the client
- *  also maps are titled "wechat", so the exact title is what tells them apart. */
+/** The pinned client's login window is 280×380. A chat window can share its title. */
 export function loginWindowId(tree: string): string | null {
-  const match = /(0x[0-9a-fA-F]+)\s+"Weixin"/.exec(tree);
+  const match = /(0x[0-9a-fA-F]+)\s+"Weixin":\s+\("wechat" "wechat"\)\s+280x380[+-]/.exec(tree);
   return match ? match[1]! : null;
 }
 
@@ -291,7 +289,8 @@ export class WechatUserRuntime {
     return null;
   }
 
-  /** The client's pid in this container, or null when it is not running. */
+  /** This dedicated container owns one WeChat client. Match its process name
+   *  because ordinary and debugger launches can use different executable paths. */
   async pid(): Promise<number | null> {
     const found = await this.run("pgrep", ["-x", "wechat"]).catch(() => null);
     const first = (found?.stdout ?? "").split("\n")[0]?.trim();
@@ -335,13 +334,16 @@ export class WechatUserRuntime {
     }
     const windowId = loginWindowId(tree.stdout);
     if (!windowId) return false;
-    const window = await this.run("xwininfo", ["-id", windowId], {
+    const window = await this.run("xwininfo", ["-id", windowId, "-stats", "-size"], {
       env: { DISPLAY: this.display },
     });
-    if (window.code !== 0) {
-      throw new WechatUserRuntimeError("Could not inspect the WeChat login window.");
-    }
-    return /Map State: IsViewable/.test(window.stdout);
+    // Login can destroy the window between the tree snapshot and this lookup.
+    if (window.code !== 0) return false;
+    return (
+      /Map State: IsViewable/.test(window.stdout) &&
+      /Program supplied minimum size: 280 by 380/.test(window.stdout) &&
+      /Program supplied maximum size: 280 by 380/.test(window.stdout)
+    );
   }
 
   async status(): Promise<WechatUserStatus> {

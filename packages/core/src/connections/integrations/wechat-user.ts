@@ -51,6 +51,7 @@ import {
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
 import type { RootScriptRunner } from "../../host-execution/root-script-runner.js";
 import { createLogger } from "../../logger.js";
+import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type {
@@ -494,7 +495,7 @@ export function createWechatUserDescriptor(
           const talker: WechatUserTalker = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
-            start(): void {
+            start(_deliver, fault): void {
               if (controller) return;
               const epoch = new AbortController();
               controller = epoch;
@@ -520,6 +521,14 @@ export function createWechatUserDescriptor(
                       reason:
                         "The WeChat desktop client is not running. New messages cannot sync. Rome will retry.",
                     };
+                  } else if (status.state === "awaiting-scan" && !status.loggedIn) {
+                    degradation = { reason: "The WeChat account is signed out on your instance." };
+                    fault(
+                      new CredentialRejected({
+                        grant: "session",
+                        cause: new Error("WeChat signed out"),
+                      }),
+                    );
                   } else if (status.state === "awaiting-scan") {
                     degradation = {
                       reason:

@@ -14,6 +14,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
+import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
@@ -337,6 +338,21 @@ describe("the WeChat personal Talker", () => {
       expect(degradation()?.reason).toContain("desktop unavailable");
       expect(await talker.feature("history")!.query({ limit: 1 })).toEqual([]);
       expect(fault).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("rejects a running login screen with no cached account", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, state: "awaiting-scan", loggedIn: false, keysReady: false }],
+    });
+    const fault = rs.fn();
+    const { talker } = buildTalker(runtime, fault);
+    try {
+      await rs.waitFor(() => expect(fault).toHaveBeenCalledWith(expect.any(CredentialRejected)));
+      expect(fault.mock.calls[0]![0].grant).toBe("session");
+      expect(runtime.start).not.toHaveBeenCalled();
     } finally {
       await talker.stop();
     }
