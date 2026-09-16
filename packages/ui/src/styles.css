@@ -221,7 +221,8 @@
      a line of text occupies whole spacing units and stacked text lands on the
      same rhythm as the boxes around it. A step is therefore chosen by the box
      it produces, not by how loose it looks: 13→16, 14→20, 15→20, 16→20,
-     18→24, 20→24, 22→28, 24→32, 30→36.
+     18→24, 20→24, 22→28, 24→32, 30→36. Markdown prose reads at length and
+     in CJK, so it opens one line further: 16→24 and its h3 20→28.
 
      Each holds the exact ratio as a division of the two rem values rather than
      its rounded decimal, which would miss the grid by hundredths of a pixel —
@@ -232,7 +233,9 @@
   --rome-line-height-125: 1.25;
   --rome-line-height-127: calc(1.75 / 1.375);
   --rome-line-height-133: calc(4 / 3);
+  --rome-line-height-140: calc(1.75 / 1.25);
   --rome-line-height-143: calc(1.25 / 0.875);
+  --rome-line-height-150: 1.5;
 }
 
 /* ──────────────────────────── TYPOGRAPHY ROLES ─────────────────────────────
@@ -306,54 +309,64 @@
    Markdown has a document grammar that is separate from dashboard typography
    roles. These fixed semantic tokens expose its standard typography and
    rhythm to every host. The opt-in Markdown stylesheet binds them to rendered
-   elements and rebinds them for compact density. */
+   elements and rebinds them for compact density.
+
+   Four rules set the values. Leading is the unit: prose is read at length,
+   often in CJK, so the body opens to 1.5 and every gap is a multiple of the
+   4px grid that line box sits on. A heading belongs to what follows it: its
+   space-before is at least 1.5× the paragraph gap and at least 2.5× its own
+   space-after, at every level. Hierarchy comes from size and space, not from
+   weight: the ladder steps by ≥ 1.2 (16 → 20 → 24 → 30), and headings carry
+   the same 600 that inline emphasis does, so a bold label never outweighs the
+   heading above it. A block with a visible edge — a fence's tint, a quote's
+   bar, a table's rules — has no half-leading of its own, so it sits one grid
+   step further from its neighbours than text does. */
 :root,
 :host {
   --markdown-body-font-size: var(--rome-font-size-16);
-  --markdown-body-line-height: var(--rome-line-height-125);
+  --markdown-body-line-height: var(--rome-line-height-150);
   --markdown-body-font-weight: 400;
   --markdown-body-letter-spacing: 0;
 
   /* Inline code is monospace inside prose, so it is sized against the line box
      rather than the body size: IBM Plex Mono paints its tint over a 1.3em
      content area, so a span that fills the line merges with the span on the
-     line above. The two densities declare the same 20px line but do not
-     resolve to the same line box — a 16px strut and a 14px monospace baseline
-     open standard to 21px, which holds an 18.2px tint with room to spare.
-     Compact rebinds one step down for the pixel it does not have. */
+     line above. Standard's 24px line holds a 14px face's 18.2px tint with
+     room to spare; compact's 20px line does not, and rebinds one step down. */
   --markdown-inline-code-font-size: var(--rome-font-size-14);
 
-  --markdown-heading-1-font-size: var(--rome-font-size-24);
-  --markdown-heading-1-line-height: var(--rome-line-height-133);
-  --markdown-heading-2-font-size: var(--rome-font-size-22);
-  --markdown-heading-2-line-height: var(--rome-line-height-127);
+  --markdown-heading-1-font-size: var(--rome-font-size-30);
+  --markdown-heading-1-line-height: var(--rome-line-height-120);
+  --markdown-heading-2-font-size: var(--rome-font-size-24);
+  --markdown-heading-2-line-height: var(--rome-line-height-133);
   --markdown-heading-3-font-size: var(--rome-font-size-20);
-  --markdown-heading-3-line-height: var(--rome-line-height-120);
-  --markdown-heading-4-font-size: var(--rome-font-size-18);
-  --markdown-heading-4-line-height: var(--rome-line-height-133);
+  --markdown-heading-3-line-height: var(--rome-line-height-140);
+  --markdown-heading-4-font-size: var(--rome-font-size-16);
+  --markdown-heading-4-line-height: var(--rome-line-height-150);
   --markdown-heading-floor-font-size: var(--rome-font-size-16);
-  --markdown-heading-floor-line-height: var(--rome-line-height-125);
-  --markdown-heading-font-weight: 500;
+  --markdown-heading-floor-line-height: var(--rome-line-height-150);
+  --markdown-heading-font-weight: 600;
   --markdown-heading-letter-spacing: 0;
 
   --markdown-block-space-between: var(--rome-space-4);
-  --markdown-heading-1-space-before: var(--rome-space-6);
+  --markdown-heading-1-space-before: var(--rome-space-8);
   --markdown-heading-1-space-after: var(--rome-space-2);
-  --markdown-heading-2-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-before: var(--rome-space-7);
   --markdown-heading-2-space-after: var(--rome-space-2);
-  --markdown-heading-3-space-before: var(--rome-space-4);
-  --markdown-heading-3-space-after: var(--rome-space-1);
-  --markdown-heading-4-space-before: var(--rome-space-4);
-  --markdown-heading-4-space-after: var(--rome-space-1);
-  --markdown-heading-floor-space-before: var(--rome-space-4);
+  --markdown-heading-3-space-before: var(--rome-space-6);
+  --markdown-heading-3-space-after: var(--rome-space-2);
+  --markdown-heading-4-space-before: var(--rome-space-6);
+  --markdown-heading-4-space-after: var(--rome-space-2);
+  --markdown-heading-floor-space-before: var(--rome-space-6);
   --markdown-heading-floor-space-after: var(--rome-space-1);
-  --markdown-list-space-block: var(--rome-space-2);
+  /* A list item carries its own padding, so 12 + 4 meets the paragraph gap. */
+  --markdown-list-space-block: var(--rome-space-3);
   --markdown-list-item-space-block: var(--rome-space-1);
-  --markdown-code-block-space-block: var(--rome-space-4);
-  --markdown-blockquote-space-block: var(--rome-space-4);
-  --markdown-table-space-block: var(--rome-space-4);
+  --markdown-code-block-space-block: var(--rome-space-5);
+  --markdown-blockquote-space-block: var(--rome-space-5);
+  --markdown-table-space-block: var(--rome-space-5);
   --markdown-rule-space-block: var(--rome-space-6);
-  --markdown-media-space-block: var(--rome-space-4);
+  --markdown-media-space-block: var(--rome-space-5);
 }
 
 /* ─────────────────────────── DESIGN TOKEN REFERENCE ───────────────────────────

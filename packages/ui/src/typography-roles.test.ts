@@ -37,7 +37,9 @@ const lineHeights = {
   125: "1.25",
   127: "calc(1.75 / 1.375)",
   133: "calc(4 / 3)",
+  140: "calc(1.75 / 1.25)",
   143: "calc(1.25 / 0.875)",
+  150: "1.5",
 } as const;
 
 /** The ratio a step holds, for arithmetic the `calc()` strings above can't do. */
@@ -47,7 +49,9 @@ const ratioOf: Record<keyof typeof lineHeights, number> = {
   125: 1.25,
   127: 1.75 / 1.375,
   133: 1.25 / 0.9375,
+  140: 1.75 / 1.25,
   143: 1.25 / 0.875,
+  150: 1.5,
 };
 
 let compiledCss: string;

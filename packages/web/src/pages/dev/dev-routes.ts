@@ -43,6 +43,13 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./TypographyPage")),
       },
       {
+        path: "/dev/markdown-rhythm",
+        title: "Markdown rhythm",
+        description:
+          "The chat Markdown rhythm as a specimen: one long reply through ChatMarkdown at standard and compact density, with every block gap and type size read back from the rendered DOM.",
+        Component: lazy(() => import("./MarkdownRhythmPage")),
+      },
+      {
         path: "/dev/gallery",
         title: "Component gallery",
         description:

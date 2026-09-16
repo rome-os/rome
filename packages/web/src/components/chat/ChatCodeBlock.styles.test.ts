@@ -27,7 +27,7 @@ describe("chat code block styles", () => {
       '[data-chat-code-block-body] > :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) { margin-block: 0;',
     );
     expect(normalizedDashboardCss).toContain(
-      ".rome-markdown > [data-chat-code-block] + * { margin-block-start: 0; }",
+      '.rome-markdown > [data-chat-code-block] + :not([data-streamdown^="heading-"]) { margin-block-start: 0; }',
     );
     expect(normalizedDashboardCss).toContain(
       '[data-chat-code-block] :is( [data-streamdown="code-block-header"], [data-streamdown="mermaid-block"] > :first-child ) { display: none;',
