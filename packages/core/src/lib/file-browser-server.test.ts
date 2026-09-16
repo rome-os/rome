@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import {
+  createDownloadHandler,
+  createFilePostHandler,
   createFileWatchEventsHandler,
   createResolveHandler,
+  createTreeHandler,
   type FileBrowserScope,
 } from "./file-browser-server.js";
+import { readArchivePaths } from "../test/file-browser.js";
 
 // File watch streams over real chokidar on a real temp directory (edge-only
 // fakes, #763): events arrive because files actually change on disk. The only
@@ -129,6 +133,28 @@ describe("file browser event streams", () => {
     await reader.cancel();
   });
 
+  it("can watch entries excluded from directory listings", async () => {
+    const scope: FileBrowserScope = {
+      assetBasePath: "/asset",
+      logicalRoot: "projects",
+      rootDir,
+      ignoredNames: ["output.txt"],
+      watchIgnoredNames: [],
+    };
+    handler = createFileWatchEventsHandler(scope);
+    const { reader } = openEventStream();
+    try {
+      await expect(readSseChunk(reader)).resolves.toContain("event: ready");
+      writeFileSync(join(rootDir, "output.txt"), "generated\n");
+      const seen = await readUntilEvent(reader, "change");
+      expect(JSON.parse(seen.at(-1)!.data).path).toBe("projects/output.txt");
+      const tree = await new Hono().get("/tree", createTreeHandler(scope)).request("/tree");
+      expect(await tree.json()).toEqual([]);
+    } finally {
+      await reader.cancel();
+    }
+  });
+
   it("keeps healthy event streams open while sending heartbeats", async () => {
     useHeartbeatClock();
     const { reader } = openEventStream();
@@ -209,6 +235,83 @@ describe("file browser event streams", () => {
 
     await rs.advanceTimersByTimeAsync(120_000);
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+});
+
+describe("file browser entry policies", () => {
+  let rootDir = "";
+
+  beforeEach(() => {
+    rootDir = mkdtempSync(join(tmpdir(), "rome-file-policy-"));
+    mkdirSync(join(rootDir, "excluded"));
+    writeFileSync(join(rootDir, "excluded", "file.txt"), "content");
+    writeFileSync(join(rootDir, ".hidden"), "hidden");
+  });
+
+  afterEach(() => rmSync(rootDir, { recursive: true, force: true }));
+
+  it.each([
+    {
+      operation: "fallback",
+      overrides: {},
+      visible: false,
+      downloadable: false,
+      uploadable: false,
+    },
+    {
+      operation: "tree",
+      overrides: { treeIgnoredNames: [] },
+      visible: true,
+      downloadable: false,
+      uploadable: false,
+    },
+    {
+      operation: "download",
+      overrides: { downloadIgnoredNames: [] },
+      visible: false,
+      downloadable: true,
+      uploadable: false,
+    },
+    {
+      operation: "upload",
+      overrides: { uploadIgnoredNames: [] },
+      visible: false,
+      downloadable: false,
+      uploadable: true,
+    },
+  ])("keeps the $operation policy independent", async ({
+    overrides,
+    visible,
+    downloadable,
+    uploadable,
+  }) => {
+    const scope: FileBrowserScope = {
+      assetBasePath: "/asset",
+      logicalRoot: "projects",
+      rootDir,
+      ignoredNames: ["excluded"],
+      ...overrides,
+    };
+    const app = new Hono()
+      .get("/tree", createTreeHandler(scope))
+      .get("/download", createDownloadHandler(scope))
+      .post("/file", createFilePostHandler(scope));
+    const tree = await app.request("/tree?depth=1");
+    expect(await tree.json()).toEqual(
+      visible ? [{ name: "excluded", path: "projects/excluded", type: "directory" }] : [],
+    );
+    const download = await app.request("/download?path=projects");
+    expect(await readArchivePaths(download)).toEqual(
+      downloadable
+        ? ["projects/", "projects/excluded/", "projects/excluded/file.txt"]
+        : ["projects/"],
+    );
+    const body = new FormData();
+    body.append("path", "projects");
+    body.append("files", new File(["new"], "new.txt"));
+    body.append("paths", "excluded/new.txt");
+    const upload = await app.request("/file", { method: "POST", body });
+    expect(upload.status).toBe(uploadable ? 200 : 400);
   });
 });
 

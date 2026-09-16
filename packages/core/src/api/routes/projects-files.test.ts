@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { readArchivePaths } from "../../test/file-browser.js";
 
 // Projects-files routes over the real stack (edge-only fakes, #763): the
 // projects root is a real temp directory reached via ROME_PROJECTS_ROOT,
@@ -151,7 +153,7 @@ describe("Projects files API", () => {
       return new TextDecoder().decode(result.value);
     }
 
-    it("streams change events for watched folders only, ignoring generated dirs and deep paths", async () => {
+    it("streams changes in opened dependency folders without watching deeper paths", async () => {
       mkdirSync(join(projectsRoot, "demo", "src", "app"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo", "node_modules"), { recursive: true });
 
@@ -163,15 +165,16 @@ describe("Projects files API", () => {
       const reader = res.body!.getReader();
       await expect(readSseChunk(reader)).resolves.toContain("event: ready");
 
-      // node_modules is never watched, and demo/src/app is one level below
-      // the shallowly-watched demo/src — neither write may produce an event.
-      writeFileSync(join(projectsRoot, "demo", "node_modules", "skipped.txt"), "no\n");
+      writeFileSync(join(projectsRoot, "demo", "node_modules", "visible.txt"), "yes\n");
       writeFileSync(join(projectsRoot, "demo", "src", "app", "deep.txt"), "no\n");
       writeFileSync(join(projectsRoot, "demo", "src", "index.ts"), "export {};\n");
 
       const changes: SseEvent[] = [];
       while (
-        !changes.some((event) => JSON.parse(event.data).path === "projects/demo/src/index.ts")
+        !changes.some((event) => JSON.parse(event.data).path === "projects/demo/src/index.ts") ||
+        !changes.some(
+          (event) => JSON.parse(event.data).path === "projects/demo/node_modules/visible.txt",
+        )
       ) {
         const result = await reader.read();
         expect(result.done).toBe(false);
@@ -182,7 +185,8 @@ describe("Projects files API", () => {
         );
       }
 
-      expect(changes.map((event) => JSON.parse(event.data).path)).toEqual([
+      expect(changes.map((event) => JSON.parse(event.data).path).sort()).toEqual([
+        "projects/demo/node_modules/visible.txt",
         "projects/demo/src/index.ts",
       ]);
       await reader.cancel();
@@ -190,7 +194,7 @@ describe("Projects files API", () => {
   });
 
   describe("GET /projects/tree", () => {
-    it("loads two layers and skips generated project folders", async () => {
+    it("loads two layers including dependencies while skipping dot entries", async () => {
       mkdirSync(join(projectsRoot, "demo", "src", "app"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo", ".cache"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo", "node_modules", "library"), { recursive: true });
@@ -208,12 +212,12 @@ describe("Projects files API", () => {
         type: string;
       }>;
       const demo = tree.find((node) => node.name === "demo");
-      expect(demo?.children?.map((node) => node.name)).toEqual(["src"]);
+      expect(demo?.children?.map((node) => node.name)).toEqual(["node_modules", "src"]);
       const src = demo?.children?.find((node) => node.name === "src");
       expect(src).not.toHaveProperty("children");
     });
 
-    it("keeps a project's dist folder browsable while still skipping node_modules", async () => {
+    it("keeps build outputs and dependencies browsable", async () => {
       mkdirSync(join(projectsRoot, "demo", "dist", "assets"), { recursive: true });
       mkdirSync(join(projectsRoot, "demo", "node_modules", "library"), { recursive: true });
       writeFileSync(join(projectsRoot, "demo", "dist", "bundle.js"), "export {};\n");
@@ -231,13 +235,32 @@ describe("Projects files API", () => {
       const demo = tree.find((node) => node.name === "demo");
       const childNames = demo?.children?.map((node) => node.name) ?? [];
       expect(childNames).toContain("dist");
-      expect(childNames).not.toContain("node_modules");
+      expect(childNames).toContain("node_modules");
       const dist = demo?.children?.find((node) => node.name === "dist");
       expect(
         (dist?.children as Array<{ name: string; type: string }> | undefined)?.map(
           (child) => child.name,
         ),
       ).toEqual(["assets", "bundle.js"]);
+    });
+
+    it.each([
+      "build",
+      "coverage",
+      "dist",
+      "node_modules",
+    ])("resolves a top-level project named %s in both the tree and dashboard", async (name) => {
+      mkdirSync(join(projectsRoot, name));
+      const app = buildApp();
+      const tree = await app.request("/projects/tree?depth=1");
+      expect(await tree.json()).toContainEqual({
+        name,
+        path: `projects/${name}`,
+        type: "directory",
+      });
+      const dashboard = await app.request(`/projects/dashboard?path=projects/${name}`);
+      expect(dashboard.status).toBe(200);
+      expect(await dashboard.json()).toMatchObject({ relativePath: name });
     });
   });
 
@@ -1033,6 +1056,63 @@ describe("Projects files API", () => {
   });
 
   describe("GET /projects/download", () => {
+    it("includes build outputs in project archives but skips nested dependencies and dot entries", async () => {
+      for (const directory of [
+        "build",
+        "coverage",
+        "dist",
+        "node_modules",
+        "nested/node_modules",
+        ".next",
+        ".git",
+      ]) {
+        mkdirSync(join(projectsRoot, "demo", directory), { recursive: true });
+        writeFileSync(join(projectsRoot, "demo", directory, "output.txt"), directory);
+      }
+      mkdirSync(join(sandboxDir, "external-package"));
+      writeFileSync(join(sandboxDir, "external-package", "private.txt"), "outside the project");
+      symlinkSync(
+        join(sandboxDir, "external-package"),
+        join(projectsRoot, "demo", "node_modules", "linked-package"),
+      );
+      const app = buildApp();
+      const response = await app.request("/projects/download?path=projects/demo");
+      expect(response.status).toBe(200);
+      expect(await readArchivePaths(response)).toEqual([
+        "demo/",
+        "demo/build/",
+        "demo/build/output.txt",
+        "demo/coverage/",
+        "demo/coverage/output.txt",
+        "demo/dist/",
+        "demo/dist/output.txt",
+        "demo/nested/",
+      ]);
+
+      const selected = await app.request("/projects/download?path=projects/demo/node_modules");
+      expect(selected.status).toBe(200);
+      expect(await readArchivePaths(selected)).toEqual([
+        "node_modules/",
+        "node_modules/output.txt",
+      ]);
+      const linked = await app.request(
+        "/projects/download?path=projects/demo/node_modules/linked-package",
+      );
+      expect(linked.status).toBe(400);
+      expect(await linked.json()).toEqual({ error: "Symbolic links cannot be downloaded" });
+
+      const multiple = await app.request(
+        "/projects/download?path=projects/demo/dist&path=projects/demo/node_modules",
+      );
+      expect(multiple.status).toBe(200);
+      expect(await readArchivePaths(multiple)).toEqual([
+        "demo/dist/",
+        "demo/dist/output.txt",
+        "demo/node_modules/",
+        "demo/node_modules/output.txt",
+      ]);
+    });
+
     it("downloads a project file as an attachment", async () => {
       mkdirSync(join(projectsRoot, "demo"), { recursive: true });
       writeFileSync(join(projectsRoot, "demo", "README.md"), "# Demo\n");
@@ -1258,8 +1338,36 @@ describe("Projects files API", () => {
       expect(existsSync(join(projectsRoot, "x.txt"))).toBe(false);
     });
 
-    it("rejects folder upload paths inside ignored project directories", async () => {
-      for (const ignoredPath of ["demo/node_modules/pkg/index.js", "demo/.next/cache.bin"]) {
+    it.each([
+      "build",
+      "coverage",
+      "dist",
+      "node_modules",
+    ])("uploads, browses, reads, and edits files in %s", async (name) => {
+      const app = buildApp();
+      const path = `projects/demo/${name}/output.txt`;
+      const formData = new FormData();
+      formData.append("path", "projects");
+      formData.append("files", new File(["uploaded"], "output.txt"));
+      formData.append("paths", `demo/${name}/output.txt`);
+      expect((await app.request("/projects/file", { method: "POST", body: formData })).status).toBe(
+        200,
+      );
+      const tree = await app.request(`/projects/tree?path=projects/demo/${name}&depth=1`);
+      expect(await tree.json()).toEqual([{ name: "output.txt", path, type: "file" }]);
+      const read = await app.request(`/projects/file?path=${path}`);
+      expect(await read.json()).toMatchObject({ content: "uploaded", editable: true });
+      const save = await app.request("/projects/file", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, content: "edited", commit: false }),
+      });
+      expect(save.status).toBe(200);
+      expect(readFileSync(join(projectsRoot, "demo", name, "output.txt"), "utf-8")).toBe("edited");
+    });
+
+    it("rejects folder upload paths containing dot entries", async () => {
+      for (const ignoredPath of ["demo/.env", "demo/.next/cache.bin"]) {
         const formData = new FormData();
         formData.append("path", "projects");
         formData.append("files", new File(["safe"], "safe.txt"));

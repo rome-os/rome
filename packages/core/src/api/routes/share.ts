@@ -9,16 +9,13 @@ import {
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
+import { PROJECT_FILE_BROWSER_POLICY } from "../../lib/project-file-browser.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");
-
-// Mirror of projects-files.ts; share projects are read-only so writers + the
-// file-watch SSE stream are intentionally omitted.
-const PROJECTS_IGNORED_NAMES = [".next", ".turbo", "build", "coverage", "dist", "node_modules"];
 
 /**
  * Public, login-free surface for shared chats. The auth edge waves through
@@ -85,8 +82,8 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // stays "projects" while rootDir is the project dir, so the frozen layout's
   // project-relative `selectedPath` (rewritten at share time) stays addressable.
   const scopeFor = (token: string, rootDir: string): FileBrowserScope => ({
+    ...PROJECT_FILE_BROWSER_POLICY,
     assetBasePath: `/api/share/${encodeURIComponent(token)}/projects/asset`,
-    ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir,
   });
@@ -111,23 +108,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
   app.get("/share/:token/projects/asset", readHandler(createAssetHandler));
   app.get("/share/:token/projects/asset/:fileName", readHandler(createAssetHandler));
   app.get("/share/:token/projects/download", readHandler(createDownloadHandler));
-  app.get(
-    "/share/:token/projects/search",
-    readHandler((scope) =>
-      createSearchHandler({
-        ...scope,
-        searchGlobs: [
-          "!**/.git/**",
-          "!**/.next/**",
-          "!**/.turbo/**",
-          "!**/build/**",
-          "!**/coverage/**",
-          "!**/dist/**",
-          "!**/node_modules/**",
-        ],
-      }),
-    ),
-  );
+  app.get("/share/:token/projects/search", readHandler(createSearchHandler));
 
   return app;
 }

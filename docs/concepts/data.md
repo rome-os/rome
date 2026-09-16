@@ -23,6 +23,10 @@ Projects are working directories where the agent does its work — writing code,
 **Contracts:**
 
 - A project can have a memory summary. The first paragraph of the summary always loads into agent context as a brief description. The rest is available for deeper reference (repo structure, commands, conventions).
+- Folder names such as `build`, `coverage`, `dist`, and `node_modules` do not prevent browsing, editing, uploading, or recognizing a project.
+- Folder downloads include build outputs and coverage reports. They skip descendant dependency trees named `node_modules`. An explicitly selected dependency folder can be downloaded separately.
+- Browsing, live updates, search, and archive exclusions are independent policies. Search can omit generated content without making it inaccessible in the file browser.
+- Dot entries remain excluded from directory listings, folder uploads, search, and archive traversal. Archives omit symbolic links and reject direct symbolic-link downloads. Entry filters are not access controls.
 
 **Not to be confused with:**
 
