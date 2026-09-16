@@ -42,7 +42,7 @@ const RULES = [
   },
   {
     title: "Hierarchy from size and space, not weight",
-    body: "The heading ladder steps by at least 1.2: 16 → 20 → 24 → 30. Headings carry the same 600 as inline emphasis, so a bold label never outweighs the heading above it.",
+    body: "The heading ladder climbs 16 → 18 → 20 → 24 and tops out at 1.5× the body, since a reply is a turn, not a page with a title. Headings carry the same 600 as inline emphasis, so a bold label never outweighs the heading above it.",
   },
   {
     title: "An edge has no half-leading",

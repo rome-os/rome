@@ -20,12 +20,12 @@ const compact = declarations(markdownCss, ".rome-markdown.rome-markdown-compact"
 const normalType = {
   "body-font-size": "var(--rome-font-size-16)",
   "body-line-height": "var(--rome-line-height-150)",
-  "heading-1-font-size": "var(--rome-font-size-30)",
-  "heading-1-line-height": "var(--rome-line-height-120)",
-  "heading-2-font-size": "var(--rome-font-size-24)",
-  "heading-2-line-height": "var(--rome-line-height-133)",
-  "heading-3-font-size": "var(--rome-font-size-20)",
-  "heading-3-line-height": "var(--rome-line-height-140)",
+  "heading-1-font-size": "var(--rome-font-size-24)",
+  "heading-1-line-height": "var(--rome-line-height-133)",
+  "heading-2-font-size": "var(--rome-font-size-20)",
+  "heading-2-line-height": "var(--rome-line-height-140)",
+  "heading-3-font-size": "var(--rome-font-size-18)",
+  "heading-3-line-height": "var(--rome-line-height-133)",
   "heading-4-font-size": "var(--rome-font-size-16)",
   "heading-4-line-height": "var(--rome-line-height-150)",
   "heading-floor-font-size": "var(--rome-font-size-16)",
@@ -89,7 +89,7 @@ describe("Markdown semantic tokens", () => {
     expect(stylesCss).not.toContain("--text-markdown-");
   });
 
-  it("binds the standard prose scale: body on 1.5, headings stepping by at least 1.2", () => {
+  it("binds the standard prose scale: body on 1.5, headings climbing 18/20/24 to 1.5× the body", () => {
     for (const [name, value] of Object.entries(normalType)) expectToken(normal, name, value);
     expectToken(normal, "body-font-weight", "400");
     // Headings match inline emphasis, so a bold label never outweighs its heading.

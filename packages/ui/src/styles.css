@@ -316,11 +316,12 @@
    4px grid that line box sits on. A heading belongs to what follows it: its
    space-before is at least 1.5× the paragraph gap and at least 2.5× its own
    space-after, at every level. Hierarchy comes from size and space, not from
-   weight: the ladder steps by ≥ 1.2 (16 → 20 → 24 → 30), and headings carry
-   the same 600 that inline emphasis does, so a bold label never outweighs the
-   heading above it. A block with a visible edge — a fence's tint, a quote's
-   bar, a table's rules — has no half-leading of its own, so it sits one grid
-   step further from its neighbours than text does. */
+   weight: the ladder climbs 16 → 18 → 20 → 24 and tops out at 1.5× the body,
+   because prose here is a turn in a conversation, not a page with a title;
+   headings carry the same 600 that inline emphasis does, so a bold label
+   never outweighs the heading above it. A block with a visible edge — a
+   fence's tint, a quote's bar, a table's rules — has no half-leading of its
+   own, so it sits one grid step further from its neighbours than text does. */
 :root,
 :host {
   --markdown-body-font-size: var(--rome-font-size-16);
@@ -335,12 +336,12 @@
      room to spare; compact's 20px line does not, and rebinds one step down. */
   --markdown-inline-code-font-size: var(--rome-font-size-14);
 
-  --markdown-heading-1-font-size: var(--rome-font-size-30);
-  --markdown-heading-1-line-height: var(--rome-line-height-120);
-  --markdown-heading-2-font-size: var(--rome-font-size-24);
-  --markdown-heading-2-line-height: var(--rome-line-height-133);
-  --markdown-heading-3-font-size: var(--rome-font-size-20);
-  --markdown-heading-3-line-height: var(--rome-line-height-140);
+  --markdown-heading-1-font-size: var(--rome-font-size-24);
+  --markdown-heading-1-line-height: var(--rome-line-height-133);
+  --markdown-heading-2-font-size: var(--rome-font-size-20);
+  --markdown-heading-2-line-height: var(--rome-line-height-140);
+  --markdown-heading-3-font-size: var(--rome-font-size-18);
+  --markdown-heading-3-line-height: var(--rome-line-height-133);
   --markdown-heading-4-font-size: var(--rome-font-size-16);
   --markdown-heading-4-line-height: var(--rome-line-height-150);
   --markdown-heading-floor-font-size: var(--rome-font-size-16);
