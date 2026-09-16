@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils";
 // frame, one header, and one way of turning the chevron. A card holds one or
 // more sections, each with its own header and body, and rules them apart.
 //
+// The card sits in the message flow, so its border alone says where it ends.
+// A cast would lift it off the page it belongs to.
+//
 // The frame clips rather than scrolls: `overflow-clip` keeps the corners on
 // the header's hover tint and on whatever a body paints to its edge, without
 // making the card a scroll container. A body that pins something to the top
@@ -16,7 +19,7 @@ export function CollapsibleCard({ className, ...props }: ComponentProps<"div">) 
   return (
     <div
       className={cn(
-        "w-full divide-y divide-border overflow-clip rounded-12 border border-border-strong bg-surface shadow-1",
+        "w-full divide-y divide-border overflow-clip rounded-12 border border-border-strong bg-surface",
         className,
       )}
       {...props}
