@@ -87,7 +87,11 @@ export const runCommand: RunCommand = (file, args, opts = {}) =>
       },
       (error, stdout, stderr) => {
         if (error && typeof (error as NodeJS.ErrnoException).code === "string") {
-          reject(new Error(`${file} could not be run: ${error.message}`));
+          reject(
+            Object.assign(new Error(`${file} could not be run: ${error.message}`), {
+              code: (error as NodeJS.ErrnoException).code,
+            }),
+          );
           return;
         }
         const code = error
@@ -333,7 +337,8 @@ export class WechatUserRuntime {
           .parse(await this.readerCommand(["check"]));
         keysReady = checked.keysReady;
       } catch (error) {
-        if (!isWechatUserSessionRejected(error)) throw error;
+        if (!isWechatUserSessionRejected(error) && !(error instanceof WechatUserStorePending))
+          throw error;
       }
     }
 
@@ -510,6 +515,11 @@ export class WechatUserRuntime {
       env: { HOME: this.home },
       timeoutMs: 5 * 60_000,
       ...(signal ? { signal } : {}),
+    }).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        throw new WechatUserSessionRejected("The WeChat reader has not been installed yet.");
+      }
+      throw error;
     });
     if (result.code === 3) {
       throw new WechatUserSessionRejected(
@@ -563,9 +573,7 @@ export class WechatUserReader {
     return messagesSchema.parse(await this.runtime.readerCommand(args, signal)).messages;
   }
 
-  /** Total messages in a conversation — a cheap COUNT, for a directory row's
-   *  message count. Slightly above the readable count when a body cannot be
-   *  decoded (which a message read skips). */
+  /** Total messages, including placeholders for undecodable bodies. */
   async count(conversationId: string, signal?: AbortSignal): Promise<number> {
     const parsed = countSchema.parse(
       await this.runtime.readerCommand(["count", "--conversation", conversationId], signal),

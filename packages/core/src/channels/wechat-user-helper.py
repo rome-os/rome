@@ -34,6 +34,7 @@ import re
 import sqlite3
 import struct
 import sys
+import tempfile
 from contextlib import closing
 
 PAGE_SIZE = 4096
@@ -155,17 +156,30 @@ def cmd_derive(args):
 
     validate_keys(db_dir, keys)
 
-    os.makedirs(os.path.dirname(KEYS_FILE), exist_ok=True)
-    with open(KEYS_FILE, "w", encoding="utf-8") as f:
-        json.dump(keys, f, indent=2, ensure_ascii=False)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"db_dir": db_dir}, f)
+    write_private_json(KEYS_FILE, keys)
+    write_private_json(CONFIG_FILE, {"db_dir": db_dir})
 
     print(json.dumps({
         "derived": len(keys),
         "databases": len(databases),
         "wxid": os.path.basename(account),
     }))
+
+
+def write_private_json(path, value):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    if os.path.islink(directory) or os.stat(directory).st_uid != os.geteuid():
+        raise Unavailable("The reader directory must be owned by the runtime user.")
+    os.chmod(directory, 0o700)
+    fd, temporary = tempfile.mkstemp(dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def validate_keys(db_dir, keys):
@@ -309,6 +323,21 @@ def clean_text(text):
     return text[:cut].strip()[:MAX_TEXT]
 
 
+def query_message_window(query, conn, table, since_ts, before_ts, limit):
+    # Fetch the cursor second in full, plus an older page so a consumed second
+    # cannot hide the next page. Include every tie at the older page's edge too.
+    rows = query(conn, table, start_ts=since_ts,
+                 end_ts=before_ts - 1 if before_ts is not None else None,
+                 limit=limit, offset=0)
+    if rows:
+        edge = min(row[2] for row in rows)
+        ties = query(conn, table, start_ts=edge, end_ts=edge, limit=-1, offset=0)
+        rows = [row for row in rows if row[2] != edge] + ties
+    if before_ts is not None and (since_ts is None or before_ts >= since_ts):
+        rows += query(conn, table, start_ts=before_ts, end_ts=before_ts, limit=-1, offset=0)
+    return rows
+
+
 def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit):
     from wechat_cli.core.messages import (
         _format_message_text,
@@ -329,20 +358,21 @@ def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit
         try:
             with closing(sqlite3.connect(table["db_path"])) as conn:
                 id_to_username = _load_name2id_maps(conn)
-                rows = _query_messages(
-                    conn, table["table_name"], start_ts=since_ts, end_ts=before_ts,
-                    limit=limit, offset=0,
+                rows = query_message_window(
+                    _query_messages, conn, table["table_name"], since_ts, before_ts, limit
                 )
                 for row in rows:
                     local_id, local_type, created, real_sender, content, ct = row
-                    content = decompress_content(content, ct)
-                    if content is None:
-                        continue
-                    sender, text = _format_message_text(
-                        local_id, local_type, content, table["is_group"], table["username"],
-                        table["display_name"], names, app.display_name_fn,
-                        db_dir=app.db_dir, create_time_ts=created,
-                    )
+                    try:
+                        content = decompress_content(content, ct)
+                        sender, text = _format_message_text(
+                            local_id, local_type, content or "[Unreadable message]",
+                            table["is_group"], table["username"], table["display_name"],
+                            names, app.display_name_fn,
+                            db_dir=app.db_dir, create_time_ts=created,
+                        )
+                    except Exception:
+                        sender, text = "", "[Unreadable message]"
                     label = _resolve_sender_label(
                         real_sender, sender, table["is_group"], table["username"],
                         table["display_name"], names, id_to_username, app.display_name_fn,
@@ -360,14 +390,14 @@ def chat_messages(app, chat_id, names, self_username, since_ts, before_ts, limit
                         "isSelf": bool(self_username) and sender_id == self_username,
                         "timestamp": created,
                         "type": type_name(local_type),
-                        "text": clean_text(text),
+                        "text": clean_text(text) or "[Unreadable message]",
                     })
         except Exception:  # noqa: BLE001
             # One unreadable shard must not lose the rest of the conversation.
             continue
 
     collected.sort(key=lambda m: m["timestamp"])
-    return collected[-limit:]
+    return collected
 
 
 def cmd_messages(args):
@@ -410,9 +440,7 @@ def cmd_messages(args):
 
 def cmd_count(args):
     """Total messages in a conversation, summed over its (possibly sharded)
-    tables. A COUNT(*) — no decrypt — so a directory can show a per-chat count
-    cheaply. Slightly above the readable count when a row's body cannot be
-    decoded, which the message read skips."""
+    tables. Undecodable bodies remain readable as placeholders."""
     app = app_context()
     from wechat_cli.core.messages import (
         _is_safe_msg_table_name,

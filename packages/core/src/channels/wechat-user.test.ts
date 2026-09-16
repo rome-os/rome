@@ -95,14 +95,14 @@ describe("WechatUserRuntime.status", () => {
     expect(status.wxid).toBe("wxid_guardian");
   });
 
-  it("keeps a partial key file awaiting keys", async () => {
+  it.each([3, 4])("keeps unreadable or pending keys awaiting keys (exit %s)", async (code) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
       run: scriptedRun({
         sh: () => ok("wxid_guardian\n"),
         [join(h, ".local/share/wechat/cli/bin/python3")]: () => ({
-          code: 3,
+          code,
           stdout: "",
           stderr: "The WeChat message store is locked: message/message_0.db has no valid key.",
         }),

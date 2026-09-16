@@ -10,6 +10,7 @@ terminate) and also print on stdout as `PASSPHRASE <hex>`.
 """
 import os
 import subprocess
+import signal
 import sys
 import tempfile
 import time
@@ -21,8 +22,6 @@ WECHAT = "/opt/wechat/wechat"
 # HOME must match the home the Rome runtime reads the store from — the root
 # script sets it, so read it back rather than assuming /root.
 HOME = os.environ.get("HOME", "/root")
-RESULT_FILE = "/tmp/rome-wechat-capture.result"
-GDB_LOG = "/tmp/rome-wechat-capture.gdb.log"
 
 GDB_SCRIPT = r"""
 set pagination off
@@ -101,15 +100,17 @@ quit
 """
 
 
-def main():
-    open(RESULT_FILE, "w").close()
+def capture(directory):
+    result_file = os.path.join(directory, "capture.result")
+    gdb_log = os.path.join(directory, "gdb.log")
+    open(result_file, "x").close()
     hook_va = tool.find_hook_offset(WECHAT)
-    with open(RESULT_FILE, "a") as f:
+    with open(result_file, "a") as f:
         f.write("hook_va=0x%X\n" % hook_va)
         f.flush()
 
-    with tempfile.NamedTemporaryFile("w", suffix=".gdb", delete=False) as f:
-        f.write(GDB_SCRIPT.format(hook_va=hook_va, result=RESULT_FILE))
+    with tempfile.NamedTemporaryFile("w", suffix=".gdb", dir=directory, delete=False) as f:
+        f.write(GDB_SCRIPT.format(hook_va=hook_va, result=result_file))
         script_path = f.name
 
     env = {
@@ -127,12 +128,25 @@ def main():
 
     proc = subprocess.Popen(
         ["gdb", "-q", "--nx", "-batch", "-x", script_path, "--args", WECHAT],
-        stdout=open(GDB_LOG, "w"), stderr=subprocess.STDOUT, env=env, cwd="/opt/wechat",
+        stdout=open(gdb_log, "w"), stderr=subprocess.STDOUT, env=env, cwd="/opt/wechat",
     )
+    try:
+        return wait_for_capture(proc, result_file, timeout)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+def wait_for_capture(proc, result_file, timeout):
     deadline = time.time() + timeout
     passphrase = None
     while time.time() < deadline and proc.poll() is None:
-        for line in open(RESULT_FILE):
+        for line in open(result_file):
             if line.startswith("WECHAT_PASSPHRASE="):
                 passphrase = line.split("=", 1)[1].strip()
         if passphrase:
@@ -144,14 +158,25 @@ def main():
     # poll loop can end (proc gone) before its next read. Read the file once more
     # before giving up — the value is durable on disk even when the race is lost.
     if passphrase is None:
-        for line in open(RESULT_FILE):
+        for line in open(result_file):
             if line.startswith("WECHAT_PASSPHRASE="):
                 passphrase = line.split("=", 1)[1].strip()
     if passphrase:
         print("PASSPHRASE " + passphrase)
         return
-    print("ERROR no passphrase (see %s)" % RESULT_FILE, file=sys.stderr)
+    print("ERROR no passphrase captured", file=sys.stderr)
     sys.exit(5)
+
+
+def main():
+    os.umask(0o077)
+    def interrupted(_signal, _frame):
+        raise SystemExit(5)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGINT, interrupted)
+    # The staged driver already lives in a private directory under /run.
+    with tempfile.TemporaryDirectory(prefix="capture-", dir=os.path.dirname(__file__)) as directory:
+        capture(directory)
 
 
 if __name__ == "__main__":

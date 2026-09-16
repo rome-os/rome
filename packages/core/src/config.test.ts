@@ -17,6 +17,7 @@ const CONFIG_ENV_KEYS = [
   "ROME_ACTION_MAX_WORKERS",
   "ROME_HOST_EXECUTION_SOCKET",
   "ROME_HOST_EXECUTION_ENABLED",
+  "WECHAT_USER_ENABLED",
   "ROME_ENABLE_CDP_AUTOMATION",
   "WEB_PORT",
   "WEB_HOST",
@@ -36,6 +37,20 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
+  it("disables personal WeChat by default", () => {
+    expect(loadConfig().wechatUserEnabled).toBe(false);
+  });
+  it.each([
+    ["true", true],
+    ["false", false],
+  ] as const)("parses WECHAT_USER_ENABLED=%s", (value, enabled) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", value);
+    expect(loadConfig().wechatUserEnabled).toBe(enabled);
+  });
+  it.each(["0", "1", "no", "yes", ""])("rejects an ambiguous WeChat flag: %s", (value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
   it("disables CDP automation by default", () => {
     expect(loadConfig().cdpAutomationEnabled).toBe(false);
   });

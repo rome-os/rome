@@ -8,8 +8,16 @@
 //   3. the address book lists direct contacts (never groups) and resolves a wxid.
 
 import { describe, expect, it } from "@rstest/core";
-import { messageCursor, parseMessageCursor } from "@rome/api-types/message";
-import type { WechatUserConversation, WechatUserMessage, WechatUserReader } from "./wechat-user.js";
+import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
+import {
+  WechatUserSessionRejected,
+  WechatUserStorePending,
+  WechatUserRuntimeError,
+  WechatUserRuntime,
+  WechatUserReader,
+  type WechatUserConversation,
+  type WechatUserMessage,
+} from "./wechat-user.js";
 import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.js";
 
 const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
@@ -43,8 +51,16 @@ function fakeReader(opts: {
         const before = Math.floor(input.before.getTime() / 1000);
         rows = rows.filter((m) => m.timestamp <= before);
       }
-      // The reader answers newest-first; mimic that before applying the limit.
-      return [...rows].sort((a, b) => b.timestamp - a.timestamp).slice(0, input.limit);
+      const sorted = [...rows].sort((a, b) => b.timestamp - a.timestamp);
+      const older = input.before
+        ? sorted.filter((row) => row.timestamp < input.before!.getTime() / 1000)
+        : sorted;
+      const edge = older.slice(0, input.limit).at(-1)?.timestamp;
+      return sorted.filter(
+        (row) =>
+          (input.before && row.timestamp === input.before.getTime() / 1000) ||
+          (edge !== undefined && row.timestamp >= edge),
+      );
     },
     async count(conversationId: string) {
       return (opts.byConversation?.[conversationId] ?? []).length;
@@ -60,6 +76,60 @@ function fakeReader(opts: {
 const account = (address: string) => ({ channel: "wechat_user", addresses: [address] });
 
 describe("wechatUserMessages", () => {
+  it("lists an empty directory before the reader is installed", async () => {
+    const directory = wechatUserAccounts(
+      new WechatUserReader(new WechatUserRuntime({ home: "/nonexistent-wechat-review-home" })),
+    );
+    expect(await directory.listAccounts({ limit: 10 })).toEqual({ accounts: [] });
+    expect(await directory.resolve("wxid_a")).toBeNull();
+  });
+  it("walks more than a window of same-second messages on both read surfaces", async () => {
+    const rows = Array.from({ length: 650 }, (_, i) =>
+      msg({ id: `wxid_a:${i}`, isSelf: i % 2 === 0 }),
+    );
+    rows.push(msg({ id: "wxid_a:older", timestamp: 999 }));
+    const store = wechatUserMessages(fakeReader({ byConversation: { wxid_a: rows } }));
+    for (const conversation of [false, true]) {
+      const found = [];
+      let after: Message | undefined;
+      for (;;) {
+        const page = conversation
+          ? await store.readConversation({
+              conversation: { channel: "wechat_user", id: "wxid_a" },
+              after,
+              limit: 100,
+            })
+          : await store.read({ accounts: [account("wxid_a")], after, limit: 100 });
+        if (!page.length) break;
+        found.push(...page);
+        after = page.at(-1);
+        expect(found.length).toBeLessThanOrEqual(651);
+      }
+      expect(new Set(found.map((row) => row.ref)).size).toBe(651);
+      expect(found.at(-1)?.ref).toBe("wxid_a:older");
+    }
+  });
+  it.each([
+    new WechatUserSessionRejected("not connected"),
+    new WechatUserStorePending("pending"),
+  ])("keeps unavailable accounts out of the directory: %s", async (error) => {
+    const reader = {
+      conversations: async () => {
+        throw error;
+      },
+    } as unknown as WechatUserReader;
+    const directory = wechatUserAccounts(reader);
+    expect(await directory.listAccounts({ limit: 10 })).toEqual({ accounts: [] });
+    expect(await directory.resolve("wxid_a")).toBeNull();
+  });
+  it("preserves genuine runtime failures from the directory", async () => {
+    const reader = {
+      conversations: async () => {
+        throw new WechatUserRuntimeError("broken");
+      },
+    } as unknown as WechatUserReader;
+    await expect(wechatUserAccounts(reader).listAccounts({ limit: 10 })).rejects.toThrow("broken");
+  });
   it("maps reader rows to the timeline shape, newest-first", async () => {
     const store = wechatUserMessages(
       fakeReader({

@@ -15,7 +15,13 @@
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
-import type { WechatUserConversation, WechatUserMessage, WechatUserReader } from "./wechat-user.js";
+import {
+  isWechatUserSessionRejected,
+  WechatUserStorePending,
+  type WechatUserConversation,
+  type WechatUserMessage,
+  type WechatUserReader,
+} from "./wechat-user.js";
 
 /** The channel name every stored WeChat-account row spells, matching the
  *  connection service and the person mappings that link to it. */
@@ -59,7 +65,7 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
  *
  * Paging without a native cursor: the reader answers the newest messages
  * at-or-before a timestamp, so a page after a cursor fetches a bounded window
- * ending at the cursor's second and drops what the cursor already covered
+ * ending at the cursor's second, including every tie, and drops what the cursor covered
  * ({@link isAfterMessageCursor}). `compareMessages` is the one ranking both a
  * store and a person's timeline cut, so the local sort matches every consumer.
  */
@@ -147,14 +153,22 @@ function toAccount(conversation: WechatUserConversation): Account {
  * and every address a message arrives on (the wxid) resolves to it.
  */
 export function wechatUserAccounts(reader: WechatUserReader): Accounts {
+  async function conversations(input: { query?: string; limit: number }) {
+    try {
+      return await reader.conversations(input);
+    } catch (error) {
+      if (isWechatUserSessionRejected(error) || error instanceof WechatUserStorePending) return [];
+      throw error;
+    }
+  }
   return {
     async listAccounts({ query, limit }): Promise<{ accounts: Account[] }> {
-      const conversations = await reader.conversations({
+      const rows = await conversations({
         ...(query ? { query } : {}),
         limit,
       });
       return {
-        accounts: conversations.filter((conversation) => !conversation.isGroup).map(toAccount),
+        accounts: rows.filter((conversation) => !conversation.isGroup).map(toAccount),
       };
     },
 
@@ -162,8 +176,8 @@ export function wechatUserAccounts(reader: WechatUserReader): Accounts {
       // The address is a wxid; find the direct conversation it names. A bounded
       // scan, since the reader has no by-id contact read — enough to cover an
       // account's own contacts, which is all a message can arrive from.
-      const conversations = await reader.conversations({ limit: WINDOW_CAP });
-      const match = conversations.find(
+      const rows = await conversations({ limit: WINDOW_CAP });
+      const match = rows.find(
         (conversation) => conversation.id === address && !conversation.isGroup,
       );
       return match ? toAccount(match) : null;

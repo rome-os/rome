@@ -77,6 +77,7 @@ export interface BuiltinConnectionDeps {
   db: DrizzleDb;
   /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
   wechatUserEnabled?: boolean;
+  hostExecutionEnabled?: boolean;
   /** Runs actions, so the WeChat key recovery can drive a host-root script.
    *  Only the WeChat personal connection needs it. */
   actionEngine?: {
@@ -110,12 +111,12 @@ export function registerBuiltinConnections(
   // The personal WeChat connection is opt-in (see config `wechatUserEnabled`).
   // It runs the client in this container and recovers its store key through a
   // host-root script, so its key recovery is wired to the action engine; when
-  // host execution is disabled, connecting fails at the recovery step with a
+  // host execution is disabled, connecting fails before installation with a
   // clear message rather than being hidden here.
   if (deps.wechatUserEnabled) {
     registry.register(
       createWechatUserDescriptor(
-        deps.actionEngine
+        deps.actionEngine && deps.hostExecutionEnabled
           ? { rootScriptRunner: createActionRootScriptRunner(deps.actionEngine) }
           : {},
       ),

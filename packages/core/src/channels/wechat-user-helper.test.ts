@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHmac, pbkdf2Sync } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +67,10 @@ describe("WeChat key readiness", () => {
     const { home, dbDir } = await store();
     const derived = run(home, ["derive", "--passphrase", passphrase]);
     expect(derived.status, derived.stderr).toBe(0);
+    for (const name of ["all_keys.json", "config.json"]) {
+      expect((await stat(join(home, ".wechat-cli", name))).mode & 0o777).toBe(0o600);
+    }
+    expect((await stat(join(home, ".wechat-cli"))).mode & 0o777).toBe(0o700);
     const checked = run(home, ["check"]);
     expect(checked.status, checked.stderr).toBe(0);
     expect(JSON.parse(checked.stdout)).toMatchObject({ keysReady: true });
@@ -84,4 +88,10 @@ describe("WeChat key readiness", () => {
     await writeFile(join(dbDir, "message/message_0.db"), Buffer.alloc(4096));
     expect(run(home, ["check"]).status).toBe(3);
   });
+});
+
+it("preserves SQLite page boundaries, unreadable rows, and capture cleanup", () => {
+  execFileSync("python3", [
+    fileURLToPath(new URL("./wechat-user-helper-fixtures.py", import.meta.url)),
+  ]);
 });

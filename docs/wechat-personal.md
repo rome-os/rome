@@ -11,6 +11,8 @@ The personal WeChat connection reads the guardian's account through the Linux de
 - `ROME_DOCKER_USER_MODE=root` so the client and the reader can access the same files under `/home/rome`.
 - At least 1 GB of container shared memory (`shm_size: 1gb` in Compose).
 
+Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. If host execution is disabled, setup stops before downloading the client.
+
 The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
 
 ## Connect
@@ -21,6 +23,8 @@ The Rome image includes the client libraries, debugger, and QR screenshot tools.
 4. Sync recent messages to the desktop, or send a test message to the File Transfer chat from the phone.
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
+
+Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Persisted reader keys have mode `0600` in a mode `0700` directory. The privileged helper matches both the container PID and its PID namespace before entering it.
 
 Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
 

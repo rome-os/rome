@@ -24,7 +24,7 @@
 // the VM is the passphrase, and it lands in the same container that already
 // holds the client and its store.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
@@ -40,7 +40,7 @@ const CAPTURE_TIMEOUT_SECONDS = 540;
 /** Where Rome stages the driver and key tool inside its own container. The root
  *  script reaches this path only after entering the container's namespaces, so
  *  it is a container path, not a host one. */
-export const CAPTURE_DRIVER_DIR = "/tmp/rome-wechat-keys";
+const CAPTURE_DRIVER_PREFIX = ".rome-wechat-keys-";
 
 const DRIVER_FILE = "launch-driver.py";
 const TOOL_FILE = "wcdb_key_tool.py";
@@ -57,21 +57,32 @@ export class WechatUserKeyRecoveryError extends Error {
 }
 
 /**
- * Stage the launch driver and the vendored key tool into `dir` inside this
+ * Stage the launch driver and the vendored key tool inside this
  * container, so the root script can exec them once it has entered the container.
- * Idempotent — it just rewrites the two files. Returns the directory.
+ * Returns a private, unique directory. The caller removes it after recovery.
  */
-export async function stageCaptureDriver(dir: string = CAPTURE_DRIVER_DIR): Promise<string> {
-  const [driver, tool] = await Promise.all([
-    readFile(join(assetDir(), "wechat-user-launch-driver.py"), "utf8"),
-    readFile(join(assetDir(), "vendor", "wcdb_key_tool.py"), "utf8"),
-  ]);
-  await mkdir(dir, { recursive: true });
-  await Promise.all([
-    writeFile(join(dir, DRIVER_FILE), driver),
-    writeFile(join(dir, TOOL_FILE), tool),
-  ]);
-  return dir;
+export async function stageCaptureDriver(parent = "/run"): Promise<string> {
+  const owner = await lstat(parent);
+  if (!owner.isDirectory() || owner.uid !== process.getuid?.() || (owner.mode & 0o022) !== 0) {
+    throw new WechatUserKeyRecoveryError(
+      "Capture requires a private parent directory owned by the runtime user.",
+    );
+  }
+  const dir = await mkdtemp(join(parent, CAPTURE_DRIVER_PREFIX));
+  try {
+    const [driver, tool] = await Promise.all([
+      readFile(join(assetDir(), "wechat-user-launch-driver.py"), "utf8"),
+      readFile(join(assetDir(), "vendor", "wcdb_key_tool.py"), "utf8"),
+    ]);
+    await Promise.all([
+      writeFile(join(dir, DRIVER_FILE), driver, { mode: 0o600, flag: "wx" }),
+      writeFile(join(dir, TOOL_FILE), tool, { mode: 0o600, flag: "wx" }),
+    ]);
+    return dir;
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export interface WechatKeyRecoveryOptions {
@@ -81,7 +92,9 @@ export interface WechatKeyRecoveryOptions {
    *  the natural choice: it is guaranteed to be in the right container. */
   anchorPid: number;
   /** Where the driver was staged, inside this container. */
-  driverDir?: string;
+  driverDir: string;
+  /** PID namespace identity observed inside the runtime container. */
+  pidNamespace?: string;
   /** The home the launched client must run under, so the store it writes lands
    *  where the Rome runtime reads it. Defaults to the container's own HOME. */
   home?: string;
@@ -102,8 +115,22 @@ export async function recoverWechatPassphrase(
   options: WechatKeyRecoveryOptions,
   signal?: AbortSignal,
 ): Promise<string> {
-  const driverDir = options.driverDir ?? CAPTURE_DRIVER_DIR;
-  const script = rootScript(options.anchorPid, driverDir, CAPTURE_TIMEOUT_SECONDS, options.home);
+  const driverDir = options.driverDir;
+  const pidNamespace = options.pidNamespace ?? (await readlink("/proc/self/ns/pid"));
+  if (
+    !/^pid:\[\d+\]$/.test(pidNamespace) ||
+    !Number.isSafeInteger(options.anchorPid) ||
+    options.anchorPid <= 0
+  ) {
+    throw new WechatUserKeyRecoveryError("Invalid container process identity.");
+  }
+  const script = rootScript(
+    options.anchorPid,
+    pidNamespace,
+    driverDir,
+    CAPTURE_TIMEOUT_SECONDS,
+    options.home,
+  );
 
   log.info("wechat_user.key_recovery_started", { anchorPid: options.anchorPid });
   const outcome = await runner.run(
@@ -125,11 +152,12 @@ export async function recoverWechatPassphrase(
  * staged driver there.
  *
  * NSpid in /proc/<hostpid>/status lists a process's pid in each nesting
- * namespace; the last field is the number the container itself sees. Matching it
- * turns the container pid back into the host pid nsenter needs.
+ * namespace; the last field is the number the container itself sees. The PID
+ * namespace identity distinguishes otherwise identical PIDs in other containers.
  */
 function rootScript(
   anchorPid: number,
+  pidNamespace: string,
   driverDir: string,
   timeoutSeconds: number,
   home?: string,
@@ -142,15 +170,17 @@ function rootScript(
     "set -eu",
     "command -v nsenter >/dev/null || { echo 'nsenter is not installed on the hosting VM' >&2; exit 6; }",
     `anchor=${anchorPid}`,
+    `pid_namespace=${sq(pidNamespace)}`,
     "host_pid=''",
     "for st in /proc/[0-9]*/status; do",
     '  ns="$(awk \'/^NSpid:/{print $NF}\' "$st" 2>/dev/null || true)"',
-    '  if [ "$ns" = "$anchor" ]; then host_pid="$(basename "$(dirname "$st")")"; break; fi',
+    '  candidate="$(dirname "$st")"',
+    '  if [ "$ns" = "$anchor" ] && [ "$(readlink "$candidate/ns/pid" 2>/dev/null || true)" = "$pid_namespace" ]; then host_pid="$(basename "$candidate")"; break; fi',
     "done",
     '[ -n "$host_pid" ] || { echo "no host pid for container pid $anchor" >&2; exit 4; }',
     'echo "host pid $host_pid for container anchor $anchor" >&2',
     // exec so the driver's stdout and exit code become the job's, unmediated.
-    `exec nsenter -t "$host_pid" -m -u -i -n -p -- ${homeEnv}python3 ${driver} ${timeoutSeconds}`,
+    `exec nsenter -t "$host_pid" -m -u -i -n -p -- ${homeEnv}python3 ${sq(driver)} ${timeoutSeconds}`,
   ].join("\n");
 }
 

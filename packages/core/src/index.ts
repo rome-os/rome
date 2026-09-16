@@ -1022,6 +1022,7 @@ async function main() {
     // The personal WeChat connection is opt-in; its key recovery drives a
     // host-root script through the action engine.
     wechatUserEnabled: config.wechatUserEnabled,
+    hostExecutionEnabled: config.hostExecutionEnabled,
     actionEngine,
   });
 

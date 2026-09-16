@@ -44,7 +44,10 @@ const configSchema = z.object({
   // script, so it needs host execution enabled and carries WeChat ToS/account
   // risk. Registered only when this is on, so an instance that does not want it
   // shows no Connect button that would fail.
-  wechatUserEnabled: z.coerce.boolean().default(false),
+  wechatUserEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
