@@ -43,7 +43,7 @@ Once all three conditions hold, schedule nothing and report the outcome. When a 
 
 ## CI failures
 
-1. Find the failing job and read its log. The run id is in the check's link (`gh pr checks <pr> --json name,bucket,link`); read the log with `gh run view <run-id> --log-failed`.
+1. Find the failing job and read its log. The run id is in the check's link, and `<workflow>` is its workflow (`gh pr checks <pr> --json name,bucket,link,workflow`); read the log with `gh run view <run-id> --log-failed`.
 2. Decide whether the diff caused it. Check whether the same job fails on the base branch's latest run (`gh run list --branch <base> --workflow <workflow>`).
    - **The diff caused it:** reproduce the failure locally, make the smallest fix, and push.
    - **The base branch fails the same way:** the PR did not cause it. Leave it, and name the failing job in the final report.
