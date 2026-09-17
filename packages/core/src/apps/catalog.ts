@@ -234,6 +234,7 @@ function buildAppView(
       state: inFlight.kind === "install" ? "installing" : "uninstalling",
       installedHash: entry.installedHash,
       installedVersion: entry.installedVersion,
+      installedAt: entry.installedAt,
       lastError: entry.lastError,
       updatedAt: inFlight.startedAt,
     };
@@ -246,6 +247,7 @@ function buildAppView(
     state: entry.state,
     installedHash: entry.installedHash,
     installedVersion: entry.installedVersion,
+    installedAt: entry.installedAt,
     lastError: entry.lastError,
     updatedAt: entry.updatedAt,
   };

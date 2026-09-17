@@ -228,6 +228,10 @@ export class AppManager {
             state: "installed",
             installedHash: result.hash,
             installedVersion: result.version,
+            // First successful install stamps the time. A prior entry that
+            // already installed once keeps what it recorded, including
+            // "absent" for entries older than the field.
+            installedAt: prior?.installedHash != null ? prior.installedAt : nowIso(),
             lastError: null,
             updatedAt: nowIso(),
           };
@@ -284,6 +288,7 @@ export class AppManager {
             state: "failed",
             installedHash: priorHash,
             installedVersion: priorVersion,
+            installedAt: prior?.installedAt,
             lastError: error,
             updatedAt: nowIso(),
           };

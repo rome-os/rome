@@ -946,4 +946,47 @@ sideEffects: read-only
       await fresh.cleanup();
     }
   });
+
+  it("stamps installedAt on the first successful install and keeps it across re-installs", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+    expect(typeof first).toBe("string");
+    expect(Number.isNaN(Date.parse(first as string))).toBe(false);
+
+    const view = harness.catalog.list().find((candidate) => candidate.appId === "testapp");
+    expect(view?.installedAt).toBe(first);
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+  });
+
+  it("never backfills installedAt onto an entry that predates the field", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const lockfile = await readLockfile(harness);
+    delete lockfile.apps.testapp.installedAt;
+    await writeFile(harness.lockfilePath, JSON.stringify(lockfile, null, 2));
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBeUndefined();
+  });
+
+  it("keeps installedAt when a later install fails", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+
+    const realMaterialize = harness.installer.materialize.bind(harness.installer);
+    harness.installer.materialize = async () => {
+      throw new Error("simulated disk failure during materialize");
+    };
+    try {
+      const failed = await harness.appManager.install({ source });
+      expect(failed.state).toBe("failed");
+      expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+    } finally {
+      harness.installer.materialize = realMaterialize;
+    }
+  });
 });
