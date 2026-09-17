@@ -7,6 +7,7 @@ import { AppActionsFab } from "@/components/app-actions-fab";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAppCatalogEvents } from "@/hooks/use-app-catalog-events";
+import { useRecordAppOpened } from "@/hooks/use-recent-apps";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 import { fetchJson } from "@/lib/fetch-json";
@@ -90,6 +91,10 @@ export default function AppEmbeddedPage() {
   // The manifest stays authoritative; the stream is only a poke to refetch it.
   const isGuardian = manifest?.bootstrap.caller?.kind === "guardian";
   useAppCatalogEvents(appId, isGuardian, refetch);
+
+  // The sidebar's Recent zone orders by this. Guardian only: a public visitor
+  // reaches this page too and has no settings to write.
+  useRecordAppOpened(appId, isGuardian);
 
   // Remount gate (#1640): RomeAppHost keys its mount lifecycle on `entryUrl`
   // (a string, value-compared) and `styleUrls` (an array, reference-compared).

@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useRecordAppOpened } from "@/hooks/use-recent-apps";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 
@@ -64,6 +65,11 @@ export default function AppFullPage() {
       cancelled = true;
     };
   }, [appId, splat, t]);
+
+  // Split view mounts apps through this page inside an iframe, so this is where
+  // a split-view open is seen. Guardian only, as in AppEmbeddedPage.
+  const isGuardian = manifest?.bootstrap.caller?.kind === "guardian";
+  useRecordAppOpened(appId, isGuardian);
 
   if (error) {
     return (
