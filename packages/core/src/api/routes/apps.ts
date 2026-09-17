@@ -137,6 +137,7 @@ function toInstalledAppCard(
     source: view.source,
     projectPath: deriveAppProjectPath(view.source),
     origin: deriveAppOrigin(view),
+    installedAt: view.installedAt ?? null,
     suggestedChannelBindings: resolved?.manifest.suggestedChannelBindings ?? [],
   };
 }

@@ -127,6 +127,11 @@ export interface InstalledAppCard {
    */
   projectPath: string | null;
   origin: AppOrigin;
+  /**
+   * When the app first installed, ISO-8601. `null` for installs that predate
+   * the field. Optional on the wire; consumers must default to `null`.
+   */
+  installedAt?: string | null;
   /** Root-relative icon URL, or `null` when the manifest declares no icon. */
   iconUrl: string | null;
   /** Optional on the wire; consumers must default to `[]`. */
