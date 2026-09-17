@@ -13,6 +13,27 @@ The personal WeChat connection reads the guardian's account through the Linux de
 
 Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. If host execution is disabled, setup stops before downloading the client.
 
+## Enable on a Compose deployment
+
+The production [`docker-compose.yml`](../docker-compose.yml) reads every knob below from the `.env` file beside it, and defaults all of them to off. Add these four lines to that `.env` on a VM that runs the host helper:
+
+```sh
+WECHAT_USER_ENABLED=true
+ROME_HOST_EXECUTION_ENABLED=true
+ROME_DOCKER_USER_MODE=root
+# Host directory holding the helper's control socket. Bound into the container
+# at /run/rome-host, which is where ROME_HOST_EXECUTION_SOCKET points.
+ROME_HOST_EXECUTION_SOCKET_DIR=/run/rome-host
+```
+
+Then run `docker compose up -d rome`. Compose recreates the container with the socket directory bound and the connection registered. `docker compose config` prints the resolved values.
+
+The container mounts the socket directory whether or not the helper is installed, so a deployment that leaves these off is unchanged. Rome rejects every submission while `ROME_HOST_EXECUTION_ENABLED` is `false`.
+
+`ROME_DOCKER_USER_MODE=root` changes the whole container, not only WeChat: every process runs as root instead of the `rome` user. Enable it on an instance whose WeChat account the guardian owns.
+
+The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_size`. The client faults during startup there. Use `docker-compose.yml` for this connection.
+
 The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
 
 ## Connect

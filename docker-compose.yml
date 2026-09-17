@@ -16,6 +16,12 @@ services:
       - rome-home:/home/rome
       - ~/docker/ssh-host-keys:/etc/ssh/ssh_host_keys
       - ~/docker/tailscale:/var/lib/tailscale
+      # Host helper control socket (docs/architecture/host-execution.md). Bound
+      # whether or not the helper is installed: the socket appears inside the
+      # directory once the helper runs, and Rome refuses to submit while
+      # ROME_HOST_EXECUTION_ENABLED is off. Personal WeChat's store-key recovery
+      # is the only built-in that reaches for it.
+      - ${ROME_HOST_EXECUTION_SOCKET_DIR:-/run/rome-host}:/run/rome-host
     env_file: .env
     environment:
       - NODE_ENV=production
@@ -29,6 +35,13 @@ services:
       - ROME_NOVNC_PORT=6080
       - ROME_DOCKER_APP_CODE_MODE=${ROME_DOCKER_APP_CODE_MODE:-source}
       - ROME_DOCKER_USER_MODE=${ROME_DOCKER_USER_MODE:-multi}
+      # Personal WeChat (docs/wechat-personal.md). Off unless the operator opts
+      # in, because it runs the WeChat desktop client in this container and
+      # recovers its store key through a host-root script. Turning it on means
+      # host execution on as well, plus ROME_DOCKER_USER_MODE=root.
+      - WECHAT_USER_ENABLED=${WECHAT_USER_ENABLED:-false}
+      - ROME_HOST_EXECUTION_ENABLED=${ROME_HOST_EXECUTION_ENABLED:-false}
+      - ROME_HOST_EXECUTION_SOCKET=${ROME_HOST_EXECUTION_SOCKET:-/run/rome-host/control.sock}
       # Backend → in-stack OTEL collector (otlp/http). The collector forwards
       # to the central ClickStack target using credentials from `.env`.
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
