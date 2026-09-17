@@ -7,6 +7,7 @@ import { AppActionsFab } from "@/components/app-actions-fab";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAppCatalogEvents } from "@/hooks/use-app-catalog-events";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 import { fetchJson } from "@/lib/fetch-json";
@@ -101,6 +102,11 @@ export default function AppEmbeddedPage() {
   // the invariant that the JS entry hash also covers CSS.
   const styleUrlsKey = (manifest?.styleUrls ?? []).join("\n");
   const styleUrls = useMemo(() => manifest?.styleUrls ?? [], [styleUrlsKey]);
+
+  // The name the server already rendered into the shell's <title> for this
+  // path (packages/core/src/api/app-social-card.ts), so a direct load and the
+  // client agree and nothing flashes.
+  useDocumentTitle(manifest?.appName ?? null);
 
   if (error) {
     return (

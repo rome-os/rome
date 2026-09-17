@@ -98,7 +98,9 @@ describe("app document routes through buildApp", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-cache");
     const body = await res.text();
-    expect(body).toContain("<title>Reddit Radar</title>");
+    // The document title carries the site name; og:title does not, because every
+    // platform renders the site beside the card.
+    expect(body).toContain("<title>Reddit Radar · Rome</title>");
     expect(body).toContain('<meta property="og:title" content="Reddit Radar" />');
     expect(body).toContain(
       '<meta property="og:description" content="Watches &lt;subreddits&gt; &amp; &quot;more&quot;" />',

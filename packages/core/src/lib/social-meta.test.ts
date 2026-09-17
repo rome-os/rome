@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "@rstest/core";
 import { renderSocialMeta, type SocialCard } from "./social-meta.js";
 
@@ -28,7 +29,7 @@ describe("renderSocialMeta", () => {
 
   it("replaces the title and the marked block, escaping attribute values", () => {
     const html = renderSocialMeta(SHELL, card);
-    expect(html).toContain("<title>Reddit Radar</title>");
+    expect(html).toContain("<title>Reddit Radar · Rome</title>");
     expect(html).not.toContain("Rome OS - Enjoy your life with Rome");
     expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
     expect(html).toContain(
@@ -66,7 +67,7 @@ describe("renderSocialMeta", () => {
 
   it("treats a title containing $-patterns as literal text, not a replacement pattern", () => {
     const html = renderSocialMeta(SHELL, { ...card, title: "Cost $& Co" });
-    expect(html).toContain("<title>Cost $&amp; Co</title>");
+    expect(html).toContain("<title>Cost $&amp; Co · Rome</title>");
   });
 
   it("keeps the shell's own og:image when the card has no imageUrl", () => {
@@ -101,5 +102,25 @@ describe("renderSocialMeta", () => {
     expect(html).not.toContain("og:image");
     expect(html).not.toContain("twitter:image");
     expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
+  });
+});
+
+describe("the document title and og:title", () => {
+  it("appends the site name to the document title and leaves og:title bare", () => {
+    const html = renderSocialMeta(SHELL, card);
+    expect(html).toContain("<title>Reddit Radar · Rome</title>");
+    expect(html).toContain('<meta property="og:title" content="Reddit Radar" />');
+    expect(html).toContain('<meta name="twitter:title" content="Reddit Radar" />');
+  });
+
+  // The SPA recomposes the same title once it takes over, so a direct load that
+  // disagrees with the client flashes on hydration.
+  it("composes it the way the dashboard does", () => {
+    const pageTitle = readFileSync(
+      new URL("../../../web/src/lib/page-title.ts", import.meta.url),
+      "utf8",
+    );
+    expect(pageTitle).toContain('const SITE_NAME = "Rome";');
+    expect(pageTitle).toContain('const SEPARATOR = " · ";');
   });
 });

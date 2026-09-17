@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 
@@ -38,6 +39,8 @@ export default function AppFullPage() {
   const splat = params["*"] ?? "";
   const [manifest, setManifest] = useState<AppManifestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useDocumentTitle(manifest?.appName ?? null);
 
   useEffect(() => {
     if (!appId) return;

@@ -17,6 +17,7 @@ import {
   type Routine,
   type RoutineRun,
 } from "@/lib/routine-language";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useRoutines, useRoutineRuns, useRoutineRunTrace } from "@/hooks/use-routines";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
@@ -29,6 +30,7 @@ export default function RoutineDetailPage() {
   // triggers the list fetch, which is small and already the source of truth.
   const { routines, isLoading } = useRoutines();
   const routine = (routines as Routine[] | null)?.find((r) => r.id === id) ?? null;
+  useDocumentTitle(routine === null ? null : [routineDisplayName(routine), t("header.title")]);
 
   return (
     <PageShell>
@@ -59,17 +61,29 @@ export default function RoutineDetailPage() {
   );
 }
 
+// Mirror the card: agent-created routines often name themselves after the
+// action they run, which reads as no name at all.
+function hasOwnName(routine: Routine): boolean {
+  const trimmed = routine.name.trim();
+  return (
+    trimmed !== "" &&
+    trimmed !== routine.actionName &&
+    trimmed !== artifactLocalName(routine.actionName)
+  );
+}
+
+/** What the routine is called: its own name, else the humanized outcome. */
+function routineDisplayName(routine: Routine): string {
+  if (hasOwnName(routine)) return routine.name.trim();
+  const outcome = describeOutcome(routine.actionName, routine.args);
+  return outcome.charAt(0).toUpperCase() + outcome.slice(1);
+}
+
 function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
   const triggerPhrase = describeTrigger(routine.trigger);
   const outcomePhrase = describeOutcome(routine.actionName, routine.args);
-  const trimmed = routine.name.trim();
-  // Mirror the card: agent-created routines often name themselves after the
-  // action, so fall back to the humanized outcome as the title.
-  const hasName =
-    trimmed !== "" &&
-    trimmed !== routine.actionName &&
-    trimmed !== artifactLocalName(routine.actionName);
-  const title = hasName ? trimmed : outcomePhrase.charAt(0).toUpperCase() + outcomePhrase.slice(1);
+  const hasName = hasOwnName(routine);
+  const title = routineDisplayName(routine);
   const TriggerIcon = isScheduleTrigger(routine.trigger) ? Clock : Radio;
 
   return (

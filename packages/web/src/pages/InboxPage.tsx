@@ -8,6 +8,7 @@ import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Timestamp } from "@rome-os/ui/timestamp";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
@@ -62,6 +63,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  useDocumentTitle(t("page.title"));
 
   const flash = useCallback((msg: string) => {
     setToast(msg);

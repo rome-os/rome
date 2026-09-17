@@ -5,6 +5,7 @@ import { formatWhatsAppPhone, normalizeBondLevel } from "@rome/api-types/people"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageShell, PageBody } from "@/shell/PageShell";
 import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
@@ -60,6 +61,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
 
   const personQuery = usePerson(personId);
   const person = personQuery.data ?? null;
+  useDocumentTitle(person?.displayName ?? null);
 
   if (personQuery.isPending) {
     return (
