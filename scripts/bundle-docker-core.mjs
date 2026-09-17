@@ -1,19 +1,40 @@
 #!/usr/bin/env node
-import { cp, readdir, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// Static template trees copied into core/dist so the published runtime can find
+// Static files and trees copied into core/dist so the published runtime can find
 // them. The app templates back `op: "create"`; the memory template seeds a fresh
 // profile's memory/ dir on first boot (MEMORY.md, IDENTITY.md, relationship/,
 // etc.). Keep in sync with getAppTemplateDir() in paths.ts and
 // getMemoryTemplateDir() in profile-memory.ts.
-const bundledTemplates = [
+//
+// The WeChat scripts are read at runtime relative to `import.meta.url`, which is
+// src/channels/ under tsx and dist/ in the image, so a compiled runtime finds
+// them only if they are copied to the paths below: helperPath() in
+// channels/wechat-user.ts reads the reader helper, and stageCaptureDriver() in
+// channels/wechat-user-keys.ts reads the launch driver and the key tool.
+export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
   ["packages/app-template/workflow", "dist/app-template-workflow", "app template"],
   ["packages/core/memory.example", "dist/memory.example", "memory template"],
+  [
+    "packages/core/src/channels/wechat-user-helper.py",
+    "dist/wechat-user-helper.py",
+    "WeChat reader helper",
+  ],
+  [
+    "packages/core/src/channels/wechat-user-launch-driver.py",
+    "dist/wechat-user-launch-driver.py",
+    "WeChat launch driver",
+  ],
+  [
+    "packages/core/src/channels/vendor/wcdb_key_tool.py",
+    "dist/vendor/wcdb_key_tool.py",
+    "WeChat key tool",
+  ],
 ];
 const esbuildModuleCandidates = [
   resolve(projectRoot, "node_modules/esbuild/lib/main.js"),
@@ -115,12 +136,13 @@ async function main() {
     ),
   );
 
-  for (const [srcRel, destRel, label] of bundledTemplates) {
+  for (const [srcRel, destRel, label] of bundledAssets) {
     const src = resolve(projectRoot, srcRel);
     const dest = resolve(projectRoot, "packages/core", destRel);
     if (!(await pathExists(src))) {
       throw new Error(`Expected ${label} at ${src} but it does not exist; aborting bundle.`);
     }
+    await mkdir(dirname(dest), { recursive: true });
     await cp(src, dest, { recursive: true });
     console.log(`Copied ${label} → ${dest}`);
   }
