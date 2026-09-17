@@ -121,25 +121,25 @@ export function PairingRequestCard({
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="break-words text-title [overflow-wrap:anywhere]">{name}</h3>
-                  <PairingDetail
-                    label={`ID ${accountId}`}
-                    detail={accountId}
-                    className="text-muted-foreground"
-                  >
-                    {accountId.length > ID_TRUNCATION_THRESHOLD ? (
-                      <>
-                        <span className="shrink-0">ID</span>
-                        <span className="flex min-w-0" aria-hidden="true">
-                          <span className="overflow-hidden">
-                            {accountId.slice(0, ID_PREFIX_LENGTH)}
-                          </span>
-                          <span className="shrink-0">…{accountId.slice(-ID_SUFFIX_LENGTH)}</span>
+                  {accountId.length > ID_TRUNCATION_THRESHOLD ? (
+                    <PairingDetail
+                      label={`ID ${accountId}`}
+                      detail={accountId}
+                      className="text-muted-foreground"
+                    >
+                      <span className="shrink-0">ID</span>
+                      <span className="flex min-w-0" aria-hidden="true">
+                        <span className="overflow-hidden">
+                          {accountId.slice(0, ID_PREFIX_LENGTH)}
                         </span>
-                      </>
-                    ) : (
-                      `ID ${accountId}`
-                    )}
-                  </PairingDetail>
+                        <span className="shrink-0">…{accountId.slice(-ID_SUFFIX_LENGTH)}</span>
+                      </span>
+                    </PairingDetail>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      ID {accountId}
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-ui text-muted-foreground">{channel}</p>
               </div>

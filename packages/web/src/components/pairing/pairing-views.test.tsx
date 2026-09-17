@@ -23,6 +23,8 @@ describe("pairing presentation without query or router providers", () => {
       onReject: rs.fn(),
     };
     const view = render(<PairingRequestCard {...props} />);
+    expect(screen.getByText("ID alice").tagName).toBe("SPAN");
+    expect(screen.queryByRole("button", { name: "ID alice" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Approved")).toBeNull();
