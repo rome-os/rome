@@ -276,6 +276,27 @@ describe("publishAppBundle", () => {
     expect(listing).toContain("image_alt:");
   });
 
+  it("leaves a listing that names image with no value alone", async () => {
+    const bundle = await makeSourceArtifactWithStoreSidecar();
+    const storeRoot = join(bundle, "..", "..", ".rome_store");
+    await writeFile(join(storeRoot, "rome_store.yaml"), "title: Notes\nimage:\n");
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init! };
+      return new Response(JSON.stringify(OK_PAYLOAD), { status: 201 });
+    }) as typeof fetch;
+
+    await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl });
+
+    const store = Buffer.from(
+      await ((captured!.init.body as FormData).get("store") as Blob).arrayBuffer(),
+    );
+    expect(await listTarEntries(store)).not.toContain(".rome_store/assets/store-card.png");
+    // A second `image` key would make the store reject the listing outright.
+    const listing = (await readTarFile(store, ".rome_store/rome_store.yaml"))!.toString();
+    expect(listing.match(/^image:/gm)).toHaveLength(1);
+  });
+
   it("leaves an authored image alone", async () => {
     const bundle = await makeSourceArtifactWithStoreSidecar();
     const storeRoot = join(bundle, "..", "..", ".rome_store");

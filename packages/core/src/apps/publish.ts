@@ -229,12 +229,15 @@ const ICON_MIMES: Record<string, OgIcon["mime"]> = {
   ".png": "image/png",
 };
 
-/** Whether the listing names a key itself; an author's value always wins. */
+/**
+ * Whether the listing names a key itself; an author's value always wins. A key
+ * present with no value counts: appending a second one would make the document
+ * reject as a duplicate mapping key, and it reads as "leave this alone".
+ */
 function declares(yamlText: string, key: "image" | "image_alt"): boolean {
   try {
     const doc = parseYaml(yamlText) as Record<string, unknown> | null;
-    const value = doc?.[key];
-    return typeof value === "string" && value.trim().length > 0;
+    return doc !== null && typeof doc === "object" && key in doc;
   } catch {
     // Let the store report the malformed listing; never generate over it.
     return true;
