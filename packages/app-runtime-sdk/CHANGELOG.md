@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.6.6](https://github.com/rome-os/rome/compare/app-runtime-v0.6.5...app-runtime-v0.6.6) (2026-09-17)
+
+
+### Features
+
+* unify channel pairing with Activity approvals ([#298](https://github.com/rome-os/rome/issues/298)) ([78b085a](https://github.com/rome-os/rome/commit/78b085a86145d791db425fcb26658de7f6c3198f))
+
 ## [0.6.5](https://github.com/rome-os/rome/compare/app-runtime-v0.6.4...app-runtime-v0.6.5) (2026-09-15)
 
 

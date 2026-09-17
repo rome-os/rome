@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/rome-os/rome/compare/ui-v0.3.1...ui-v0.3.2) (2026-09-17)
+
+
+### Features
+
+* **web:** isolate pairing views and add Storybook previews ([#353](https://github.com/rome-os/rome/issues/353)) ([3595492](https://github.com/rome-os/rome/commit/35954927cd9958a2494c3cbc5854e1e5028ff9bb))
+
+
+### Bug Fixes
+
+* **ui:** pull the Markdown heading ladder back to 1.5x the body ([#410](https://github.com/rome-os/rome/issues/410)) ([3a8b183](https://github.com/rome-os/rome/commit/3a8b18344ea62d52a3314e668a52d88346af4a8e))
+
 ## [0.3.1](https://github.com/rome-os/rome/compare/ui-v0.3.0...ui-v0.3.1) (2026-09-16)
 
 
