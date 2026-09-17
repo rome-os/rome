@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch the WeChat client under gdb and capture the store passphrase.
 
-Runs inside the container's namespaces (host root enters them and execs this),
+Runs directly inside the Rome container (Rome spawns it as a local subprocess),
 so client and databases are plain container paths. The passphrase is derived
 once during the first login; launching arms the breakpoint before any code runs
 and re-arms it after every exec (new_objfile), so that first login is caught
