@@ -240,7 +240,7 @@ describe("ChatComponent empty home", () => {
     expect(screen.getByText("alpha").classList.contains("text-aux")).toBe(true);
     expect(pinnedHeading.nextElementSibling?.classList.contains("text-aux")).toBe(true);
     expect(screen.getByRole("button", { name: "Cloud announcement" }).className).toContain(
-      "[&_.rome-news-item-subtitle]:!text-body",
+      "[&_.rome-news-item-subtitle]:!text-ui",
     );
     expect(screen.queryByText("Ideas and shortcuts")).toBeNull();
 

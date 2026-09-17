@@ -235,7 +235,7 @@ export function AppInstallConfirm({
         <AppIcon displayName={displayName} iconUrl={iconUrl} />
         <div className="min-w-0 flex-1">
           <h1 className="text-title text-foreground">{t("install.title")}</h1>
-          <p className="mt-1 text-body text-muted-foreground">
+          <p className="mt-1 text-ui text-muted-foreground">
             <Trans
               i18nKey="install.subtitle"
               t={t}
@@ -320,7 +320,7 @@ function AppIcon({ displayName, iconUrl }: AppIconProps) {
     );
   }
   return (
-    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-12 bg-surface-muted text-body text-muted-foreground">
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-12 bg-surface-muted text-ui text-muted-foreground">
       {displayName.charAt(0).toUpperCase()}
     </div>
   );

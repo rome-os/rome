@@ -26,6 +26,8 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { createWechatDescriptor } from "./wechat.js";
+import { createWechatUserDescriptor } from "./wechat-user.js";
+import { createActionRootScriptRunner } from "../../host-execution/root-script-runner.js";
 import { makeWebchatDescriptor } from "./webchat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
@@ -33,6 +35,7 @@ export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
+export { createWechatUserDescriptor, WECHAT_USER_SERVICE } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeWebchatDescriptor } from "./webchat.js";
@@ -72,6 +75,17 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
+  /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
+  wechatUserEnabled?: boolean;
+  hostExecutionEnabled?: boolean;
+  /** Runs actions, so the WeChat key recovery can drive a host-root script.
+   *  Only the WeChat personal connection needs it. */
+  actionEngine?: {
+    run(
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<{ status: string; data?: unknown; error?: string }>;
+  };
 }
 
 /**
@@ -94,6 +108,20 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(createWechatDescriptor());
+  // The personal WeChat connection is opt-in (see config `wechatUserEnabled`).
+  // It runs the client in this container and recovers its store key through a
+  // host-root script, so its key recovery is wired to the action engine; when
+  // host execution is disabled, connecting fails before installation with a
+  // clear message rather than being hidden here.
+  if (deps.wechatUserEnabled) {
+    registry.register(
+      createWechatUserDescriptor(
+        deps.actionEngine && deps.hostExecutionEnabled
+          ? { rootScriptRunner: createActionRootScriptRunner(deps.actionEngine) }
+          : {},
+      ),
+    );
+  }
   registry.register(
     createFeishuDescriptor({
       conversationSettings: deps.conversationSettings,

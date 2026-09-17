@@ -60,7 +60,7 @@ export function HandoffCard({ appId, agentName, agentLabel, summary, status }: H
   const collapsed = !!clamp?.overflowing && !expanded;
 
   return (
-    <div className="mb-2 rounded-12 border-l-2 border-primary bg-primary/5 px-3 py-2 text-body text-foreground">
+    <div className="mb-2 rounded-12 border-l-2 border-primary bg-primary/5 px-3 py-2 text-ui text-foreground">
       <span className="inline-flex items-center gap-1 rounded-8 bg-primary/15 px-2 py-1 text-badge text-primary">
         @
         <AgentAvatar

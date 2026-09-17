@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -28,6 +28,7 @@ import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
   buildWorkspaceContextSection,
+  PROJECT_SUMMARY_CHAR_LIMIT,
   PromptBuilder,
   WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT,
 } from "./prompt-builder.js";
@@ -127,6 +128,73 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain(join(mockPaths.projectsRoot, "alpha"));
     expect(systemPrompt).not.toContain("Details stay available on demand.");
     expect(systemPrompt).not.toContain("Legacy summary should not load.");
+  });
+
+  it.each([
+    {
+      name: "wrapped prose with CRLF and heading-only blocks",
+      content:
+        "# Alpha\r\n\r\n## Summary\r\n\r\nA short\r\nproject introduction.\r\n\r\nPrivate implementation details.",
+      expected: "A short project introduction.",
+    },
+    {
+      name: "an exact-limit paragraph",
+      content: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT),
+      expected: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT),
+    },
+    {
+      name: "an oversized prose paragraph",
+      content: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT + 1),
+      expected: `${"a".repeat(PROJECT_SUMMARY_CHAR_LIMIT - 1)}…`,
+    },
+    {
+      name: "consecutive bullets without blank lines",
+      content: `# Alpha\n\n${"- Release details\n".repeat(100)}\nPrivate implementation details.`,
+      expected: `${Array(100)
+        .fill("- Release details")
+        .join(" ")
+        .slice(0, PROJECT_SUMMARY_CHAR_LIMIT - 1)
+        .trimEnd()}…`,
+    },
+    {
+      name: "non-BMP characters at the truncation boundary",
+      content: "🌸".repeat(PROJECT_SUMMARY_CHAR_LIMIT + 1),
+      expected: `${"🌸".repeat(PROJECT_SUMMARY_CHAR_LIMIT - 1)}…`,
+    },
+  ])("bounds project context for $name without changing the file", ({ content, expected }) => {
+    const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
+    mkdirSync(projectMemoryDir, { recursive: true });
+    const filePath = join(projectMemoryDir, "PROJECT.md");
+    writeFileSync(filePath, content);
+
+    const prompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+    const projectSection = prompt.split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): ${expected}`,
+    );
+    expect(Array.from(expected).length).toBeLessThanOrEqual(PROJECT_SUMMARY_CHAR_LIMIT);
+    expect(readFileSync(filePath, "utf8")).toBe(content);
+  });
+
+  it("refreshes project introductions without injecting detailed notes", () => {
+    const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
+    mkdirSync(projectMemoryDir, { recursive: true });
+    const filePath = join(projectMemoryDir, "PROJECT.md");
+    writeFileSync(filePath, "# Alpha\n\nOriginal introduction.\n\n- Detailed history.");
+    const builder = new PromptBuilder();
+    expect(builder.build(mainConfig, corePromptOptions)).toContain("Original introduction.");
+
+    writeFileSync(filePath, "# Alpha\n\nUpdated introduction.\n\n- Detailed history.");
+    const refreshed = builder.build(mainConfig, corePromptOptions);
+
+    expect(refreshed).toContain("Updated introduction.");
+    expect(refreshed).not.toContain("Original introduction.");
+    expect(refreshed).not.toContain("Detailed history.");
+    expect(builder.build({ ...mainConfig, name: "envoy" }, corePromptOptions)).not.toContain(
+      "# Projects",
+    );
+    expect(builder.build(mainConfig, { ownerType: "app" })).not.toContain("# Projects");
   });
 
   it("includes local dashboard and app URLs in the agent browser guidance", () => {

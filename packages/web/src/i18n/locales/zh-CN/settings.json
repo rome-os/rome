@@ -110,6 +110,15 @@
             "reply": "有人在微信上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
+        },
+        "session": {
+          "title": "你的微信账号",
+          "bullets": {
+            "read": "读取你自己的微信聊天、群聊和历史消息",
+            "recap": "回顾你不在时错过的内容",
+            "search": "直接找到别人说过的话，不用翻聊天记录"
+          },
+          "privacyNote": "只读——Rome 永远不会替你发送微信消息。微信运行在你自己的实例上，聊天记录在那里读取，不会离开该实例。随时可以断开连接。"
         }
       },
       "linkedin": {
@@ -406,6 +415,10 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
+    },
+    "wechatUser": {
+      "fallbackName": "微信账号",
+      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {

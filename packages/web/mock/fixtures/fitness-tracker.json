@@ -1,0 +1,224 @@
+{
+  "settings": {
+    "goal": "general",
+    "level": "beginner",
+    "minutesPerDay": 20,
+    "restDays": [0]
+  },
+  "exercises": [
+    {
+      "id": "back-posture",
+      "category": "back",
+      "titleZh": "5 Minute Workout for the Back & Better Posture",
+      "titleEn": "5 Minute Workout for the Back & Better Posture",
+      "videoId": "MBQKdUxCcWA",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "Strengthen the upper back and undo desk slouch — gentle enough to do daily.",
+      "focusEn": "Strengthen the upper back and undo desk slouch — gentle enough to do daily."
+    },
+    {
+      "id": "back-fix-posture",
+      "category": "back",
+      "titleZh": "Fix Posture | 5 Minute Posture Routine",
+      "titleEn": "Fix Posture | 5 Minute Posture Routine",
+      "videoId": "7tJ6ljxSikM",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "Five daily minutes to realign posture and release neck and shoulder tension.",
+      "focusEn": "Five daily minutes to realign posture and release neck and shoulder tension."
+    },
+    {
+      "id": "cardio-beginner",
+      "category": "cardio",
+      "titleZh": "5 Min Cardio for Beginners - No Equipment",
+      "titleEn": "5 Min Cardio for Beginners - No Equipment",
+      "videoId": "q2NZyW5EP5A",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "40 seconds on, 20 seconds off — a gentle way to ease into cardio.",
+      "focusEn": "40 seconds on, 20 seconds off — a gentle way to ease into cardio."
+    },
+    {
+      "id": "core-quick-abs",
+      "category": "core",
+      "titleZh": "5 Minute Ab Workout | Quick & Effective!",
+      "titleEn": "5 Minute Ab Workout | Quick & Effective!",
+      "videoId": "ynxBkod4xtQ",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "A short, sharp ab blast — perfect as a daily add-on.",
+      "focusEn": "A short, sharp ab blast — perfect as a daily add-on."
+    },
+    {
+      "id": "core-plank-challenge",
+      "category": "core",
+      "titleZh": "5 Minute Plank Challenge - Strong Core",
+      "titleEn": "5 Minute Plank Challenge - Strong Core",
+      "videoId": "xr-26gAX7T8",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "All plank variations, building up gradually toward a strong core.",
+      "focusEn": "All plank variations, building up gradually toward a strong core."
+    },
+    {
+      "id": "fullbody-quick-burn",
+      "category": "full_body",
+      "titleZh": "5-Minute Fat Burning Workout | Full Body",
+      "titleEn": "5-Minute Fat Burning Workout | Full Body",
+      "videoId": "l2ADeM1HD88",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "Five simple bodyweight moves — easy enough to follow start to finish as a beginner.",
+      "focusEn": "Five simple bodyweight moves — easy enough to follow start to finish as a beginner."
+    },
+    {
+      "id": "legs-glute-home",
+      "category": "legs",
+      "titleZh": "Glute Workout at Home (No Lunges, No Squats)",
+      "titleEn": "Glute Workout at Home (No Lunges, No Squats)",
+      "videoId": "roqLTPRUDpQ",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "Build the glutes with no squats or lunges — mostly floor-based moves.",
+      "focusEn": "Build the glutes with no squats or lunges — mostly floor-based moves."
+    },
+    {
+      "id": "stretch-cooldown",
+      "category": "stretch",
+      "titleZh": "5 Min Full Body Cool Down Stretches",
+      "titleEn": "5 Min Full Body Cool Down Stretches",
+      "videoId": "Qy3U09CnELI",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "Do it after every session to speed recovery and ease soreness.",
+      "focusEn": "Do it after every session to speed recovery and ease soreness."
+    },
+    {
+      "id": "stretch-full-body",
+      "category": "stretch",
+      "titleZh": "5 Min Full Body Stretch & Cool Down",
+      "titleEn": "5 Min Full Body Stretch & Cool Down",
+      "videoId": "wo1uEoy9MwU",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "A simple, gentle full-body stretch — great for winding down before bed too.",
+      "focusEn": "A simple, gentle full-body stretch — great for winding down before bed too."
+    },
+    {
+      "id": "stretch-post-workout",
+      "category": "stretch",
+      "titleZh": "5 Minute Full Body Cool Down & Stretch",
+      "titleEn": "5 Minute Full Body Cool Down & Stretch",
+      "videoId": "NUIMZ4IcBy8",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "A calming stretch across the big muscle groups to bring the body back to rest.",
+      "focusEn": "A calming stretch across the big muscle groups to bring the body back to rest."
+    },
+    {
+      "id": "upper-toned-arms",
+      "category": "upper",
+      "titleZh": "5 Min Toned Arms Workout - No Equipment",
+      "titleEn": "5 Min Toned Arms Workout - No Equipment",
+      "videoId": "kfP_9z-BtmA",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "Keep your arms up the whole time to carve out toned arm lines.",
+      "focusEn": "Keep your arms up the whole time to carve out toned arm lines."
+    },
+    {
+      "id": "warmup-full-body",
+      "category": "warmup",
+      "titleZh": "5 Min Warm Up Exercises Before Workout",
+      "titleEn": "5 Min Warm Up Exercises Before Workout",
+      "videoId": "IbEzhffCZww",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "Wake up every joint and muscle and lift your heart rate before the real work begins.",
+      "focusEn": "Wake up every joint and muscle and lift your heart rate before the real work begins."
+    },
+    {
+      "id": "warmup-home-gym",
+      "category": "warmup",
+      "titleZh": "5 Min Warm Up | Before Home or Gym Workouts",
+      "titleEn": "5 Min Warm Up | Before Home or Gym Workouts",
+      "videoId": "cmple9fw65w",
+      "durationMin": 5,
+      "level": "all",
+      "focusZh": "All standing, easy to follow — works before any session, home or gym.",
+      "focusEn": "All standing, easy to follow — works before any session, home or gym."
+    },
+    {
+      "id": "warmup-no-jump",
+      "category": "warmup",
+      "titleZh": "5 Min Warm Up (No Jumping)",
+      "titleEn": "5 Min Warm Up (No Jumping)",
+      "videoId": "CSrBaHX3HxQ",
+      "durationMin": 5,
+      "level": "beginner",
+      "focusZh": "Low-impact, no jumping — apartment-friendly for early mornings or late nights.",
+      "focusEn": "Low-impact, no jumping — apartment-friendly for early mornings or late nights."
+    }
+  ],
+  "plan": [
+    {
+      "dayOfWeek": 0,
+      "label": "rest",
+      "moduleIds": [],
+      "totalMinutes": 0
+    },
+    {
+      "dayOfWeek": 1,
+      "label": "full_body",
+      "moduleIds": [
+        "warmup-home-gym",
+        "fullbody-quick-burn",
+        "core-plank-challenge",
+        "stretch-full-body"
+      ],
+      "totalMinutes": 20
+    },
+    {
+      "dayOfWeek": 2,
+      "label": "core",
+      "moduleIds": [
+        "warmup-no-jump",
+        "core-plank-challenge",
+        "cardio-beginner",
+        "stretch-post-workout"
+      ],
+      "totalMinutes": 20
+    },
+    {
+      "dayOfWeek": 3,
+      "label": "lower_body",
+      "moduleIds": ["warmup-full-body", "legs-glute-home", "core-quick-abs", "stretch-cooldown"],
+      "totalMinutes": 20
+    },
+    {
+      "dayOfWeek": 4,
+      "label": "upper_body",
+      "moduleIds": ["warmup-home-gym", "upper-toned-arms", "back-fix-posture", "stretch-full-body"],
+      "totalMinutes": 20
+    },
+    {
+      "dayOfWeek": 5,
+      "label": "cardio_burn",
+      "moduleIds": [
+        "warmup-no-jump",
+        "cardio-beginner",
+        "fullbody-quick-burn",
+        "stretch-post-workout"
+      ],
+      "totalMinutes": 20
+    },
+    {
+      "dayOfWeek": 6,
+      "label": "posture_tune",
+      "moduleIds": ["warmup-full-body", "back-posture", "legs-glute-home", "stretch-cooldown"],
+      "totalMinutes": 20
+    }
+  ],
+  "logs": []
+}

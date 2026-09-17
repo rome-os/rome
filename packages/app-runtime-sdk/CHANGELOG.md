@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.6.5](https://github.com/rome-os/rome/compare/app-runtime-v0.6.4...app-runtime-v0.6.5) (2026-09-15)
+
+
+### Features
+
+* **onboarding:** collapse cloud setup into the welcome conversation ([#222](https://github.com/rome-os/rome/issues/222)) ([00c96f7](https://github.com/rome-os/rome/commit/00c96f714d753ebe9cfb079d888d72daf04b8da5))
+
 ## [0.6.4](https://github.com/rome-os/rome/compare/app-runtime-v0.6.3...app-runtime-v0.6.4) (2026-09-03)
 
 

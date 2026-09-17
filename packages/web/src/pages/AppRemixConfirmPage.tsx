@@ -30,7 +30,7 @@ export default function AppRemixConfirmPage() {
           />
         ) : (
           <div className="flex flex-col gap-4">
-            <p role="alert" className="text-body text-destructive">
+            <p role="alert" className="text-ui text-destructive">
               {t("remixStore.invalidLink")}
             </p>
             <Button variant="outline" onClick={cancel}>

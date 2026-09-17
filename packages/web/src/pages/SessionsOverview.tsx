@@ -448,7 +448,7 @@ export function SessionsOverview({
             <h2 id="grouped-analysis-heading" className="text-section">
               Usage by {GROUP_LABELS[groupBy].toLowerCase()}
             </h2>
-            <p className="mt-1 text-body text-muted-foreground">
+            <p className="mt-1 text-ui text-muted-foreground">
               Select a row to inspect the matching Sessions.
             </p>
           </div>

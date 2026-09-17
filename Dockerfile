@@ -205,6 +205,30 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
+# Runtime libraries for the WeChat personal-account connection. The client
+# itself is 744 MB and is fetched into a volume when a guardian connects, so it
+# is deliberately not baked in; these are its shared libraries, which are 37 MB
+# and cannot be staged the same way. WeChat resolves EGL through glvnd, and
+# glvnd finds its vendor driver through ldconfig and /usr/share/glvnd — pointing
+# LD_LIBRARY_PATH at a volume leaves eglGetPlatformDisplayEXT unresolved and the
+# client dies before it draws. The browser package already supplies most of the
+# X and GL stack; this is only the remainder.
+#
+# gdb is here because key recovery launches the client under it to catch the
+# passphrase the client derives at its first login. This does not grant the
+# container ptrace: a normal container process still lacks CAP_SYS_PTRACE. The
+# recovery runs gdb only through host root, which enters this container's
+# namespaces from the VM (channels/wechat-user-keys.ts) and keeps its capability
+# across the entry — the gdb binary simply has to exist in this mount namespace.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      libegl1 libgl1-mesa-dri libglx-mesa0 libgbm1 libatomic1 \
+      libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+      libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
+      libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
+      python3-venv gdb x11-utils imagemagick
+
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
 # default registry. A scoped --@yunfanye:registry override on the mirrored install

@@ -2,6 +2,8 @@
 
 The design token docs. One directory per kind of token: `primitive-token/` (one doc per dimension), `semantic-token/` (one doc per token or role group), and `component-token/` (one spec per component). [`component-roles.md`](component-roles.md) and [`composition.md`](composition.md) sit beside them. Neither is a token doc. The first fixes which components must line up with each other and what each role's members guarantee. The second covers the case that roster does not reach: what size a component takes when the thing beside it is a text run rather than another component.
 
+[`layouts.md`](layouts.md) sits beside them too, and holds the catalogue of page layouts a routed page picks from by naming the reader's task.
+
 [`VOICE.md`](VOICE.md) and [`secondary-text.md`](secondary-text.md) govern the words rather than the pixels. The first fixes how every string a guardian reads sounds. The second decides whether a piece of secondary text exists at all, and the `secondary-text-audit` skill reads it as its ruleset.
 
 ## Playbook

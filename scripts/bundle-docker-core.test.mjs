@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dockerBundleOptions } from "./bundle-docker-core.mjs";
+import { bundledAssets, dockerBundleOptions } from "./bundle-docker-core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -98,4 +98,24 @@ test("compiled People contracts run in plain Node without TypeScript source reso
     { cwd: directory, encoding: "utf8" },
   );
   assert.equal(Number(output), 75);
+});
+
+// The compiled runtime reads these next to its own module, so a missing copy is
+// only visible in the image — the source tree keeps working under tsx.
+test("bundles the WeChat scripts the compiled runtime reads from dist", async () => {
+  const expected = [
+    ["packages/core/src/channels/wechat-user-helper.py", "dist/wechat-user-helper.py"],
+    [
+      "packages/core/src/channels/wechat-user-launch-driver.py",
+      "dist/wechat-user-launch-driver.py",
+    ],
+    ["packages/core/src/channels/vendor/wcdb_key_tool.py", "dist/vendor/wcdb_key_tool.py"],
+  ];
+
+  for (const [source, destination] of expected) {
+    const entry = bundledAssets.find(([, dest]) => dest === destination);
+    assert.ok(entry, `no bundled asset copied to ${destination}`);
+    assert.equal(entry[0], source);
+    await readFile(join(root, source), "utf8");
+  }
 });

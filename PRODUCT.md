@@ -42,7 +42,7 @@ Rome is open source (MIT), self-hostable or run on Rome Cloud, and exportable, s
 ## Operating Context
 
 - **Chat (webchat)** is the only interactive surface and the default entry point. Guardians also reach the agent through channels such as Telegram, Discord, and WhatsApp.
-- **Rome Apps** are the home for repeated work. "A workflow is a verb, an app is a noun." First-party apps in `rome_apps/` (assistant, briefing, browser-automation, coding, connector, dream, inbox, recap, replay, showcases, skills, system, welcome-to-rome, workflow-studio) use the same app model as user-authored apps.
+- **Rome Apps** are the home for repeated work. "A workflow is a verb, an app is a noun." First-party apps in `rome_apps/` (assistant, briefing, browser-automation, coding, connector, dream, inbox, recap, showcases, skills, system, welcome-to-rome, workflow-studio) use the same app model as user-authored apps. [Replay](https://github.com/rome-os/rome-apps/tree/main/apps/replay) is maintained in the Rome Apps repository and installed separately.
 - **Self-evolution loop.** The guardian describes a need, Rome writes a short spec, the guardian approves it, and Rome builds the app or workflow into the instance and keeps iterating in the same conversation.
 - **Approvals and suspensions.** Actions can pause for the guardian's decision, and the guardian answers from the dashboard or a channel.
 - **Background work.** Routines, scheduled tasks, and long-running follow-through run while the guardian is away, and results arrive as notifications, briefs, or app state.

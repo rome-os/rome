@@ -71,14 +71,23 @@ const dynamic = (source: string, ago: number, preview: string | null) => ({
 
 /* ---------------------------------------------------------------- channels */
 
-/** Every glyph the page can draw, side by side, at muted foreground. The last
- *  entry is a channel `CHANNEL_META` has no icon for — a Rome App's — which is
- *  the branch every channel added after this page was written lands in. */
+/** Every glyph the page can draw, side by side, at muted foreground. One entry
+ *  per name — a personal-account channel draws its network's glyph and answers
+ *  to its network's name, so it is the same entry — and the last is a channel
+ *  `CHANNEL_META` has no entry for, a Rome App's, which is the branch every
+ *  channel added after this page was written lands in. */
 export function ChannelGlyphSet() {
   const { t } = useTranslation("people");
+  const named = new Set<string>();
+  const channels: string[] = [];
+  for (const [channel, meta] of Object.entries(CHANNEL_META)) {
+    if (named.has(meta.labelKey)) continue;
+    named.add(meta.labelKey);
+    channels.push(channel);
+  }
   return (
     <div className="flex flex-wrap items-center gap-4 rounded-12 border border-border bg-surface p-4">
-      {[...Object.keys(CHANNEL_META), "rome-app"].map((channel) => (
+      {[...channels, "rome-app"].map((channel) => (
         <span key={channel} className="flex items-center gap-2 text-aux text-muted-foreground">
           <ChannelGlyph channel={channel} />
           {channelLabel(t, channel)}
@@ -463,7 +472,7 @@ export function PersonPageDemo() {
             { text: "perfect — dinner at 7?", at: "09:16", out: true },
             { text: "yes, book it", at: "09:31", out: false },
           ].map((msg) => (
-            <div key={msg.at} className="flex gap-2 text-body">
+            <div key={msg.at} className="flex gap-2 text-ui">
               <span className="w-12 shrink-0 font-mono text-badge tabular-nums text-subtle-foreground">
                 {msg.at}
               </span>

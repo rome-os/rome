@@ -45,7 +45,7 @@ export function LiveTurnActivity({
 
   if (!label && (hasText || snapshot?.summary.plan?.steps.length)) return null;
   return (
-    <div className="text-body text-muted-foreground" role="status" aria-label="Working">
+    <div className="text-ui text-muted-foreground" role="status" aria-label="Working">
       <span className="shimmer line-clamp-2 w-fit">
         {label ?? t("trace.summary.activity.thinking")}
       </span>

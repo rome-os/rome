@@ -205,6 +205,9 @@ services:
     # prod's runtime location.
     tmpfs:
       - /run/rome:mode=1777
+    # Matches production: a Chromium-based client on the desktop faults during
+    # startup on Docker's 64 MB default.
+    shm_size: 1gb
     environment:
       <<: *rome-env
     env_file:

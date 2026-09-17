@@ -15,6 +15,9 @@ web:
 agents:
   - agents/image-gen.yaml
 
+skills:
+  - skills/app-lifecycle
+
 actions:
   - actions/add-person-mapping
   - actions/app-management

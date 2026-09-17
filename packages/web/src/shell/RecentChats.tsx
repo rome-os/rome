@@ -743,7 +743,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex flex-col">
         <div className="flex items-center justify-between px-5 pt-4">
-          <span className="text-body text-foreground">{t("recentChats.title")}</span>
+          <span className="text-section text-foreground">{t("recentChats.title")}</span>
           <div className="flex items-center gap-1">
             <IconButton
               size="sm"

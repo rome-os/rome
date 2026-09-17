@@ -99,6 +99,26 @@ describe("SettingsPage failures", () => {
     expect(settingsLoads).toBe(2);
   });
 
+  it("keeps the Favors loading and error content within the same measure", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/favors/")) return pending;
+      return defaultResponse(url);
+    }) as typeof fetch);
+
+    renderSettings("/settings/favors");
+    const loading = await screen.findByText("Loading favors...");
+    const measure = loading.closest('[data-slot="measure"]');
+    expect(measure).not.toBeNull();
+    release(response(false, 503, { error: "Favors unavailable" }));
+    const error = await screen.findByText("Favors unavailable");
+    expect(error.closest('[data-slot="measure"]')).toBe(measure);
+  });
+
   it("shows a save failure toast whose retry action reissues the rejected patch", async () => {
     let putAttempts = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (

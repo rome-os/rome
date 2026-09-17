@@ -77,7 +77,7 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
       </div>
 
       <div className="space-y-3 px-4 py-3">
-        <p className="text-body text-foreground">{draft.sentence}</p>
+        <p className="text-ui text-foreground">{draft.sentence}</p>
 
         <dl className="space-y-2 text-aux">
           <SpecRow label={isSchedule || isManual ? "Runs" : "Watches"} value={draft.watchLabel} />

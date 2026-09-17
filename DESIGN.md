@@ -52,7 +52,7 @@ typography:
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
-  body:
+  composer:
     fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "1rem"
     fontWeight: 400
@@ -346,7 +346,7 @@ Every text run takes exactly one of seven roles. A role sets size, line height, 
 The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The seven roles read 13, 14, 15, 16, 18, and 30. Steps 20, 22, and 24 back the Markdown heading tokens, not a dashboard role.
 
 ### Named Rules
-**The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-body`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
+**The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-composer`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
 
 **The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale. The CJK system fallbacks ship no 500 face, so the weight on Title, Section, and Badge is Latin-only. Hierarchy on a bilingual surface also comes from size through a different role, ink, position, or container geometry.
 
@@ -411,7 +411,7 @@ Components are precise and restrained. Each one declares its own typography role
 - **Filter chip:** Pill with 12px by 4px padding on Warm Paper with a strong hairline. Selected fills Coral Ember with a white label. An optional count trails in `tabular-nums`, in Subtle Ink when unselected.
 
 ### Cards and Tiles
-- **Card:** Warm Paper on the canvas, 12px radius, hairline border, 16px padding, 16px gap between header, content, and footer. Title is `text-section`, description is `text-body` in Muted Ink. No shadow at rest. Interactive cards take `shadow-4` on hover.
+- **Card:** Warm Paper on the canvas, 12px radius, hairline border, 16px padding, 16px gap between header, content, and footer. Title is `text-section`, description is `text-ui` in Muted Ink. No shadow at rest. Interactive cards take `shadow-4` on hover.
 - **Tile:** 8px radius, 12px padding, strong hairline border. Hover recesses the fill. A selected tile takes a coral border, a 5% coral fill, and a 1px coral ring.
 - **Alert:** 8px radius, 12px by 16px padding, `text-ui` in both rows with the title at weight 600, and a 16px leading icon. Default is Warm Paper with a hairline and a Muted Ink description. Status variants use the tint, ink, and edge of their family and set the description to `foreground`.
 

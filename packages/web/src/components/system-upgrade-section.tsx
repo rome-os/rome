@@ -1,3 +1,4 @@
+import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -145,8 +146,10 @@ export function SystemUpgradeSection() {
 
   if (restartingTo !== null) {
     return (
-      <div>
-        <h2 className="mb-4 text-section text-foreground">{t("system.title")}</h2>
+      <Section>
+        <SectionHeader>
+          <SectionTitle>{t("system.title")}</SectionTitle>
+        </SectionHeader>
         {restartTimedOut ? (
           <Alert variant="warning">
             <AlertTitle>{t("system.restartTimeoutTitle")}</AlertTitle>
@@ -173,7 +176,7 @@ export function SystemUpgradeSection() {
             </AlertDescription>
           </Alert>
         )}
-      </div>
+      </Section>
     );
   }
 
@@ -186,8 +189,10 @@ export function SystemUpgradeSection() {
   }
 
   return (
-    <div>
-      <h2 className="mb-4 text-section text-foreground">{t("system.title")}</h2>
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{t("system.title")}</SectionTitle>
+      </SectionHeader>
 
       {build?.upgradedSinceLastBoot && build.version && (
         <Alert variant="success" className="mb-4">
@@ -297,7 +302,7 @@ export function SystemUpgradeSection() {
           }}
         />
       )}
-    </div>
+    </Section>
   );
 }
 

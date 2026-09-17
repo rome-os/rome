@@ -1,3 +1,11 @@
+import {
+  Measure,
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionDescription,
+} from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { ComputerUseSection } from "@/components/computer-use-section";
 import { Trans, useTranslation } from "react-i18next";
@@ -38,6 +46,15 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import {
+  FormRow,
+  FormRowControl,
+  FormRowDescription,
+  FormRowHeading,
+  FormRowIcon,
+  FormRowLabel,
+  FormRows,
+} from "@rome-os/ui/layout-form";
 import { Spinner } from "@rome-os/ui/spinner";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -55,7 +72,6 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { List, ListRow, ListRowContent, ListRowTitle } from "@/components/ui/list-row";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
@@ -102,7 +118,7 @@ import {
   type SessionHandoffPayload,
 } from "@/lib/access-control-client";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
+import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
@@ -351,123 +367,90 @@ export default function SettingsPage() {
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
   return (
-    <PageShell>
-      <PageBody>
-        <PageHeader title={t("page.title")} />
+    <Page>
+      <PageHeader>
+        <PageHeading>
+          <PageTitle>{t("page.title")}</PageTitle>
+        </PageHeading>
+      </PageHeader>
 
-        {/* Navigation, not a tablist: each entry is a route change, and the
-          section it reveals renders outside this element rather than in a
-          `TabsContent`. Using `Tabs` here would emit `role="tab"` with
-          `aria-controls` pointing at tabpanel ids that don't exist. Styled as
-          the same underline bar; `aria-current="page"` marks the active route. */}
-        <nav aria-label={t("page.title")}>
-          <ul className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border">
-            {VISIBLE_TABS.map((tab) => {
-              const slug = tabToSlug(tab);
-              const isActive = tab === activeTab;
-              return (
-                <li key={tab}>
-                  <Link
-                    to={`/settings/${slug}`}
-                    aria-current={isActive ? "page" : undefined}
-                    className={cn(
-                      "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors",
-                      // A 2px border on a zero-content pseudo-element, not a
-                      // sized box, so it authors no off-scale edge length.
-                      "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",
-                      isActive
-                        ? "text-foreground after:opacity-100"
-                        : "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground",
-                    )}
-                  >
-                    {t(`tabs.${tab}` as const)}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+      <PageNav aria-label={t("page.title")}>
+        {VISIBLE_TABS.map((tab) => (
+          <PageNavLink asChild key={tab} active={tab === activeTab}>
+            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
+          </PageNavLink>
+        ))}
+      </PageNav>
 
-        {/* Tab content. Settings rows are label/control pairs, so this column
-          keeps a reading measure while the frame above stays full-bleed — the
-          h1 and the nav land at the same x as on every other route, and only
-          the form narrows. Loading and failure swap this column only, and only
-          for the tabs that read the settings payload, so a dead /api/settings
-          still leaves Connections, Channels, Favors and Appearance usable. */}
-        <div className="max-w-3xl">
-          {tabNeedsSettings && loading ? (
-            <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-          ) : tabNeedsSettings && loadError ? (
-            <Card>
-              <CardContent className="flex flex-col items-start gap-3">
-                <p className="text-ui text-destructive">{loadError}</p>
-                <Button type="button" size="sm" onClick={() => void loadAll()}>
-                  <RefreshCw />
-                  {t("page.retry")}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              {activeTab === "Appearance" && <AppearanceSection />}
-              {activeTab === "Connections" && (
-                <ConnectionsSection
-                  connections={connections}
-                  composio={composio}
-                  loading={connectionsLoading}
-                  error={connectionsError}
-                  onRetry={loadConnections}
-                  onRefresh={loadConnections}
-                  onFlash={(message) => toast.error(message)}
-                />
-              )}
-              {activeTab === "Channels" && <ChannelsSettingsPage />}
-              {activeTab === "Favors" && <FavorsSection />}
-              {activeTab === "AI Tools" && (
-                <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
-              )}
-              {activeTab === "Advanced" && (
-                <AdvancedSection
-                  settings={settings}
-                  onSave={saveSettings}
-                  saving={saving}
-                  tailscale={tailscale}
-                  onRefresh={loadAll}
-                />
-              )}
-            </>
+      {tabNeedsSettings && loading ? (
+        <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+      ) : tabNeedsSettings && loadError ? (
+        <Measure>
+          <Card>
+            <CardContent className="flex flex-col items-start gap-3">
+              <p className="text-ui text-destructive">{loadError}</p>
+              <Button type="button" size="sm" onClick={() => void loadAll()}>
+                <RefreshCw />
+                {t("page.retry")}
+              </Button>
+            </CardContent>
+          </Card>
+        </Measure>
+      ) : (
+        <>
+          {activeTab === "Appearance" && <AppearanceSection />}
+          {activeTab === "Connections" && (
+            <ConnectionsSection
+              connections={connections}
+              composio={composio}
+              loading={connectionsLoading}
+              error={connectionsError}
+              onRetry={loadConnections}
+              onRefresh={loadConnections}
+              onFlash={(message) => toast.error(message)}
+            />
           )}
-        </div>
-      </PageBody>
-    </PageShell>
+          {activeTab === "Channels" && (
+            <div className="max-w-3xl">
+              <ChannelsSettingsPage />
+            </div>
+          )}
+          {activeTab === "Favors" && (
+            <Measure>
+              <FavorsSection />
+            </Measure>
+          )}
+          {activeTab === "AI Tools" && (
+            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+          )}
+          {activeTab === "Advanced" && (
+            <AdvancedSection
+              settings={settings}
+              onSave={saveSettings}
+              saving={saving}
+              tailscale={tailscale}
+              onRefresh={loadAll}
+            />
+          )}
+        </>
+      )}
+    </Page>
   );
 }
 
-function AppearanceRow({
-  icon,
-  title,
-  control,
-}: {
-  icon: ReactNode;
-  title: string;
-  control: ReactNode;
-}) {
-  return (
-    <ListRow>
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-8 bg-surface-muted text-muted-foreground [&_svg]:size-4.5">
-        {icon}
-      </div>
-      <ListRowContent>
-        <ListRowTitle>{title}</ListRowTitle>
-      </ListRowContent>
-      <div className="shrink-0">{control}</div>
-    </ListRow>
-  );
-}
-
+/**
+ * The Appearance tab, on the kit's Form layout. The tab's body fills Form's
+ * rows slot — `FormRows` caps the reading measure and each `FormRow` carries
+ * one setting, label left and control right — while the Settings title and tab
+ * strip above stay the shared frame all six tabs render into.
+ *
+ * Rows rather than stacked fields, because a guardian returns here to change
+ * one setting at a time, and every row saves itself the moment it changes.
+ */
 function AppearanceSection() {
   const { t, i18n } = useTranslation("settings");
   const { theme, setTheme, themes, preference, setPreference } = useTheme();
+  const uid = useId();
 
   const currentLang: SupportedLanguage = (SUPPORTED_LANGUAGES as readonly string[]).includes(
     i18n.resolvedLanguage ?? "",
@@ -479,83 +462,93 @@ function AppearanceSection() {
     preference === "dark" ? <Moon /> : preference === "light" ? <Sun /> : <Monitor />;
 
   return (
-    <div className="space-y-6">
-      <div className="overflow-hidden rounded-8 border border-border bg-surface">
-        <List>
-          <AppearanceRow
-            icon={<Languages />}
-            title={t("appearance.language.title")}
-            control={
-              <Select
-                value={currentLang}
-                onValueChange={(next) => {
-                  void i18n.changeLanguage(next);
-                }}
-              >
-                <SelectTrigger className="w-44" aria-label={t("appearance.language.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <SelectItem key={lang} value={lang}>
-                      {LANGUAGE_LABELS[lang]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
+    <FormRows>
+      <FormRow>
+        <FormRowIcon>
+          <Languages />
+        </FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-language`}>{t("appearance.language.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select
+            value={currentLang}
+            onValueChange={(next) => {
+              void i18n.changeLanguage(next);
+            }}
+          >
+            {/* `aria-label` alongside the label element: a Radix trigger is a
+              `button`, and a button takes its accessible name from its own
+              content, so the visible label would leave the name reading as the
+              selected value. */}
+            <SelectTrigger id={`${uid}-language`} aria-label={t("appearance.language.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <SelectItem key={lang} value={lang}>
+                  {LANGUAGE_LABELS[lang]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
 
-          <AppearanceRow
-            icon={<Palette />}
-            title={t("appearance.theme.title")}
-            control={
-              <Select value={theme} onValueChange={(next) => setTheme(next)}>
-                <SelectTrigger className="w-44" aria-label={t("appearance.theme.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  {themes.map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {entry.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
-          />
+      <FormRow>
+        <FormRowIcon>
+          <Palette />
+        </FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-theme`}>{t("appearance.theme.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select value={theme} onValueChange={(next) => setTheme(next)}>
+            <SelectTrigger id={`${uid}-theme`} aria-label={t("appearance.theme.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {themes.map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  {entry.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
 
-          <AppearanceRow
-            icon={modeIcon}
-            title={t("appearance.mode.title")}
-            control={
-              <Select
-                value={preference}
-                onValueChange={(next) => setPreference(next as ThemePreference)}
-              >
-                <SelectTrigger className="w-44" aria-label={t("appearance.mode.title")}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper" align="end">
-                  <SelectItem value="system">
-                    <Monitor />
-                    {t("appearance.mode.system")}
-                  </SelectItem>
-                  <SelectItem value="light">
-                    <Sun />
-                    {t("appearance.mode.light")}
-                  </SelectItem>
-                  <SelectItem value="dark">
-                    <Moon />
-                    {t("appearance.mode.dark")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            }
-          />
-        </List>
-      </div>
-    </div>
+      <FormRow>
+        <FormRowIcon>{modeIcon}</FormRowIcon>
+        <FormRowHeading>
+          <FormRowLabel htmlFor={`${uid}-mode`}>{t("appearance.mode.title")}</FormRowLabel>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select
+            value={preference}
+            onValueChange={(next) => setPreference(next as ThemePreference)}
+          >
+            <SelectTrigger id={`${uid}-mode`} aria-label={t("appearance.mode.title")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              <SelectItem value="system">
+                <Monitor />
+                {t("appearance.mode.system")}
+              </SelectItem>
+              <SelectItem value="light">
+                <Sun />
+                {t("appearance.mode.light")}
+              </SelectItem>
+              <SelectItem value="dark">
+                <Moon />
+                {t("appearance.mode.dark")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
+    </FormRows>
   );
 }
 
@@ -637,7 +630,7 @@ function FavorRequestRow({
               {favorRequestStatusLabel(request)}
             </span>
           </div>
-          {summary && <p className="mt-1 text-body text-muted-foreground">{summary}</p>}
+          {summary && <p className="mt-1 text-ui text-muted-foreground">{summary}</p>}
           {fields.length > 0 && (
             <dl className="mt-3 grid gap-2 text-ui sm:grid-cols-2">
               {fields.map((field) => (
@@ -803,13 +796,15 @@ function FavorsSection() {
   const history = requests.filter((request) => request.status !== "pending");
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-section text-foreground">Favors</h2>
-        <p className="mt-1 text-body text-muted-foreground">
-          Balance, payments, and paid app actions settled through Rome Cloud.
-        </p>
-      </div>
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>Favors</SectionTitle>
+          <SectionDescription>
+            Balance, payments, and paid app actions settled through Rome Cloud.
+          </SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
@@ -844,7 +839,7 @@ function FavorsSection() {
         </Card>
       </div>
 
-      <section className="rounded-8 border border-border bg-surface">
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
         <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <h3 className="text-section text-foreground">Recharge</h3>
           <CreditCard className="size-4 text-muted-foreground" />
@@ -878,9 +873,9 @@ function FavorsSection() {
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
-      <section className="rounded-8 border border-border bg-surface">
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-section text-foreground">Awaiting your payment decision</h3>
         </div>
@@ -898,10 +893,10 @@ function FavorsSection() {
             />
           ))
         )}
-      </section>
+      </Section>
 
       {failed.length > 0 && (
-        <section className="rounded-8 border border-border bg-surface">
+        <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
           <div className="border-b border-border px-4 py-3">
             <h3 className="text-section text-foreground">Failed owner-side actions</h3>
           </div>
@@ -915,10 +910,10 @@ function FavorsSection() {
               onDecline={(next) => void resolveRequest(next, "decline")}
             />
           ))}
-        </section>
+        </Section>
       )}
 
-      <section className="rounded-8 border border-border bg-surface">
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-section text-foreground">Paid action requests</h3>
         </div>
@@ -936,9 +931,9 @@ function FavorsSection() {
             />
           ))
         )}
-      </section>
+      </Section>
 
-      <section className="rounded-8 border border-border bg-surface">
+      <Section className="gap-0 overflow-hidden rounded-12 border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-section text-foreground">Ledger</h3>
         </div>
@@ -967,8 +962,8 @@ function FavorsSection() {
             ))}
           </div>
         )}
-      </section>
-    </div>
+      </Section>
+    </Section>
   );
 }
 
@@ -1003,9 +998,12 @@ function AdvancedSection({
   }, []);
 
   return (
-    <div className="space-y-8">
-      <h2 className="text-section text-foreground">{t("advanced.title")}</h2>
-      {/* Not rendered in the Mac app. Its check and upgrade actions relay to
+    <Measure>
+      <Section className="gap-6">
+        <SectionHeader>
+          <SectionTitle>{t("advanced.title")}</SectionTitle>
+        </SectionHeader>
+        {/* Not rendered in the Mac app. Its check and upgrade actions relay to
           Rome Cloud, which resolves them against the account's *hosted*
           instance — a machine other than the one showing the page. The version
           card above them is read from the local build and is correct on
@@ -1016,26 +1014,15 @@ function AdvancedSection({
           This is a mitigation. It keys on which window is rendering, not on
           what kind of backend is behind the page, so the same dashboard opened
           in a browser at the loopback port still shows it. */}
-      {!isElectronShell() && (
-        <div className="border-b border-border pb-8">
-          <SystemUpgradeSection />
-        </div>
-      )}
-      <div className="border-b border-border pb-8">
+        {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
-      </div>
-      <div className="border-b border-border pb-8">
         <SystemDiagnosisSection />
-      </div>
-      <div className="border-b border-border pb-8">
         <ComputerUseSection />
-      </div>
-      <div className="border-b border-border pb-8">
         <PresentationModeSection />
-      </div>
-      <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
-      {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
-    </div>
+        <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
+        {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
+      </Section>
+    </Measure>
   );
 }
 
@@ -1048,17 +1035,53 @@ function PresentationModeSection() {
   const enabled = usePresentationMode();
 
   return (
-    <div>
-      <h2 className="text-section text-foreground">{t("advanced.presentationMode.title")}</h2>
-      <p className="mt-1 mb-4 text-body text-muted-foreground">
-        {t("advanced.presentationMode.description")}
-      </p>
-      <ToggleSwitch
+    <FormRows>
+      <SettingsToggleRow
+        title={t("advanced.presentationMode.title")}
+        description={t("advanced.presentationMode.description")}
+        label={t("advanced.presentationMode.toggleLabel")}
         checked={enabled}
         onChange={setPresentationMode}
-        label={t("advanced.presentationMode.toggleLabel")}
       />
-    </div>
+    </FormRows>
+  );
+}
+
+function SettingsToggleRow({
+  title,
+  description,
+  label,
+  checked,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description?: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const id = useId();
+  return (
+    <FormRow>
+      <FormRowHeading>
+        <FormRowLabel htmlFor={id}>{title}</FormRowLabel>
+        {description && <FormRowDescription>{description}</FormRowDescription>}
+        <FormRowLabel htmlFor={id} className="text-aux text-muted-foreground">
+          {label}
+        </FormRowLabel>
+      </FormRowHeading>
+      <FormRowControl>
+        <Switch
+          id={id}
+          aria-label={label}
+          checked={checked}
+          onCheckedChange={onChange}
+          disabled={disabled}
+        />
+      </FormRowControl>
+    </FormRow>
   );
 }
 
@@ -1083,13 +1106,15 @@ function DeveloperSettingsSection({
           {t("advanced.developerSettings.title")}
         </span>
       </summary>
-      <div className="mt-6 space-y-8">
-        <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-        <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+      <Section className="mt-3">
+        <FormRows>
+          <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+        </FormRows>
         {open && <RelayHealthSection />}
-      </div>
+      </Section>
     </details>
   );
 }
@@ -1112,16 +1137,14 @@ function FableAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-2 text-ui text-foreground">{t("advanced.fable.title")}</h3>
-      <p className="mb-4 text-aux text-muted-foreground">{t("advanced.fable.description")}</p>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.fable.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.fable.title")}
+      description={t("advanced.fable.description")}
+      label={t("advanced.fable.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1374,15 +1397,13 @@ function ModelSelectorAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-4 text-ui text-foreground">{t("advanced.modelSelector.title")}</h3>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.modelSelector.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.modelSelector.title")}
+      label={t("advanced.modelSelector.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1404,15 +1425,13 @@ function ImpersonationAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-4 text-ui text-foreground">{t("advanced.impersonation.title")}</h3>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.impersonation.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.impersonation.title")}
+      label={t("advanced.impersonation.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1434,16 +1453,14 @@ function AiToolUsageAdvancedSection({
   }
 
   return (
-    <div>
-      <h3 className="mb-2 text-ui text-foreground">{t("advanced.aiToolUsage.title")}</h3>
-      <p className="mb-4 text-aux text-muted-foreground">{t("advanced.aiToolUsage.description")}</p>
-      <ToggleSwitch
-        checked={enabled}
-        onChange={toggle}
-        disabled={saving}
-        label={t("advanced.aiToolUsage.toggleLabel")}
-      />
-    </div>
+    <SettingsToggleRow
+      title={t("advanced.aiToolUsage.title")}
+      description={t("advanced.aiToolUsage.description")}
+      label={t("advanced.aiToolUsage.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
   );
 }
 
@@ -1545,19 +1562,21 @@ function AccessControlSection({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <div>
-      <h2 className="text-section text-foreground">{t("publicAccess.title")}</h2>
-      <p className="mt-1 text-body text-muted-foreground">{t("publicAccess.description")}</p>
-      <div className="mt-6 space-y-6">
-        <AllowedCloudEmailsSection />
-        <Card>
-          <CardContent>
-            <TailscaleSection tailscale={tailscale} onRefresh={onRefresh} />
-            <TailnetRestrictionSection />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("publicAccess.title")}</SectionTitle>
+          <SectionDescription>{t("publicAccess.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <AllowedCloudEmailsSection />
+      <Card>
+        <CardContent>
+          <TailscaleSection tailscale={tailscale} onRefresh={onRefresh} />
+          <TailnetRestrictionSection />
+        </CardContent>
+      </Card>
+    </Section>
   );
 }
 

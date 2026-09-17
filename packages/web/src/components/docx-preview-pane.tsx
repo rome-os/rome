@@ -317,7 +317,7 @@ export function DocxPreviewPane({ assetUrl, title }: DocxPreviewPaneProps) {
                 <h3 className="text-section text-foreground">
                   {t("view.documentPreviewFailedTitle")}
                 </h3>
-                <p className="mt-2 text-body text-muted-foreground">
+                <p className="mt-2 text-ui text-muted-foreground">
                   {t("view.documentPreviewFailedDescription")}
                 </p>
               </>

@@ -105,6 +105,6 @@ Vertical rhythm needs no pairing table. Every line box and every control height 
 ## Examples
 
 - Positive: a `text-ui` label, a 32px `Select`, and a 16px trailing icon in one row under `items-center` and `gap-2`. The row is 32px because the `Select` is. Moving the row to `sm` moves the label and icon with it, since neither carries a size of its own.
-- Positive: an avatar at 24px, a `text-body` name, and a `text-aux` timestamp. The row is 24px, and the timestamp reads as annotation through ink rather than through a second row.
+- Positive: an avatar at 24px, a `text-ui` name, and a `text-aux` timestamp. The row is 24px, and the timestamp reads as annotation through ink rather than through a second row.
 - Negative: a `text-title` heading given a 28px `sm` button beside it. The heading's 24px box leaves the button 4px of visual lead, so the button reads as an afterthought at the size a title-led row calls for `md`.
 - Negative: a `text-aux` run raised to `text-ui` so it matches the button beside it. The row height does not change, because the button already set it. The only effect is one more thing at reading weight.

@@ -43,11 +43,25 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./TypographyPage")),
       },
       {
+        path: "/dev/markdown-rhythm",
+        title: "Markdown rhythm",
+        description:
+          "The chat Markdown rhythm as a specimen: one long reply through ChatMarkdown at standard and compact density, with every block gap and type size read back from the rendered DOM.",
+        Component: lazy(() => import("./MarkdownRhythmPage")),
+      },
+      {
         path: "/dev/gallery",
         title: "Component gallery",
         description:
           "Live specimens of every ui/ and @rome-os/ui primitive — variants, sizes, and states, with theme and mode switches.",
         Component: lazy(() => import("./gallery/ComponentGalleryPage")),
+      },
+      {
+        path: "/dev/layouts",
+        title: "Page layouts",
+        description:
+          "The page layouts in @rome-os/ui, one at a time against fake content, with the usage statement and the theme and mode switches.",
+        Component: lazy(() => import("./LayoutsPage")),
       },
       {
         path: "/dev/connections",

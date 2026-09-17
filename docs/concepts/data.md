@@ -22,7 +22,9 @@ Projects are working directories where the agent does its work — writing code,
 
 **Contracts:**
 
-- A project can have a memory summary. The first paragraph of the summary always loads into agent context as a brief description. The rest is available for deeper reference (repo structure, commands, conventions).
+- Every project can have a one-line memory summary describing what it is. The main agent receives all project summaries, not just the selected project's summary.
+- The first paragraph supplies the summary, capped at 160 Unicode code points including a trailing ellipsis when truncated. Separate this short introduction from detailed notes with a blank line. Consecutive list items without blank lines count as one paragraph.
+- Detailed notes remain available on demand and stay out of the automatic project context.
 
 **Not to be confused with:**
 

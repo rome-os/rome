@@ -45,7 +45,7 @@ export function AppAccessPanel({
       <h1 className="mt-4 text-title text-foreground">
         {t("accessGate.title", { name: appName })}
       </h1>
-      <p className="mt-2 text-body text-muted-foreground">
+      <p className="mt-2 text-ui text-muted-foreground">
         {visitorEmail
           ? t("accessGate.deniedDescription", { email: visitorEmail })
           : t("accessGate.description")}

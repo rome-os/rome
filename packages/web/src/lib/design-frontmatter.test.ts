@@ -178,7 +178,7 @@ const COLOR_SEMANTICS: Record<string, readonly string[]> = {
 };
 
 /** Roles carrying a size; `serif` and `mono` declare a family and nothing else. */
-const SIZED_ROLES = ["display", "title", "section", "body", "ui", "badge", "aux"] as const;
+const SIZED_ROLES = ["display", "title", "section", "composer", "ui", "badge", "aux"] as const;
 
 /** `rounded.<slug>` → the custom property holding it. */
 const RADIUS_PROPERTIES: Record<string, string> = {

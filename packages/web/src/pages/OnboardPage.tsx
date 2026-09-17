@@ -46,7 +46,7 @@ export default function OnboardPage() {
           <RomeLogo className="h-7 w-7" aria-hidden />
           <h1 className="text-title">{t("page.title")}</h1>
         </div>
-        <p className="mb-7 text-center text-body text-muted-foreground">{t("account.tagline")}</p>
+        <p className="mb-7 text-center text-ui text-muted-foreground">{t("account.tagline")}</p>
         <div className="rounded-12 border border-border bg-surface p-6 shadow-1 sm:p-8">
           <AccountStep />
         </div>

@@ -140,7 +140,7 @@ export function ShareBar({
       {/* Header */}
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="text-body text-foreground">
+          <h2 className="text-section text-foreground">
             {t("share.createTitle", "Create a share link")}
           </h2>
           <p className="text-ui text-muted-foreground">{t("share.selectedCount", { count })}</p>
@@ -210,7 +210,7 @@ export function ShareBar({
                         </span>
                       </div>
                     ) : (
-                      <div className="text-body text-muted-foreground">{desc}</div>
+                      <div className="text-ui text-muted-foreground">{desc}</div>
                     )}
                   </div>
                   <Switch

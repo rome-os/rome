@@ -9,6 +9,9 @@
    overrides). Kept out of the canon above so app bundles that render no prose
    don't carry it — the dashboard does, so it opts in here. */
 @import "@rome-os/ui/markdown.css";
+/* Recorded apps ship their own Shadow DOM styles. Their compiled bundles
+   must not contribute utility classes to the dashboard stylesheet. */
+@source not "../mock/public/recorded-apps";
 @plugin "@tailwindcss/typography";
 
 /* ════════════════════════ THEME CONTRACT ════════════════════════
@@ -64,8 +67,10 @@
   --tw-prose-td-borders: var(--border);
 }
 
-/* Chat owns its collapsible wrapper around the shared Markdown cards. Keep the
-   wrapper in prose rhythm, while the nested card and duplicate label go flat. */
+/* Chat wraps the shared Markdown cards in its own collapsible card. The
+   wrapper keeps the prose rhythm; the nested Streamdown card hands its frame
+   to the wrapper and goes flush inside it, and its language label, which the
+   wrapper's header already says, goes away. */
 .rome-markdown [data-chat-code-block="code"] {
   margin-block: var(--markdown-code-block-space-block);
 }
@@ -75,12 +80,22 @@
 }
 
 .rome-markdown
-  [data-chat-code-block-body]
-  > :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
+  [data-chat-code-block]
+  :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
   margin-block: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
 }
 
-.rome-markdown > [data-chat-code-block] + * {
+/* The canvas keeps its own `--background`, for the reason markdown.css gives,
+   and reaches the wrapper's edges, which clip it to their corners. */
+.rome-markdown [data-chat-code-block] [data-streamdown="mermaid-block"] > :last-child {
+  border: 0;
+  border-radius: 0;
+}
+
+.rome-markdown > [data-chat-code-block] + :not([data-streamdown^="heading-"]) {
   margin-block-start: 0;
 }
 

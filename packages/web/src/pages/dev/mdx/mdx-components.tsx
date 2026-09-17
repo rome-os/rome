@@ -24,15 +24,15 @@ function H3(props: ComponentPropsWithoutRef<"h3">) {
 }
 
 function P(props: ComponentPropsWithoutRef<"p">) {
-  return <p className="my-3 text-body text-muted-foreground" {...props} />;
+  return <p className="my-3 text-ui text-muted-foreground" {...props} />;
 }
 
 function Ul(props: ComponentPropsWithoutRef<"ul">) {
-  return <ul className="my-3 list-disc pl-6 text-body text-muted-foreground" {...props} />;
+  return <ul className="my-3 list-disc pl-6 text-ui text-muted-foreground" {...props} />;
 }
 
 function Ol(props: ComponentPropsWithoutRef<"ol">) {
-  return <ol className="my-3 list-decimal pl-6 text-body text-muted-foreground" {...props} />;
+  return <ol className="my-3 list-decimal pl-6 text-ui text-muted-foreground" {...props} />;
 }
 
 function Li(props: ComponentPropsWithoutRef<"li">) {
@@ -78,7 +78,7 @@ function Pre(props: ComponentPropsWithoutRef<"pre">) {
 function Blockquote(props: ComponentPropsWithoutRef<"blockquote">) {
   return (
     <blockquote
-      className="my-4 border-l-2 border-border-strong pl-4 text-body text-muted-foreground italic"
+      className="my-4 border-l-2 border-border-strong pl-4 text-ui text-muted-foreground italic"
       {...props}
     />
   );
@@ -133,7 +133,7 @@ export function Invariant({ children }: { children: ReactNode }) {
   return (
     <aside className="my-4 rounded-12 border border-border-strong bg-surface p-4">
       <div className="mb-1 text-badge text-subtle-foreground uppercase">Invariant</div>
-      <div className="text-body text-foreground">{children}</div>
+      <div className="text-ui text-foreground">{children}</div>
     </aside>
   );
 }

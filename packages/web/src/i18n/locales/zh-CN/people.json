@@ -33,7 +33,10 @@
     "whatsapp": "WhatsApp",
     "discord": "Discord",
     "webchat": "网页聊天",
-    "linkedin": "领英"
+    "linkedin": "领英",
+    "wechat": "微信",
+    "email": "邮件",
+    "feishu": "飞书"
   },
   "filters": {
     "groupLabel": "按亲密度筛选人物",

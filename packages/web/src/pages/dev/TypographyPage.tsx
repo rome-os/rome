@@ -29,15 +29,15 @@ import { DEFAULT_THEME_NAME, type ThemePreference } from "@/lib/theme";
 // zh-CN via fixed-language translators, independent of the app language), so
 // before/after comparisons over time measure typography, not content.
 //
-// There is no body-cjk variant: per-script leading is not a semantic choice a
-// call site can make (Rome's surfaces are bilingual within a single element),
-// so Chinese copy renders with the same `body` role as English.
+// There is no per-script variant: leading is not a semantic choice a call site
+// can make (Rome's surfaces are bilingual within a single element), so Chinese
+// copy renders with the same role as English.
 
 // The kit deliberately doesn't export its `TYPOGRAPHY_ROLES` list (it isn't
 // published API), so the specimen carries its own copy — and
 // `TypographyPage.test.ts` asserts it stays equal to the roles the kit
 // stylesheet actually declares, in both directions.
-export const ROLES = ["display", "title", "section", "body", "ui", "badge", "aux"] as const;
+export const ROLES = ["display", "title", "section", "composer", "ui", "badge", "aux"] as const;
 type Role = (typeof ROLES)[number];
 
 // Literal class names so Tailwind's scanner sees them (a computed
@@ -46,7 +46,7 @@ export const ROLE_CLASS: Record<Role, string> = {
   display: "text-display",
   title: "text-title",
   section: "text-section",
-  body: "text-body",
+  composer: "text-composer",
   ui: "text-ui",
   badge: "text-badge",
   aux: "text-aux",
@@ -192,8 +192,6 @@ function buildRoleSamples(): RoleSampleDef[] {
   const zhChat = zh("chat");
   const enCommon = en("common");
   const zhCommon = zh("common");
-  const enApps = en("apps");
-  const zhApps = zh("apps");
   return [
     {
       role: "display",
@@ -219,14 +217,14 @@ function buildRoleSamples(): RoleSampleDef[] {
       ],
     },
     {
-      role: "body",
-      label: "Body",
-      note: "Chinese renders with the same body role — there is no CJK leading variant. These are among the longest real sentences in the app, so this is the honest test of leading.",
+      role: "composer",
+      label: "Composer",
+      note: "The chat composer only. Its 16px matches the message the composer produces, which Markdown renders at the same size — every other surface reads UI. Chinese renders with the same role; there is no CJK leading variant.",
       lines: [
-        { lang: "en", text: enApps("sections.my.empty") },
-        { lang: "zh", text: zhApps("sections.my.empty") },
-        { lang: "en", text: enChat("errors.allProvidersQuotaExhausted.description") },
-        { lang: "zh", text: zhChat("errors.allProvidersQuotaExhausted.description") },
+        { lang: "en", text: enChat("composer.placeholderDefault") },
+        { lang: "zh", text: zhChat("composer.placeholderDefault") },
+        { lang: "en", text: enChat("composer.placeholderWithUploads") },
+        { lang: "zh", text: zhChat("composer.placeholderWithUploads") },
       ],
     },
     {
@@ -435,7 +433,7 @@ function HomeSample() {
             <span className="text-aux text-foreground">{column.t("empty.pinnedChats")}</span>
             <span className="text-aux tabular-nums text-subtle-foreground">3</span>
           </div>
-          <p className="mt-3 max-w-md text-body text-foreground">
+          <p className="mt-3 max-w-md text-ui text-foreground">
             {column.t("errors.allProvidersQuotaExhausted.description")}
           </p>
         </div>

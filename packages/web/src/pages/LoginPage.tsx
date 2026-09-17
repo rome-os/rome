@@ -109,7 +109,7 @@ export default function LoginPage() {
       </div>
       <div className="w-full max-w-sm">
         <h1 className="mb-2 text-center text-title text-foreground">{t("login.title")}</h1>
-        <p className="mb-8 text-center text-body text-muted-foreground">
+        <p className="mb-8 text-center text-ui text-muted-foreground">
           {t(dashboardVisitorAccess ? "login.descriptionShared" : "login.description")}
         </p>
 
