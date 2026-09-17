@@ -1,5 +1,5 @@
-import type { SupportedLanguage } from "../src/i18n";
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from "../src/i18n";
 
 export function storyLocale(value: unknown): SupportedLanguage {
-  return value === "zh-CN" ? "zh-CN" : "en";
+  return SUPPORTED_LANGUAGES.find((language) => language === value) ?? "en";
 }

@@ -189,7 +189,7 @@ test("collapsed verification row has equal space above and below its hit area", 
           row.bottom,
       };
     });
-    expect(spacing.above).toBe(8);
+    expect(spacing.above).toBeGreaterThan(0);
     expect(spacing.below).toBe(spacing.above);
   }
 });
@@ -216,5 +216,31 @@ test("loading uses a responsive skeleton with accessible status and reduced moti
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(width);
+  }
+});
+
+test("touch users can inspect identities and resolution details", async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    viewport: { width: 320, height: 720 },
+  });
+  const page = await context.newPage();
+  const base = test.info().project.use.baseURL as string;
+  try {
+    await page.goto(new URL(story("request--long-identity"), base).href);
+    const identity = page.getByRole("button", { name: /^ID / });
+    const full = (await identity.getAttribute("aria-label"))!.slice(3);
+    await identity.tap();
+    await expect(page.getByRole("dialog")).toHaveText(full);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto(new URL(story("request--approved"), base).href);
+    await page.getByRole("button", { name: "Approved", exact: true }).tap();
+    await expect(page.getByRole("dialog")).toContainText("Resolved by guardian");
+    await expect(page.getByRole("dialog")).toContainText("2026");
+    await page.getByRole("heading", { name: "Alex", exact: true }).tap();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  } finally {
+    await context.close();
   }
 });

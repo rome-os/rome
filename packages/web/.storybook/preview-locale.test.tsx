@@ -2,8 +2,9 @@
 import { afterEach, expect, test, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import i18n from "../src/i18n";
+import i18n, { SUPPORTED_LANGUAGES } from "../src/i18n";
 import { PairingCodeSection } from "../src/components/pairing/pairing-views";
+import { storyLocale } from "./locale";
 import { Locale } from "./preview";
 
 afterEach(async () => {
@@ -38,4 +39,9 @@ test("locale updates existing components without resetting an expanded code sect
   view.rerender(<Locale locale="en">{content}</Locale>);
   await screen.findByRole("button", { name: "Copy" });
   expect(view.container.querySelector("details")?.open).toBe(true);
+});
+
+test("the toolbar accepts every supported language and falls back for invalid globals", () => {
+  for (const language of SUPPORTED_LANGUAGES) expect(storyLocale(language)).toBe(language);
+  for (const value of [undefined, null, "invalid", 42]) expect(storyLocale(value)).toBe("en");
 });

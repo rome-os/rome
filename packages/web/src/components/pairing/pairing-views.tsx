@@ -1,9 +1,10 @@
-import { cloneElement, useRef, type ReactElement, type ReactNode } from "react";
+import { cloneElement, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Check, ChevronRight, Copy, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger, PopoverArrow } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
@@ -13,6 +14,57 @@ import {
   DialogFooter,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+const ID_TRUNCATION_THRESHOLD = 24;
+const ID_PREFIX_LENGTH = 12;
+const ID_SUFFIX_LENGTH = 8;
+const detailSurface = {
+  side: "top" as const,
+  align: "center" as const,
+  sideOffset: 4,
+  collisionPadding: 16,
+  className:
+    "block w-fit max-w-[min(20rem,calc(100vw-2rem))] break-all rounded-8 bg-foreground px-3 py-1 text-aux text-background shadow-none ring-0",
+};
+
+function PairingDetail({
+  label,
+  detail,
+  children,
+  className = "",
+}: {
+  label: string;
+  detail: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip open={!open && tooltipOpen} onOpenChange={setTooltipOpen}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Badge
+              asChild
+              variant="outline"
+              className={`min-w-0 max-w-full gap-1 whitespace-nowrap outline-none outline-1 outline-transparent focus-visible:outline-solid focus-visible:-outline-offset-1 focus-visible:outline-ring/50 ${className}`}
+            >
+              <button type="button" aria-label={label}>
+                {children}
+              </button>
+            </Badge>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent {...detailSurface}>{detail}</TooltipContent>
+      </Tooltip>
+      <PopoverContent {...detailSurface} aria-label={label}>
+        {detail}
+        <PopoverArrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 interface PairingAccount {
   name: string;
@@ -58,109 +110,92 @@ export function PairingRequestCard({
     maximumFractionDigits: 1,
   }).format(minutes >= 60 ? minutes / 60 : minutes);
   return (
-    <section
-      aria-label={t("pairing.account", { account: `${name} (${accountId})` })}
-      className="@container flex min-w-0 flex-col gap-3 rounded-8 border border-border bg-surface p-4 text-foreground"
-    >
-      <div className="grid grid-cols-1 gap-3 @min-[28rem]:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="break-words text-title [overflow-wrap:anywhere]">{name}</h3>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Badge
-                        variant="outline"
-                        tabIndex={0}
-                        aria-label={`ID ${accountId}`}
-                        className="min-w-0 max-w-full gap-1 whitespace-nowrap text-muted-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
-                      >
-                        {accountId.length > 24 ? (
-                          <>
-                            <span className="shrink-0">ID</span>
-                            <span className="flex min-w-0">
-                              <span className="truncate">{accountId.slice(0, 12)}</span>
-                              <span className="shrink-0">…{accountId.slice(-8)}</span>
-                            </span>
-                          </>
-                        ) : (
-                          `ID ${accountId}`
-                        )}
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      sideOffset={4}
-                      className="max-w-[min(20rem,calc(100vw-2rem))] break-all"
-                    >
-                      {accountId}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+    <TooltipProvider delayDuration={150}>
+      <section
+        aria-label={t("pairing.account", { account: `${name} (${accountId})` })}
+        className="@container flex min-w-0 flex-col gap-3 rounded-8 border border-border bg-surface p-4 text-foreground"
+      >
+        <div className="grid grid-cols-1 gap-3 @min-[28rem]:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="flex min-w-0 flex-col gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="break-words text-title [overflow-wrap:anywhere]">{name}</h3>
+                  <PairingDetail
+                    label={`ID ${accountId}`}
+                    detail={accountId}
+                    className="text-muted-foreground"
+                  >
+                    {accountId.length > ID_TRUNCATION_THRESHOLD ? (
+                      <>
+                        <span className="shrink-0">ID</span>
+                        <span className="flex min-w-0" aria-hidden="true">
+                          <span className="overflow-hidden">
+                            {accountId.slice(0, ID_PREFIX_LENGTH)}
+                          </span>
+                          <span className="shrink-0">…{accountId.slice(-ID_SUFFIX_LENGTH)}</span>
+                        </span>
+                      </>
+                    ) : (
+                      `ID ${accountId}`
+                    )}
+                  </PairingDetail>
+                </div>
+                <p className="text-ui text-muted-foreground">{channel}</p>
               </div>
-              <p className="text-ui text-muted-foreground">{channel}</p>
             </div>
+            <p className="text-aux text-muted-foreground">
+              {t("pairing.requested", { time: new Date(createdAt).toLocaleString(locale) })}
+              {" · "}
+              {t("pairing.validity", { duration })}
+            </p>
           </div>
-          <p className="text-aux text-muted-foreground">
-            {t("pairing.requested", { time: new Date(createdAt).toLocaleString(locale) })}
-            {" · "}
-            {t("pairing.validity", { duration })}
-          </p>
+          {status === "pending" ? (
+            <div
+              className="flex flex-wrap items-start gap-2 @min-[28rem]:self-center"
+              aria-busy={!!busy}
+            >
+              <Button disabled={!!busy} onClick={onApprove}>
+                {t(busy === "approve" ? "pairing.approving" : "pairing.approve")}
+              </Button>
+              <Button variant="outline" disabled={!!busy} onClick={onReject}>
+                {t(busy === "reject" ? "pairing.rejecting" : "pairing.reject")}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex min-h-[var(--control-h-md)] self-start items-center @min-[28rem]:self-center @min-[28rem]:justify-end">
+              {resolvedBy ? (
+                <PairingDetail
+                  label={t(`pairing.${status}`)}
+                  detail={t("pairing.resolved", {
+                    actor: resolvedBy,
+                    time: resolvedAt ? new Date(resolvedAt).toLocaleString(locale) : "",
+                  })}
+                >
+                  {status === "approved" && <Check className="size-3.5" aria-hidden="true" />}
+                  {t(`pairing.${status}`)}
+                </PairingDetail>
+              ) : (
+                <Badge variant="outline" className="shrink-0 gap-1">
+                  {status === "approved" && <Check className="size-3.5" aria-hidden="true" />}
+                  {t(`pairing.${status}`)}
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
-        {status === "pending" ? (
-          <div
-            className="flex flex-wrap items-start gap-2 @min-[28rem]:self-center"
-            aria-busy={!!busy}
-          >
-            <Button disabled={!!busy} onClick={onApprove}>
-              {t(busy === "approve" ? "pairing.approving" : "pairing.approve")}
-            </Button>
-            <Button variant="outline" disabled={!!busy} onClick={onReject}>
-              {t(busy === "reject" ? "pairing.rejecting" : "pairing.reject")}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex min-h-[var(--control-h-md)] self-start items-center @min-[28rem]:self-center @min-[28rem]:justify-end">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Badge
-                    variant="outline"
-                    tabIndex={resolvedBy ? 0 : undefined}
-                    className="shrink-0 gap-1 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
-                  >
-                    {status === "approved" && <Check className="size-3.5" aria-hidden="true" />}
-                    {t(`pairing.${status}`)}
-                  </Badge>
-                </TooltipTrigger>
-                {resolvedBy && (
-                  <TooltipContent
-                    sideOffset={4}
-                    className="max-w-[min(20rem,calc(100vw-2rem))] break-words"
-                  >
-                    {t("pairing.resolved", {
-                      actor: resolvedBy,
-                      time: resolvedAt ? new Date(resolvedAt).toLocaleString(locale) : "",
-                    })}
-                  </TooltipContent>
-                )}
-              </Tooltip>
-            </TooltipProvider>
+        {error && (
+          <p role="alert" className="text-ui text-destructive">
+            {t("pairing.resolveFailed")}
+          </p>
+        )}
+        {status === "pending" && children && (
+          <div className="border-t border-border pt-2 has-[details:not([open])]:-mb-2">
+            {children}
           </div>
         )}
-      </div>
-      {error && (
-        <p role="alert" className="text-ui text-destructive">
-          {t("pairing.resolveFailed")}
-        </p>
-      )}
-      {status === "pending" && children && (
-        <div className="border-t border-border pt-2 has-[details:not([open])]:-mb-2">
-          {children}
-        </div>
-      )}
-    </section>
+      </section>
+    </TooltipProvider>
   );
 }
 
@@ -172,7 +207,6 @@ export interface PairingCodeSectionProps {
   channel: string;
   accountName: string;
   state: PairingCodeState;
-  defaultOpen?: boolean;
   onCopy: () => void;
   onRetry: () => void;
 }
@@ -181,13 +215,12 @@ export function PairingCodeSection({
   channel,
   accountName,
   state,
-  defaultOpen = false,
   onCopy,
   onRetry,
 }: PairingCodeSectionProps) {
   const { t } = useTranslation("activity");
   return (
-    <details className="group" open={defaultOpen || undefined}>
+    <details className="group">
       <summary className="flex min-h-[var(--control-h-md)] cursor-pointer list-none items-center gap-2 rounded-4 text-ui text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-4 shrink-0 group-open:rotate-90" aria-hidden="true" />
         {t("pairing.codeAlternative")}

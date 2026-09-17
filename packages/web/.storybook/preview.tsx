@@ -30,7 +30,6 @@ export function ColorMode({ mode, children }: { mode: ThemePreference; children:
 export function Locale({ locale, children }: { locale: string; children: ReactNode }) {
   useLayoutEffect(() => {
     void i18n.changeLanguage(locale);
-    document.documentElement.dir = i18n.dir(locale);
   }, [locale]);
   return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
 }

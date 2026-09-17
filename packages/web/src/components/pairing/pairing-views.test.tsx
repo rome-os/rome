@@ -1,5 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import userEvent from "@testing-library/user-event";
 import i18n from "@/i18n";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { PairingCodeSection, PairingConfirmationDialog, PairingRequestCard } from "./pairing-views";
@@ -34,17 +35,18 @@ describe("pairing presentation without query or router providers", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
   });
 
-  it("delegates retry and copy while rendering the supplied feedback", () => {
+  it("delegates retry and copy while rendering the supplied feedback", async () => {
+    const user = userEvent.setup();
     const onRetry = rs.fn();
     const onCopy = rs.fn();
     const props = {
       channel: "Telegram",
       accountName: "Alice",
-      defaultOpen: true,
       onCopy,
       onRetry,
     };
     const view = render(<PairingCodeSection {...props} state={{ kind: "error" }} />);
+    await user.click(screen.getByText("Pair with a verification code"));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
     view.rerender(
@@ -66,6 +68,9 @@ describe("pairing presentation without query or router providers", () => {
     view.rerender(<PairingCodeSection {...props} state={{ kind: "locked" }} />);
     expect(screen.queryByText("RP-12AB34CD")).toBeNull();
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    await user.click(screen.getByText("Pair with a verification code"));
+    view.rerender(<PairingCodeSection {...props} state={{ kind: "loading" }} />);
+    expect(view.container.querySelector("details")?.open).toBe(false);
   });
 
   it("prevents dismissal while approval is in flight and leaves failure retryable", () => {
