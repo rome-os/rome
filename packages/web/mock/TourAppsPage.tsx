@@ -18,8 +18,11 @@ export default function TourAppsPage() {
   const navigate = useNavigate();
   const [active, setActive] = useState(false);
   const [spots, setSpots] = useState<Spotlight[]>([]);
+  const [copyHeight, setCopyHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
   const pageRef = useRef<HTMLDivElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
+  const copyRef = useRef<HTMLDivElement>(null);
   const maskId = useId();
   const titleId = useId();
   const parentOrigin = document.referrer ? new URL(document.referrer).origin : null;
@@ -48,20 +51,26 @@ export default function TourAppsPage() {
         const tile = page.querySelector<HTMLAnchorElement>(`a[href="${app.tile}"]`)?.parentElement;
         if (!tile) return [];
         tile.dataset.tourHighlight = "true";
-        highlighted.add(tile);
+        if (!highlighted.has(tile)) {
+          highlighted.add(tile);
+          resize.observe(tile);
+        }
         const rect = tile.getBoundingClientRect();
         return [
           { ...app, x: rect.x - 4, y: rect.y - 4, width: rect.width + 8, height: rect.height + 8 },
         ];
       });
       setSpots((previous) => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
+      setCopyHeight(copyRef.current?.getBoundingClientRect().height ?? 0);
+      setViewportHeight(window.innerHeight);
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(measure);
     };
     const resize = new ResizeObserver(schedule);
-    resize.observe(page);
+    if (page.firstElementChild) resize.observe(page.firstElementChild);
+    if (copyRef.current) resize.observe(copyRef.current);
     const mutation = new MutationObserver(schedule);
     mutation.observe(page, { childList: true, subtree: true });
     window.addEventListener("resize", schedule);
@@ -96,7 +105,12 @@ export default function TourAppsPage() {
         bottom: Math.max(...spots.map((spot) => spot.y + spot.height)) + 8,
       }
     : null;
-  const top = group?.y ?? 300;
+  const above = (group?.y ?? 0) - copyHeight - 24;
+  const below = (group?.bottom ?? 0) + 24;
+  const fitsAbove = above >= 24 && above + copyHeight <= viewportHeight - 24;
+  const fitsBelow = below >= 24 && below + copyHeight <= viewportHeight - 24;
+  // Clamping to the viewport would overlap the tiles in short or scrolled frames.
+  const copyTop = !group ? 24 : !fitsAbove && fitsBelow ? below : above;
   return (
     <>
       <div ref={pageRef} style={{ display: "contents" }} inert={active}>
@@ -164,7 +178,11 @@ export default function TourAppsPage() {
                 }}
               />
             )}
-            <div className="tour-apps-copy" style={{ top: Math.max(24, top - 210) }}>
+            <div
+              ref={copyRef}
+              className="tour-apps-copy"
+              style={{ top: copyTop, visibility: copyHeight ? "visible" : "hidden" }}
+            >
               <h2 id={titleId}>Rome App is the new way to interact with your agent.</h2>
               <p>Pick an app. See what your agent can do.</p>
               <button type="button" onClick={() => finish(null)}>
