@@ -29,7 +29,13 @@
     "add": "添加",
     "newApps": "有新应用可用",
     "new": "新",
-    "appDisabled": "已停用"
+    "appDisabled": "已停用",
+    "recent": "最近",
+    "recentApps": "最近使用的应用",
+    "showMore": "展开更多",
+    "showLess": "收起",
+    "moreRecentApps": "更多最近应用",
+    "notOpened": "尚未打开"
   },
   "recentChats": {
     "title": "最近对话",
