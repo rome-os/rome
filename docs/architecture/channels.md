@@ -28,7 +28,7 @@ LinkedIn replies use the shared [People outbox](../concepts/people.md#outbox) an
 
 WeChat has two connections. The `wechat` service is Tencent's official bot channel: it sends and receives, scoped to a bot. The `wechat_user` service is the guardian's own account, read through the official desktop client Rome runs in its own container, on the desktop it serves at `/desktop`.
 
-The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in. The container carries the capability the debugger needs (`SYS_ADMIN`, AppArmor unconfined) and gdb traces a child it launched, so the runtime launches the client under gdb from inside the container, catches the key the first login derives, and reads back only the passphrase. No host-root script or namespace crossing is involved; the client, the store, and the reads are all local to the container.
+The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in. The container carries the capability the debugger needs (`SYS_ADMIN`, AppArmor unconfined) and gdb traces a child it launched, so the runtime launches the client under gdb from inside the container, catches the key the first login derives, and reads back only the passphrase. No host-root script or namespace crossing is involved. The client, the store, and the reads are all local to the container.
 
 ### Invariants
 
