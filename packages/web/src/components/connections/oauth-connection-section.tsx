@@ -9,7 +9,7 @@ import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 import { isElectronShell } from "@/lib/electron-shell";
-import type { SetupState } from "@/lib/setup-api";
+import { isTerminalSetup, type SetupState } from "@/lib/setup-api";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
 /**
@@ -148,7 +148,7 @@ export function OAuthConnectionSection({
     </div>
   ) : null;
   const connectedSetupState: SetupState | null =
-    setup.state && !["done", "cancelled"].includes(setup.state.status) ? setup.state : null;
+    setup.state && !isTerminalSetup(setup.state) ? setup.state : null;
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.

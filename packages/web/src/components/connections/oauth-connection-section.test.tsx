@@ -217,13 +217,21 @@ describe("OAuthConnectionSection", () => {
     expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
 
-  it("restores Reconnect after a connected setup reaches a terminal state", async () => {
+  it.each([
+    "done",
+    "failed",
+    "cancelled",
+  ] as const)("restores Reconnect after a connected setup reaches %s", async (status) => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           state: {
-            status: "done",
-            conferral: { summary: { title: "Slack connected" } },
+            status,
+            ...(status === "done"
+              ? { conferral: { summary: { title: "Slack connected" } } }
+              : status === "failed"
+                ? { reason: "Setup failed" }
+                : {}),
           },
         }),
         { status: 200 },

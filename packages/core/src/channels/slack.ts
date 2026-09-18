@@ -10,8 +10,10 @@ const SLACK_TEXT_CHUNK_LENGTH = 4_000;
 const SLACK_INITIAL_STARTUP_GRACE_MS = 30_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 const SLACK_API_TIMEOUT_MS = 15_000;
+export const SLACK_HANDLER_REBUILD_GRACE_MS = 2 * 60_000;
 export const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
 export const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
+const SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS = 100;
 
 export const SLACK_REQUIRED_BOT_SCOPES = ["app_mentions:read", "chat:write", "im:history"] as const;
 
@@ -55,6 +57,10 @@ export interface SlackRequestVerification {
  */
 export class SlackIngress {
   private readonly handlers = new Map<string, SlackIngressHandler[]>();
+  private readonly expectedWorkspaces = new Map<
+    string,
+    { references: number; expiry?: ReturnType<typeof setTimeout> }
+  >();
   private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate" | "retry">>();
   private readonly dedup: DeferredInboundDedup;
   private readonly now: () => number;
@@ -150,6 +156,39 @@ export class SlackIngress {
     this.initialRegistrationComplete = true;
   }
 
+  /**
+   * Keep a known authorized workspace retryable while its Talk epoch rebuilds.
+   * A delayed release covers Disconnected backoff; credential teardown releases
+   * immediately so a revoked grant cannot create a permanent retry storm.
+   */
+  expectWorkspace(teamId: string): (options?: { graceMs?: number }) => void {
+    const current = this.expectedWorkspaces.get(teamId) ?? { references: 0 };
+    if (current.expiry) clearTimeout(current.expiry);
+    delete current.expiry;
+    current.references++;
+    this.expectedWorkspaces.set(teamId, current);
+    let active = true;
+    return (options = {}) => {
+      if (!active) return;
+      active = false;
+      const expected = this.expectedWorkspaces.get(teamId);
+      if (!expected) return;
+      expected.references = Math.max(0, expected.references - 1);
+      if (expected.references > 0) return;
+      const graceMs = options.graceMs ?? 0;
+      if (graceMs <= 0) {
+        this.expectedWorkspaces.delete(teamId);
+        return;
+      }
+      expected.expiry = setTimeout(() => {
+        if (this.expectedWorkspaces.get(teamId) === expected && expected.references === 0) {
+          this.expectedWorkspaces.delete(teamId);
+        }
+      }, graceMs);
+      expected.expiry.unref();
+    };
+  }
+
   /** Dispatch one already-authenticated Events API envelope. */
   async dispatch(
     envelope: SlackEventEnvelope,
@@ -165,6 +204,7 @@ export class SlackIngress {
     const handlers = this.handlers.get(envelope.team_id);
     if (!handlers || handlers.length === 0) {
       return this.pendingRegistrations > 0 ||
+        this.expectedWorkspaces.has(envelope.team_id) ||
         !this.initialRegistrationComplete ||
         this.now() < this.initialStartupDeadline
         ? "starting"
@@ -285,11 +325,13 @@ async function slackApiCall(
 }
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(signal.reason);
+  const abortError = () =>
+    signal?.reason instanceof Error ? signal.reason : new Error("Slack API wait aborted.");
+  if (signal?.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timeout);
-      reject(signal?.reason);
+      reject(abortError());
     };
     const timeout = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -382,11 +424,23 @@ function slackTimestamp(ts: string): Date {
 }
 
 function decodeSlackText(text: string): string {
-  return text.replace(/&(amp|lt|gt);/g, (_entity, name: string) => {
-    if (name === "amp") return "&";
-    if (name === "lt") return "<";
-    return ">";
-  });
+  return text
+    .replace(
+      /<@([A-Z0-9]+)(?:\|([^>]+))?>/gi,
+      (_match, id: string, label?: string) => `@${label ?? id}`,
+    )
+    .replace(
+      /<#([A-Z0-9]+)(?:\|([^>]+))?>/gi,
+      (_match, id: string, label?: string) => `#${label ?? id}`,
+    )
+    .replace(/<(https?:\/\/[^|>]+)(?:\|([^>]+))?>/gi, (_match, url: string, label?: string) =>
+      label && label !== url ? `${label} (${url})` : url,
+    )
+    .replace(/&(amp|lt|gt);/g, (_entity, name: string) => {
+      if (name === "amp") return "&";
+      if (name === "lt") return "<";
+      return ">";
+    });
 }
 
 function splitSlackText(text: string): string[] {
@@ -426,7 +480,6 @@ export class SlackAdapter {
       api?: SlackWebApi;
       expectedAppId?: string;
       onCredentialFault?: (cause: unknown) => void;
-      onTransportFault?: (cause: unknown) => void;
     },
   ) {}
 
@@ -474,7 +527,9 @@ export class SlackAdapter {
 
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<{ ts?: string }> {
     const omittedAttachments = message.attachments?.length ?? 0;
-    const omittedParts = message.parts?.length ?? 0;
+    const omittedParts =
+      message.parts?.filter((part) => part.type !== "text" && part.type !== "approval_card")
+        .length ?? 0;
     if (omittedAttachments > 0 || omittedParts > 0) {
       log.warn("slack omitted unsupported outbound content", {
         attachments: omittedAttachments,
@@ -491,6 +546,8 @@ export class SlackAdapter {
       })
       .filter(Boolean)
       .join("\n\n");
+    // The canonical text wins when both representations are present, matching
+    // other Talk adapters; parts are a fallback for text-only Slack delivery.
     const outboundText = message.text?.trim() || fallbackText?.trim();
     if (!outboundText) return {};
     const api = this.config.api ?? slackWebApi;
@@ -531,7 +588,7 @@ export class SlackAdapter {
         expectedAppId: this.config.expectedAppId,
         receivedAppId: envelope.api_app_id,
       });
-      this.config.onTransportFault?.(error);
+      this.config.onCredentialFault?.(error);
       return true;
     }
 
@@ -579,7 +636,11 @@ export class SlackAdapter {
         addressing: "direct",
         raw: envelope,
       };
-    } else if (event.type === "app_mention") {
+    } else if (
+      event.type === "app_mention" &&
+      event.channel_type !== "im" &&
+      !event.channel.startsWith("D")
+    ) {
       const text = stripSlackBotMention(event.text, identity.botUserId);
       if (!text) return true;
       const rootTs = event.thread_ts ?? event.ts;
@@ -631,7 +692,15 @@ export function isSlackGuardianLinkEvent(
     typeof event.user === "string" &&
     event.user !== botUserId &&
     typeof event.text === "string" &&
-    event.text.trim().toUpperCase() === code.toUpperCase()
+    slackCodesEqual(event.text, code)
+  );
+}
+
+function slackCodesEqual(candidate: string, expected: string): boolean {
+  const candidateBytes = Buffer.from(candidate.trim().toUpperCase());
+  const expectedBytes = Buffer.from(expected.trim().toUpperCase());
+  return (
+    candidateBytes.length === expectedBytes.length && timingSafeEqual(candidateBytes, expectedBytes)
   );
 }
 
@@ -654,7 +723,7 @@ export function waitForSlackGuardianLink(
 ): Promise<{ channelUserId: string }> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
-      reject(signal.reason ?? new Error("Setup cancelled."));
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Setup cancelled."));
       return;
     }
     let unregister = () => {};
@@ -688,7 +757,7 @@ export function waitForSlackGuardianLink(
           envelope.api_app_id &&
           envelope.api_app_id !== options.expectedAppId &&
           typeof event.text === "string" &&
-          event.text.trim().toUpperCase() === code.toUpperCase()
+          slackCodesEqual(event.text, code)
         ) {
           finish(
             new Error(
@@ -718,6 +787,12 @@ export function waitForSlackGuardianLink(
           return false;
         }
         if (lockedSenders.has(sender)) return true;
+        if (
+          !failedAttempts.has(sender) &&
+          failedAttempts.size >= SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS
+        ) {
+          return true;
+        }
         const maxAttempts = options.maxFailedAttempts ?? SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS;
         const attempts = (failedAttempts.get(sender) ?? 0) + 1;
         failedAttempts.set(sender, attempts);

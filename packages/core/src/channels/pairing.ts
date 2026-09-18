@@ -60,6 +60,7 @@ export function createPairingAdmission(deps: {
   personMappingRepo: PersonMappingRepository;
   talkGrants: (service: string) => readonly string[];
   replyInOriginatingConversation?: (service: string) => boolean;
+  plainTextGuidance?: (service: string) => boolean;
 }) {
   return async (
     connectionId: string,
@@ -71,9 +72,13 @@ export function createPairingAdmission(deps: {
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     const allowAddressedGroup = deps.replyInOriginatingConversation?.(service) ?? false;
+    const plainTextGuidance = deps.plainTextGuidance?.(service) ?? false;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
     const displayName = message.senderDisplayName ?? message.senderId;
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen Settings → Connections in the Rome Web UI.\n\nPairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
+    const guideUrl = `https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
+    const guidance = plainTextGuidance
+      ? `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen Settings → Connections in the Rome Web UI.\n\nPairing Guide: ${guideUrl}`
+      : `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](${guideUrl}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {

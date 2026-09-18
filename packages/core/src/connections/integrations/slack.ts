@@ -2,6 +2,7 @@ import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
   type SlackBotIdentity,
+  SLACK_HANDLER_REBUILD_GRACE_MS,
   type SlackIngress,
   SLACK_REQUIRED_BOT_SCOPES,
   type SlackWebApi,
@@ -198,7 +199,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 
 export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescriptor {
   const descriptor = makeOAuthProviderDescriptor("slack");
-  descriptor.pairing = { replyInOriginatingConversation: true };
+  descriptor.pairing = { replyInOriginatingConversation: true, plainTextGuidance: true };
   descriptor.connectAvailability = () =>
     deps.ingress.configured
       ? { available: true, unavailableReason: null }
@@ -232,33 +233,51 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
         };
       }
       let faultSink: ((error: CredentialRejected | Disconnected) => void) | null = null;
+      const releaseExpectedWorkspace = profile.teamId
+        ? deps.ingress.expectWorkspace(profile.teamId)
+        : () => {};
+      // Most stops are epoch replacement/reconciliation, so retain a bounded
+      // retry window unless a credential/configuration fault proves otherwise.
+      let retainExpectationForReconnect = true;
       const adapter = new SlackAdapter({
         botToken: material.botToken,
         ingress: deps.ingress,
         api: deps.api,
         expectedAppId: profile.appId,
         onCredentialFault: (cause) => {
+          retainExpectationForReconnect = false;
           faultSink?.(new CredentialRejected({ grant: "workspace", cause }));
-        },
-        onTransportFault: (cause) => {
-          faultSink?.(new Disconnected(cause));
         },
       });
 
       return {
         start(deliver, fault): void {
           faultSink = fault;
+          if (!deps.ingress.configured) {
+            retainExpectationForReconnect = false;
+            fault(
+              new Disconnected(
+                new Error("Slack bot events are not configured on this Rome instance."),
+              ),
+            );
+            return;
+          }
           adapter.onMessage(deliver);
           adapter.start().catch((error) => {
-            faultSink?.(
-              isSlackCredentialError(error)
-                ? new CredentialRejected({ grant: "workspace", cause: error })
-                : new Disconnected(error),
-            );
+            if (isSlackCredentialError(error)) {
+              retainExpectationForReconnect = false;
+              faultSink?.(new CredentialRejected({ grant: "workspace", cause: error }));
+              return;
+            }
+            retainExpectationForReconnect = true;
+            faultSink?.(new Disconnected(error));
           });
         },
         stop(): void {
           adapter.stop();
+          releaseExpectedWorkspace({
+            graceMs: retainExpectationForReconnect ? SLACK_HANDLER_REBUILD_GRACE_MS : 0,
+          });
         },
         async send(conversationId, message) {
           try {

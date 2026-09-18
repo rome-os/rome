@@ -317,6 +317,8 @@ async function main() {
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
       replyInOriginatingConversation: (service) =>
         connectionRegistry.getDescriptor(service)?.pairing?.replyInOriginatingConversation === true,
+      plainTextGuidance: (service) =>
+        connectionRegistry.getDescriptor(service)?.pairing?.plainTextGuidance === true,
     }),
   );
   // Conferral setups: in-memory session store keyed per grant,

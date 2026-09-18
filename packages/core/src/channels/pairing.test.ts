@@ -82,6 +82,7 @@ describe("channel pairing approvals", () => {
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
       replyInOriginatingConversation: (service) => service === "slack",
+      plainTextGuidance: (service) => service === "slack",
     });
     await admit(
       "connection",
@@ -129,6 +130,7 @@ describe("channel pairing approvals", () => {
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
       replyInOriginatingConversation: (service) => service === "slack",
+      plainTextGuidance: (service) => service === "slack",
     });
 
     await admit(
@@ -582,6 +584,7 @@ describe("channel pairing approvals", () => {
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      plainTextGuidance: (candidate) => candidate === "slack",
     });
     const send = rs.fn<TalkRouter["send"]>(async () => ({
       messageId: "sent",
@@ -631,8 +634,11 @@ describe("channel pairing approvals", () => {
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2].text).toContain(`🔗 Pair ${account} with Rome.`);
+    const guideUrl = `https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
     expect(send.mock.calls[0][2].text).toContain(
-      `Pairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`,
+      service === "slack"
+        ? `Pairing Guide: ${guideUrl}`
+        : `Learn more in the [Pairing Guide](${guideUrl}).`,
     );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);

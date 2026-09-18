@@ -4,6 +4,7 @@ import { oauthPendingAttempts } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
 import { setInstanceTokenInMemory } from "./instance-identity.js";
 import {
+  cancelRomeCloudOAuthAttempt,
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   pendingRomeCloudOAuthProvider,
@@ -87,6 +88,16 @@ describe("Rome Cloud OAuth brokering", () => {
 
       await expect(pendingRomeCloudOAuthProvider(db, state)).resolves.toBe("slack");
       await expect(pendingRomeCloudOAuthProvider(db, "unknown-state")).resolves.toBeNull();
+    });
+
+    it("cancels a handoff that the instance refuses to redeem", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "slack");
+      const state = new URL(url).searchParams.get("state")!;
+
+      await cancelRomeCloudOAuthAttempt(db, state);
+
+      await expect(pendingRomeCloudOAuthProvider(db, state)).resolves.toBeNull();
+      await expect(db.select().from(oauthPendingAttempts)).resolves.toHaveLength(0);
     });
   });
 

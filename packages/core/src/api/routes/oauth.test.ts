@@ -20,11 +20,13 @@ import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
 };
 
 const {
+  cancelRomeCloudOAuthAttempt,
   pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
   syncProviderTokenFile,
   syncGithubShellIntegrationForProvider,
 } = rs.hoisted(() => ({
+  cancelRomeCloudOAuthAttempt: rs.fn(async () => {}),
   pendingRomeCloudOAuthProvider: rs.fn<() => Promise<"slack" | null>>(async () => null),
   redeemRomeCloudOAuthHandoff: rs.fn(),
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
@@ -32,6 +34,7 @@ const {
 }));
 
 rs.mock("../../lib/rome-cloud-oauth.js", () => ({
+  cancelRomeCloudOAuthAttempt,
   pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
   createRomeCloudOAuthStartRedirect: rs.fn(),
@@ -155,8 +158,9 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
   it("slack: refuses the fallback path because it carries no guardian proof", async () => {
     pendingRomeCloudOAuthProvider.mockResolvedValueOnce("slack");
     const registry = makeRegistry();
+    const deps = makeDeps(registry);
 
-    const res = await postRedeem(makeDeps(registry));
+    const res = await postRedeem(deps);
 
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({
@@ -164,6 +168,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
         "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
     });
     expect(redeemRomeCloudOAuthHandoff).not.toHaveBeenCalled();
+    expect(cancelRomeCloudOAuthAttempt).toHaveBeenCalledWith(deps.db, "s");
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("github")).toHaveLength(0);
   });

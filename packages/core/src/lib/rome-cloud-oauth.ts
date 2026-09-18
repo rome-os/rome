@@ -228,3 +228,13 @@ export async function pendingRomeCloudOAuthProvider(
     .limit(1);
   return attempt && isOAuthProvider(attempt.provider) ? attempt.provider : null;
 }
+
+/**
+ * Cancel a locally pending OAuth handoff that this instance will not redeem.
+ * Deleting the PKCE verifier makes the returned handoff unusable here; the
+ * broker's short-lived, single-use handoff then expires without minting a
+ * provider credential for the instance.
+ */
+export async function cancelRomeCloudOAuthAttempt(db: DrizzleDb, state: string): Promise<void> {
+  await db.delete(oauthPendingAttempts).where(eq(oauthPendingAttempts.state, state));
+}

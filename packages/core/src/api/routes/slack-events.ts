@@ -43,7 +43,7 @@ export function slackEventsRoutes(deps: Pick<ApiDeps, "slackIngress">): Hono {
       signature: c.req.header("x-slack-signature"),
     });
     if (!verification.ok) {
-      log.warn("slack request rejected", { reason: verification.reason });
+      log.debug("slack request rejected", { reason: verification.reason });
       return c.json({ error: "Invalid Slack request." }, 401);
     }
 

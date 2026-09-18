@@ -14,7 +14,9 @@ During connection, Settings shows a one-time code. The guardian must direct-mess
 
 The guardian's linked Slack account is admitted automatically. Other workspace members must complete Rome's normal pairing approval before their message reaches the agent. Until then, Rome replies only with pairing guidance.
 
-Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
+Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Before approving an unfamiliar ID, open that member's Slack profile, choose **More**, and use **Copy member ID** to compare it with Rome's approval. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
+
+When bot events are enabled on an instance that already has a connector-only Slack grant, Rome marks that legacy grant degraded until the guardian reconnects it in Settings and completes the one-time proof. This fail-closed migration temporarily pauses connector custody rather than allowing an unproven workspace identity to unlock Talk.
 
 Answers longer than Slack's message limit are sent as sequential text messages. A transport failure after an earlier part was accepted can leave a partial answer, because Slack does not provide an idempotency key for `chat.postMessage`.
 Outbound text is posted with Slack markup disabled. API calls have a bounded timeout and one bounded rate-limit retry.

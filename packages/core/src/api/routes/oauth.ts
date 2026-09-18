@@ -8,6 +8,7 @@ import {
   OAUTH_PROVIDER_DESCRIPTORS,
 } from "../../lib/oauth-providers.js";
 import {
+  cancelRomeCloudOAuthAttempt,
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   pendingRomeCloudOAuthProvider,
@@ -97,6 +98,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
     try {
       if ((await pendingRomeCloudOAuthProvider(deps.db, state)) === "slack") {
+        await cancelRomeCloudOAuthAttempt(deps.db, state);
         return c.json(
           {
             error:

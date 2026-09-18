@@ -49,6 +49,111 @@ describe("Slack setup", () => {
     });
   });
 
+  it("faults a stored Talk grant when bot event ingress is unconfigured", () => {
+    const authTest = rs.fn(async () => identity);
+    const descriptor = makeSlackDescriptor({
+      ingress: new SlackIngress(undefined),
+      beginRedirect: async () => "unused",
+      redeem: async () => {
+        throw new Error("unused");
+      },
+      api: { authTest, postMessage: async () => ({ ts: "unused" }) },
+    });
+    const talker = descriptor.capabilities.talker?.build(
+      { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
+      {
+        connectionId: "slack-connection",
+        persist: async () => {},
+        profile: () => ({
+          teamId: "T1",
+          guardianChannelUserId: "T1/UGUARDIAN",
+        }),
+        registerIngress: () => () => {},
+      },
+    );
+    if (!talker) throw new Error("Slack Talk capability was not built");
+    const fault = rs.fn();
+
+    talker.start(() => {}, fault);
+
+    expect(fault).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ name: "Disconnected" }),
+    );
+    expect(authTest).not.toHaveBeenCalled();
+    talker.stop();
+  });
+
+  it("keeps a workspace retryable across a transient startup backoff", async () => {
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
+    ingress.completeInitialRegistration();
+    const descriptor = makeSlackDescriptor({
+      ingress,
+      beginRedirect: async () => "unused",
+      redeem: async () => {
+        throw new Error("unused");
+      },
+      api: {
+        authTest: async () => {
+          throw new Error("temporary network failure");
+        },
+        postMessage: async () => ({ ts: "unused" }),
+      },
+    });
+    const talker = descriptor.capabilities.talker?.build(
+      { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
+      {
+        connectionId: "slack-connection",
+        persist: async () => {},
+        profile: () => ({ teamId: "T1", guardianChannelUserId: "T1/UGUARDIAN" }),
+        registerIngress: () => () => {},
+      },
+    );
+    if (!talker) throw new Error("Slack Talk capability was not built");
+    const fault = rs.fn();
+    talker.start(() => {}, fault);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fault).toHaveBeenCalledWith(expect.objectContaining({ name: "Disconnected" }));
+
+    talker.stop();
+
+    await expect(ingress.dispatch(guardianCodeEvent("during-backoff"))).resolves.toBe("starting");
+  });
+
+  it("keeps a workspace retryable across normal epoch reconciliation", async () => {
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
+    ingress.completeInitialRegistration();
+    const descriptor = makeSlackDescriptor({
+      ingress,
+      beginRedirect: async () => "unused",
+      redeem: async () => {
+        throw new Error("unused");
+      },
+      api: {
+        authTest: async () => identity,
+        postMessage: async () => ({ ts: "unused" }),
+      },
+    });
+    const talker = descriptor.capabilities.talker?.build(
+      { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
+      {
+        connectionId: "slack-connection",
+        persist: async () => {},
+        profile: () => ({ teamId: "T1", guardianChannelUserId: "T1/UGUARDIAN" }),
+        registerIngress: () => () => {},
+      },
+    );
+    if (!talker) throw new Error("Slack Talk capability was not built");
+    talker.start(
+      () => {},
+      () => {},
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    talker.stop();
+
+    await expect(ingress.dispatch(guardianCodeEvent("during-reconcile"))).resolves.toBe("starting");
+  });
+
   it("requires the exact least-privilege bot scopes", () => {
     expect(missingSlackBotScopes(["chat:write"])).toEqual(["app_mentions:read", "im:history"]);
     expect(missingSlackBotScopes(["im:history", "chat:write", "app_mentions:read"])).toEqual([]);

@@ -119,6 +119,20 @@ describe("SlackIngress", () => {
     ]);
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it("keeps a known workspace retryable while its handler is rebuilding", async () => {
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
+    ingress.completeInitialRegistration();
+    const release = ingress.expectWorkspace(identity.teamId);
+
+    await expect(
+      ingress.dispatch(envelope("Ev-rebuild", { type: "message", channel_type: "im" })),
+    ).resolves.toBe("starting");
+    release();
+    await expect(
+      ingress.dispatch(envelope("Ev-disconnected", { type: "message", channel_type: "im" })),
+    ).resolves.toBe("unhandled");
+  });
 });
 
 describe("SlackAdapter", () => {
@@ -136,7 +150,7 @@ describe("SlackAdapter", () => {
         channel_type: "im",
         channel: "D1",
         user: "U1",
-        text: "hello &amp; goodbye",
+        text: "hello &amp; <@U9|Ada> in <#C9|general> read <https://example.com|docs> not &lt;@U8&gt;",
         ts: "1700000000.100",
       }),
     );
@@ -169,12 +183,22 @@ describe("SlackAdapter", () => {
         ts: "1700000000.400",
       }),
     );
+    await ingress.dispatch(
+      envelope("dm-app-mention", {
+        type: "app_mention",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "<@UBOT> only once",
+        ts: "1700000000.500",
+      }),
+    );
 
     expect(messages).toHaveLength(3);
     expect(messages[0]).toMatchObject({
       conversationId: "D1",
       senderId: "T123/U1",
-      text: "hello & goodbye",
+      text: "hello & @Ada in #general read docs (https://example.com) not <@U8>",
       addressing: "direct",
       thread: { kind: "dm" },
     });
@@ -395,6 +419,23 @@ describe("SlackAdapter", () => {
     }
   });
 
+  it("normalizes a non-Error abort reason while waiting to retry", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = rs
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "30" } }));
+    globalThis.fetch = fetchMock;
+    const controller = new AbortController();
+    try {
+      const request = slackWebApi.authTest("xoxb-test", controller.signal);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort("cancelled");
+      await expect(request).rejects.toThrow("Slack API wait aborted.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("posts valid JSON for auth.test and captures the application id", async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = rs.fn<typeof fetch>().mockResolvedValueOnce(
@@ -459,14 +500,14 @@ describe("SlackAdapter", () => {
   it("reports an inbound event from a different Slack application", async () => {
     const ingress = new SlackIngress("secret");
     const { api } = fakeApi();
-    const onTransportFault = rs.fn();
+    const onCredentialFault = rs.fn();
     const handler = rs.fn();
     const adapter = new SlackAdapter({
       botToken: "xoxb-test",
       ingress,
       api,
       expectedAppId: "A-CONNECTED",
-      onTransportFault,
+      onCredentialFault,
     });
     adapter.onMessage(handler);
     await adapter.start();
@@ -484,7 +525,7 @@ describe("SlackAdapter", () => {
     });
 
     expect(handler).not.toHaveBeenCalled();
-    expect(onTransportFault).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
+    expect(onCredentialFault).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
   });
 
   it("does not subscribe when stopped during the identity probe", async () => {
@@ -579,6 +620,45 @@ describe("Slack guardian linking", () => {
     );
     await expect(linking).resolves.toEqual({ channelUserId: "T123/U2" });
     expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it("bounds attacker bookkeeping without blocking the correct guardian code", async () => {
+    const ingress = new SlackIngress("secret");
+    const controller = new AbortController();
+    const rejected = rs.fn(async () => {});
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { onRejectedAttempt: rejected },
+    );
+    for (let sender = 0; sender <= 100; sender++) {
+      await ingress.dispatch(
+        envelope(`attacker-${sender}`, {
+          type: "message",
+          channel_type: "im",
+          channel: `D${sender}`,
+          user: `U${sender}`,
+          text: "ROME-LINK-WRONG000000",
+          ts: `1700000010.${sender}`,
+        }),
+      );
+    }
+    expect(rejected).toHaveBeenCalledTimes(100);
+
+    await ingress.dispatch(
+      envelope("guardian-after-flood", {
+        type: "message",
+        channel_type: "im",
+        channel: "DGUARDIAN",
+        user: "UGUARDIAN",
+        text: "ROME-LINK-ABCDEFGH",
+        ts: "1700000011.0",
+      }),
+    );
+
+    await expect(linking).resolves.toEqual({ channelUserId: "T123/UGUARDIAN" });
   });
 
   it("expires and unregisters a guardian-link code", async () => {
