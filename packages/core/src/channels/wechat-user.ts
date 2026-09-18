@@ -474,7 +474,7 @@ export class WechatUserRuntime {
     await mkdir("/run/user/0", { recursive: true, mode: 0o700 }).catch(() => {});
     await this.run("sh", [
       "-c",
-      "pgrep -f '[d]bus-daemon --session' >/dev/null || " +
+      "pgrep -f '^dbus-daemon --session( |$)' >/dev/null || " +
         "dbus-daemon --session --fork --address=unix:path=/run/user/0/bus >/dev/null 2>&1 || true",
     ]).catch(() => {});
   }
