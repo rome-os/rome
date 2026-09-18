@@ -431,7 +431,7 @@ Components are precise and restrained. Each one declares its own typography role
 - **Switch:** A pill track that fills coral when checked. The thumb is the canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
 
 ### Navigation
-- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action.
+- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
 - **Mobile header:** 48px plus the safe-area inset, hairline bottom border, hidden from 768px up.
 - **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path.
 
