@@ -49,6 +49,7 @@ import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { APP_STORE_BROWSE_URL } from "@/lib/app-store-url";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
+import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { useApps, useInvalidateApps } from "@/hooks/use-apps";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
@@ -234,6 +235,12 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   const [storeOpen, setStoreOpen] = useState(false);
   const invalidateSettings = useInvalidateSettings();
   const invalidateApps = useInvalidateApps();
+  // The list query only revalidates on mount and window focus, but the shell
+  // stays mounted while the agent builds an app in the chat beside it. Listen
+  // to the catalog stream so that app reaches the sidebar as it installs.
+  useAppCatalogChanges(() => {
+    void invalidateApps.list();
+  });
 
   const { data: settings } = useSettings();
   const { apps: appsFromQuery } = useApps();
