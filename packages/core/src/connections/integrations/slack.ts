@@ -19,6 +19,7 @@ import type { GrantLedger } from "../ledger.js";
 import type { ConnectionDescriptor, Credential, Talker } from "../types.js";
 import {
   makeOAuthProviderDescriptor,
+  redeemOAuthRedirect,
   slackGrantProfileSchema,
   type OAuthProviderSetupDeps,
   type SlackGrantProfile,
@@ -120,21 +121,10 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
       );
     }
 
-    const url = await deps.beginRedirect();
-    const returned = await interact.redirect(url);
-    if (typeof returned.error === "string" && returned.error) {
-      throw new Error(
-        returned.error === "access_denied"
-          ? "Authorization was declined."
-          : `Authorization failed: ${returned.error}`,
-      );
-    }
-    const handoff = typeof returned.handoff === "string" ? returned.handoff.trim() : "";
-    const state = typeof returned.state === "string" ? returned.state.trim() : "";
-    if (!handoff || !state) throw new Error("The authorization return was incomplete.");
-
-    interact.show({ body: ["Checking the Slack workspace and Rome bot…"], progress: true });
-    const redeemed = await ctx.step("oauth-redeem", () => deps.redeem(handoff, state));
+    const redeemed = await redeemOAuthRedirect(interact, ctx, deps, {
+      body: ["Checking the Slack workspace and Rome bot…"],
+      progress: true,
+    });
     const material = credentialMaterial(redeemed.credential);
     const profile = slackGrantProfileSchema.parse(redeemed.profile ?? {});
     const missingScopes = missingSlackBotScopes(profile.scopes);
@@ -150,6 +140,9 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
     if (profile.teamId && profile.teamId !== identity.teamId) {
       throw new Error("Slack authorized a different workspace than the bot token belongs to.");
     }
+    if (profile.appId && identity.appId && profile.appId !== identity.appId) {
+      throw new Error("Slack authorized a different application than the bot token belongs to.");
+    }
 
     const code = generateCode();
     // Subscribe before the instructions reach the browser so an immediate DM
@@ -158,12 +151,16 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
       waitForSlackGuardianLink(deps.ingress, identity, code, signal, {
         expectedAppId: profile.appId ?? identity.appId,
         onRejectedAttempt: async ({ channelId, attempts, maxAttempts, locked }) => {
-          await api.postMessage(material.botToken, {
-            channel: channelId,
-            text: locked
-              ? "Too many incorrect codes. Cancel and reconnect Slack in Settings to generate a new code."
-              : `That code was not accepted (${attempts} of ${maxAttempts} attempts). Check the code shown in Settings.`,
-          });
+          await api.postMessage(
+            material.botToken,
+            {
+              channel: channelId,
+              text: locked
+                ? "Too many incorrect codes. Cancel and reconnect Slack in Settings to generate a new code."
+                : `That code was not accepted (${attempts} of ${maxAttempts} attempts). Check the code shown in Settings.`,
+            },
+            signal,
+          );
         },
       }),
     );
@@ -205,6 +202,7 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
           unavailableReason: "Slack bot events are not configured on this Rome instance.",
         };
   descriptor.auth.workspace.setup = makeSlackSetup(deps);
+  if (!deps.ingress.configured) return descriptor;
   descriptor.capabilities.talker = {
     needs: ["workspace"] as const,
     build(creds, kit): Talker {
@@ -251,15 +249,6 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
       return {
         start(deliver, fault): void {
           faultSink = fault;
-          if (!deps.ingress.configured) {
-            retainExpectationForReconnect = false;
-            fault(
-              new Disconnected(
-                new Error("Slack bot events are not configured on this Rome instance."),
-              ),
-            );
-            return;
-          }
           adapter.onMessage(deliver);
           adapter.start().catch((error) => {
             if (isSlackCredentialError(error)) {

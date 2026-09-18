@@ -174,7 +174,7 @@ export function registerBuiltinConnections(
       },
     };
     registry.register(
-      provider === "slack"
+      provider === "slack" && deps.slackIngress.configured
         ? makeSlackDescriptor({ ...oauthDeps, ingress: deps.slackIngress })
         : makeOAuthProviderDescriptor(provider, oauthDeps),
     );

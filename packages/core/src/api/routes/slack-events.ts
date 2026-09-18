@@ -87,7 +87,7 @@ export function slackEventsRoutes(deps: Pick<ApiDeps, "slackIngress">): Hono {
         // Outside a bounded registration window it cannot become deliverable by
         // retrying, so acknowledge it rather than harming the shared Slack app's
         // Events API health with an indefinite 5xx loop.
-        log.warn("slack event has no workspace handler", {
+        log.debug("slack event has no workspace handler", {
           eventId: payload.event_id,
           teamId: payload.team_id,
         });

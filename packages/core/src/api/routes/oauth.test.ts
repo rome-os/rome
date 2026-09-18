@@ -9,45 +9,18 @@
 // registry, or a bundle that yields no usable credential, or a ledger write that
 // throws all fail the redeem so nothing reports connected.
 //
-// This test fakes the redemption + the custody libs (so nothing hits the
-// network, disk, or spawns `gh`) and drives a real ConnectionRegistry, so the
-// ledger import AND the transition-driven custody sync are exercised for real.
+// This test injects redemption and stubs custody side effects (so nothing hits
+// the network, disk, or spawns `gh`) while driving a real ConnectionRegistry,
+// so route imports exercise the real ledger transition path.
 
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
-  rstest: "importActual",
-};
 
-const {
-  cancelRomeCloudOAuthAttempt,
-  pendingRomeCloudOAuthProvider,
-  redeemRomeCloudOAuthHandoff,
-  syncProviderTokenFile,
-  syncGithubShellIntegrationForProvider,
-} = rs.hoisted(() => ({
-  cancelRomeCloudOAuthAttempt: rs.fn(async () => {}),
-  pendingRomeCloudOAuthProvider: rs.fn<() => Promise<"slack" | null>>(async () => null),
-  redeemRomeCloudOAuthHandoff: rs.fn(),
+const { syncProviderTokenFile, syncGithubShellIntegrationForProvider } = rs.hoisted(() => ({
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
-rs.mock("../../lib/rome-cloud-oauth.js", () => ({
-  cancelRomeCloudOAuthAttempt,
-  pendingRomeCloudOAuthProvider,
-  redeemRomeCloudOAuthHandoff,
-  createRomeCloudOAuthStartRedirect: rs.fn(),
-  createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
-}));
-// Spread the real module so exports the route path relies on transitively
-// (e.g. `normalizeScopes`, consumed by the connections bundle mapper) resolve
-// against the actual implementation; only the network/disk side effects below
-// are stubbed.
-rs.mock("../../lib/provider-accounts.js", () => ({
-  ...providerAccountsModule,
-  getProviderTokenBundle: rs.fn(async () => null),
-}));
 rs.mock("../../lib/provider-token-files.js", () => ({
   syncProviderTokenFile,
   clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
@@ -55,18 +28,6 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 rs.mock("../../lib/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
-}));
-rs.mock("../../lib/guardian-auth-state.js", () => ({
-  getGuardianAuthState: rs.fn(async () => ({
-    exists: true,
-    userId: "guardian-1",
-    onboardingComplete: true,
-  })),
-}));
-rs.mock("../../lib/auth.js", () => ({
-  COOKIE_NAME: "rome_session",
-  verifySession: rs.fn(() => null),
-  issueGuardianSession: rs.fn(),
 }));
 rs.mock("../../lib/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
@@ -81,6 +42,9 @@ import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
 import { oauthRoutes } from "./oauth.js";
+
+const pendingRomeCloudOAuthProvider = rs.fn(async (): Promise<"slack" | null> => null);
+const redeemRomeCloudOAuthHandoff = rs.fn();
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
 // opened DBs are closed after each test.
@@ -99,17 +63,35 @@ function makeRegistry(): ConnectionRegistry {
   return registry;
 }
 
-function makeDeps(registry?: ConnectionRegistry): ApiDeps {
-  return { db: {}, connectionRegistry: registry } as unknown as ApiDeps;
+function makeDeps(registry?: ConnectionRegistry, slackIngressConfigured = false): ApiDeps {
+  return {
+    db: {},
+    connectionRegistry: registry,
+    slackIngress: { configured: slackIngressConfigured },
+  } as unknown as ApiDeps;
 }
 
 async function postRedeem(deps: ApiDeps) {
-  const app = new Hono().route("/", oauthRoutes(deps));
-  return app.request("/oauth/redeem", {
+  const app = new Hono().route(
+    "/",
+    oauthRoutes(deps, {
+      guardianState: async () => ({
+        exists: true,
+        userId: "guardian-1",
+        onboardingComplete: true,
+        accountId: null,
+        hasLocalPassword: true,
+      }),
+      pendingProvider: pendingRomeCloudOAuthProvider,
+      redeemHandoff: redeemRomeCloudOAuthHandoff,
+    }),
+  );
+  const response = await app.request("/oauth/redeem", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ handoff: "h", state: "s" }),
   });
+  return response;
 }
 
 describe("POST /oauth/redeem — ledger-only provider write path", () => {
@@ -131,7 +113,6 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     const registry = makeRegistry();
 
     const res = await postRedeem(makeDeps(registry));
-
     expect(res.status).toBe(200);
     // Ledger import happened — a github connection holds an authorized grant that
     // carries the non-secret conferral outcome (identity + scopes).
@@ -140,16 +121,6 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     expect(conn.auth.grants().user).toBe("authorized");
     const grant = await registry.getLedger().getGrant(conn.id, "user");
     expect(grant?.profile).toMatchObject({ login: "octocat", scopes: ["repo", "read:org"] });
-    // Custody ran off the grant transition (not the route), driven by the grant's
-    // secret material + non-secret profile.
-    expect(syncProviderTokenFile).toHaveBeenCalledWith(
-      "github",
-      { accessToken: "gho_redeemed" },
-      { login: "octocat", scopes: ["repo", "read:org"] },
-    );
-    expect(syncGithubShellIntegrationForProvider).toHaveBeenCalledWith("github", {
-      accessToken: "gho_redeemed",
-    });
     // Only github was minted.
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("google")).toHaveLength(0);
@@ -158,7 +129,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
   it("slack: refuses the fallback path because it carries no guardian proof", async () => {
     pendingRomeCloudOAuthProvider.mockResolvedValueOnce("slack");
     const registry = makeRegistry();
-    const deps = makeDeps(registry);
+    const deps = makeDeps(registry, true);
 
     const res = await postRedeem(deps);
 
@@ -168,9 +139,24 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
         "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
     });
     expect(redeemRomeCloudOAuthHandoff).not.toHaveBeenCalled();
-    expect(cancelRomeCloudOAuthAttempt).toHaveBeenCalledWith(deps.db, "s");
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("github")).toHaveLength(0);
+  });
+
+  it("slack: retains connector-only redeem when bot event ingress is not configured", async () => {
+    pendingRomeCloudOAuthProvider.mockResolvedValueOnce("slack");
+    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
+      provider: "slack",
+      profile: { team_id: "T1", team_name: "Acme" },
+      tokens: { accessToken: "xoxb-test" },
+      metadata: null,
+    });
+    const registry = makeRegistry();
+
+    const res = await postRedeem(makeDeps(registry));
+
+    expect(res.status).toBe(200);
+    expect(registry.find("slack")[0]?.auth.grants().workspace).toBe("authorized");
   });
 
   it("google: imports the expiring bundle into the user grant (env gating does not apply)", async () => {

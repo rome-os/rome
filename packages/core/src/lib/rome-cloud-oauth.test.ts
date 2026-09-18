@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import { oauthPendingAttempts } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
 import { setInstanceTokenInMemory } from "./instance-identity.js";
 import {
-  cancelRomeCloudOAuthAttempt,
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   pendingRomeCloudOAuthProvider,
@@ -90,14 +90,23 @@ describe("Rome Cloud OAuth brokering", () => {
       await expect(pendingRomeCloudOAuthProvider(db, "unknown-state")).resolves.toBeNull();
     });
 
-    it("cancels a handoff that the instance refuses to redeem", async () => {
-      const url = await createRomeCloudOAuthStartRedirect(db, "slack");
-      const state = new URL(url).searchParams.get("state")!;
+    it("does not identify consumed or expired pending attempts", async () => {
+      const consumedUrl = await createRomeCloudOAuthStartRedirect(db, "slack");
+      const consumedState = new URL(consumedUrl).searchParams.get("state")!;
+      await db
+        .update(oauthPendingAttempts)
+        .set({ consumedAt: new Date() })
+        .where(eq(oauthPendingAttempts.state, consumedState));
 
-      await cancelRomeCloudOAuthAttempt(db, state);
+      const expiredUrl = await createRomeCloudOAuthStartRedirect(db, "slack");
+      const expiredState = new URL(expiredUrl).searchParams.get("state")!;
+      await db
+        .update(oauthPendingAttempts)
+        .set({ expiresAt: new Date(Date.now() - 1) })
+        .where(eq(oauthPendingAttempts.state, expiredState));
 
-      await expect(pendingRomeCloudOAuthProvider(db, state)).resolves.toBeNull();
-      await expect(db.select().from(oauthPendingAttempts)).resolves.toHaveLength(0);
+      await expect(pendingRomeCloudOAuthProvider(db, consumedState)).resolves.toBeNull();
+      await expect(pendingRomeCloudOAuthProvider(db, expiredState)).resolves.toBeNull();
     });
   });
 

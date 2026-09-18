@@ -17,6 +17,7 @@ The guardian's linked Slack account is admitted automatically. Other workspace m
 Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Before approving an unfamiliar ID, open that member's Slack profile, choose **More**, and use **Copy member ID** to compare it with Rome's approval. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
 
 When bot events are enabled on an instance that already has a connector-only Slack grant, Rome marks that legacy grant degraded until the guardian reconnects it in Settings and completes the one-time proof. This fail-closed migration temporarily pauses connector custody rather than allowing an unproven workspace identity to unlock Talk.
+On an instance without `SLACK_SIGNING_SECRET`, Slack remains available as a connector-only OAuth integration; bot setup and Talk are not offered there.
 
 Answers longer than Slack's message limit are sent as sequential text messages. A transport failure after an earlier part was accepted can leave a partial answer, because Slack does not provide an idempotency key for `chat.postMessage`.
 Outbound text is posted with Slack markup disabled. API calls have a bounded timeout and one bounded rate-limit retry.
@@ -38,6 +39,7 @@ Do not add channel-message subscriptions. Rome must not receive unmentioned chan
 The manifest also enables a writable App Home Messages tab so workspace members can find and direct-message the bot.
 
 Slack signs every Events API request. Rome limits the streaming request body before buffering it, verifies the signature against those exact untouched bytes, and rejects timestamps older than five minutes. It routes the event only to a bot token for the same workspace.
+Event IDs are deduplicated for the lifetime of the Rome process. A restart clears that in-memory history, so Slack retrying or replaying a still-fresh signed event after a restart can deliver it again; persistent cross-restart deduplication remains follow-up work.
 When Slack supplies the application id in OAuth and event payloads, Rome also rejects delivery from a different application so a mismatched broker app and signing secret fail visibly instead of crossing identities.
 
 ## Deployment check

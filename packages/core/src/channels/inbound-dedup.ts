@@ -63,6 +63,13 @@ export class InMemoryInboundDedup implements InboundDedup, DeferredInboundDedup 
     if (existing === "complete") return { state: "complete" };
     if (existing === "pending") return { state: "busy" };
 
+    // Never let hung handlers grow the reservation map without bound. Returning
+    // `busy` is deliberately retryable: unlike evicting a live reservation, it
+    // cannot allow two handlers to process the same key concurrently.
+    if (this.states.size >= this.maxEntries) {
+      this.evictOneCompleted();
+      if (this.states.size >= this.maxEntries) return { state: "busy" };
+    }
     this.states.set(key, "pending");
     let active = true;
     return {
@@ -94,15 +101,17 @@ export class InMemoryInboundDedup implements InboundDedup, DeferredInboundDedup 
 
   private evictCompleted(): void {
     while (this.completedCount > this.maxEntries) {
-      let removed = false;
-      for (const [key, state] of this.states) {
-        if (state !== "complete") continue;
-        this.states.delete(key);
-        this.completedCount--;
-        removed = true;
-        break;
-      }
-      if (!removed) return;
+      if (!this.evictOneCompleted()) return;
     }
+  }
+
+  private evictOneCompleted(): boolean {
+    for (const [key, state] of this.states) {
+      if (state !== "complete") continue;
+      this.states.delete(key);
+      this.completedCount--;
+      return true;
+    }
+    return false;
   }
 }

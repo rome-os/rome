@@ -8,7 +8,6 @@ import {
   OAUTH_PROVIDER_DESCRIPTORS,
 } from "../../lib/oauth-providers.js";
 import {
-  cancelRomeCloudOAuthAttempt,
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   pendingRomeCloudOAuthProvider,
@@ -17,7 +16,22 @@ import {
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { ApiDeps } from "../deps.js";
 
-export function oauthRoutes(deps: ApiDeps): Hono {
+interface OAuthRedeemServices {
+  guardianState: typeof getGuardianAuthState;
+  pendingProvider: typeof pendingRomeCloudOAuthProvider;
+  redeemHandoff: typeof redeemRomeCloudOAuthHandoff;
+}
+
+const defaultOAuthRedeemServices: OAuthRedeemServices = {
+  guardianState: getGuardianAuthState,
+  pendingProvider: pendingRomeCloudOAuthProvider,
+  redeemHandoff: redeemRomeCloudOAuthHandoff,
+};
+
+export function oauthRoutes(
+  deps: ApiDeps,
+  redeemServices: OAuthRedeemServices = defaultOAuthRedeemServices,
+): Hono {
   const app = new Hono();
 
   app.get("/oauth/providers", async (c) => {
@@ -91,14 +105,16 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "state is required." }, 400);
     }
 
-    const guardian = await getGuardianAuthState(deps.db);
+    const guardian = await redeemServices.guardianState(deps.db);
     if (!guardian.exists || !guardian.userId) {
       return c.json({ error: "Guardian account has not been created yet." }, 412);
     }
 
     try {
-      if ((await pendingRomeCloudOAuthProvider(deps.db, state)) === "slack") {
-        await cancelRomeCloudOAuthAttempt(deps.db, state);
+      if (
+        deps.slackIngress?.configured === true &&
+        (await redeemServices.pendingProvider(deps.db, state)) === "slack"
+      ) {
         return c.json(
           {
             error:
@@ -107,7 +123,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
           409,
         );
       }
-      const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
+      const redeemed = await redeemServices.redeemHandoff(deps.db, handoff, state);
 
       // The grant ledger is the sole OAuth store: import the provider's bundle
       // into the grant so it holds both the connection state and the non-secret

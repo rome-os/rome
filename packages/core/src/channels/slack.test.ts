@@ -133,6 +133,22 @@ describe("SlackIngress", () => {
       ingress.dispatch(envelope("Ev-disconnected", { type: "message", channel_type: "im" })),
     ).resolves.toBe("unhandled");
   });
+
+  it("bounds the process-wide unknown-workspace registration grace", async () => {
+    let now = 0;
+    const ingress = new SlackIngress("secret", { now: () => now, startupGraceMs: 0 });
+    ingress.completeInitialRegistration();
+    const finishRegistration = ingress.beginHandlerRegistration();
+
+    await expect(
+      ingress.dispatch(envelope("Ev-pending", { type: "message" }, "T-UNKNOWN")),
+    ).resolves.toBe("starting");
+    now = 30_001;
+    await expect(
+      ingress.dispatch(envelope("Ev-pending-expired", { type: "message" }, "T-UNKNOWN")),
+    ).resolves.toBe("unhandled");
+    finishRegistration();
+  });
 });
 
 describe("SlackAdapter", () => {
@@ -268,11 +284,15 @@ describe("SlackAdapter", () => {
     });
 
     await adapter.send(messages[0]!.conversationId, { text: "thread answer" });
-    expect(postMessage).toHaveBeenCalledWith("xoxb-test", {
-      channel: "D1",
-      text: "thread answer",
-      threadTs: "1700000001.100",
-    });
+    expect(postMessage).toHaveBeenCalledWith(
+      "xoxb-test",
+      {
+        channel: "D1",
+        text: "thread answer",
+        threadTs: "1700000001.100",
+      },
+      expect.any(AbortSignal),
+    );
   });
 
   it("drops self-authored, bot-authored, and textless events", async () => {
@@ -366,16 +386,26 @@ describe("SlackAdapter", () => {
     await adapter.send(slackThreadConversationId("C1", "1700000000.300"), { text: "answer" });
     await adapter.send("D1" as never, { text: "private answer" });
 
-    expect(postMessage).toHaveBeenNthCalledWith(1, "xoxb-test", {
-      channel: "C1",
-      text: "answer",
-      threadTs: "1700000000.300",
-    });
-    expect(postMessage).toHaveBeenNthCalledWith(2, "xoxb-test", {
-      channel: "D1",
-      text: "private answer",
-      threadTs: undefined,
-    });
+    expect(postMessage).toHaveBeenNthCalledWith(
+      1,
+      "xoxb-test",
+      {
+        channel: "C1",
+        text: "answer",
+        threadTs: "1700000000.300",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(postMessage).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-test",
+      {
+        channel: "D1",
+        text: "private answer",
+        threadTs: undefined,
+      },
+      expect.any(AbortSignal),
+    );
     expect(parseSlackConversationId("D1")).toEqual({ channelId: "D1" });
   });
 
@@ -390,6 +420,31 @@ describe("SlackAdapter", () => {
     expect(postMessage.mock.calls[0][1].text).toBe("hello &lt;!channel&gt; &amp; &lt;@U1&gt;");
     expect(postMessage.mock.calls[1][1].text).toBe("a".repeat(3_999));
     expect(postMessage.mock.calls[2][1].text).toBe("😀b");
+  });
+
+  it("aborts in-flight outbound sends when the adapter stops", async () => {
+    const ingress = new SlackIngress("secret");
+    const postMessage = rs.fn<SlackWebApi["postMessage"]>(
+      async (_token, _input, signal) =>
+        new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(signal.reason instanceof Error ? signal.reason : new Error("aborted")),
+            { once: true },
+          );
+        }),
+    );
+    const adapter = new SlackAdapter({
+      botToken: "xoxb-test",
+      ingress,
+      api: { authTest: async () => identity, postMessage },
+    });
+
+    const sending = adapter.send("D1" as never, { text: "hello" });
+    adapter.stop();
+
+    await expect(sending).rejects.toThrow("Slack adapter stopped");
+    expect(postMessage).toHaveBeenCalledTimes(1);
   });
 
   it("retries one Slack HTTP rate limit using Retry-After", async () => {
@@ -531,7 +586,31 @@ describe("SlackAdapter", () => {
     );
   });
 
-  it("reports an inbound event from a different Slack application", async () => {
+  it("logs an approval card omitted in favor of canonical text", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api, postMessage } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+    const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
+
+    await adapter.send("D1" as never, {
+      text: "Already rendered approval guidance",
+      parts: [
+        {
+          type: "approval_card",
+          approvalId: "approval-1",
+          actionName: "send_email",
+          preview: { kind: "generic", title: "Send email", summary: "Send it" },
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(postMessage.mock.calls[0]?.[1].text).toBe("Already rendered approval guidance");
+    expect(warn.mock.calls.some(([line]) => String(line).includes('"parts":1'))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("drops an inbound event from a different Slack application without degrading", async () => {
     const ingress = new SlackIngress("secret");
     const { api } = fakeApi();
     const onCredentialFault = rs.fn();
@@ -559,7 +638,7 @@ describe("SlackAdapter", () => {
     });
 
     expect(handler).not.toHaveBeenCalled();
-    expect(onCredentialFault).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
+    expect(onCredentialFault).not.toHaveBeenCalled();
   });
 
   it("does not subscribe when stopped during the identity probe", async () => {
@@ -679,7 +758,7 @@ describe("Slack guardian linking", () => {
         }),
       );
     }
-    expect(rejected).toHaveBeenCalledTimes(100);
+    expect(rejected).toHaveBeenCalledTimes(5);
 
     await ingress.dispatch(
       envelope("guardian-after-flood", {

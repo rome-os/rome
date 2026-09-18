@@ -33,6 +33,19 @@ describe("InMemoryInboundDedup", () => {
     expect((await dedup.reserve("event")).state).toBe("acquired");
   });
 
+  it("bounds pending reservations without evicting live handlers", async () => {
+    const dedup = new InMemoryInboundDedup(2);
+    const first = await dedup.reserve("first");
+    const second = await dedup.reserve("second");
+
+    expect(first.state).toBe("acquired");
+    expect(second.state).toBe("acquired");
+    expect((await dedup.reserve("third")).state).toBe("busy");
+
+    if (first.state === "acquired") await first.release();
+    expect((await dedup.reserve("third")).state).toBe("acquired");
+  });
+
   it("evicts the oldest key once capacity is exceeded (FIFO)", async () => {
     const dedup = new InMemoryInboundDedup(2);
     await dedup.checkAndRecord("a"); // [a]

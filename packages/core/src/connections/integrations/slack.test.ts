@@ -49,38 +49,16 @@ describe("Slack setup", () => {
     });
   });
 
-  it("faults a stored Talk grant when bot event ingress is unconfigured", () => {
-    const authTest = rs.fn(async () => identity);
+  it("does not expose Talk for a connector-only grant when bot ingress is unconfigured", () => {
     const descriptor = makeSlackDescriptor({
       ingress: new SlackIngress(undefined),
       beginRedirect: async () => "unused",
       redeem: async () => {
         throw new Error("unused");
       },
-      api: { authTest, postMessage: async () => ({ ts: "unused" }) },
     });
-    const talker = descriptor.capabilities.talker?.build(
-      { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
-      {
-        connectionId: "slack-connection",
-        persist: async () => {},
-        profile: () => ({
-          teamId: "T1",
-          guardianLinked: true,
-        }),
-        registerIngress: () => () => {},
-      },
-    );
-    if (!talker) throw new Error("Slack Talk capability was not built");
-    const fault = rs.fn();
 
-    talker.start(() => {}, fault);
-
-    expect(fault).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ name: "Disconnected" }),
-    );
-    expect(authTest).not.toHaveBeenCalled();
-    talker.stop();
+    expect(descriptor.capabilities.talker).toBeUndefined();
   });
 
   it("keeps a workspace retryable across a transient startup backoff", async () => {
@@ -354,6 +332,40 @@ describe("Slack setup", () => {
         },
       ),
     ).rejects.toThrow("app_mentions:read, im:history");
+  });
+
+  it("refuses OAuth and bot tokens from different Slack applications", async () => {
+    const setup = makeSlackSetup({
+      ingress: new SlackIngress("secret"),
+      beginRedirect: async () => "https://cloud.example/oauth?state=state",
+      redeem: async () => ({
+        credential: { material: { botToken: "xoxb-test" }, expiresAt: "never" },
+        profile: {
+          teamId: "T1",
+          appId: "A-OAUTH",
+          scopes: ["app_mentions:read", "chat:write", "im:history"],
+        },
+      }),
+      api: {
+        authTest: async () => ({ ...identity, appId: "A-TOKEN" }),
+        postMessage: async () => ({ ts: "unused" }),
+      },
+    });
+    const controller = new AbortController();
+
+    await expect(
+      setup(
+        {
+          prompt: async () => ({}),
+          redirect: async () => ({ handoff: "handoff", state: "state" }),
+          show: () => {},
+        },
+        {
+          signal: controller.signal,
+          step: (_label, fn) => fn(controller.signal),
+        },
+      ),
+    ).rejects.toThrow("different application");
   });
 
   it("maps a revoked bot token to a workspace credential rejection", async () => {

@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { WeChatIcon } from "@/components/brand-icons/connection-badges";
+import { SlackIcon } from "@/components/brand-icons/slack-icon";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,6 +36,10 @@ function TelegramGlyph({ className }: { className?: string }) {
       <path d="M21.6 4.1 2.9 11.3c-.9.34-.9.9-.16 1.13l4.8 1.5 1.85 5.68c.22.6.4.83.83.83.42 0 .6-.19.83-.42l2.28-2.22 4.74 3.5c.87.48 1.5.23 1.72-.8l3.1-14.6c.31-1.27-.49-1.84-1.29-1.48v-.32ZM7.9 13.6l10.28-6.48c.5-.3.97-.14.59.2l-8.8 7.95-.35 3.7-1.72-5.37Z" />
     </svg>
   );
+}
+
+function SlackGlyph({ className }: { className?: string }) {
+  return <SlackIcon className={className} monochrome />;
 }
 
 function DiscordGlyph({ className }: { className?: string }) {
@@ -120,6 +125,7 @@ export const CHANNEL_META: Record<string, ChannelMeta> = {
   telegram: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
   telegram_user: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
   discord: { labelKey: "channels.discord", Glyph: DiscordGlyph },
+  slack: { labelKey: "channels.slack", Glyph: SlackGlyph },
   webchat: { labelKey: "channels.webchat", Glyph: WebchatGlyph },
   linkedin: { labelKey: "channels.linkedin", Glyph: LinkedInGlyph },
   wechat: { labelKey: "channels.wechat", Glyph: WeChatIcon },

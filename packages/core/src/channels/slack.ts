@@ -14,6 +14,8 @@ export const SLACK_HANDLER_REBUILD_GRACE_MS = 2 * 60_000;
 const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
 const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
 const SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS = 100;
+const SLACK_GUARDIAN_LINK_MAX_FEEDBACK_MESSAGES = 5;
+const SLACK_PENDING_REGISTRATION_GRACE_MS = 30_000;
 
 export const SLACK_REQUIRED_BOT_SCOPES = ["app_mentions:read", "chat:write", "im:history"] as const;
 
@@ -67,6 +69,7 @@ export class SlackIngress {
   private readonly now: () => number;
   private readonly initialStartupDeadline: number;
   private pendingRegistrations = 0;
+  private pendingRegistrationDeadline = 0;
   private initialRegistrationComplete = false;
 
   constructor(
@@ -144,11 +147,16 @@ export class SlackIngress {
    */
   beginHandlerRegistration(): () => void {
     this.pendingRegistrations++;
+    this.pendingRegistrationDeadline = Math.max(
+      this.pendingRegistrationDeadline,
+      this.now() + SLACK_PENDING_REGISTRATION_GRACE_MS,
+    );
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       this.pendingRegistrations--;
+      if (this.pendingRegistrations === 0) this.pendingRegistrationDeadline = 0;
     };
   }
 
@@ -204,7 +212,7 @@ export class SlackIngress {
 
     const handlers = this.handlers.get(envelope.team_id);
     if (!handlers || handlers.length === 0) {
-      return this.pendingRegistrations > 0 ||
+      return (this.pendingRegistrations > 0 && this.now() < this.pendingRegistrationDeadline) ||
         this.expectedWorkspaces.has(envelope.team_id) ||
         !this.initialRegistrationComplete ||
         this.now() < this.initialStartupDeadline
@@ -259,6 +267,7 @@ export interface SlackWebApi {
   postMessage(
     token: string,
     input: { channel: string; text: string; threadTs?: string },
+    signal?: AbortSignal,
   ): Promise<{ ts: string }>;
 }
 
@@ -364,13 +373,18 @@ export const slackWebApi: SlackWebApi = {
       appId: result.app_id,
     };
   },
-  async postMessage(token, input) {
-    const result = await slackApiCall(token, "chat.postMessage", {
-      channel: input.channel,
-      text: input.text,
-      mrkdwn: false,
-      ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
-    });
+  async postMessage(token, input, signal) {
+    const result = await slackApiCall(
+      token,
+      "chat.postMessage",
+      {
+        channel: input.channel,
+        text: input.text,
+        mrkdwn: false,
+        ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
+      },
+      signal,
+    );
     if (!result.ts) throw new SlackApiError("missing_message_id");
     return { ts: result.ts };
   },
@@ -482,6 +496,7 @@ export class SlackAdapter {
   private identity: SlackBotIdentity | null = null;
   private startGeneration = 0;
   private startAbort: AbortController | null = null;
+  private sendAbort = new AbortController();
 
   constructor(
     private readonly config: {
@@ -499,6 +514,7 @@ export class SlackAdapter {
 
   async start(): Promise<void> {
     const api = this.config.api ?? slackWebApi;
+    if (this.sendAbort.signal.aborted) this.sendAbort = new AbortController();
     const finishRegistration = this.config.ingress.beginHandlerRegistration();
     const generation = ++this.startGeneration;
     this.startAbort?.abort();
@@ -530,6 +546,7 @@ export class SlackAdapter {
     this.startGeneration++;
     this.startAbort?.abort();
     this.startAbort = null;
+    this.sendAbort.abort(new Error("Slack adapter stopped."));
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.identity = null;
@@ -537,9 +554,11 @@ export class SlackAdapter {
 
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<{ ts?: string }> {
     const omittedAttachments = message.attachments?.length ?? 0;
+    const hasCanonicalText = Boolean(message.text?.trim());
     const omittedParts =
-      message.parts?.filter((part) => part.type !== "text" && part.type !== "approval_card")
-        .length ?? 0;
+      message.parts?.filter(
+        (part) => part.type !== "text" && (part.type !== "approval_card" || hasCanonicalText),
+      ).length ?? 0;
     if (omittedAttachments > 0 || omittedParts > 0) {
       log.warn("slack omitted unsupported outbound content", {
         attachments: omittedAttachments,
@@ -565,11 +584,15 @@ export class SlackAdapter {
     let firstTs: string | undefined;
     try {
       for (const text of splitSlackText(outboundText)) {
-        const sent = await api.postMessage(this.config.botToken, {
-          channel: channelId,
-          text,
-          threadTs,
-        });
+        const sent = await api.postMessage(
+          this.config.botToken,
+          {
+            channel: channelId,
+            text,
+            threadTs,
+          },
+          this.sendAbort.signal,
+        );
         firstTs ??= sent.ts;
       }
       return { ts: firstTs };
@@ -591,14 +614,10 @@ export class SlackAdapter {
       envelope.api_app_id &&
       envelope.api_app_id !== this.config.expectedAppId
     ) {
-      const error = new Error(
-        `Slack event app ${envelope.api_app_id} does not match connected app ${this.config.expectedAppId}.`,
-      );
       log.error("slack event app mismatch", {
         expectedAppId: this.config.expectedAppId,
         receivedAppId: envelope.api_app_id,
       });
-      this.config.onCredentialFault?.(error);
       return true;
     }
 
@@ -739,6 +758,7 @@ export function waitForSlackGuardianLink(
     let unregister = () => {};
     const failedAttempts = new Map<string, number>();
     const lockedSenders = new Set<string>();
+    let feedbackMessages = 0;
     let settled = false;
     const finish = (outcome: { channelUserId: string } | Error) => {
       if (settled) return;
@@ -812,8 +832,13 @@ export function waitForSlackGuardianLink(
           lockedSenders.add(sender);
         }
         const rejectedAttempt = options.onRejectedAttempt;
-        if (event.channel && rejectedAttempt) {
+        if (
+          event.channel &&
+          rejectedAttempt &&
+          feedbackMessages < SLACK_GUARDIAN_LINK_MAX_FEEDBACK_MESSAGES
+        ) {
           const channelId = event.channel;
+          feedbackMessages++;
           // Slack must receive an Events API acknowledgement within a few seconds.
           // Rejection feedback is best-effort and may itself be rate-limited, so
           // contain both synchronous and asynchronous failures without making the

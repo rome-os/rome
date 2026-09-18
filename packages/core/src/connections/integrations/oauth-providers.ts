@@ -24,7 +24,7 @@ import {
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
 import { clearProviderTokenFile, syncProviderTokenFile } from "../../lib/provider-token-files.js";
 import { romeCloudOAuth } from "../schemes.js";
-import type { SetupFn } from "../setup/types.js";
+import type { SetupContext, SetupFn, SetupInteraction, SetupView } from "../setup/types.js";
 import type {
   ConnectionDescriptor,
   Credential,
@@ -218,6 +218,31 @@ export interface OAuthProviderSetupDeps {
   ) => Promise<{ credential: Credential; profile?: ProfileRecord }>;
 }
 
+/** Shared Rome Cloud OAuth redirect/validation/redeem stage. Integrations may
+ * supply their own progress copy, then continue with service-specific proof. */
+export async function redeemOAuthRedirect(
+  interact: SetupInteraction,
+  ctx: SetupContext,
+  deps: OAuthProviderSetupDeps,
+  progress: SetupView,
+): Promise<{ credential: Credential; profile?: ProfileRecord }> {
+  const url = await deps.beginRedirect();
+  const returned = await interact.redirect(url);
+  if (typeof returned.error === "string" && returned.error) {
+    throw new Error(
+      returned.error === "access_denied"
+        ? "Authorization was declined."
+        : `Authorization failed: ${returned.error}`,
+    );
+  }
+  const handoff = typeof returned.handoff === "string" ? returned.handoff.trim() : "";
+  const state = typeof returned.state === "string" ? returned.state.trim() : "";
+  if (!handoff || !state) throw new Error("The authorization return was incomplete.");
+
+  interact.show(progress);
+  return ctx.step("oauth-redeem", () => deps.redeem(handoff, state));
+}
+
 /**
  * The conferral setup for a Rome Cloud-brokered OAuth provider. A linear
  * coroutine of the `redirect` mechanic:
@@ -239,31 +264,10 @@ export function makeOAuthProviderSetup(
   deps: OAuthProviderSetupDeps,
 ): SetupFn {
   return async (interact, ctx) => {
-    const url = await deps.beginRedirect();
-    const returned = await interact.redirect(url);
-
-    // A denied consent (or any broker-reported error) fails the setup cleanly —
-    // the guardian sees the reason and can retry from a fresh authorize.
-    if (typeof returned.error === "string" && returned.error) {
-      throw new Error(
-        returned.error === "access_denied"
-          ? "Authorization was declined."
-          : `Authorization failed: ${returned.error}`,
-      );
-    }
-    const handoff = typeof returned.handoff === "string" ? returned.handoff.trim() : "";
-    const state = typeof returned.state === "string" ? returned.state.trim() : "";
-    if (!handoff || !state) {
-      throw new Error("The authorization return was incomplete.");
-    }
-
-    interact.show({
+    const { credential, profile } = await redeemOAuthRedirect(interact, ctx, deps, {
       body: [`Finishing the connection to ${OAUTH_PROVIDER_LABELS[provider]}…`],
       progress: true,
     });
-    const { credential, profile } = await ctx.step("oauth-redeem", () =>
-      deps.redeem(handoff, state),
-    );
 
     return {
       credential,
