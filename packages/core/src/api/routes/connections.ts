@@ -93,8 +93,15 @@ interface GrantDetailView {
   tokenExpiresAt: string | null;
 }
 
-function connectHint(service: string): ConnectHint | null {
+function connectHint(service: string, slackConfigured?: boolean): ConnectHint | null {
   if (!isOAuthProvider(service)) return null;
+  if (service === "slack" && slackConfigured === false) {
+    return {
+      url: null,
+      available: false,
+      unavailableReason: "Slack bot events are not configured on this Rome instance.",
+    };
+  }
   const link = createRomeCloudOAuthStartUrl(service);
   return {
     url: link.connectUrl,
@@ -117,6 +124,7 @@ function buildConnectionView(
   conn: Connection,
   records: Map<GrantName, GrantRecord>,
   manager: SetupManager | null,
+  slackConfigured?: boolean,
 ): ConnectionView {
   const revive = registry.getDescriptor(conn.service)?.reviveProfile;
   const grants = conn.auth.grants();
@@ -142,7 +150,7 @@ function buildConnectionView(
     grants,
     display,
     capabilities: conn.status(),
-    connect: connectHint(conn.service),
+    connect: connectHint(conn.service, slackConfigured),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
   };
 }
@@ -171,8 +179,15 @@ async function serializeConnection(
   registry: ConnectionRegistry,
   conn: Connection,
   manager: SetupManager | null,
+  slackConfigured?: boolean,
 ): Promise<ConnectionView> {
-  return buildConnectionView(registry, conn, await loadGrantRecords(registry, conn), manager);
+  return buildConnectionView(
+    registry,
+    conn,
+    await loadGrantRecords(registry, conn),
+    manager,
+    slackConfigured,
+  );
 }
 
 /** An offerable placeholder: a registered service with no connection row yet.
@@ -184,6 +199,7 @@ function placeholderView(
   service: string,
   descriptor: ConnectionDescriptor,
   manager: SetupManager | null,
+  slackConfigured?: boolean,
 ): ConnectionView {
   const grantNames = Object.keys(descriptor.auth);
   const grants: Record<GrantName, GrantState> = {};
@@ -214,7 +230,7 @@ function placeholderView(
       act: capStatus("actor"),
       watch: capStatus("watcher"),
     },
-    connect: connectHint(service),
+    connect: connectHint(service, slackConfigured),
     setups: activeSetups(manager, service, grantNames),
   };
 }
@@ -227,6 +243,7 @@ function placeholderView(
 function placeholderViews(
   registry: ConnectionRegistry,
   manager: SetupManager | null,
+  slackConfigured?: boolean,
 ): ConnectionView[] {
   return registry
     .registeredServices()
@@ -234,7 +251,7 @@ function placeholderViews(
     .filter((service) => !isOAuthProvider(service) || isEnabledOAuthProvider(service))
     .map((service) => {
       const descriptor = registry.getDescriptor(service);
-      return descriptor ? placeholderView(service, descriptor, manager) : null;
+      return descriptor ? placeholderView(service, descriptor, manager, slackConfigured) : null;
     })
     .filter((view): view is ConnectionView => view !== null);
 }
@@ -248,13 +265,17 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   app.get("/connections", async (c) => {
     const registry = requireConnectionRegistry(deps);
     const manager = deps.setupManager ?? null;
+    const slackConfigured = deps.slackIngress?.configured;
     const connected = await Promise.all(
-      registry.all().map((conn) => serializeConnection(registry, conn, manager)),
+      registry.all().map((conn) => serializeConnection(registry, conn, manager, slackConfigured)),
     );
     // Stable ordering for the UI: by service, then label, then id — the
     // registry's own iteration order is insertion-dependent. Placeholders sort
     // like a connection whose label is its service name and whose id is empty.
-    const connections = [...connected, ...placeholderViews(registry, manager)].sort(
+    const connections = [
+      ...connected,
+      ...placeholderViews(registry, manager, slackConfigured),
+    ].sort(
       (a, b) =>
         a.service.localeCompare(b.service) ||
         a.label.localeCompare(b.label) ||
@@ -272,7 +293,13 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     c.header("Cache-Control", "no-store");
     return c.json({
       connection: {
-        ...buildConnectionView(registry, conn, records, deps.setupManager ?? null),
+        ...buildConnectionView(
+          registry,
+          conn,
+          records,
+          deps.setupManager ?? null,
+          deps.slackIngress?.configured,
+        ),
         grantDetails: buildGrantDetails(conn, records),
       },
     });
@@ -327,7 +354,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     c.header("Cache-Control", "no-store");
     return c.json({
       ok: true,
-      connection: await serializeConnection(registry, conn, deps.setupManager ?? null),
+      connection: await serializeConnection(
+        registry,
+        conn,
+        deps.setupManager ?? null,
+        deps.slackIngress?.configured,
+      ),
     });
   });
 

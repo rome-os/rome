@@ -181,10 +181,20 @@ describe("grantProfileFromBundle", () => {
     const bundle: OAuthTokenBundle = {
       accessToken: "xoxb-bot",
       scope: ["chat:write"],
-      raw: { authed_user: { access_token: "xoxp-user" }, team: { id: "T123" } },
+      raw: {
+        authed_user: { access_token: "xoxp-user" },
+        team: { id: "T123", name: "Acme" },
+        bot_user_id: "UBOT",
+      },
     };
     const profile = grantProfileFromBundle("slack", bundle, { displayName: "Ada" });
-    expect(profile).toEqual({ displayName: "Ada", scopes: ["chat:write"], teamId: "T123" });
+    expect(profile).toEqual({
+      displayName: "Ada",
+      scopes: ["chat:write"],
+      teamId: "T123",
+      workspaceName: "Acme",
+      botUserId: "UBOT",
+    });
     // The workspace identity lands on the PROFILE, never inside the secret material.
     expect(credentialFromBundle("slack", bundle)?.material).toEqual({
       botToken: "xoxb-bot",

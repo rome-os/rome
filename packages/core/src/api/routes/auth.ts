@@ -52,6 +52,8 @@ const PUBLIC_API_PATHS = [
   "/api/onboard/*",
   "/api/instance/enroll/*",
   "/api/oauth/*",
+  // Slack Events API requests authenticate with Slack's timestamped HMAC.
+  "/api/slack/events",
   // The connect return leg. The desktop shell hands provider sign-in to the
   // system browser (the Electron window has no platform authenticator, so a
   // passkey second factor cannot complete there), and that browser carries no

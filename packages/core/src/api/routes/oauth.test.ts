@@ -1,4 +1,4 @@
-// The /oauth/redeem provider write path (github/slack/google).
+// The /oauth/redeem provider write path (github/google) and Slack proof guard.
 //
 // The grant ledger is now the SOLE OAuth store. Redeem makes one direct write:
 // import the redeemed bundle into the provider's grant (credential + the
@@ -148,7 +148,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     expect(registry.find("google")).toHaveLength(0);
   });
 
-  it("slack: imports the two-token bundle into the workspace grant", async () => {
+  it("slack: refuses the fallback path because it carries no guardian proof", async () => {
     redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
       provider: "slack",
       profile: "default",
@@ -162,12 +162,12 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
 
     const res = await postRedeem(makeDeps(registry));
 
-    expect(res.status).toBe(200);
-    const conn = registry.find("slack")[0];
-    expect(conn).toBeDefined();
-    expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.getLedger().getGrant(conn.id, "workspace");
-    expect(grant?.profile).toMatchObject({ teamId: "T123" });
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error:
+        "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
+    });
+    expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("github")).toHaveLength(0);
   });
 

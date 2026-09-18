@@ -9,6 +9,7 @@
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { SlackIngress } from "../../channels/slack.js";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
@@ -256,6 +257,26 @@ describe("GET /connections", () => {
       if (prev === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
       else process.env.PANTHEON_BASE_ORIGIN = prev;
     }
+  });
+
+  it("marks Slack unavailable until Events API signing is configured", async () => {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    registry.register({
+      service: "slack",
+      auth: { workspace: tokenPaste({ label: "token", validate: async () => {} }) },
+      capabilities: {},
+    });
+
+    const res = await makeApp(registry, fakePersonMappingRepo(), {
+      slackIngress: new SlackIngress(undefined),
+    }).request("/connections");
+    const { connections } = await res.json();
+
+    expect(connections[0].connect).toEqual({
+      url: null,
+      available: false,
+      unavailableReason: "Slack bot events are not configured on this Rome instance.",
+    });
   });
 });
 

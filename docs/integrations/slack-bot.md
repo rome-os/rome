@@ -1,0 +1,39 @@
+# Slack bot
+
+Rome uses its existing Slack connection for both workspace operations and bot conversations. One Rome instance connects one Slack workspace.
+
+## Behavior
+
+- A direct message to the Rome bot starts or continues a private conversation.
+- An `@Rome` mention in a channel where the bot is invited starts or continues that channel thread. Rome posts its answer in the thread.
+- Rome ignores ordinary channel messages, bot-authored messages, and messages without text.
+- The first release sends and receives completed text messages only. It does not handle files, images, or streamed partial answers.
+
+During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready.
+
+## Slack app configuration
+
+Use [`infra/slack/rome-bot-manifest.yml`](../../infra/slack/rome-bot-manifest.yml) as the versioned baseline. Before installing it:
+
+1. Set the OAuth redirect URL to the Rome Cloud Slack OAuth callback.
+2. Set the Events API request URL to `https://<instance-origin>/api/slack/events`.
+3. Copy the app's signing secret into `SLACK_SIGNING_SECRET` on the Rome instance.
+4. Recreate or restart the Rome service after changing the environment.
+
+The bot scopes are limited to `chat:write`, `im:history`, and `app_mentions:read`.
+Subscribe to `message.im`, `app_mention`, and the scope-free `app_uninstalled` and `tokens_revoked` lifecycle events.
+Do not add channel-message subscriptions. Rome must not receive unmentioned channel traffic.
+The manifest also enables a writable App Home Messages tab so workspace members can find and direct-message the bot.
+
+Slack signs every Events API request. Rome verifies the signature against the untouched request body and rejects timestamps older than five minutes. It routes the event only to a bot token for the same workspace.
+
+## Deployment check
+
+After deploying:
+
+1. Confirm Slack accepts the Events API request URL challenge.
+2. Connect Slack in **Settings → Connections** and send the displayed code to the bot.
+3. Confirm Settings shows the workspace and `@Rome` bot identity.
+4. Send the bot a direct message and verify one reply appears in that direct conversation.
+5. Invite the bot to a test channel, mention it, and verify the reply appears in a thread.
+6. Post an unmentioned channel message and verify Rome stays silent.

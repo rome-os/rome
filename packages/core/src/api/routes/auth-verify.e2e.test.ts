@@ -184,6 +184,12 @@ describe("/api/auth/verify", () => {
     expect(res.status).toBe(204);
   });
 
+  it("lets Slack reach its signature-authenticated Events API route", async () => {
+    const host = buildHost(await stubDeps([]));
+    const res = await verifyRequest(host, "/api/slack/events");
+    expect(res.status).toBe(204);
+  });
+
   it("keeps the rest of /api/setups/* private", async () => {
     // The return leg is listed as an exact path, so the sibling routes a
     // browser must never reach on its own stay behind the cookie.

@@ -96,6 +96,15 @@ export function oauthRoutes(deps: ApiDeps): Hono {
 
     try {
       const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
+      if (redeemed.provider === "slack") {
+        return c.json(
+          {
+            error:
+              "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
+          },
+          409,
+        );
+      }
 
       // The grant ledger is the sole OAuth store: import the provider's bundle
       // into the grant so it holds both the connection state and the non-secret

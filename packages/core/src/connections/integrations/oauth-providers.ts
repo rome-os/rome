@@ -6,14 +6,10 @@
 // (`romeCloudOAuth` — see schemes.ts), and renew() is "re-confer" until a
 // Rome Cloud refresh exchange exists.
 //
-// This phase migrates ONLY the connection state into the registry: the grant
-// ledger becomes the system of record for whether a provider is connected, while
-// the legacy consumers (the tmpfs token files written at connect time, the
-// gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
-// keep reading the legacy providerAccounts row/file. The Act seam (registry-built
-// Actors) is a follow-up — `capabilities` is deliberately empty, which the
-// registry supports (`capabilities` is `Partial<…>`); a capability-less
-// connection still carries full grant state.
+// The grant ledger is the system of record for whether a provider is connected.
+// The tmpfs token files, GitHub shell auth, and `connector_proxy` remain custody
+// consumers of that grant. GitHub and Google declare no capability here. Slack
+// extends its base descriptor with Talk in `slack.ts`.
 //
 // Grant names follow the grant table: grants are about conferrals, not
 // token count. GitHub and Google each mint one user credential → one `user`
@@ -79,6 +75,10 @@ export const slackGrantProfileSchema = z
     /** Slack workspace id — identity, never credential material; the token-file
      *  custody writes it beside the secret tokens. */
     teamId: identityField,
+    /** Slack workspace name and bot identity captured from `auth.test`. */
+    workspaceName: identityField,
+    botUserId: identityField,
+    botUsername: identityField,
   })
   .strict();
 export type SlackGrantProfile = z.infer<typeof slackGrantProfileSchema>;
@@ -140,9 +140,9 @@ export function toGithubDisplay(profile: GithubGrantProfile): ProfileDisplay {
 
 export function toSlackDisplay(profile: SlackGrantProfile): ProfileDisplay {
   return Object.freeze({
-    displayName: profile.displayName,
-    /** The workspace name reads as Slack's handle. */
-    handle: profile.login,
+    /** A connected Slack card names the workspace and identifies the Rome bot. */
+    displayName: profile.workspaceName ?? profile.displayName,
+    handle: profile.botUsername ? `@${profile.botUsername}` : profile.login,
     email: profile.email,
     avatarUrl: profile.avatarUrl,
   });

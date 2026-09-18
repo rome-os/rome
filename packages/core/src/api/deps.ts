@@ -50,6 +50,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
+import type { SlackIngress } from "../channels/slack.js";
 
 export interface ApiConfig {
   port: number;
@@ -181,6 +182,8 @@ export interface ApiDeps {
    *  registry; drives the generic setup routes. Present only when the
    *  registry is. */
   setupManager?: SetupManager;
+  /** Slack Events API verifier/router. Optional in lightweight route tests. */
+  slackIngress?: SlackIngress;
 }
 
 export interface ApiHandle {
