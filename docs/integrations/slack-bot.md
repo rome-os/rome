@@ -15,6 +15,8 @@ The guardian's linked Slack account is admitted automatically. Other workspace m
 
 Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
 
+Answers longer than Slack's message limit are sent as sequential text messages. A transport failure after an earlier part was accepted can leave a partial answer, because Slack does not provide an idempotency key for `chat.postMessage`.
+
 ## Slack app configuration
 
 Use [`infra/slack/rome-bot-manifest.yml`](../../infra/slack/rome-bot-manifest.yml) as the versioned baseline. Before installing it:
