@@ -118,7 +118,7 @@ describe("Recent zone, expanded sidebar", () => {
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual(["Bravo", "Alpha"]);
-    expect(within(zone).getAllByRole("img", { name: "Not opened yet" })).toHaveLength(1);
+    expect(within(zone).getAllByRole("img", { name: "Not opened on this device" })).toHaveLength(1);
     expect(screen.queryByText("System Thing")).toBeNull();
   });
 
@@ -264,6 +264,6 @@ describe("Recent zone, collapsed rail", () => {
     renderSidebar(true);
 
     await screen.findByRole("link", { name: "Bravo" });
-    expect(screen.getByRole("img", { name: "Not opened yet" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Not opened on this device" })).toBeTruthy();
   });
 });

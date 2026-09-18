@@ -13,12 +13,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  ACTIVE_CLASS,
+  IDLE_CLASS,
   LINK_CLASS,
-  RAIL_ACTIVE_CLASS,
-  RAIL_IDLE_CLASS,
   RAIL_LINK_CLASS,
-  WIDE_ACTIVE_CLASS,
-  WIDE_IDLE_CLASS,
   isEntryActive,
 } from "./sidebar-shared";
 
@@ -101,7 +99,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                   className={cn(
                     LINK_CLASS,
                     "pr-8 [@media(hover:none)]:pr-14",
-                    active ? WIDE_ACTIVE_CLASS : WIDE_IDLE_CLASS,
+                    active ? ACTIVE_CLASS : IDLE_CLASS,
                   )}
                 >
                   <SidebarAppIcon app={app} />
@@ -189,7 +187,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                 <Link
                   to={app.href}
                   aria-label={app.displayName}
-                  className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
+                  className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                 >
                   <SidebarAppIcon app={app} />
                   {unopenedIds.has(app.id) ? (
@@ -214,7 +212,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                 <button
                   type="button"
                   aria-label={t("sidebar.moreRecentApps")}
-                  className={`${RAIL_LINK_CLASS} ${RAIL_IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                  className={`${RAIL_LINK_CLASS} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
                 >
                   <Ellipsis className="h-4 w-4" aria-hidden />
                 </button>

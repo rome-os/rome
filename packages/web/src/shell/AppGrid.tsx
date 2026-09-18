@@ -62,9 +62,9 @@ import {
 import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
+  ACTIVE_CLASS,
+  IDLE_CLASS,
   LINK_CLASS,
-  RAIL_ACTIVE_CLASS,
-  RAIL_IDLE_CLASS,
   RAIL_LINK_CLASS,
   isEntryActive,
 } from "./sidebar-shared";
@@ -418,7 +418,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                           type="button"
                           onClick={() => setStoreOpen(true)}
                           aria-label={label}
-                          className={`${RAIL_LINK_CLASS} ${RAIL_IDLE_CLASS}`}
+                          className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
                         >
                           {renderBuiltinIcon(entry)}
                         </button>
@@ -428,7 +428,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={label}
-                          className={`${RAIL_LINK_CLASS} ${RAIL_IDLE_CLASS}`}
+                          className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
                         >
                           {renderBuiltinIcon(entry)}
                         </a>
@@ -445,7 +445,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     <Link
                       to={entry.href}
                       aria-label={label}
-                      className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
+                      className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                     >
                       {renderBuiltinIcon(entry)}
                     </Link>
@@ -466,7 +466,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     <Link
                       to={app.href}
                       aria-label={app.displayName}
-                      className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
+                      className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                     >
                       {resolveIcon(pin)}
                       {app.status === "disabled" ? (
@@ -498,7 +498,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     type="button"
                     onClick={onSearch}
                     aria-label={t("recentChats.search")}
-                    className={`${RAIL_LINK_CLASS} ${RAIL_IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                    className={`${RAIL_LINK_CLASS} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
                   >
                     <Search className="h-4 w-4" aria-hidden />
                   </button>
@@ -707,7 +707,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     key={`builtin-${pin.id}`}
                     to={entry.href}
                     title={t(entry.labelKey)}
-                    className={`${LINK_CLASS} ${active ? "bg-surface shadow-1 dark:bg-surface-hover" : "hover:bg-surface-hover dark:hover:bg-surface"}`}
+                    className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                   >
                     {renderBuiltinIcon(entry)}
                     <span className="flex-1 truncate">{t(entry.labelKey)}</span>
@@ -725,7 +725,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                     <Link
                       to={app.href}
                       title={app.displayName}
-                      className={`${LINK_CLASS} ${active ? "bg-surface shadow-1 dark:bg-surface-hover" : "hover:bg-surface-hover dark:hover:bg-surface"}`}
+                      className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                     >
                       {app.iconUrl ? (
                         <img
