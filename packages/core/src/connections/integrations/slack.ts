@@ -52,17 +52,29 @@ export async function lockUnlinkedSlackTalk(
   ledger: GrantLedger,
   options: { enabled?: boolean; now?: Date; clearCustody?: () => Promise<void> } = {},
 ): Promise<void> {
-  // A connector-only Slack grant must remain usable on hosts that do not offer
-  // bot conversations. Such a host cannot complete the guardian-link recovery,
-  // so migrating it to degraded would strand the connection permanently.
-  if (options.enabled === false) return;
   let locked = false;
+  let restored = false;
   const lockedConnectionIds: string[] = [];
+  const restoredConnectionIds: string[] = [];
   const degradedAt = options.now ?? new Date();
   const connections = await ledger.listConnections();
   for (const connection of connections) {
     if (connection.service !== "slack") continue;
     const grant = await ledger.getGrant(connection.id, "workspace");
+    if (options.enabled === false) {
+      // Reversing the bot-events configuration must also reverse only the
+      // migration-owned lock. load() follows this pass and re-materializes
+      // connector custody from the restored authorized grant.
+      if (grant?.state === "degraded" && grant.degraded?.reason === GUARDIAN_LINK_REQUIRED_REASON) {
+        await ledger.updateGrant(connection.id, "workspace", {
+          state: "authorized",
+          degraded: undefined,
+        });
+        restored = true;
+        restoredConnectionIds.push(connection.id);
+      }
+      continue;
+    }
     if (grant?.state !== "authorized") continue;
     const linked = grant.profile?.guardianLinked === true;
     if (linked) continue;
@@ -79,6 +91,11 @@ export async function lockUnlinkedSlackTalk(
       reason: GUARDIAN_LINK_REQUIRED_REASON,
     });
     await (options.clearCustody ?? (() => clearProviderTokenFile("slack")))();
+  }
+  if (restored) {
+    log.info("restored connector-only Slack grants after bot events were disabled", {
+      connectionIds: restoredConnectionIds,
+    });
   }
 }
 

@@ -746,7 +746,7 @@ describe("Slack guardian linking", () => {
       controller.signal,
       { onRejectedAttempt: rejected },
     );
-    for (let sender = 0; sender <= 100; sender++) {
+    for (let sender = 0; sender < 5; sender++) {
       await ingress.dispatch(
         envelope(`attacker-${sender}`, {
           type: "message",
@@ -758,7 +758,35 @@ describe("Slack guardian linking", () => {
         }),
       );
     }
-    expect(rejected).toHaveBeenCalledTimes(5);
+    await ingress.dispatch(
+      envelope("guardian-wrong-after-burst", {
+        type: "message",
+        channel_type: "im",
+        channel: "D-GUARDIAN",
+        user: "UGUARDIAN",
+        text: "ROME-LINK-WRONG000000",
+        ts: "guardian-wrong-after-burst",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(rejected).toHaveBeenCalledTimes(6);
+
+    for (let sender = 5; sender <= 100; sender++) {
+      await ingress.dispatch(
+        envelope(`attacker-${sender}`, {
+          type: "message",
+          channel_type: "im",
+          channel: `D${sender}`,
+          user: `U${sender}`,
+          text: "ROME-LINK-WRONG000000",
+          ts: `1700000010.${sender}`,
+        }),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Each tracked sender gets one response even after the global burst cap,
+    // while the sender map and total feedback remain bounded.
+    expect(rejected).toHaveBeenCalledTimes(100);
 
     await ingress.dispatch(
       envelope("guardian-after-flood", {

@@ -238,17 +238,38 @@ describe("Slack setup", () => {
     expect(clearCustody).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves connector-only Slack grants intact when bot events are not offered", async () => {
-    const listConnections = rs.fn(async () => []);
+  it("restores only migration-locked connector grants when bot events are disabled", async () => {
+    const listConnections = rs.fn(async () => [
+      { id: "migration-locked", service: "slack", label: "Slack", createdAt: new Date() },
+      { id: "other-fault", service: "slack", label: "Slack", createdAt: new Date() },
+    ]);
+    const updateGrant = rs.fn(async () => {});
     const clearCustody = rs.fn(async () => {});
-    const ledger = { listConnections } as unknown as GrantLedger;
+    const ledger = {
+      listConnections,
+      getGrant: async (connectionId: string) => ({
+        state: "degraded",
+        degraded: {
+          at: new Date(),
+          reason:
+            connectionId === "migration-locked"
+              ? "Reconnect Slack in Settings to link the guardian identity."
+              : "token revoked",
+        },
+      }),
+      updateGrant,
+    } as unknown as GrantLedger;
 
     await lockUnlinkedSlackTalk(ledger, {
       enabled: false,
       clearCustody,
     });
 
-    expect(listConnections).not.toHaveBeenCalled();
+    expect(listConnections).toHaveBeenCalledTimes(1);
+    expect(updateGrant).toHaveBeenCalledExactlyOnceWith("migration-locked", "workspace", {
+      state: "authorized",
+      degraded: undefined,
+    });
     expect(clearCustody).not.toHaveBeenCalled();
   });
 

@@ -758,6 +758,7 @@ export function waitForSlackGuardianLink(
     let unregister = () => {};
     const failedAttempts = new Map<string, number>();
     const lockedSenders = new Set<string>();
+    const feedbackBySender = new Map<string, number>();
     let feedbackMessages = 0;
     let settled = false;
     const finish = (outcome: { channelUserId: string } | Error) => {
@@ -832,12 +833,17 @@ export function waitForSlackGuardianLink(
           lockedSenders.add(sender);
         }
         const rejectedAttempt = options.onRejectedAttempt;
+        const senderFeedback = feedbackBySender.get(sender) ?? 0;
         if (
           event.channel &&
           rejectedAttempt &&
-          feedbackMessages < SLACK_GUARDIAN_LINK_MAX_FEEDBACK_MESSAGES
+          // Preserve one useful response for every tracked sender so unrelated
+          // members cannot exhaust the guardian's feedback. Beyond that first
+          // response, the setup-wide cap prevents one sender from spamming.
+          (senderFeedback === 0 || feedbackMessages < SLACK_GUARDIAN_LINK_MAX_FEEDBACK_MESSAGES)
         ) {
           const channelId = event.channel;
+          feedbackBySender.set(sender, senderFeedback + 1);
           feedbackMessages++;
           // Slack must receive an Events API acknowledgement within a few seconds.
           // Rejection feedback is best-effort and may itself be rate-limited, so
