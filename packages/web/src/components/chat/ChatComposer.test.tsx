@@ -3,7 +3,6 @@ import { createRef, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef, type RefObject } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
@@ -57,7 +56,6 @@ interface RenderComposerOptions {
   settings?: Record<string, unknown>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
-  composerRef?: RefObject<ChatComposerHandle | null>;
 }
 
 function renderComposer(props: Partial<ChatComposerProps>, options: RenderComposerOptions = {}) {
