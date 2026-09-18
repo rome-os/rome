@@ -1,6 +1,6 @@
 import { Download, Ellipsis, Pin, Plus, Search, Store, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import type { AppViewState, InstalledAppCard } from "@rome/api-types/apps";
@@ -42,7 +42,6 @@ import {
 import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
-import { useNewApps } from "@/hooks/use-new-apps";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
 import { APP_NAV } from "@/shell/AppGrid";
 
@@ -293,13 +292,6 @@ export default function AppsIndexPage() {
   const [storeOpen, setStoreOpen] = useState(false);
   const [remixTarget, setRemixTarget] = useState<InstalledAppCard | null>(null);
   const { isPinned, togglePin } = useSidebarPins();
-
-  // Landing on the full apps list is the acknowledgement: clear the sidebar's
-  // "new app" hint by marking every installed frontend app as seen.
-  const { markAppsSeen } = useNewApps();
-  useEffect(() => {
-    markAppsSeen();
-  }, [markAppsSeen]);
 
   const menusDisabled = lifecycle.lifecycleBusy || lifecycle.accessBusy;
 

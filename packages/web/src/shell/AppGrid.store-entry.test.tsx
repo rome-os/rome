@@ -20,10 +20,6 @@ rs.mock("@/hooks/use-settings", () => {
   const invalidate = async () => {};
   return { useSettings: () => settings, useInvalidateSettings: () => invalidate };
 });
-rs.mock("@/hooks/use-new-apps", () => {
-  const newApps = { newAppIds: new Set<string>(), markAppsSeen: () => {} };
-  return { useNewApps: () => newApps };
-});
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
