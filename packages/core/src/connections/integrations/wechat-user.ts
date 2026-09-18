@@ -434,9 +434,12 @@ export function createWechatUserDescriptor(
   const reader = new WechatUserReader(runtime);
 
   const recoverPassphrase = async (signal: AbortSignal): Promise<string> => {
-    const driverDir = await stageCaptureDriver();
+    const driverDir = await stageCaptureDriver(runtime.runtimeDir);
     try {
-      return await recoverWechatPassphrase({ driverDir, home: runtime.home }, signal);
+      return await recoverWechatPassphrase(
+        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir },
+        signal,
+      );
     } finally {
       await rm(driverDir, { recursive: true, force: true });
     }

@@ -177,7 +177,12 @@ describe("WechatUserRuntime.start", () => {
   it("restores the client link and coalesces concurrent launches without installing", async () => {
     const h = await tempHome();
     const { run, calls } = scriptedRun({});
-    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "opt-wechat"), run });
+    const runtime = new WechatUserRuntime({
+      home: h,
+      runtimeDir: join(h, "run"),
+      canonicalPrefix: join(h, "opt-wechat"),
+      run,
+    });
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
     await Promise.all([runtime.start(), runtime.start()]);
     expect(await readlink(runtime.canonicalPrefix)).toBe(runtime.clientDir);

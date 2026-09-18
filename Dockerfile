@@ -214,12 +214,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # client dies before it draws. The browser package already supplies most of the
 # X and GL stack; this is only the remainder.
 #
-# gdb is here because key recovery launches the client under it to catch the
-# passphrase the client derives at its first login. This does not grant the
-# container ptrace: a normal container process still lacks CAP_SYS_PTRACE. The
-# recovery runs gdb only through host root, which enters this container's
-# namespaces from the VM (channels/wechat-user-keys.ts) and keeps its capability
-# across the entry — the gdb binary simply has to exist in this mount namespace.
+# Key recovery launches the client under gdb as the Rome service user.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \

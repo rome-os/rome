@@ -38,8 +38,8 @@ services:
       # Personal WeChat (docs/wechat-personal.md). Off unless the operator opts
       # in, because it runs the WeChat desktop client in this container and
       # recovers its store key by launching that client under a debugger here.
-      # Turning it on also needs ROME_DOCKER_USER_MODE=root; the SYS_ADMIN cap
-      # and 1 GB shared memory below are already in place.
+      # The default multi mode keeps Rome and WeChat running as rome; the
+      # SYS_ADMIN cap and 1 GB shared memory below are already in place.
       - WECHAT_USER_ENABLED=${WECHAT_USER_ENABLED:-false}
       - ROME_HOST_EXECUTION_ENABLED=${ROME_HOST_EXECUTION_ENABLED:-false}
       - ROME_HOST_EXECUTION_SOCKET=${ROME_HOST_EXECUTION_SOCKET:-/run/rome-host/control.sock}

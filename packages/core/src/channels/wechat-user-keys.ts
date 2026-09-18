@@ -1,33 +1,10 @@
-// Recovering the WeChat message-store key, the one step that needs a debugger.
-//
-// The store is SQLCipher, keyed by a passphrase the client only ever holds in
-// memory and only ever derives during a login. Reading it out needs ptrace on
-// the client as it signs in. Rome's own container can do that: it launches the
-// client under gdb from inside the container and reads the value back out. The
-// container already carries the capability the debugger needs (SYS_ADMIN, and
-// AppArmor unconfined), and gdb traces a child it launched, so no host-root
-// script or namespace crossing is involved — the capture is an ordinary local
-// subprocess. Rome then derives and verifies the per-database keys in the same
-// container, where the databases are.
-//
-// It recovers the key by launching the client under gdb, not by attaching to a
-// running one. The passphrase is derived once, at the first login, and a
-// fresh-QR login re-execs into a new image — attaching after the client is up
-// misses that derivation and forces a second, in-process login. Launching owns
-// the client from its first instruction and re-arms the breakpoint across every
-// exec, so the very first login is caught with nothing asked of the guardian
-// twice.
-//
-// The mechanics: Rome stages the launch driver and the vendored key tool in a
-// private directory under /run, then runs the driver directly. The driver
-// launches the client the container's own way, catches the key the first login
-// derives, and prints only the passphrase on stdout.
+// WeChat key recovery. Channel contract: docs/architecture/channels.md.
 
 import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
-import { runCommand, type RunCommand, type RunResult } from "./wechat-user.js";
+import { runCommand, wechatRuntimeDir, type RunCommand, type RunResult } from "./wechat-user.js";
 
 const log = createLogger("wechat-user-keys");
 
@@ -62,7 +39,7 @@ export class WechatUserKeyRecoveryError extends Error {
  * the capture can run them. Returns a private, unique directory. The caller
  * removes it after recovery.
  */
-export async function stageCaptureDriver(parent = "/run"): Promise<string> {
+export async function stageCaptureDriver(parent = wechatRuntimeDir()): Promise<string> {
   const owner = await lstat(parent);
   if (!owner.isDirectory() || owner.uid !== process.getuid?.() || (owner.mode & 0o022) !== 0) {
     throw new WechatUserKeyRecoveryError(
@@ -94,6 +71,7 @@ export interface WechatKeyRecoveryOptions {
   home?: string;
   /** Override the capture window (seconds). Defaults to CAPTURE_TIMEOUT_SECONDS. */
   timeoutSeconds?: number;
+  runtimeDir?: string;
 }
 
 /**
@@ -119,7 +97,10 @@ export async function recoverWechatPassphrase(
     timeoutMs: (timeoutSeconds + CAPTURE_GRACE_SECONDS) * 1000,
     // The launched client must run under the runtime's home so the store lands
     // where the reader looks; the driver reads HOME from its environment.
-    ...(options.home ? { env: { HOME: options.home } } : {}),
+    env: {
+      ...(options.home ? { HOME: options.home } : {}),
+      XDG_RUNTIME_DIR: options.runtimeDir ?? wechatRuntimeDir(),
+    },
     ...(signal ? { signal } : {}),
   });
 

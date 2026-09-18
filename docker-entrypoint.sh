@@ -115,6 +115,19 @@ mkdir -p /home/rome/.rome
 safe_chown -R rome:rome /home/rome
 chmod 750 /home/rome /home/rome/.rome
 
+# WeChat writes only into the runtime user's home and private session directory.
+# Prepare its canonical link while the entrypoint still owns /opt.
+if [ "${WECHAT_USER_ENABLED:-false}" = "true" ]; then
+  WECHAT_RUNTIME_UID="$(run_as_rome id -u)"
+  WECHAT_RUNTIME_DIR="/run/user/$WECHAT_RUNTIME_UID"
+  mkdir -p "$WECHAT_RUNTIME_DIR"
+  safe_chown rome:rome "$WECHAT_RUNTIME_DIR"
+  chmod 700 "$WECHAT_RUNTIME_DIR"
+  if [ ! -e /opt/wechat ] && [ ! -L /opt/wechat ]; then
+    ln -s /home/rome/.local/share/wechat/client/opt/wechat /opt/wechat
+  fi
+fi
+
 # Prepare shared sshfs mount roots before creating user dirs.
 mkdir -p /var/lib/rome-hostfs/targets/home/user
 safe_chown -R rome:user /var/lib/rome-hostfs
