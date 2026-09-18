@@ -1,16 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import {
-  LAST_OPENED_REWRITE_MS,
   RECENT_APPS_VISIBLE,
   RECENT_APPS_WINDOW_MS,
   type RecentAppCandidate,
   isUnopened,
   lastActiveMs,
-  mergeAppLastOpened,
   parseAppLastOpened,
   pruneAppLastOpened,
   selectRecentApps,
-  shouldRecordOpen,
 } from "./recent-apps";
 
 const NOW = Date.parse("2026-09-17T12:00:00.000Z");
@@ -35,7 +32,6 @@ describe("constants", () => {
   it("match the spec", () => {
     expect(RECENT_APPS_VISIBLE).toBe(3);
     expect(RECENT_APPS_WINDOW_MS).toBe(14 * DAY);
-    expect(LAST_OPENED_REWRITE_MS).toBe(HOUR);
   });
 });
 
@@ -50,17 +46,6 @@ describe("parseAppLastOpened", () => {
     expect(parseAppLastOpened(undefined)).toEqual({});
     expect(parseAppLastOpened(["x"])).toEqual({});
     expect(parseAppLastOpened("x")).toEqual({});
-  });
-});
-
-describe("mergeAppLastOpened", () => {
-  it("keeps the newer timestamp per app and the union of ids", () => {
-    expect(
-      mergeAppLastOpened(
-        { a: iso(NOW - DAY), b: iso(NOW) },
-        { a: iso(NOW), c: iso(NOW - 2 * DAY) },
-      ),
-    ).toEqual({ a: iso(NOW), b: iso(NOW), c: iso(NOW - 2 * DAY) });
   });
 });
 
@@ -140,27 +125,5 @@ describe("selectRecentApps", () => {
     const builtin = app("sys", { origin: "builtin", installedAt: iso(NOW) });
     expect(selectRecentApps([builtin], none, {}, NOW)).toEqual([]);
     expect(selectRecentApps([builtin], none, { sys: iso(NOW) }, NOW)).toEqual([builtin]);
-  });
-});
-
-describe("shouldRecordOpen", () => {
-  it("records an app with no entry", () => {
-    expect(shouldRecordOpen("a", {}, NOW)).toBe(true);
-  });
-
-  it("skips an app that is already the newest and was recorded under an hour ago", () => {
-    expect(shouldRecordOpen("a", { a: iso(NOW - 10 * 60 * 1000), b: iso(NOW - DAY) }, NOW)).toBe(
-      false,
-    );
-  });
-
-  it("records again when another app has been opened since (A, B, A)", () => {
-    expect(
-      shouldRecordOpen("a", { a: iso(NOW - 10 * 60 * 1000), b: iso(NOW - 5 * 60 * 1000) }, NOW),
-    ).toBe(true);
-  });
-
-  it("records again once the newest entry is an hour old, so daily use never expires", () => {
-    expect(shouldRecordOpen("a", { a: iso(NOW - HOUR) }, NOW)).toBe(true);
   });
 });

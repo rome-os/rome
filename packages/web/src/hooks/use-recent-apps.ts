@@ -1,18 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { saveSetting } from "@/lib/chat-api";
-import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
+import { useEffect, useMemo, useState } from "react";
 import {
   type AppLastOpened,
   type RecentAppCandidate,
   isUnopened,
-  mergeAppLastOpened,
   parseAppLastOpened,
   pruneAppLastOpened,
   selectRecentApps,
-  shouldRecordOpen,
 } from "@/lib/recent-apps";
 
-const APP_LAST_OPENED_KEY = "appLastOpened";
+// "Last opened" lives in this browser only, on purpose. It is cache-shaped
+// data: it regrows as the guardian uses apps, and a phone and a laptop have
+// different habits, so each device keeps its own list. Only the pin set is a
+// deliberate setting worth syncing. The install time, the other half of the
+// Recent zone, comes from the server with each app card.
 export const APP_LAST_OPENED_STORAGE_KEY = "rome-app-last-opened";
 // Same-document poke, the counterpart of `rome-pins-changed`. An open recorded
 // inside a split-view iframe reaches the sidebar through the `storage` event
@@ -34,22 +34,8 @@ function writeLocal(value: AppLastOpened): void {
   } catch {}
 }
 
-// localStorage answers first render, the settings query then reconciles. Unlike
-// the pin set, the server is not simply authoritative here: an open recorded on
-// this device moments ago may not have reached it yet, so the two are merged.
 export function useAppLastOpened(): AppLastOpened {
   const [value, setValue] = useState<AppLastOpened>(readLocal);
-  const { data: settings } = useSettings();
-
-  useEffect(() => {
-    if (!settings) return;
-    const merged = mergeAppLastOpened(
-      readLocal(),
-      parseAppLastOpened(settings[APP_LAST_OPENED_KEY]),
-    );
-    writeLocal(merged);
-    setValue(merged);
-  }, [settings]);
 
   useEffect(() => {
     const sync = () => setValue(readLocal());
@@ -70,7 +56,7 @@ export function useAppLastOpened(): AppLastOpened {
 interface RecentApps<T> {
   /** Unpinned apps active within the window, most recent first. */
   recent: T[];
-  /** The subset of `recent` that was installed but never opened. */
+  /** The subset of `recent` that was installed but never opened here. */
   unopenedIds: ReadonlySet<string>;
 }
 
@@ -88,30 +74,15 @@ export function useRecentApps<T extends RecentAppCandidate>(
   }, [apps, pinnedAppIds, lastOpened]);
 }
 
-// Records that the guardian opened `appId`. `enabled` must be false for anyone
-// else: the same host pages serve public visitors, who have no settings to read
-// or write. Waits for settings to load so it merges against server truth and
-// never persists a truncated map (the rule the old seen-apps ledger followed).
+// Records that the guardian opened `appId` on this device. `enabled` is false
+// while the app has not loaded for a guardian (a public visitor, or a manifest
+// still on its way), so a failed or foreign open never counts.
 export function useRecordAppOpened(appId: string | undefined, enabled: boolean): void {
-  const { data: settings } = useSettings({ enabled });
-  const invalidateSettings = useInvalidateSettings();
-  const recordedFor = useRef<string | null>(null);
-
   useEffect(() => {
-    if (!enabled || !appId || settings === undefined) return;
-    if (recordedFor.current === appId) return;
-    recordedFor.current = appId;
-
+    if (!enabled || !appId) return;
     const now = Date.now();
-    const merged = mergeAppLastOpened(
-      readLocal(),
-      parseAppLastOpened(settings[APP_LAST_OPENED_KEY]),
-    );
-    if (!shouldRecordOpen(appId, merged, now)) return;
-
-    const next = pruneAppLastOpened({ ...merged, [appId]: new Date(now).toISOString() }, now);
+    const next = pruneAppLastOpened({ ...readLocal(), [appId]: new Date(now).toISOString() }, now);
     writeLocal(next);
     window.dispatchEvent(new Event(APP_OPENED_EVENT));
-    void saveSetting(APP_LAST_OPENED_KEY, next).then(() => invalidateSettings());
-  }, [appId, enabled, settings, invalidateSettings]);
+  }, [appId, enabled]);
 }

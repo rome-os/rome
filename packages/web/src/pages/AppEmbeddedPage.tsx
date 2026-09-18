@@ -93,7 +93,7 @@ export default function AppEmbeddedPage() {
   useAppCatalogEvents(appId, isGuardian, refetch);
 
   // The sidebar's Recent zone orders by this. Guardian only: a public visitor
-  // reaches this page too and has no settings to write.
+  // reaches this page too, and their visit is not the guardian's recent app.
   useRecordAppOpened(appId, isGuardian);
 
   // Remount gate (#1640): RomeAppHost keys its mount lifecycle on `entryUrl`
