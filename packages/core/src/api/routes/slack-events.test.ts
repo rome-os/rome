@@ -157,6 +157,8 @@ describe("POST /slack/events", () => {
     });
     now = 1_001;
 
+    expect((await app.request(signedRequest(secret, body, "1"))).status).toBe(503);
+    ingress.completeInitialRegistration();
     const response = await app.request(signedRequest(secret, body, "1"));
 
     expect(response.status).toBe(200);

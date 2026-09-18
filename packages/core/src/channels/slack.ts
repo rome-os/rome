@@ -60,6 +60,7 @@ export class SlackIngress {
   private readonly now: () => number;
   private readonly initialStartupDeadline: number;
   private pendingRegistrations = 0;
+  private initialRegistrationComplete = false;
 
   constructor(
     private readonly signingSecret?: string,
@@ -144,6 +145,11 @@ export class SlackIngress {
     };
   }
 
+  /** Mark boot hydration complete after all initial Talk epochs started. */
+  completeInitialRegistration(): void {
+    this.initialRegistrationComplete = true;
+  }
+
   /** Dispatch one already-authenticated Events API envelope. */
   async dispatch(
     envelope: SlackEventEnvelope,
@@ -158,7 +164,9 @@ export class SlackIngress {
 
     const handlers = this.handlers.get(envelope.team_id);
     if (!handlers || handlers.length === 0) {
-      return this.pendingRegistrations > 0 || this.now() < this.initialStartupDeadline
+      return this.pendingRegistrations > 0 ||
+        !this.initialRegistrationComplete ||
+        this.now() < this.initialStartupDeadline
         ? "starting"
         : "unhandled";
     }
@@ -333,6 +341,14 @@ export function isSlackCredentialError(error: unknown): boolean {
 
 export function slackChannelUserId(teamId: string, userId: string): string {
   return `${teamId}/${userId}`;
+}
+
+export function isExternalSlackAuthor(envelope: SlackEventEnvelope): boolean {
+  const event = envelope.event;
+  return (
+    (typeof event.user_team === "string" && event.user_team !== envelope.team_id) ||
+    (typeof event.source_team === "string" && event.source_team !== envelope.team_id)
+  );
 }
 
 export function slackThreadConversationId(channelId: string, threadTs: string): ConversationId {
@@ -533,11 +549,7 @@ export class SlackAdapter {
     // Slack user ids are workspace-scoped. Never map a Slack Connect author
     // under the host workspace identity, where an id collision could inherit a
     // local member's pairing or guardian admission.
-    if (
-      (event.user_team && event.user_team !== envelope.team_id) ||
-      (event.source_team && event.source_team !== envelope.team_id)
-    )
-      return true;
+    if (isExternalSlackAuthor(envelope)) return true;
 
     if (
       event.bot_id ||
@@ -551,13 +563,18 @@ export class SlackAdapter {
     if (event.type === "message" && event.channel_type === "im") {
       const text = decodeSlackText(event.text).trim();
       if (!text) return true;
+      const threadTs = event.thread_ts?.trim() || undefined;
       message = {
         messageId: event.ts,
-        conversationId: event.channel as ConversationId,
+        conversationId: threadTs
+          ? slackThreadConversationId(event.channel, threadTs)
+          : (event.channel as ConversationId),
+        ...(threadTs ? { parentConversationId: event.channel as ConversationId } : {}),
         senderId: slackChannelUserId(envelope.team_id, event.user),
         text,
         attachments: [],
         timestamp: slackTimestamp(event.ts),
+        ...(threadTs ? { replyTo: { messageId: threadTs } } : {}),
         thread: { kind: "dm" },
         addressing: "direct",
         raw: envelope,
@@ -606,6 +623,7 @@ export function isSlackGuardianLinkEvent(
   const event = envelope.event;
   return (
     event.type === "message" &&
+    !isExternalSlackAuthor(envelope) &&
     (!expectedAppId || !envelope.api_app_id || envelope.api_app_id === expectedAppId) &&
     event.channel_type === "im" &&
     !event.bot_id &&
@@ -622,7 +640,17 @@ export function waitForSlackGuardianLink(
   identity: SlackBotIdentity,
   code: string,
   signal: AbortSignal,
-  options: { expiresInMs?: number; maxFailedAttempts?: number; expectedAppId?: string } = {},
+  options: {
+    expiresInMs?: number;
+    maxFailedAttempts?: number;
+    expectedAppId?: string;
+    onRejectedAttempt?: (input: {
+      channelId: string;
+      attempts: number;
+      maxAttempts: number;
+      locked: boolean;
+    }) => Promise<void>;
+  } = {},
 ): Promise<{ channelUserId: string }> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -651,9 +679,10 @@ export function waitForSlackGuardianLink(
     );
     unregister = ingress.subscribe(
       identity.teamId,
-      (envelope) => {
+      async (envelope) => {
         const event = envelope.event;
         const sender = typeof event.user === "string" ? event.user : null;
+        if (isExternalSlackAuthor(envelope)) return false;
         if (
           options.expectedAppId &&
           envelope.api_app_id &&
@@ -689,10 +718,17 @@ export function waitForSlackGuardianLink(
           return false;
         }
         if (lockedSenders.has(sender)) return true;
+        const maxAttempts = options.maxFailedAttempts ?? SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS;
         const attempts = (failedAttempts.get(sender) ?? 0) + 1;
         failedAttempts.set(sender, attempts);
-        if (attempts >= (options.maxFailedAttempts ?? SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS)) {
+        const locked = attempts >= maxAttempts;
+        if (locked) {
           lockedSenders.add(sender);
+        }
+        if (event.channel && options.onRejectedAttempt) {
+          await options
+            .onRejectedAttempt({ channelId: event.channel, attempts, maxAttempts, locked })
+            .catch(() => {});
         }
         // Link-looking messages are setup credentials, not agent requests.
         return true;

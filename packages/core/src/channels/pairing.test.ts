@@ -156,7 +156,7 @@ describe("channel pairing approvals", () => {
 
     expect(feature).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith("connection", "C1:1700000000.1", {
-      text: "✅ `T1/U123` is paired with Rome. You can start chatting now.",
+      text: "✅ T1/U123 is paired with Rome. You can start chatting now.",
     });
   });
 
@@ -595,7 +595,7 @@ describe("channel pairing approvals", () => {
         : service === "discord"
           ? "<@123> (`123`)"
           : service === "slack"
-            ? "`T1/U123`"
+            ? "T1/U123"
             : '<at user_id="ou_123">Owner</at> (`ou_123`)';
     const message: InboundMessage = {
       senderId: id,

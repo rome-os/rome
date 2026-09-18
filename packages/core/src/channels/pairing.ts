@@ -28,6 +28,7 @@ function pairingAccount(
 ): string {
   const name = username ? `@${username}` : displayName?.replace(/\s+/g, " ").trim();
   const code = `\`${id}\``;
+  if (channel === "slack") return name && name !== id ? `${name} (${id})` : id;
   if (channel === "discord" && /^[1-9][0-9]*$/.test(id)) return `<@${id}> (${code})`;
   if (channel === "feishu" && /^ou_[a-zA-Z0-9_-]+$/.test(id)) {
     const label = (displayName || id)
@@ -72,7 +73,7 @@ export function createPairingAdmission(deps: {
     const allowAddressedGroup = deps.replyInOriginatingConversation?.(service) ?? false;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
     const displayName = message.senderDisplayName ?? message.senderId;
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nPairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen Settings → Connections in the Rome Web UI.\n\nPairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {

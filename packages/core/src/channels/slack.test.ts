@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import type { InboundMessage } from "@rome-os/app-runtime";
 import { describe, expect, it, rs } from "@rstest/core";
 import {
   SlackAdapter,
@@ -61,6 +62,7 @@ describe("SlackIngress", () => {
     const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
     const handler = rs.fn(async () => {});
     ingress.subscribe(identity.teamId, handler);
+    ingress.completeInitialRegistration();
     const event = envelope("Ev1", { type: "message", channel_type: "im" });
 
     await expect(ingress.dispatch(event)).resolves.toBe("delivered");
@@ -213,6 +215,39 @@ describe("SlackAdapter", () => {
     expect(messages[0]).toMatchObject({
       conversationId: "C1:1700000000.300",
       text: "/stop",
+    });
+  });
+
+  it("keeps a Slack DM thread separate and replies inside it", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api, postMessage } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+    const messages: InboundMessage[] = [];
+    adapter.onMessage((message) => messages.push(message));
+    await adapter.start();
+
+    await ingress.dispatch(
+      envelope("dm-thread", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "inside a thread",
+        ts: "1700000002.200",
+        thread_ts: "1700000001.100",
+      }),
+    );
+    expect(messages[0]).toMatchObject({
+      conversationId: "D1:1700000001.100",
+      parentConversationId: "D1",
+      thread: { kind: "dm" },
+    });
+
+    await adapter.send(messages[0]!.conversationId, { text: "thread answer" });
+    expect(postMessage).toHaveBeenCalledWith("xoxb-test", {
+      channel: "D1",
+      text: "thread answer",
+      threadTs: "1700000001.100",
     });
   });
 
@@ -558,6 +593,7 @@ describe("Slack guardian linking", () => {
     );
 
     await expect(linking).rejects.toThrow("expired");
+    ingress.completeInitialRegistration();
     await expect(
       ingress.dispatch(
         envelope("expired-code", {
@@ -584,6 +620,7 @@ describe("Slack guardian linking", () => {
 
     controller.abort(new Error("setup replaced"));
     await expect(linking).rejects.toThrow("setup replaced");
+    ingress.completeInitialRegistration();
     await expect(
       ingress.dispatch(
         envelope("cancelled-code", {
@@ -623,5 +660,84 @@ describe("Slack guardian linking", () => {
     });
 
     await rejection;
+  });
+
+  it("does not link or count a Slack Connect external author", async () => {
+    const ingress = new SlackIngress("secret");
+    const controller = new AbortController();
+    const onRejectedAttempt = rs.fn(async () => {});
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { onRejectedAttempt },
+    );
+
+    await ingress.dispatch(
+      envelope("external-guardian", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        user_team: "T-EXTERNAL",
+        source_team: "T-EXTERNAL",
+        text: "ROME-LINK-ABCDEFGH",
+        ts: "1700000015.0",
+      }),
+    );
+    expect(onRejectedAttempt).not.toHaveBeenCalled();
+
+    await ingress.dispatch(
+      envelope("local-guardian", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U2",
+        text: "ROME-LINK-ABCDEFGH",
+        ts: "1700000015.1",
+      }),
+    );
+    await expect(linking).resolves.toEqual({ channelUserId: "T123/U2" });
+  });
+
+  it("reports rejected guardian-code attempts without revealing the expected code", async () => {
+    const ingress = new SlackIngress("secret");
+    const controller = new AbortController();
+    const onRejectedAttempt = rs.fn(async () => {});
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { maxFailedAttempts: 2, onRejectedAttempt },
+    );
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await ingress.dispatch(
+        envelope(`rejected-${attempt}`, {
+          type: "message",
+          channel_type: "im",
+          channel: "D1",
+          user: "U1",
+          text: `ROME-LINK-WRONG${attempt}`,
+          ts: `1700000016.${attempt}`,
+        }),
+      );
+    }
+    expect(onRejectedAttempt).toHaveBeenNthCalledWith(1, {
+      channelId: "D1",
+      attempts: 1,
+      maxAttempts: 2,
+      locked: false,
+    });
+    expect(onRejectedAttempt).toHaveBeenNthCalledWith(2, {
+      channelId: "D1",
+      attempts: 2,
+      maxAttempts: 2,
+      locked: true,
+    });
+    controller.abort(new Error("test complete"));
+    await expect(linking).rejects.toThrow("test complete");
   });
 });

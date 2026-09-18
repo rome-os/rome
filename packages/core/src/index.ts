@@ -1120,6 +1120,7 @@ async function main() {
     listAgents: () => agentLoader.getAll().keys(),
   });
   connectionRegistry.startCapabilities();
+  slackIngress.completeInitialRegistration();
 
   try {
     await writeAppRuntimeStatus(refreshRuntimeAppStatus());

@@ -11,6 +11,7 @@ import {
   waitForSlackGuardianLink,
 } from "../../channels/slack.js";
 import { clearProviderTokenFile } from "../../lib/provider-token-files.js";
+import { createLogger } from "../../logger.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { GrantLedger } from "../ledger.js";
@@ -29,6 +30,7 @@ export interface SlackDescriptorDeps extends OAuthProviderSetupDeps {
 }
 
 const GUARDIAN_LINK_REQUIRED_REASON = "Reconnect Slack in Settings to link the guardian identity.";
+const log = createLogger("slack-connection");
 
 function credentialMaterial(credential: Credential): { botToken: string } {
   if (typeof credential.material === "function") {
@@ -53,6 +55,7 @@ export async function lockUnlinkedSlackTalk(
   // so migrating it to degraded would strand the connection permanently.
   if (options.enabled === false) return;
   let locked = false;
+  const lockedConnectionIds: string[] = [];
   const degradedAt = options.now ?? new Date();
   const connections = await ledger.listConnections();
   for (const connection of connections) {
@@ -68,8 +71,15 @@ export async function lockUnlinkedSlackTalk(
       degraded: { at: degradedAt, reason: GUARDIAN_LINK_REQUIRED_REASON },
     });
     locked = true;
+    lockedConnectionIds.push(connection.id);
   }
-  if (locked) await (options.clearCustody ?? (() => clearProviderTokenFile("slack")))();
+  if (locked) {
+    log.warn("legacy Slack grants require guardian linking", {
+      connectionIds: lockedConnectionIds,
+      reason: GUARDIAN_LINK_REQUIRED_REASON,
+    });
+    await (options.clearCustody ?? (() => clearProviderTokenFile("slack")))();
+  }
 }
 
 export function missingSlackBotScopes(scopes: readonly string[] | undefined): string[] {
@@ -149,6 +159,14 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
     const guardianLink = ctx.step("slack-guardian-link", (signal) =>
       waitForSlackGuardianLink(deps.ingress, identity, code, signal, {
         expectedAppId: profile.appId ?? identity.appId,
+        onRejectedAttempt: async ({ channelId, attempts, maxAttempts, locked }) => {
+          await api.postMessage(material.botToken, {
+            channel: channelId,
+            text: locked
+              ? "Too many incorrect codes. Cancel and reconnect Slack in Settings to generate a new code."
+              : `That code was not accepted (${attempts} of ${maxAttempts} attempts). Check the code shown in Settings.`,
+          });
+        },
       }),
     );
     interact.show({
@@ -197,7 +215,12 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
       if (!profile.guardianChannelUserId) {
         return {
           start(_deliver, fault): void {
-            fault(new Disconnected(new Error(GUARDIAN_LINK_REQUIRED_REASON)));
+            fault(
+              new CredentialRejected({
+                grant: "workspace",
+                cause: new Error(GUARDIAN_LINK_REQUIRED_REASON),
+              }),
+            );
           },
           stop(): void {},
           async send(): Promise<never> {

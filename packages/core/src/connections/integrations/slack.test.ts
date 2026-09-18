@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { SlackApiError, SlackIngress, type SlackEventEnvelope } from "../../channels/slack.js";
 import type { GrantLedger } from "../ledger.js";
 import type { SetupContext, SetupInteraction, SetupView } from "../setup/types.js";
-import { CredentialRejected, Disconnected } from "../errors.js";
+import { CredentialRejected } from "../errors.js";
 import {
   lockUnlinkedSlackTalk,
   makeSlackDescriptor,
@@ -214,7 +214,7 @@ describe("Slack setup", () => {
     const fault = rs.fn();
 
     expect(() => talker.start(() => {}, fault)).not.toThrow();
-    expect(fault).toHaveBeenCalledExactlyOnceWith(expect.any(Disconnected));
+    expect(fault).toHaveBeenCalledExactlyOnceWith(expect.any(CredentialRejected));
   });
 
   it("refuses a grant without mention and DM permissions", async () => {
