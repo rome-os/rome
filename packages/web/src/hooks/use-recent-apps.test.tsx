@@ -79,7 +79,7 @@ describe("useAppLastOpened", () => {
     await waitFor(() => expect(result.current).toEqual({ a: opened }));
   });
 
-  it("re-reads when another document (a split-view iframe) records an open", async () => {
+  it("re-reads when another tab records an open", async () => {
     const { result } = renderHook(() => useAppLastOpened());
     const opened = new Date().toISOString();
 

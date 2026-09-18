@@ -69,10 +69,14 @@ export default function AppFullPage() {
     };
   }, [appId, splat, t]);
 
-  // Split view mounts apps through this page inside an iframe, so this is where
-  // a split-view open is seen. Guardian only, as in AppEmbeddedPage.
+  // Only a top-level visit counts as the guardian opening the app. Split view
+  // mounts this same page inside an iframe for every tile of a restored chat
+  // layout, and those mounts are the layout coming back, not a choice — letting
+  // them count would reorder the sidebar's Recent zone on every session visit.
+  // Guardian only, as in AppEmbeddedPage.
   const isGuardian = manifest?.bootstrap.caller?.kind === "guardian";
-  useRecordAppOpened(appId, isGuardian);
+  const isTopLevel = typeof window !== "undefined" && window.self === window.top;
+  useRecordAppOpened(appId, isGuardian && isTopLevel);
 
   if (error) {
     return (

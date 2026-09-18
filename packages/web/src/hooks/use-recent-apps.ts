@@ -15,8 +15,8 @@ import {
 // Recent zone, comes from the server with each app card.
 export const APP_LAST_OPENED_STORAGE_KEY = "rome-app-last-opened";
 // Same-document poke, the counterpart of `rome-pins-changed`. An open recorded
-// inside a split-view iframe reaches the sidebar through the `storage` event
-// instead, which fires in every other same-origin document.
+// in another tab reaches this sidebar through the `storage` event instead,
+// which fires in every other same-origin document.
 const APP_OPENED_EVENT = "rome-app-opened";
 
 function readLocal(): AppLastOpened {
