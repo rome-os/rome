@@ -25,9 +25,7 @@ describe("channel pairing approvals", () => {
     channelUserId: "alice",
     displayName: "Alice",
   };
-  const talkGrants = (service: string) => [
-    service === "feishu" ? "app" : service === "slack" ? "workspace" : "bot",
-  ];
+  const talkGrants = (service: string) => [service === "feishu" ? "app" : "bot"];
   function seedConnection(service: string) {
     testDb.db
       .insert(connections)
@@ -81,8 +79,6 @@ describe("channel pairing approvals", () => {
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
-      replyInOriginatingConversation: (service) => service === "slack",
-      plainTextGuidance: (service) => service === "slack",
     });
     await admit(
       "connection",
@@ -115,51 +111,6 @@ describe("channel pairing approvals", () => {
     await expect(notifyPairingResolution(router, result.approval)).resolves.toBeUndefined();
     expect((await repo.findById(request.id))?.status).toBe("approved");
     expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
-  });
-
-  it("notifies an approved Slack requester in the originating mention thread", async () => {
-    seedConnection("slack");
-    const send = rs.fn<TalkRouter["send"]>(async (_connection, conversationId) => ({
-      messageId: "sent",
-      conversationId,
-    }));
-    const feature = rs.fn();
-    const router = { send, feature } as unknown as TalkRouter;
-    const admit = createPairingAdmission({
-      talkGrants,
-      approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      replyInOriginatingConversation: (service) => service === "slack",
-      plainTextGuidance: (service) => service === "slack",
-    });
-
-    await admit(
-      "connection",
-      "slack",
-      {
-        senderId: "T1/U123",
-        conversationId: "C1:1700000000.1" as ConversationId,
-        messageId: "request",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date(),
-        thread: { kind: "topic" },
-        addressing: "mention",
-      },
-      router,
-    );
-    const request = (await repo.findPending())[0];
-    expect(pairingPayload(request)?.conversationId).toBe("C1:1700000000.1");
-    const result = await repo.resolvePending(request.id, "approve", "owner");
-    if (result.outcome !== "resolved") throw new Error("Approval failed");
-    send.mockClear();
-
-    await notifyPairingResolution(router, result.approval, (service) => service === "slack");
-
-    expect(feature).not.toHaveBeenCalled();
-    expect(send).toHaveBeenCalledWith("connection", "C1:1700000000.1", {
-      text: "✅ T1/U123 is paired with Rome. You can start chatting now.",
-    });
   });
 
   it.each([
@@ -577,32 +528,28 @@ describe("channel pairing approvals", () => {
     "telegram",
     "discord",
     "feishu",
-    "slack",
   ])("blocks unknown %s messages and consumes group and replayed verification", async (service) => {
     seedConnection(service);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
-      plainTextGuidance: (candidate) => candidate === "slack",
     });
     const send = rs.fn<TalkRouter["send"]>(async () => ({
       messageId: "sent",
       conversationId: "dm" as ConversationId,
     }));
     const router = { send } as unknown as TalkRouter;
-    const id = service === "feishu" ? "ou_123" : service === "slack" ? "T1/U123" : "123";
+    const id = service === "feishu" ? "ou_123" : "123";
     const account =
       service === "telegram"
         ? "@realowner (`123`)"
         : service === "discord"
           ? "<@123> (`123`)"
-          : service === "slack"
-            ? "T1/U123"
-            : '<at user_id="ou_123">Owner</at> (`ou_123`)';
+          : '<at user_id="ou_123">Owner</at> (`ou_123`)';
     const message: InboundMessage = {
       senderId: id,
-      senderDisplayName: service === "slack" ? undefined : "Owner",
+      senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
       conversationId: "dm" as ConversationId,
       messageId: "one",
@@ -634,11 +581,8 @@ describe("channel pairing approvals", () => {
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2].text).toContain(`🔗 Pair ${account} with Rome.`);
-    const guideUrl = `https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
     expect(send.mock.calls[0][2].text).toContain(
-      service === "slack"
-        ? `Pairing Guide: ${guideUrl}`
-        : `Learn more in the [Pairing Guide](${guideUrl}).`,
+      `Learn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
     );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);

@@ -201,7 +201,6 @@ function buildTalker(
     {
       connectionId: "email-test",
       persist: async () => {},
-      profile: () => undefined,
       registerIngress: (handler) => {
         ingress = handler;
         return () => {
@@ -296,7 +295,6 @@ describe("email Talker fault mapping", () => {
       {
         connectionId: "email-test",
         persist: async () => {},
-        profile: () => undefined,
         registerIngress: (handler) => {
           ingress = handler;
           return () => {};

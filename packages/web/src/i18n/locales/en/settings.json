@@ -191,11 +191,11 @@
       },
       "slack": {
         "user": {
-          "title": "Your Slack workspace",
+          "title": "Your Slack account",
           "bullets": {
-            "work": "Direct-message the Rome bot or mention @Rome in an invited channel"
+            "work": "Send and read messages in your Slack workspace as you"
           },
-          "privacyNote": "Rome receives direct messages and explicit mentions only; you can disconnect here anytime."
+          "privacyNote": "You approve access on Slack; you can disconnect here anytime."
         }
       },
       "composio": {

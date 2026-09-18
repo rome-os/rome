@@ -18,7 +18,6 @@ import { credentialFromBundle, grantProfileFromBundle } from "../providers-impor
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
-import type { SlackIngress } from "../../channels/slack.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "./feishu.js";
@@ -26,7 +25,6 @@ import { createLinkedInDescriptor } from "./linkedin.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
-import { makeSlackDescriptor } from "./slack.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
 import { makeWebchatDescriptor } from "./webchat.js";
@@ -43,7 +41,6 @@ export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
-export { makeSlackDescriptor } from "./slack.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts
@@ -79,8 +76,6 @@ export interface BuiltinConnectionDeps {
   db: DrizzleDb;
   /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
   wechatUserEnabled?: boolean;
-  /** Authenticated Slack Events API fan-out shared by setup and live Talk. */
-  slackIngress: SlackIngress;
 }
 
 /**
@@ -141,8 +136,8 @@ export function registerBuiltinConnections(
       maxIntervalMs: deps.linkedinPoll.maxIntervalMs,
     }),
   );
-  // Rome Cloud-OAuth providers (github/slack/google). GitHub and Google remain
-  // grant-ledger state only; Slack extends that base descriptor with Talk.
+  // Rome Cloud-OAuth provider connection state (github/slack/
+  // google; grant ledger only, no capabilities yet — Actors land in follow-ups).
   // The conferral setup drives connect through the generic setup
   // surface: begin-redirect → guardian consents on the broker → the return leg
   // resumes the coroutine → redeem → terminal confer (which re-materializes the
@@ -154,29 +149,26 @@ export function registerBuiltinConnections(
   // connect, where consent is shown anyway). This subsumes the legacy
   // reconnect route.
   for (const provider of OAUTH_PROVIDERS) {
-    const oauthDeps = {
-      beginRedirect: () =>
-        createRomeCloudOAuthStartRedirect(deps.db, provider, { reconnect: true }),
-      redeem: async (handoff: string, state: string) => {
-        const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
-        const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
-        if (!credential) {
-          throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
-        }
-        const profile = grantProfileFromBundle(
-          redeemed.provider,
-          redeemed.tokens,
-          redeemed.profile ?? {},
-        );
-        // Omit an empty profile so the grant records no `{}` identity outcome
-        // (parity with the redeem route's sparse-profile handling).
-        return { credential, profile: Object.keys(profile).length > 0 ? profile : undefined };
-      },
-    };
     registry.register(
-      provider === "slack" && deps.slackIngress.configured
-        ? makeSlackDescriptor({ ...oauthDeps, ingress: deps.slackIngress })
-        : makeOAuthProviderDescriptor(provider, oauthDeps),
+      makeOAuthProviderDescriptor(provider, {
+        beginRedirect: () =>
+          createRomeCloudOAuthStartRedirect(deps.db, provider, { reconnect: true }),
+        redeem: async (handoff, state) => {
+          const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
+          const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
+          if (!credential) {
+            throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
+          }
+          const profile = grantProfileFromBundle(
+            redeemed.provider,
+            redeemed.tokens,
+            redeemed.profile ?? {},
+          );
+          // Omit an empty profile so the grant records no `{}` identity outcome
+          // (parity with the redeem route's sparse-profile handling).
+          return { credential, profile: Object.keys(profile).length > 0 ? profile : undefined };
+        },
+      }),
     );
   }
 }

@@ -211,25 +211,3 @@ export async function redeemRomeCloudOAuthHandoff(
         : null,
   };
 }
-
-/**
- * Inspect which provider owns a pending state without consuming its handoff.
- * The legacy sign-in redeem route uses this to redirect Slack through the
- * guardian-proof setup before Rome Cloud mints or spends a Slack token.
- */
-export async function pendingRomeCloudOAuthProvider(
-  db: DrizzleDb,
-  state: string,
-): Promise<OAuthProvider | null> {
-  const [attempt] = await db
-    .select({
-      provider: oauthPendingAttempts.provider,
-      consumedAt: oauthPendingAttempts.consumedAt,
-      expiresAt: oauthPendingAttempts.expiresAt,
-    })
-    .from(oauthPendingAttempts)
-    .where(eq(oauthPendingAttempts.state, state))
-    .limit(1);
-  if (!attempt || attempt.consumedAt || attempt.expiresAt.getTime() < Date.now()) return null;
-  return isOAuthProvider(attempt.provider) ? attempt.provider : null;
-}

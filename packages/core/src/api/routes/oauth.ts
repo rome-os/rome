@@ -10,21 +10,13 @@ import {
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
-  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
 } from "../../lib/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
-import type { ApiDeps, OAuthRedeemServices } from "../deps.js";
-
-const defaultOAuthRedeemServices: OAuthRedeemServices = {
-  guardianState: getGuardianAuthState,
-  pendingProvider: pendingRomeCloudOAuthProvider,
-  redeemHandoff: redeemRomeCloudOAuthHandoff,
-};
+import type { ApiDeps } from "../deps.js";
 
 export function oauthRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
-  const redeemServices = deps.oauthRedeemServices ?? defaultOAuthRedeemServices;
 
   app.get("/oauth/providers", async (c) => {
     const providers = getEnabledOAuthProviders().map((provider) => {
@@ -97,25 +89,13 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "state is required." }, 400);
     }
 
-    const guardian = await redeemServices.guardianState(deps.db);
+    const guardian = await getGuardianAuthState(deps.db);
     if (!guardian.exists || !guardian.userId) {
       return c.json({ error: "Guardian account has not been created yet." }, 412);
     }
 
     try {
-      if (
-        deps.slackIngress?.configured === true &&
-        (await redeemServices.pendingProvider(deps.db, state)) === "slack"
-      ) {
-        return c.json(
-          {
-            error:
-              "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
-          },
-          409,
-        );
-      }
-      const redeemed = await redeemServices.redeemHandoff(deps.db, handoff, state);
+      const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
 
       // The grant ledger is the sole OAuth store: import the provider's bundle
       // into the grant so it holds both the connection state and the non-secret

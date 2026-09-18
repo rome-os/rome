@@ -136,7 +136,6 @@ function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}
     {
       connectionId: "telegram-user-test",
       persist: async () => {},
-      profile: () => undefined,
       registerIngress: () => () => {},
     },
   );

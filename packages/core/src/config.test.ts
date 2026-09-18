@@ -9,7 +9,6 @@ import { DEFAULT_SQLITE_PATH } from "./db/index.js";
 const CONFIG_ENV_KEYS = [
   "PANTHEON_SLUG",
   "ANTHROPIC_API_KEY",
-  "SLACK_SIGNING_SECRET",
   "DATABASE_TYPE",
   "SQLITE_PATH",
   "SQLITE_ENCRYPTION_KEY",
@@ -101,12 +100,6 @@ describe("loadConfig()", () => {
   it("allows missing ANTHROPIC_API_KEY (optional)", () => {
     const config = loadConfig();
     expect(config.anthropicApiKey).toBeUndefined();
-  });
-
-  it("reads the optional Slack request signing secret", () => {
-    expect(loadConfig().slackSigningSecret).toBeUndefined();
-    rs.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
-    expect(loadConfig().slackSigningSecret).toBe("slack-signing-secret");
   });
 
   it("defaults DATABASE_TYPE to 'sqlite'", () => {

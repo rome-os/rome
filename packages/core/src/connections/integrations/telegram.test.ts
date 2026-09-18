@@ -191,7 +191,6 @@ describe("telegram descriptor shape", () => {
       {
         connectionId: "telegram-test",
         persist: async () => {},
-        profile: () => undefined,
         registerIngress: () => () => {},
       },
     );
@@ -271,7 +270,6 @@ function buildTalker(factory: FaultBotFactory): {
     {
       connectionId: "telegram-test",
       persist: async () => {},
-      profile: () => undefined,
       registerIngress: () => () => {},
     },
   );

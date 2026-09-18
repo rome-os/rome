@@ -32,7 +32,7 @@ export const APPROVAL_EXECUTION_STATES = [
 ] as const;
 export type ApprovalExecutionState = (typeof APPROVAL_EXECUTION_STATES)[number];
 
-export const PAIRING_CHANNELS = ["telegram", "discord", "feishu", "slack"] as const;
+export const PAIRING_CHANNELS = ["telegram", "discord", "feishu"] as const;
 export const PAIRING_HISTORY_PAGE_SIZE = 100;
 
 export const pairingPayloadSchema = z.object({

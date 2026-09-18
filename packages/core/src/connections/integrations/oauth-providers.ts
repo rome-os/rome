@@ -6,10 +6,14 @@
 // (`romeCloudOAuth` — see schemes.ts), and renew() is "re-confer" until a
 // Rome Cloud refresh exchange exists.
 //
-// The grant ledger is the system of record for whether a provider is connected.
-// The tmpfs token files, GitHub shell auth, and `connector_proxy` remain custody
-// consumers of that grant. GitHub and Google declare no capability here. Slack
-// extends its base descriptor with Talk in `slack.ts`.
+// This phase migrates ONLY the connection state into the registry: the grant
+// ledger becomes the system of record for whether a provider is connected, while
+// the legacy consumers (the tmpfs token files written at connect time, the
+// gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
+// keep reading the legacy providerAccounts row/file. The Act seam (registry-built
+// Actors) is a follow-up — `capabilities` is deliberately empty, which the
+// registry supports (`capabilities` is `Partial<…>`); a capability-less
+// connection still carries full grant state.
 //
 // Grant names follow the grant table: grants are about conferrals, not
 // token count. GitHub and Google each mint one user credential → one `user`
@@ -24,7 +28,7 @@ import {
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
 import { clearProviderTokenFile, syncProviderTokenFile } from "../../lib/provider-token-files.js";
 import { romeCloudOAuth } from "../schemes.js";
-import type { SetupContext, SetupFn, SetupInteraction, SetupView } from "../setup/types.js";
+import type { SetupFn } from "../setup/types.js";
 import type {
   ConnectionDescriptor,
   Credential,
@@ -75,15 +79,6 @@ export const slackGrantProfileSchema = z
     /** Slack workspace id — identity, never credential material; the token-file
      *  custody writes it beside the secret tokens. */
     teamId: identityField,
-    /** Slack workspace name and bot identity captured from `auth.test`. */
-    workspaceName: identityField,
-    botUserId: identityField,
-    botUsername: identityField,
-    /** Slack application id captured from OAuth and checked on inbound events. */
-    appId: identityField,
-    /** The one-time Slack DM setup step completed. The actual guardian identity
-     *  lives only in the person mapping written by SetupManager. */
-    guardianLinked: z.literal(true).optional(),
   })
   .strict();
 export type SlackGrantProfile = z.infer<typeof slackGrantProfileSchema>;
@@ -145,9 +140,9 @@ export function toGithubDisplay(profile: GithubGrantProfile): ProfileDisplay {
 
 export function toSlackDisplay(profile: SlackGrantProfile): ProfileDisplay {
   return Object.freeze({
-    /** A connected Slack card names the workspace and identifies the Rome bot. */
-    displayName: profile.workspaceName ?? profile.displayName,
-    handle: profile.botUsername ? `@${profile.botUsername}` : profile.login,
+    displayName: profile.displayName,
+    /** The workspace name reads as Slack's handle. */
+    handle: profile.login,
     email: profile.email,
     avatarUrl: profile.avatarUrl,
   });
@@ -218,31 +213,6 @@ export interface OAuthProviderSetupDeps {
   ) => Promise<{ credential: Credential; profile?: ProfileRecord }>;
 }
 
-/** Shared Rome Cloud OAuth redirect/validation/redeem stage. Integrations may
- * supply their own progress copy, then continue with service-specific proof. */
-export async function redeemOAuthRedirect(
-  interact: SetupInteraction,
-  ctx: SetupContext,
-  deps: OAuthProviderSetupDeps,
-  progress: SetupView,
-): Promise<{ credential: Credential; profile?: ProfileRecord }> {
-  const url = await deps.beginRedirect();
-  const returned = await interact.redirect(url);
-  if (typeof returned.error === "string" && returned.error) {
-    throw new Error(
-      returned.error === "access_denied"
-        ? "Authorization was declined."
-        : `Authorization failed: ${returned.error}`,
-    );
-  }
-  const handoff = typeof returned.handoff === "string" ? returned.handoff.trim() : "";
-  const state = typeof returned.state === "string" ? returned.state.trim() : "";
-  if (!handoff || !state) throw new Error("The authorization return was incomplete.");
-
-  interact.show(progress);
-  return ctx.step("oauth-redeem", () => deps.redeem(handoff, state));
-}
-
 /**
  * The conferral setup for a Rome Cloud-brokered OAuth provider. A linear
  * coroutine of the `redirect` mechanic:
@@ -264,10 +234,31 @@ export function makeOAuthProviderSetup(
   deps: OAuthProviderSetupDeps,
 ): SetupFn {
   return async (interact, ctx) => {
-    const { credential, profile } = await redeemOAuthRedirect(interact, ctx, deps, {
+    const url = await deps.beginRedirect();
+    const returned = await interact.redirect(url);
+
+    // A denied consent (or any broker-reported error) fails the setup cleanly —
+    // the guardian sees the reason and can retry from a fresh authorize.
+    if (typeof returned.error === "string" && returned.error) {
+      throw new Error(
+        returned.error === "access_denied"
+          ? "Authorization was declined."
+          : `Authorization failed: ${returned.error}`,
+      );
+    }
+    const handoff = typeof returned.handoff === "string" ? returned.handoff.trim() : "";
+    const state = typeof returned.state === "string" ? returned.state.trim() : "";
+    if (!handoff || !state) {
+      throw new Error("The authorization return was incomplete.");
+    }
+
+    interact.show({
       body: [`Finishing the connection to ${OAUTH_PROVIDER_LABELS[provider]}…`],
       progress: true,
     });
+    const { credential, profile } = await ctx.step("oauth-redeem", () =>
+      deps.redeem(handoff, state),
+    );
 
     return {
       credential,

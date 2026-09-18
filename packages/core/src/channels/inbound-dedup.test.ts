@@ -17,35 +17,6 @@ describe("InMemoryInboundDedup", () => {
     expect(await dedup.checkAndRecord("b")).toBe(true);
   });
 
-  it("can defer recording until handling succeeds", async () => {
-    const dedup = new InMemoryInboundDedup();
-    const reservation = await dedup.reserve("event");
-    expect(reservation.state).toBe("acquired");
-    expect((await dedup.reserve("event")).state).toBe("busy");
-    if (reservation.state === "acquired") await reservation.commit();
-    expect((await dedup.reserve("event")).state).toBe("complete");
-  });
-
-  it("releases a failed deferred delivery so a retry can acquire it", async () => {
-    const dedup = new InMemoryInboundDedup();
-    const reservation = await dedup.reserve("event");
-    if (reservation.state === "acquired") await reservation.release();
-    expect((await dedup.reserve("event")).state).toBe("acquired");
-  });
-
-  it("bounds pending reservations without evicting live handlers", async () => {
-    const dedup = new InMemoryInboundDedup(2);
-    const first = await dedup.reserve("first");
-    const second = await dedup.reserve("second");
-
-    expect(first.state).toBe("acquired");
-    expect(second.state).toBe("acquired");
-    expect((await dedup.reserve("third")).state).toBe("saturated");
-
-    if (first.state === "acquired") await first.release();
-    expect((await dedup.reserve("third")).state).toBe("acquired");
-  });
-
   it("evicts the oldest key once capacity is exceeded (FIFO)", async () => {
     const dedup = new InMemoryInboundDedup(2);
     await dedup.checkAndRecord("a"); // [a]

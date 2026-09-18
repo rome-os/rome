@@ -131,7 +131,6 @@ function buildTalker(startError: unknown = null): {
     {
       connectionId: "discord-test",
       persist: async () => {},
-      profile: () => undefined,
       registerIngress: () => () => {},
     },
   );
@@ -223,7 +222,6 @@ describe("discord descriptor shape", () => {
       {
         connectionId: "discord-test",
         persist: async () => {},
-        profile: () => undefined,
         registerIngress: () => () => {},
       },
     );
@@ -375,7 +373,6 @@ describe("discord descriptor shape", () => {
       {
         connectionId: "discord-test",
         persist: async () => {},
-        profile: () => undefined,
         registerIngress: () => () => {},
       },
     );
@@ -404,7 +401,6 @@ describe("discord descriptor shape", () => {
       {
         connectionId: "discord-test",
         persist: async () => {},
-        profile: () => undefined,
         registerIngress: () => () => {},
       },
     );

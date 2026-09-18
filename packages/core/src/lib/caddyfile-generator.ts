@@ -230,7 +230,7 @@ handle ${getFullAppHref(appId)}/* {
       .join("\n");
     body = `
 root * ${webRoot}
-@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/* /api/slack/events
+@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
 handle @publicApi {
 \t${proxy}
 }

@@ -191,11 +191,11 @@
       },
       "slack": {
         "user": {
-          "title": "你的 Slack 工作区",
+          "title": "你的 Slack 账号",
           "bullets": {
-            "work": "私信 Rome 机器人，或在已邀请机器人的频道中提及 @Rome"
+            "work": "以你的身份在你的 Slack 工作区收发消息"
           },
-          "privacyNote": "Rome 只接收私信和明确的提及；你可以随时在这里断开。"
+          "privacyNote": "你在 Slack 上授权访问，随时可以在这里断开。"
         }
       },
       "composio": {

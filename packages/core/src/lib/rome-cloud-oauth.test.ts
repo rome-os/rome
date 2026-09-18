@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { eq } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import { oauthPendingAttempts } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
@@ -7,7 +6,6 @@ import { setInstanceTokenInMemory } from "./instance-identity.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
-  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
 } from "./rome-cloud-oauth.js";
 
@@ -80,33 +78,6 @@ describe("Rome Cloud OAuth brokering", () => {
       await createRomeCloudOAuthStartRedirect(db, "github");
       const [row] = await db.select().from(oauthPendingAttempts);
       expect(row.tenant).toBe("");
-    });
-
-    it("identifies the provider before consuming a pending handoff", async () => {
-      const url = await createRomeCloudOAuthStartRedirect(db, "slack");
-      const state = new URL(url).searchParams.get("state")!;
-
-      await expect(pendingRomeCloudOAuthProvider(db, state)).resolves.toBe("slack");
-      await expect(pendingRomeCloudOAuthProvider(db, "unknown-state")).resolves.toBeNull();
-    });
-
-    it("does not identify consumed or expired pending attempts", async () => {
-      const consumedUrl = await createRomeCloudOAuthStartRedirect(db, "slack");
-      const consumedState = new URL(consumedUrl).searchParams.get("state")!;
-      await db
-        .update(oauthPendingAttempts)
-        .set({ consumedAt: new Date() })
-        .where(eq(oauthPendingAttempts.state, consumedState));
-
-      const expiredUrl = await createRomeCloudOAuthStartRedirect(db, "slack");
-      const expiredState = new URL(expiredUrl).searchParams.get("state")!;
-      await db
-        .update(oauthPendingAttempts)
-        .set({ expiresAt: new Date(Date.now() - 1) })
-        .where(eq(oauthPendingAttempts.state, expiredState));
-
-      await expect(pendingRomeCloudOAuthProvider(db, consumedState)).resolves.toBeNull();
-      await expect(pendingRomeCloudOAuthProvider(db, expiredState)).resolves.toBeNull();
     });
   });
 

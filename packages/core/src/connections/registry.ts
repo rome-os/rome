@@ -495,7 +495,7 @@ export class ConnectionRegistry {
         this.connections.set(id, conn);
         await conn.hydrate();
       } else {
-        await conn!.activatePersistedGrant(grant, credential, profile);
+        await conn!.activatePersistedGrant(grant, credential);
       }
     } catch (err) {
       this.log.error("conferral committed but adapter activation failed", {
@@ -680,8 +680,6 @@ class ConnectionImpl implements Connection {
   private readonly grantState = new Map<GrantName, GrantState>();
   /** Live credential per grant name (present ⇔ state !== "unauthorized"). */
   private readonly liveCreds = new Map<GrantName, Credential>();
-  /** Non-secret conferral profile per grant, mirrored for capability builds. */
-  private readonly grantProfiles = new Map<GrantName, ProfileRecord>();
   /** Grants renewed since their last confer — a second rejection degrades. */
   private readonly renewedSinceLastConfer = new Set<GrantName>();
   /** In-flight renewal promise per grant (single-flight coalescing). */
@@ -741,8 +739,6 @@ class ConnectionImpl implements Connection {
   async hydrate(): Promise<void> {
     for (const [name, scheme] of Object.entries(this.descriptor.auth)) {
       const rec = await this.readGrant(name);
-      if (rec?.profile) this.grantProfiles.set(name, rec.profile);
-      else this.grantProfiles.delete(name);
       if (!rec || rec.state === "unauthorized") {
         this.grantState.set(name, "unauthorized");
         continue;
@@ -1144,14 +1140,6 @@ class ConnectionImpl implements Connection {
     const allowed = new Set(needs);
     return {
       connectionId: this.id,
-      profile: (grant: GrantName): ProfileRecord | undefined => {
-        if (!allowed.has(grant)) {
-          throw new Error(
-            `kit.profile("${grant}") rejected: not in this capability's needs [${[...allowed].join(", ")}]`,
-          );
-        }
-        return this.grantProfiles.get(grant);
-      },
       registerIngress: (handler) => this.registry.registerIngress(this.id, handler),
       persist: async (grant: GrantName, material: SecretRecord): Promise<void> => {
         if (!allowed.has(grant)) {
@@ -1272,7 +1260,6 @@ class ConnectionImpl implements Connection {
       ) {
         if (profile !== undefined) {
           await this.ledger.updateGrant(this.id, grant, { profile });
-          this.grantProfiles.set(grant, profile);
           // The credential is byte-identical, but a re-conferral can still change
           // the profile (renamed login, moved workspace) — re-sync custody so a
           // profile-derived artifact (the Slack file's teamId) stays current.
@@ -1298,7 +1285,6 @@ class ConnectionImpl implements Connection {
       throw new Error(`connection "${this.id}" has no grant "${grant}"`);
     }
     await this.ledger.updateGrant(this.id, grant, { profile });
-    this.grantProfiles.set(grant, profile);
     const cred = this.liveCreds.get(grant);
     if (cred) await this.syncCustody(grant, cred);
   }
@@ -1318,7 +1304,7 @@ class ConnectionImpl implements Connection {
       grant,
       conferralPatch(this.registry.now(), cred, profile),
     );
-    await this.activateGrantInMemory(grant, cred, profile);
+    await this.activateGrantInMemory(grant, cred);
   }
 
   /** Bring a grant live in memory after its authorized credential has been
@@ -1327,22 +1313,13 @@ class ConnectionImpl implements Connection {
    *  then calls this on the already-committed grant). Mirror → reconcile (build
    *  the epoch / start the adapter) → custody. Under the per-grant lock so it
    *  serializes against a concurrent renew/fault on the same grant. */
-  activatePersistedGrant(
-    grant: GrantName,
-    cred: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
-    return this.withGrantLock(grant, () => this.activateGrantInMemory(grant, cred, profile));
+  activatePersistedGrant(grant: GrantName, cred: Credential): Promise<void> {
+    return this.withGrantLock(grant, () => this.activateGrantInMemory(grant, cred));
   }
 
-  private async activateGrantInMemory(
-    grant: GrantName,
-    cred: Credential,
-    profile?: ProfileRecord,
-  ): Promise<void> {
+  private async activateGrantInMemory(grant: GrantName, cred: Credential): Promise<void> {
     this.grantState.set(grant, "authorized");
     this.liveCreds.set(grant, cred);
-    if (profile !== undefined) this.grantProfiles.set(grant, profile);
     this.renewedSinceLastConfer.delete(grant);
     this.reconcile(grant);
     await this.syncCustody(grant, cred);
@@ -1386,7 +1363,6 @@ class ConnectionImpl implements Connection {
     }
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
-    this.grantProfiles.delete(grant);
     this.renewedSinceLastConfer.delete(grant);
     this.reconcile(grant);
     await this.clearCustody(grant);

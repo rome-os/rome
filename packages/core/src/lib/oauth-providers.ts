@@ -22,7 +22,7 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
   slack: {
     id: "slack",
     label: "Slack",
-    description: "Direct-message the Rome bot or mention @Rome in an invited channel.",
+    description: "Read and post messages, channels, reactions, and search.",
   },
 };
 

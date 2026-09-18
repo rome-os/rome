@@ -161,18 +161,9 @@ export function grantProfileFromBundle(
       );
     case "slack": {
       const candidate = withScopes(pickRawKeys(account, [...IDENTITY_KEYS, "login"]));
-      const raw = (bundle.raw ?? {}) as {
-        app_id?: unknown;
-        team?: { id?: unknown; name?: unknown };
-        bot_user_id?: unknown;
-      };
-      if (raw.app_id != null && raw.app_id !== "") candidate.appId = raw.app_id;
+      const raw = (bundle.raw ?? {}) as { team?: { id?: unknown } };
       // Pass a present-but-wrong-typed team id through so the parse rejects it.
       if (raw.team?.id != null && raw.team.id !== "") candidate.teamId = raw.team.id;
-      if (raw.team?.name != null && raw.team.name !== "") candidate.workspaceName = raw.team.name;
-      if (raw.bot_user_id != null && raw.bot_user_id !== "") {
-        candidate.botUserId = raw.bot_user_id;
-      }
       return slackGrantProfileSchema.parse(candidate);
     }
   }

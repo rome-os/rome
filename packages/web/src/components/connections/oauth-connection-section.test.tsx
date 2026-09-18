@@ -76,44 +76,6 @@ function githubCard(
   return card;
 }
 
-function slackCard(
-  state: GrantState,
-  activeSetupCid?: string,
-  connect: ConnectHint = {
-    url: "/api/oauth/slack/start",
-    available: true,
-    unavailableReason: null,
-  },
-): ConnectionCard {
-  const connection: ApiConnection = {
-    id: "conn-slack",
-    service: "slack",
-    label: "Slack",
-    grants: { workspace: state },
-    display: {
-      workspace: {
-        displayName: "Acme",
-        handle: "@Rome",
-        email: null,
-        avatarUrl: null,
-      },
-    },
-    capabilities: {
-      talk:
-        state === "authorized"
-          ? { state: "unlocked" }
-          : { state: "needs-auth", missingGrants: ["workspace"] },
-      act: { state: "unsupported" },
-      watch: { state: "unsupported" },
-    },
-    connect,
-    ...(activeSetupCid ? { setups: { workspace: activeSetupCid } } : {}),
-  };
-  const card = buildConnectionCards([connection]).find((entry) => entry.service === "slack");
-  if (!card) throw new Error("no slack card");
-  return card;
-}
-
 function renderSection(
   card: ConnectionCard,
   {
@@ -190,61 +152,6 @@ describe("OAuthConnectionSection", () => {
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
   });
 
-  it.each([
-    "authorized",
-    "degraded",
-  ] as const)("shows a guardian-link presenting state while %s Slack setup completes", async (grantState) => {
-    rs.spyOn(globalThis, "fetch").mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({
-            state: {
-              status: "presenting",
-              view: {
-                title: "Link your Slack account",
-                body: ["Send this code to the Rome bot:", "ROME-LINK-ABCDEFGH"],
-              },
-            },
-          }),
-          { status: 200 },
-        ),
-    );
-
-    renderSection(slackCard(grantState, "slack-link-setup"));
-
-    expect(await screen.findByText("ROME-LINK-ABCDEFGH")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
-  });
-
-  it.each([
-    "done",
-    "failed",
-    "cancelled",
-  ] as const)("restores Reconnect after a connected setup reaches %s", async (status) => {
-    rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          state: {
-            status,
-            ...(status === "done"
-              ? { conferral: { summary: { title: "Slack connected" } } }
-              : status === "failed"
-                ? { reason: "Setup failed" }
-                : {}),
-          },
-        }),
-        { status: 200 },
-      ),
-    );
-
-    renderSection(slackCard("authorized", "completed-slack-setup"));
-
-    expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
-    expect(screen.queryByText("Slack connected")).toBeNull();
-    if (status === "failed") expect(screen.getByText("Setup failed")).toBeTruthy();
-  });
-
   it("shows the unavailable reason and a disabled Connect when the service is unavailable", () => {
     renderSection(
       githubCard("unauthorized", {
@@ -254,25 +161,6 @@ describe("OAuthConnectionSection", () => {
     const button = screen.getByRole("button", { name: "Connect" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(screen.getByText("Not configured on this host.")).toBeTruthy();
-  });
-
-  it("keeps an existing unavailable connection visible with Disconnect and disabled Reconnect", () => {
-    renderSection(
-      slackCard("authorized", undefined, {
-        url: null,
-        available: false,
-        unavailableReason: "Slack bot events are not configured on this Rome instance.",
-      }),
-    );
-
-    expect(screen.getByText("Acme")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Reconnect" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    expect(
-      screen.getByText("Slack bot events are not configured on this Rome instance."),
-    ).toBeTruthy();
   });
 
   it("Connect starts the setup and hands off to the broker redirect", async () => {

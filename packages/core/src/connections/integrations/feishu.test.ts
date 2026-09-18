@@ -247,7 +247,6 @@ function buildTalker(channel: FakeLarkChannel): { talker: Talker; faults: Stream
     {
       connectionId: "feishu-test",
       persist: async () => {},
-      profile: () => undefined,
       registerIngress: () => () => {},
     },
   );

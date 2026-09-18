@@ -181,8 +181,6 @@ export type RawDelivery = { body: Uint8Array; headers: Record<string, string>; j
 /** The runtime services builders need, handed to build(). */
 export interface RuntimeKit {
   readonly connectionId: ConnectionId;
-  /** Non-secret conferral outcome for a grant used by this capability. */
-  profile(grant: GrantName): ProfileRecord | undefined;
   /** Write-through custody (Baileys). Updates the grant's stored credential
    *  material IN PLACE: no epoch rebuild, no state change, no onUnlocked. */
   persist(grant: GrantName, material: SecretRecord): Promise<void>;
@@ -243,13 +241,6 @@ export interface GrantCustody {
 export interface ConnectionDescriptor {
   service: string;
   auth: Record<GrantName, AuthScheme>;
-  /** Admission behavior derived from this channel's addressing semantics. */
-  pairing?: {
-    /** An approval may be announced back in the addressed group/thread. */
-    replyInOriginatingConversation?: boolean;
-    /** Guidance must avoid provider markup and use readable plain text. */
-    plainTextGuidance?: boolean;
-  };
   /** Revive a grant's stored opaque profile record: re-parse it with this
    *  service's own schema, then map it through the service's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws

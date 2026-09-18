@@ -9,7 +9,6 @@ import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 import { isElectronShell } from "@/lib/electron-shell";
-import { isTerminalSetup, type SetupState } from "@/lib/setup-api";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
 /**
@@ -147,13 +146,10 @@ export function OAuthConnectionSection({
       </div>
     </div>
   ) : null;
-  const connectedSetupState: SetupState | null =
-    setup.state && !isTerminalSetup(setup.state) ? setup.state : null;
-  const connectedSetupFailure = setup.state?.status === "failed" ? setup.state.reason : setup.error;
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.
-  if (slot.state === "unauthorized" && card.connect && !card.connect.available) {
+  if (card.connect && !card.connect.available) {
     const reason = card.connect.unavailableReason ?? t("connections.oauth.unavailable");
     return (
       <ConnectionSlotCard
@@ -223,10 +219,6 @@ export function OAuthConnectionSection({
   // handle/email becomes the connected subtitle when it adds information
   // beyond the title.
   const expired = slot.state === "degraded";
-  const reconnectUnavailableReason =
-    card.connect && !card.connect.available
-      ? (card.connect.unavailableReason ?? t("connections.oauth.unavailable"))
-      : null;
   const accountLine = slot.identity ?? label;
   const accountDetail =
     (slot.display?.email !== accountLine ? slot.display?.email : null) ||
@@ -269,38 +261,17 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        {pendingRedirectControls ??
-          (connectedSetupState ? (
-            <SetupRenderer
-              service={card.service}
-              state={connectedSetupState}
-              busy={setup.busy}
-              error={setup.error}
-              onSubmit={setup.submit}
-              onCancel={setup.cancel}
-              onRetry={() => beginConnect(true)}
-              labels={{ continue: t("common.connect") }}
-            />
-          ) : (
-            <div>
-              {connectedSetupFailure && (
-                <p className="mb-2 text-ui text-destructive-fg">{connectedSetupFailure}</p>
-              )}
-              <Button
-                variant={expired ? "default" : "outline"}
-                size="sm"
-                disabled={setup.busy || !!reconnectUnavailableReason}
-                title={reconnectUnavailableReason ?? undefined}
-                aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-                onClick={() => beginConnect(true)}
-              >
-                {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
-                {t("connections.oauth.reconnect")}
-              </Button>
-            </div>
-          ))}
-        {!connectedSetupState && reconnectUnavailableReason && (
-          <p className="text-ui text-muted-foreground">{reconnectUnavailableReason}</p>
+        {pendingRedirectControls ?? (
+          <Button
+            variant={expired ? "default" : "outline"}
+            size="sm"
+            disabled={setup.busy}
+            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+            onClick={() => beginConnect(true)}
+          >
+            {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
+            {t("connections.oauth.reconnect")}
+          </Button>
         )}
       </div>
     </ConnectionSlotCard>

@@ -60,7 +60,6 @@ import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
-import { SlackIngress } from "./channels/slack.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./computer-use/service.js";
@@ -175,7 +174,6 @@ import {
 import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
-import { lockUnlinkedSlackTalk } from "./connections/integrations/slack.js";
 import {
   ConversationSettingsRepository,
   ConversationSettingsService,
@@ -307,7 +305,6 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
-  const slackIngress = new SlackIngress(config.slackSigningSecret);
   const talkRouter = createTalkRouter(
     connectionRegistry,
     createPairingAdmission({
@@ -315,10 +312,6 @@ async function main() {
       personMappingRepo,
       talkGrants: (service) =>
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
-      replyInOriginatingConversation: (service) =>
-        connectionRegistry.getDescriptor(service)?.pairing?.replyInOriginatingConversation === true,
-      plainTextGuidance: (service) =>
-        connectionRegistry.getDescriptor(service)?.pairing?.plainTextGuidance === true,
     }),
   );
   // Conferral setups: in-memory session store keyed per grant,
@@ -1044,7 +1037,6 @@ async function main() {
     // The personal WeChat connection is opt-in; its key recovery runs a local
     // debugger in this container, needing no host execution.
     wechatUserEnabled: config.wechatUserEnabled,
-    slackIngress,
   });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
@@ -1108,9 +1100,6 @@ async function main() {
   await reconcileProviderAccounts(connectionRegistry.getLedger(), db, (service) =>
     connectionRegistry.isRegistered(service),
   );
-  await lockUnlinkedSlackTalk(connectionRegistry.getLedger(), {
-    enabled: slackIngress.configured,
-  });
   // Hydrate connection/grant state without starting provider transports. The
   // identity/settings migration must commit before any Talk epoch can observe
   // or admit messages under the new binary.
@@ -1122,7 +1111,6 @@ async function main() {
     listAgents: () => agentLoader.getAll().keys(),
   });
   connectionRegistry.startCapabilities();
-  slackIngress.completeInitialRegistration();
 
   try {
     await writeAppRuntimeStatus(refreshRuntimeAppStatus());
@@ -1344,7 +1332,6 @@ async function main() {
       isCloudAuthEnabled,
       connectionRegistry,
       setupManager,
-      slackIngress,
     };
     internalApi = await startApi(config.internalApi, apiDeps);
   } catch (err) {

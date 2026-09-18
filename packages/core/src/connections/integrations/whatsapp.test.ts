@@ -99,7 +99,6 @@ function makeDeps(fake: FakeWhatsAppAdapter) {
 const runtimeKit = (persist: RuntimeKit["persist"] = async () => {}): RuntimeKit => ({
   connectionId: "whatsapp-test",
   persist,
-  profile: () => undefined,
   registerIngress: () => () => {},
 });
 

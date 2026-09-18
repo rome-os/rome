@@ -71,7 +71,6 @@ import { routinesRoutes } from "./routes/routines.js";
 import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
-import { slackEventsRoutes } from "./routes/slack-events.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
@@ -137,7 +136,6 @@ export function buildApp(
   api.route("/", cloudLoginRoutes(deps));
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));
-  api.route("/", slackEventsRoutes(deps));
   api.route("/", appApiPublicRoutes(deps));
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
