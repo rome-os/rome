@@ -98,7 +98,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                   title={app.displayName}
                   className={cn(
                     LINK_CLASS,
-                    "pr-8 [@media(hover:none)]:pr-14",
+                    "pr-8 [@media(hover:none)]:pr-16",
                     active ? ACTIVE_CLASS : IDLE_CLASS,
                   )}
                 >
@@ -110,7 +110,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                 <span
                   role="img"
                   aria-label={t("sidebar.notOpened")}
-                  className="pointer-events-none absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-info transition-opacity group-hover/recent:opacity-0 group-focus-within/recent:opacity-0 [@media(hover:none)]:right-10"
+                  className="pointer-events-none absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-info transition-opacity group-hover/recent:opacity-0 group-focus-within/recent:opacity-0 [@media(hover:none)]:right-12"
                 />
               ) : null}
               <button

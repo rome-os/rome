@@ -47,7 +47,7 @@ afterEach(() => {
 describe("useAppCatalogChanges", () => {
   it("opens the catalog stream and reports every change, whichever app it is about", () => {
     const onChange = rs.fn();
-    renderHook(() => useAppCatalogChanges(onChange));
+    renderHook(() => useAppCatalogChanges(true, onChange));
 
     expect(MockEventSource.instances).toHaveLength(1);
     const stream = MockEventSource.instances[0];
@@ -61,11 +61,17 @@ describe("useAppCatalogChanges", () => {
   });
 
   it("closes the stream on unmount", () => {
-    const { unmount } = renderHook(() => useAppCatalogChanges(() => {}));
+    const { unmount } = renderHook(() => useAppCatalogChanges(true, () => {}));
     const stream = MockEventSource.instances[0];
 
     unmount();
 
     expect(stream.close).toHaveBeenCalled();
+  });
+
+  it("opens nothing for a visitor without a session", () => {
+    renderHook(() => useAppCatalogChanges(false, () => {}));
+
+    expect(MockEventSource.instances).toHaveLength(0);
   });
 });
