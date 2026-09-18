@@ -35,6 +35,27 @@ export function composeTitle(segments: readonly (string | null | undefined)[]): 
   return [...named, SITE_NAME].join(SEPARATOR);
 }
 
+// The title the server rendered into the shell before React mounted, and the
+// path it was rendered for. Read once at module load: by the time a page's
+// effect runs, the shell may already have replaced document.title with the
+// route's own name.
+const INITIAL_TITLE = typeof document === "undefined" ? "" : document.title;
+const INITIAL_PATHNAME = typeof window === "undefined" ? "" : window.location.pathname;
+
+/**
+ * The name the server put in `<title>` for `pathname`, or null when this is not
+ * the path the document was loaded at, or the server named nothing. A page that
+ * resolves its own name asynchronously holds this in the meantime, so a direct
+ * load does not flash the route's name between first paint and the response.
+ */
+export function serverRenderedName(pathname: string): string | null {
+  if (pathname !== INITIAL_PATHNAME) return null;
+  const suffix = `${SEPARATOR}${SITE_NAME}`;
+  if (!INITIAL_TITLE.endsWith(suffix)) return null;
+  const name = INITIAL_TITLE.slice(0, -suffix.length).trim();
+  return name.length > 0 ? name : null;
+}
+
 /**
  * A destination the guardian can navigate to by name. Structural on purpose:
  * the caller passes the nav registry it already holds, so no second list of

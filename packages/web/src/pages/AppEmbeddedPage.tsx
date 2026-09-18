@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { AppActionsFab } from "@/components/app-actions-fab";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAppCatalogEvents } from "@/hooks/use-app-catalog-events";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { serverRenderedName } from "@/lib/page-title";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 import { fetchJson } from "@/lib/fetch-json";
@@ -80,6 +81,7 @@ function useAppManifest(appId: string | undefined, path: string, mode: "embedded
 export default function AppEmbeddedPage() {
   const { t } = useTranslation("apps");
   const { resolved: theme, theme: themeName } = useTheme();
+  const location = useLocation();
   const { appId } = useParams<{ appId: string; "*"?: string }>();
   const params = useParams<{ "*"?: string }>();
   const splat = params["*"] ?? "";
@@ -103,10 +105,11 @@ export default function AppEmbeddedPage() {
   const styleUrlsKey = (manifest?.styleUrls ?? []).join("\n");
   const styleUrls = useMemo(() => manifest?.styleUrls ?? [], [styleUrlsKey]);
 
-  // The name the server already rendered into the shell's <title> for this
-  // path (packages/core/src/api/app-social-card.ts), so a direct load and the
-  // client agree and nothing flashes.
-  useDocumentTitle(manifest?.appName ?? null);
+  // The manifest names the app, and until it lands the title the server already
+  // rendered for this path stands in (packages/core/src/api/app-social-card.ts).
+  // Without that stand-in a direct load reads the app's name, then the shell's
+  // "Apps", then the app's name again once the request returns.
+  useDocumentTitle(manifest?.appName ?? serverRenderedName(location.pathname));
 
   if (error) {
     return (

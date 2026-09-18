@@ -23,6 +23,7 @@ import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
 import {
   DropdownMenu,
@@ -286,6 +287,10 @@ export function FreeGrid() {
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
   const { sessionName, model, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
+  // The chat a guardian names is the one they keep a tab on, so the name
+  // outranks the route's own title. Claimed here rather than in FreePage so it
+  // reads the same identity the header does, and follows a rename with it.
+  useDocumentTitle(sessionName);
   const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
