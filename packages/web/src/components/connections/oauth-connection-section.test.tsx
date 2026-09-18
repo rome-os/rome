@@ -217,6 +217,25 @@ describe("OAuthConnectionSection", () => {
     expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
 
+  it("restores Reconnect after a connected setup reaches a terminal state", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          state: {
+            status: "done",
+            conferral: { summary: { title: "Slack connected" } },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    renderSection(slackCard("authorized", "completed-slack-setup"));
+
+    expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
+    expect(screen.queryByText("Slack connected")).toBeNull();
+  });
+
   it("shows the unavailable reason and a disabled Connect when the service is unavailable", () => {
     renderSection(
       githubCard("unauthorized", {

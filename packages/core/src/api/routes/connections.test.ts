@@ -153,6 +153,24 @@ describe("GET /connections", () => {
     expect(d.capabilities.act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
   });
 
+  it("keeps listing a stale connection when its descriptor is unavailable", async () => {
+    const registry = new ConnectionRegistry({ ledger: makeLedger() });
+    const fixture = makePasteTalk();
+    registry.register(fixture.descriptor);
+    await registry.connect(fixture.descriptor.service, "Retired");
+    rs.spyOn(registry, "getDescriptor").mockReturnValue(null);
+
+    const res = await makeApp(registry).request("/connections");
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.connections[0]).toMatchObject({
+      service: fixture.descriptor.service,
+      connect: null,
+      display: { bot: null },
+    });
+  });
+
   it("surfaces needs-subscription for a gated watch with no active subscription", async () => {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
     registry.register(makeGatedWatch().descriptor);

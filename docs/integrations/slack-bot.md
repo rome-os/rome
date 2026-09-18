@@ -7,6 +7,7 @@ Rome uses its existing Slack connection for both workspace operations and bot co
 - A direct message to the Rome bot starts or continues a private conversation.
 - An `@Rome` mention in a channel where the bot is invited starts or continues that channel thread. Rome posts its answer in the thread.
 - Rome ignores ordinary channel messages, bot-authored messages, and messages without text.
+- Rome ignores Slack Connect authors from external workspaces so their workspace-scoped user IDs cannot collide with local admission records.
 - The first release sends and receives completed text messages only. If a direct message includes text with a file, Rome handles only the text. It does not handle files, images, or streamed partial answers.
 
 During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready. The code expires after five minutes, locks each sender after five incorrect code attempts, and is cancelled if setup is cancelled or replaced.
@@ -16,6 +17,7 @@ The guardian's linked Slack account is admitted automatically. Other workspace m
 Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
 
 Answers longer than Slack's message limit are sent as sequential text messages. A transport failure after an earlier part was accepted can leave a partial answer, because Slack does not provide an idempotency key for `chat.postMessage`.
+Outbound text is posted with Slack markup disabled. API calls have a bounded timeout and one bounded rate-limit retry.
 
 ## Slack app configuration
 

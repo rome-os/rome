@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { ConversationId, InboundMessage, OutgoingMessage } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
-import { InMemoryInboundDedup, type InboundDedup } from "./inbound-dedup.js";
+import { InMemoryInboundDedup, type DeferredInboundDedup } from "./inbound-dedup.js";
 
 const log = createLogger("slack");
 const SLACK_SIGNATURE_VERSION = "v0";
@@ -9,6 +9,7 @@ const SIGNATURE_MAX_AGE_SECONDS = 5 * 60;
 const SLACK_TEXT_CHUNK_LENGTH = 4_000;
 const SLACK_INITIAL_STARTUP_GRACE_MS = 30_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
+const SLACK_API_TIMEOUT_MS = 15_000;
 export const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
 export const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
 
@@ -27,6 +28,9 @@ export interface SlackEvent {
   user?: string;
   bot_id?: string;
   subtype?: string;
+  user_team?: string;
+  source_team?: string;
+  tokens?: { bot?: string[]; oauth?: string[] };
   text?: string;
   channel?: string;
   channel_type?: string;
@@ -51,14 +55,14 @@ export interface SlackRequestVerification {
 export class SlackIngress {
   private readonly handlers = new Map<string, SlackIngressHandler[]>();
   private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate">>();
-  private readonly dedup: InboundDedup;
+  private readonly dedup: DeferredInboundDedup;
   private readonly now: () => number;
   private readonly initialStartupDeadline: number;
   private pendingRegistrations = 0;
 
   constructor(
     private readonly signingSecret?: string,
-    options: { dedup?: InboundDedup; now?: () => number; startupGraceMs?: number } = {},
+    options: { dedup?: DeferredInboundDedup; now?: () => number; startupGraceMs?: number } = {},
   ) {
     this.dedup = options.dedup ?? new InMemoryInboundDedup(10_000);
     this.now = options.now ?? Date.now;
@@ -73,7 +77,7 @@ export class SlackIngress {
   verifyRequest(
     rawBody: string | Uint8Array,
     headers: { timestamp?: string; signature?: string },
-    now = Date.now(),
+    now = this.now(),
   ): SlackRequestVerification {
     if (!this.signingSecret) return { ok: false, reason: "not_configured" };
     const timestamp = headers.timestamp?.trim();
@@ -223,10 +227,14 @@ interface SlackApiResponse {
 async function slackApiCall(
   token: string,
   method: string,
-  body: Record<string, string> | undefined,
+  body: Record<string, string | boolean> | undefined,
   signal?: AbortSignal,
 ): Promise<SlackApiResponse> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let retriedRateLimit = false;
+  while (true) {
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
+      : AbortSignal.timeout(SLACK_API_TIMEOUT_MS);
     const response = await fetch(`https://slack.com/api/${method}`, {
       method: "POST",
       headers: {
@@ -234,9 +242,10 @@ async function slackApiCall(
         "Content-Type": "application/json; charset=utf-8",
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal,
+      signal: requestSignal,
     });
-    if (response.status === 429 && attempt === 0) {
+    if (response.status === 429 && !retriedRateLimit) {
+      retriedRateLimit = true;
       const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
       const waitMs = Math.min(
         SLACK_RATE_LIMIT_MAX_WAIT_MS,
@@ -255,7 +264,6 @@ async function slackApiCall(
     if (!result.ok) throw new SlackApiError(result.error ?? "unknown_error");
     return result;
   }
-  throw new SlackApiError("ratelimited");
 }
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -290,6 +298,7 @@ export const slackWebApi: SlackWebApi = {
     const result = await slackApiCall(token, "chat.postMessage", {
       channel: input.channel,
       text: input.text,
+      mrkdwn: false,
       ...(input.threadTs ? { thread_ts: input.threadTs } : {}),
     });
     if (!result.ts) throw new SlackApiError("missing_message_id");
@@ -332,7 +341,9 @@ export function parseSlackConversationId(conversationId: string): {
 }
 
 export function stripSlackBotMention(text: string, botUserId: string): string {
-  return text.replace(new RegExp(`<@${escapeRegex(botUserId)}>`, "g"), "").trim();
+  return decodeSlackText(
+    text.replace(new RegExp(`<@${escapeRegex(botUserId)}(?:\\|[^>]+)?>`, "g"), ""),
+  ).trim();
 }
 
 function escapeRegex(value: string): string {
@@ -341,6 +352,10 @@ function escapeRegex(value: string): string {
 
 function slackTimestamp(ts: string): Date {
   return new Date(Number.parseFloat(ts) * 1_000);
+}
+
+function decodeSlackText(text: string): string {
+  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
 function escapeSlackText(text: string): string {
@@ -462,10 +477,25 @@ export class SlackAdapter {
     const event = envelope.event;
     if (!identity || !this.handler) return false;
 
-    if (event.type === "app_uninstalled" || event.type === "tokens_revoked") {
+    if (event.type === "app_uninstalled") {
       this.config.onCredentialFault?.(new SlackApiError(event.type));
       return true;
     }
+    if (event.type === "tokens_revoked") {
+      if (event.tokens?.bot && event.tokens.bot.length > 0) {
+        this.config.onCredentialFault?.(new SlackApiError(event.type));
+      }
+      return true;
+    }
+
+    // Slack user ids are workspace-scoped. Never map a Slack Connect author
+    // under the host workspace identity, where an id collision could inherit a
+    // local member's pairing or guardian admission.
+    if (
+      (event.user_team && event.user_team !== envelope.team_id) ||
+      (event.source_team && event.source_team !== envelope.team_id)
+    )
+      return true;
 
     if (
       event.bot_id ||
@@ -477,7 +507,7 @@ export class SlackAdapter {
 
     let message: InboundMessage | null = null;
     if (event.type === "message" && event.channel_type === "im") {
-      const text = event.text.trim();
+      const text = decodeSlackText(event.text).trim();
       if (!text) return true;
       message = {
         messageId: event.ts,
@@ -539,7 +569,7 @@ export function isSlackGuardianLinkEvent(
     typeof event.user === "string" &&
     event.user !== botUserId &&
     typeof event.text === "string" &&
-    event.text.trim() === code
+    event.text.trim().toUpperCase() === code.toUpperCase()
   );
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { SlackApiError, SlackIngress, type SlackEventEnvelope } from "../../channels/slack.js";
 import type { GrantLedger } from "../ledger.js";
 import type { SetupContext, SetupInteraction, SetupView } from "../setup/types.js";
-import { CredentialRejected } from "../errors.js";
+import { CredentialRejected, Disconnected } from "../errors.js";
 import {
   lockUnlinkedSlackTalk,
   makeSlackDescriptor,
@@ -191,7 +191,7 @@ describe("Slack setup", () => {
     expect(clearCustody).not.toHaveBeenCalled();
   });
 
-  it("refuses to build Talk without the guardian-link marker", () => {
+  it("reports an unlinked legacy Talk grant as a runtime fault without throwing at build", () => {
     const descriptor = makeSlackDescriptor({
       ingress: new SlackIngress("secret"),
       beginRedirect: async () => "unused",
@@ -200,17 +200,20 @@ describe("Slack setup", () => {
       },
     });
 
-    expect(() =>
-      descriptor.capabilities.talker?.build(
-        { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
-        {
-          connectionId: "slack-connection",
-          persist: async () => {},
-          profile: () => undefined,
-          registerIngress: () => () => {},
-        },
-      ),
-    ).toThrow("Reconnect Slack in Settings");
+    const talker = descriptor.capabilities.talker?.build(
+      { workspace: { material: { botToken: "xoxb-test" }, expiresAt: "never" } },
+      {
+        connectionId: "slack-connection",
+        persist: async () => {},
+        profile: () => undefined,
+        registerIngress: () => () => {},
+      },
+    );
+    if (!talker) throw new Error("Slack Talk capability was not built");
+    const fault = rs.fn();
+
+    expect(() => talker.start(() => {}, fault)).not.toThrow();
+    expect(fault).toHaveBeenCalledExactlyOnceWith(expect.any(Disconnected));
   });
 
   it("refuses a grant without mention and DM permissions", async () => {
@@ -287,7 +290,7 @@ describe("Slack setup", () => {
     });
   });
 
-  it("reports a Slack uninstall as a workspace credential fault", async () => {
+  it("faults on uninstall or bot-token revocation but not user-token revocation", async () => {
     const ingress = new SlackIngress("secret");
     const descriptor = makeSlackDescriptor({
       ingress,
@@ -324,13 +327,30 @@ describe("Slack setup", () => {
 
     await ingress.dispatch({
       type: "event_callback",
+      event_id: "Ev-user-revoked",
+      team_id: identity.teamId,
+      event: { type: "tokens_revoked", tokens: { oauth: ["UINSTALLER"] } },
+    });
+    expect(faults).toHaveLength(0);
+
+    await ingress.dispatch({
+      type: "event_callback",
+      event_id: "Ev-bot-revoked",
+      team_id: identity.teamId,
+      event: { type: "tokens_revoked", tokens: { bot: ["UBOT"] } },
+    });
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toBeInstanceOf(CredentialRejected);
+
+    await ingress.dispatch({
+      type: "event_callback",
       event_id: "Ev-uninstalled",
       team_id: identity.teamId,
       event: { type: "app_uninstalled" },
     });
 
-    expect(faults).toHaveLength(1);
-    expect(faults[0]).toBeInstanceOf(CredentialRejected);
-    expect(faults[0]).toMatchObject({ grant: "workspace" });
+    expect(faults).toHaveLength(2);
+    expect(faults[1]).toBeInstanceOf(CredentialRejected);
+    expect(faults[1]).toMatchObject({ grant: "workspace" });
   });
 });

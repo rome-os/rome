@@ -127,8 +127,7 @@ function buildConnectionView(
   manager: SetupManager | null,
 ): ConnectionView {
   const descriptor = registry.getDescriptor(conn.service);
-  if (!descriptor) throw new Error(`Missing descriptor for connection service "${conn.service}".`);
-  const revive = descriptor.reviveProfile;
+  const revive = descriptor?.reviveProfile;
   const grants = conn.auth.grants();
 
   const display: Record<GrantName, GrantDisplayView | null> = {};
@@ -152,7 +151,7 @@ function buildConnectionView(
     grants,
     display,
     capabilities: conn.status(),
-    connect: connectHint(conn.service, descriptor),
+    connect: descriptor ? connectHint(conn.service, descriptor) : null,
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
   };
 }

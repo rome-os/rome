@@ -119,7 +119,7 @@ describe("SlackAdapter", () => {
         channel_type: "im",
         channel: "D1",
         user: "U1",
-        text: "hello",
+        text: "hello &amp; goodbye",
         ts: "1700000000.100",
       }),
     );
@@ -138,7 +138,7 @@ describe("SlackAdapter", () => {
         type: "app_mention",
         channel: "C1",
         user: "U2",
-        text: "<@UBOT> help me",
+        text: "<@UBOT|rome> help &lt;me&gt;",
         ts: "1700000000.300",
       }),
     );
@@ -147,7 +147,7 @@ describe("SlackAdapter", () => {
     expect(messages[0]).toMatchObject({
       conversationId: "D1",
       senderId: "T123/U1",
-      text: "hello",
+      text: "hello & goodbye",
       addressing: "direct",
       thread: { kind: "dm" },
     });
@@ -156,7 +156,7 @@ describe("SlackAdapter", () => {
       conversationId: "C1:1700000000.300",
       parentConversationId: "C1",
       senderId: "T123/U2",
-      text: "help me",
+      text: "help <me>",
       addressing: "mention",
       thread: { kind: "topic" },
     });
@@ -250,6 +250,29 @@ describe("SlackAdapter", () => {
     );
   });
 
+  it("drops a Slack Connect author instead of mapping them under the host workspace", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+    const handler = rs.fn();
+    adapter.onMessage(handler);
+    await adapter.start();
+
+    await ingress.dispatch(
+      envelope("external", {
+        type: "app_mention",
+        channel: "C1",
+        user: "U1",
+        user_team: "T-EXTERNAL",
+        source_team: "T-EXTERNAL",
+        text: "<@UBOT> hello",
+        ts: "1700000000.500",
+      }),
+    );
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("posts channel answers in the addressed thread and DMs inline", async () => {
     const ingress = new SlackIngress("secret");
     const { api, postMessage } = fakeApi();
@@ -302,6 +325,10 @@ describe("SlackAdapter", () => {
         slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" }),
       ).resolves.toEqual({ ts: "reply.1" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
+        text: "hello",
+        mrkdwn: false,
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -406,7 +433,7 @@ describe("Slack guardian linking", () => {
         channel_type: "im",
         channel: "D2",
         user: "U2",
-        text: "ROME-LINK-ABCDEFGH",
+        text: "rome-link-abcdefgh",
         ts: "1700000011.1",
       }),
     );

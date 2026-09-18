@@ -9,6 +9,7 @@ import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 import { isElectronShell } from "@/lib/electron-shell";
+import type { SetupState } from "@/lib/setup-api";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 
 /**
@@ -146,6 +147,8 @@ export function OAuthConnectionSection({
       </div>
     </div>
   ) : null;
+  const connectedSetupState: SetupState | null =
+    setup.state && !["done", "cancelled"].includes(setup.state.status) ? setup.state : null;
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.
@@ -266,10 +269,10 @@ export function OAuthConnectionSection({
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
         {pendingRedirectControls ??
-          (setup.state ? (
+          (connectedSetupState ? (
             <SetupRenderer
               service={card.service}
-              state={setup.state}
+              state={connectedSetupState}
               busy={setup.busy}
               error={setup.error}
               onSubmit={setup.submit}
@@ -290,7 +293,7 @@ export function OAuthConnectionSection({
               {t("connections.oauth.reconnect")}
             </Button>
           ))}
-        {!setup.state && reconnectUnavailableReason && (
+        {!connectedSetupState && reconnectUnavailableReason && (
           <p className="text-ui text-muted-foreground">{reconnectUnavailableReason}</p>
         )}
       </div>

@@ -190,7 +190,18 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
       const material = credentialMaterial(creds.workspace);
       const profile = slackGrantProfileSchema.parse(kit.profile("workspace") ?? {});
       if (!profile.guardianChannelUserId) {
-        throw new Error(GUARDIAN_LINK_REQUIRED_REASON);
+        return {
+          start(_deliver, fault): void {
+            fault(new Disconnected(new Error(GUARDIAN_LINK_REQUIRED_REASON)));
+          },
+          stop(): void {},
+          async send(): Promise<never> {
+            throw new Error(GUARDIAN_LINK_REQUIRED_REASON);
+          },
+          feature<K extends TalkFeatureName>(_name: K): TalkFeatureMap[K] | null {
+            return null;
+          },
+        };
       }
       let faultSink: ((error: CredentialRejected | Disconnected) => void) | null = null;
       const adapter = new SlackAdapter({

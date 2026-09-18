@@ -157,7 +157,7 @@ describe("POST /slack/events", () => {
     });
     now = 1_001;
 
-    const response = await app.request(signedRequest(secret, body));
+    const response = await app.request(signedRequest(secret, body, "1"));
 
     expect(response.status).toBe(200);
   });

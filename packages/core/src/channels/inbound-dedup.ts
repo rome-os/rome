@@ -9,12 +9,7 @@
  * handled id and skipping repeats prevents that.
  *
  * This is intentionally a small interface so the storage can be swapped without
- * touching the call sites. `checkAndRecord` is intentionally distinct from
- * `has`/`record`: email needs an atomic reservation before dispatch, while
- * Slack must defer `record` until its ingress handlers accept the event. A
- * persistent implementation must preserve that atomic `checkAndRecord`
- * operation rather than implement it as a separate `has` followed by `record`.
- * The in-memory implementation below covers the common
+ * touching the call site. The in-memory implementation below covers the common
  * transient-reconnect case (network blip, relay restart, ping timeout — none of
  * which clears the process), but NOT a Rome restart landing in the
  * dispatch→ack window, since it lives only for the process lifetime. To close
@@ -22,10 +17,6 @@
  * `insertEventIfAbsent`) — the call sites already await these operations.
  */
 export interface InboundDedup {
-  /** Report whether `key` has completed successfully. */
-  has(key: string): Promise<boolean>;
-  /** Record `key` after its handler has completed successfully. */
-  record(key: string): Promise<void>;
   /**
    * Atomically record `key` and report whether it was already present.
    *
@@ -35,13 +26,21 @@ export interface InboundDedup {
   checkAndRecord(key: string): Promise<boolean>;
 }
 
+/** Deferred commit variant for ingress that may ask the provider to retry. */
+export interface DeferredInboundDedup {
+  /** Report whether `key` has completed successfully. */
+  has(key: string): Promise<boolean>;
+  /** Record `key` only after its handler has completed successfully. */
+  record(key: string): Promise<void>;
+}
+
 /**
  * Bounded, in-memory dedup. Once `maxEntries` is reached the oldest id is
  * evicted (a `Set` preserves insertion order) — old ids are not expected to be
  * redelivered after that many newer ones. State is lost on restart (see the
  * `InboundDedup` docs).
  */
-export class InMemoryInboundDedup implements InboundDedup {
+export class InMemoryInboundDedup implements InboundDedup, DeferredInboundDedup {
   private readonly seen = new Set<string>();
 
   constructor(private readonly maxEntries = 1000) {}
