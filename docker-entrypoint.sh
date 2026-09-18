@@ -402,7 +402,7 @@ else
   fi
 
   echo "Starting TigerVNC on ${DISPLAY}, RFB :${VNC_PORT} ..."
-  Xtigervnc "$DISPLAY" \
+  run_as_rome Xtigervnc "$DISPLAY" \
     -geometry "$SCREEN_GEOMETRY" \
     -depth "$SCREEN_DEPTH" \
     -SecurityTypes None \
@@ -437,7 +437,7 @@ if [ "$REUSED_X_SERVER" = "1" ] && process_env_contains openbox "DISPLAY=${DISPL
   echo "Reusing existing Openbox on ${DISPLAY}."
 else
   echo "Starting Openbox ..."
-  DISPLAY="$DISPLAY" openbox >/tmp/openbox.log 2>&1 &
+  run_as_rome env DISPLAY="$DISPLAY" openbox >/tmp/openbox.log 2>&1 &
   OPENBOX_PID=$!
   wait_for_background_process "$OPENBOX_PID" "Openbox" /tmp/openbox.log
 fi
@@ -452,7 +452,7 @@ else
   fi
 
   echo "Starting noVNC on :${NOVNC_PORT} ..."
-  websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
+  run_as_rome websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
   NOVNC_PID=$!
 fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log

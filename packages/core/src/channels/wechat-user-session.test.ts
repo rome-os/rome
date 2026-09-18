@@ -18,10 +18,14 @@ it("ignores other process command lines that mention a session bus", async () =>
   );
   try {
     await once(decoy, "message");
-    await writeFile(daemon, '#!/bin/sh\nprintf started > "$WECHAT_TEST_BUS"\n');
+    await writeFile(
+      daemon,
+      '#!/bin/sh\nprintf \'%s\\n\' "$XDG_RUNTIME_DIR|$DBUS_SESSION_BUS_ADDRESS|$DISPLAY" > "$WECHAT_TEST_BUS"\n',
+    );
     await chmod(daemon, 0o700);
     const runtime = new WechatUserRuntime({
       home,
+      display: ":88",
       runtimeDir: join(home, "run"),
       run: (file, args, options) =>
         runCommand(file, args, {
@@ -34,7 +38,9 @@ it("ignores other process command lines that mention a session bus", async () =>
         }),
     });
     await runtime.prepareSession();
-    expect(await readFile(marker, "utf8")).toBe("started");
+    expect(await readFile(marker, "utf8")).toBe(
+      `${runtime.runtimeDir}|unix:path=${runtime.runtimeDir}/bus|:88\n`,
+    );
     expect((await stat(runtime.runtimeDir)).mode & 0o777).toBe(0o700);
   } finally {
     const exited = once(decoy, "exit");

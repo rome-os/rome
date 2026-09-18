@@ -22,7 +22,7 @@ WECHAT_USER_ENABLED=true
 
 Then run `docker compose up -d rome`. Compose recreates the container with the connection registered. `docker-compose.yml` already fixes `shm_size` at 1 GB and grants the capabilities the debugger needs, so no other knob is required. `docker compose config` prints the resolved values.
 
-Enabling WeChat does not change the Rome service user. The entrypoint prepares the client link and a private session directory before starting Rome as `rome`. Explicit `root` mode remains supported, but WeChat does not require it.
+Enabling WeChat does not change the Rome service user. The entrypoint prepares the client link and a private session directory before starting Rome and its desktop as `rome`. Explicit `root` mode remains supported, but WeChat does not require it.
 
 The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_size`. The client faults during startup there. Use `docker-compose.yml` for this connection.
 

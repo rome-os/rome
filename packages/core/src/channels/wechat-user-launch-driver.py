@@ -114,7 +114,7 @@ def capture(directory):
         script_path = f.name
 
     env = {
-        **os.environ, "DISPLAY": ":99", "HOME": HOME,
+        **os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99"), "HOME": HOME,
         "QT_QPA_PLATFORM": "xcb", "LIBGL_ALWAYS_SOFTWARE": "1",
         "XDG_RUNTIME_DIR": RUNTIME_DIR,
         "DBUS_SESSION_BUS_ADDRESS": "unix:path=%s/bus" % RUNTIME_DIR,

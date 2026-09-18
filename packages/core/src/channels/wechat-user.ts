@@ -446,12 +446,16 @@ export class WechatUserRuntime {
   /** Prepare the private session bus before ordinary startup or key capture. */
   async prepareSession(): Promise<void> {
     await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
-    const result = await this.run("sh", [
-      "-c",
-      'test -S "$1/bus" || exec dbus-daemon --session --fork --address="unix:path=$1/bus"',
-      "wechat-session",
-      this.runtimeDir,
-    ]);
+    const result = await this.run(
+      "sh",
+      [
+        "-c",
+        'test -S "$1/bus" || exec dbus-daemon --session --fork --address="unix:path=$1/bus"',
+        "wechat-session",
+        this.runtimeDir,
+      ],
+      { env: this.clientEnv() },
+    );
     if (result.code !== 0) {
       throw new WechatUserRuntimeError(
         `Could not start the WeChat session bus: ${result.stderr.trim()}`,
