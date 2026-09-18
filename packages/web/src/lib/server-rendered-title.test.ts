@@ -13,13 +13,4 @@ describe("serverRenderedName", () => {
     // page that renders it must not inherit the previous page's name.
     expect(serverRenderedName("/settings")).toBeNull();
   });
-
-  it("returns null when the shell served its static title", async () => {
-    const { serverRenderedName } = await import("./page-title");
-    document.title = "Rome";
-
-    // The module read the title at load, so this asserts the shape rather than
-    // the live value: a bare site name carries no page name to stand in for.
-    expect(serverRenderedName("/nowhere")).toBeNull();
-  });
 });

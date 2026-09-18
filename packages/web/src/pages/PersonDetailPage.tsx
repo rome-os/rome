@@ -44,6 +44,9 @@ export default function PersonDetailPageRoute() {
 
 function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const { t } = useTranslation("people");
+  // The section this dossier belongs to, named the way the sidebar and the
+  // route title name it, so the tab reads "<Person> · People · Rome".
+  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -61,7 +64,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
 
   const personQuery = usePerson(personId);
   const person = personQuery.data ?? null;
-  useDocumentTitle(person?.displayName ?? null);
+  useDocumentTitle(person === null ? null : [person.displayName, tCommon("nav.people")]);
 
   if (personQuery.isPending) {
     return (
