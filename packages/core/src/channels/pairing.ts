@@ -56,7 +56,9 @@ export function createPairingAdmission(deps: {
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const displayName =
+      message.senderDisplayName ?? (service === "slack" ? "Slack member" : message.senderId);
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
@@ -65,7 +67,7 @@ export function createPairingAdmission(deps: {
               channel: pairingChannel,
               connectionId,
               channelUserId: message.senderId,
-              displayName: message.senderDisplayName ?? message.senderId,
+              displayName,
               username: message.senderUsername,
             },
             deps.talkGrants(service),
@@ -87,12 +89,7 @@ export function createPairingAdmission(deps: {
         });
         if (result.outcome === "resolved" && result.approval.status === "approved") {
           await router.send(connectionId, message.conversationId, {
-            text: pairingSuccess(
-              service,
-              message.senderId,
-              message.senderDisplayName,
-              message.senderUsername,
-            ),
+            text: pairingSuccess(service, message.senderId, displayName, message.senderUsername),
           });
         }
         if (result.outcome === "invalid_code" && "notify" in result && result.notify) {
@@ -114,7 +111,7 @@ export function createPairingAdmission(deps: {
           channel: pairingChannel,
           connectionId,
           channelUserId: message.senderId,
-          displayName: message.senderDisplayName ?? message.senderId,
+          displayName,
           username: message.senderUsername,
           ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
         },

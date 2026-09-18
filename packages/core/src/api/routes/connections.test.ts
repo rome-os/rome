@@ -9,7 +9,6 @@
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { SlackIngress } from "../../channels/slack.js";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
@@ -264,12 +263,14 @@ describe("GET /connections", () => {
     registry.register({
       service: "slack",
       auth: { workspace: tokenPaste({ label: "token", validate: async () => {} }) },
+      connectAvailability: () => ({
+        available: false,
+        unavailableReason: "Slack bot events are not configured on this Rome instance.",
+      }),
       capabilities: {},
     });
 
-    const res = await makeApp(registry, fakePersonMappingRepo(), {
-      slackIngress: new SlackIngress(undefined),
-    }).request("/connections");
+    const res = await makeApp(registry).request("/connections");
     const { connections } = await res.json();
 
     expect(connections[0].connect).toEqual({

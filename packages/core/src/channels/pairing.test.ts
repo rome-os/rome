@@ -25,7 +25,9 @@ describe("channel pairing approvals", () => {
     channelUserId: "alice",
     displayName: "Alice",
   };
-  const talkGrants = (service: string) => [service === "feishu" ? "app" : "bot"];
+  const talkGrants = (service: string) => [
+    service === "feishu" ? "app" : service === "slack" ? "workspace" : "bot",
+  ];
   function seedConnection(service: string) {
     testDb.db
       .insert(connections)
@@ -528,6 +530,7 @@ describe("channel pairing approvals", () => {
     "telegram",
     "discord",
     "feishu",
+    "slack",
   ])("blocks unknown %s messages and consumes group and replayed verification", async (service) => {
     seedConnection(service);
     const admit = createPairingAdmission({
@@ -540,16 +543,18 @@ describe("channel pairing approvals", () => {
       conversationId: "dm" as ConversationId,
     }));
     const router = { send } as unknown as TalkRouter;
-    const id = service === "feishu" ? "ou_123" : "123";
+    const id = service === "feishu" ? "ou_123" : service === "slack" ? "T1/U123" : "123";
     const account =
       service === "telegram"
         ? "@realowner (`123`)"
         : service === "discord"
           ? "<@123> (`123`)"
-          : '<at user_id="ou_123">Owner</at> (`ou_123`)';
+          : service === "slack"
+            ? "Slack member (`T1/U123`)"
+            : '<at user_id="ou_123">Owner</at> (`ou_123`)';
     const message: InboundMessage = {
       senderId: id,
-      senderDisplayName: "Owner",
+      senderDisplayName: service === "slack" ? undefined : "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
       conversationId: "dm" as ConversationId,
       messageId: "one",

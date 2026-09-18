@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
 import {
   SlackAdapter,
@@ -6,6 +5,7 @@ import {
   type SlackIngress,
   SLACK_REQUIRED_BOT_SCOPES,
   type SlackWebApi,
+  generateSlackGuardianLinkCode,
   isSlackCredentialError,
   slackWebApi,
   waitForSlackGuardianLink,
@@ -28,18 +28,9 @@ export interface SlackDescriptorDeps extends OAuthProviderSetupDeps {
   generateVerificationCode?: () => string;
 }
 
-const GUARDIAN_LINK_MATERIAL_KEY = "guardianChannelUserId";
 const GUARDIAN_LINK_REQUIRED_REASON = "Reconnect Slack in Settings to link the guardian identity.";
 
-function sixDigitCode(): string {
-  return String(randomInt(100_000, 1_000_000));
-}
-
-function credentialMaterial(credential: Credential): {
-  botToken: string;
-  userToken?: string;
-  guardianChannelUserId?: string;
-} {
+function credentialMaterial(credential: Credential): { botToken: string; userToken?: string } {
   if (typeof credential.material === "function") {
     throw new Error("Slack OAuth returned an unsupported external credential.");
   }
@@ -48,25 +39,6 @@ function credentialMaterial(credential: Credential): {
   return {
     botToken,
     ...(credential.material.userToken ? { userToken: credential.material.userToken } : {}),
-    ...(credential.material[GUARDIAN_LINK_MATERIAL_KEY]
-      ? { guardianChannelUserId: credential.material[GUARDIAN_LINK_MATERIAL_KEY] }
-      : {}),
-  };
-}
-
-function credentialWithGuardianLink(
-  credential: Credential,
-  guardianChannelUserId: string,
-): Credential {
-  if (typeof credential.material === "function") {
-    throw new Error("Slack OAuth returned an unsupported external credential.");
-  }
-  return {
-    ...credential,
-    material: {
-      ...credential.material,
-      [GUARDIAN_LINK_MATERIAL_KEY]: guardianChannelUserId,
-    },
   };
 }
 
@@ -86,11 +58,9 @@ export async function lockUnlinkedSlackTalk(
     if (connection.service !== "slack") continue;
     const grant = await ledger.getGrant(connection.id, "workspace");
     if (grant?.state !== "authorized") continue;
-    const material = grant.credential?.material;
     const linked =
-      material?.kind === "inline" &&
-      typeof material.record[GUARDIAN_LINK_MATERIAL_KEY] === "string" &&
-      material.record[GUARDIAN_LINK_MATERIAL_KEY].length > 0;
+      typeof grant.profile?.guardianChannelUserId === "string" &&
+      grant.profile.guardianChannelUserId.length > 0;
     if (linked) continue;
     await ledger.updateGrant(connection.id, "workspace", {
       state: "degraded",
@@ -109,13 +79,15 @@ export function missingSlackBotScopes(scopes: readonly string[] | undefined): st
 function enrichedSlackProfile(
   profile: SlackGrantProfile,
   identity: SlackBotIdentity,
+  guardianChannelUserId: string,
 ): SlackGrantProfile {
   return slackGrantProfileSchema.parse({
     ...profile,
     teamId: identity.teamId,
-    workspaceName: identity.workspaceName,
+    workspaceName: identity.workspaceName ?? profile.workspaceName,
     botUserId: identity.botUserId,
-    botUsername: identity.botUsername,
+    botUsername: identity.botUsername ?? profile.botUsername,
+    guardianChannelUserId,
   });
 }
 
@@ -126,7 +98,7 @@ function enrichedSlackProfile(
  */
 export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
   const api = deps.api ?? slackWebApi;
-  const generateCode = deps.generateVerificationCode ?? sixDigitCode;
+  const generateCode = deps.generateVerificationCode ?? generateSlackGuardianLinkCode;
   return async (interact, ctx) => {
     if (!deps.ingress.configured) {
       throw new Error(
@@ -177,6 +149,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
         `${identity.workspaceName ?? "Your Slack workspace"} connected as @${identity.botUsername ?? "Rome"}.`,
         "To finish linking your account as guardian, send this exact code in a direct message to the Rome bot:",
         code,
+        "The code expires in five minutes and locks after five incorrect attempts.",
       ],
       steps: [{ text: `Send ${code} to @${identity.botUsername ?? "Rome"} in Slack` }],
       progress: true,
@@ -184,8 +157,8 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
     const { channelUserId } = await guardianLink;
 
     return {
-      credential: credentialWithGuardianLink(redeemed.credential, channelUserId),
-      profile: enrichedSlackProfile(profile, identity),
+      credential: redeemed.credential,
+      profile: enrichedSlackProfile(profile, identity, channelUserId),
       guardianChannelUserId: channelUserId,
       summary: {
         title: "Slack connected",
@@ -199,12 +172,20 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 
 export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescriptor {
   const descriptor = makeOAuthProviderDescriptor("slack");
+  descriptor.connectAvailability = () =>
+    deps.ingress.configured
+      ? { available: true, unavailableReason: null }
+      : {
+          available: false,
+          unavailableReason: "Slack bot events are not configured on this Rome instance.",
+        };
   descriptor.auth.workspace.setup = makeSlackSetup(deps);
   descriptor.capabilities.talker = {
     needs: ["workspace"] as const,
-    build(creds): Talker {
+    build(creds, kit): Talker {
       const material = credentialMaterial(creds.workspace);
-      if (!material.guardianChannelUserId) {
+      const profile = slackGrantProfileSchema.parse(kit.profile("workspace") ?? {});
+      if (!profile.guardianChannelUserId) {
         throw new Error(GUARDIAN_LINK_REQUIRED_REASON);
       }
       let faultSink: ((error: CredentialRejected | Disconnected) => void) | null = null;
@@ -212,12 +193,8 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
         botToken: material.botToken,
         ingress: deps.ingress,
         api: deps.api,
-        onFault: ({ kind, cause }) => {
-          faultSink?.(
-            kind === "credential"
-              ? new CredentialRejected({ grant: "workspace", cause })
-              : new Disconnected(cause),
-          );
+        onCredentialFault: (cause) => {
+          faultSink?.(new CredentialRejected({ grant: "workspace", cause }));
         },
       });
 

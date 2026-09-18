@@ -76,6 +76,36 @@ function githubCard(
   return card;
 }
 
+function slackCard(state: GrantState, activeSetupCid?: string): ConnectionCard {
+  const connection: ApiConnection = {
+    id: "conn-slack",
+    service: "slack",
+    label: "Slack",
+    grants: { workspace: state },
+    display: {
+      workspace: {
+        displayName: "Acme",
+        handle: "@Rome",
+        email: null,
+        avatarUrl: null,
+      },
+    },
+    capabilities: {
+      talk:
+        state === "authorized"
+          ? { state: "unlocked" }
+          : { state: "needs-auth", missingGrants: ["workspace"] },
+      act: { state: "unsupported" },
+      watch: { state: "unsupported" },
+    },
+    connect: { url: "/api/oauth/slack/start", available: true, unavailableReason: null },
+    ...(activeSetupCid ? { setups: { workspace: activeSetupCid } } : {}),
+  };
+  const card = buildConnectionCards([connection]).find((entry) => entry.service === "slack");
+  if (!card) throw new Error("no slack card");
+  return card;
+}
+
 function renderSection(
   card: ConnectionCard,
   {
@@ -150,6 +180,33 @@ describe("OAuthConnectionSection", () => {
     expect(screen.getByText("ada@example.com")).toBeTruthy();
     expect(screen.getByText("Access expired — reconnect to keep it working")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
+  });
+
+  it.each([
+    "authorized",
+    "degraded",
+  ] as const)("shows a guardian-link presenting state while %s Slack setup completes", async (grantState) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            state: {
+              status: "presenting",
+              view: {
+                title: "Link your Slack account",
+                body: ["Send this code to the Rome bot:", "ROME-LINK-ABCDEFGH"],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    renderSection(slackCard(grantState, "slack-link-setup"));
+
+    expect(await screen.findByText("ROME-LINK-ABCDEFGH")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
   });
 
   it("shows the unavailable reason and a disabled Connect when the service is unavailable", () => {

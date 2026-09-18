@@ -17,6 +17,13 @@ describe("InMemoryInboundDedup", () => {
     expect(await dedup.checkAndRecord("b")).toBe(true);
   });
 
+  it("can defer recording until handling succeeds", async () => {
+    const dedup = new InMemoryInboundDedup();
+    expect(await dedup.has("event")).toBe(false);
+    await dedup.record("event");
+    expect(await dedup.has("event")).toBe(true);
+  });
+
   it("evicts the oldest key once capacity is exceeded (FIFO)", async () => {
     const dedup = new InMemoryInboundDedup(2);
     await dedup.checkAndRecord("a"); // [a]

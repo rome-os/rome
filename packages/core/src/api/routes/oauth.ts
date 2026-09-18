@@ -10,6 +10,7 @@ import {
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
+  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
 } from "../../lib/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
@@ -95,8 +96,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     }
 
     try {
-      const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
-      if (redeemed.provider === "slack") {
+      if ((await pendingRomeCloudOAuthProvider(deps.db, state)) === "slack") {
         return c.json(
           {
             error:
@@ -105,6 +105,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
           409,
         );
       }
+      const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
 
       // The grant ledger is the sole OAuth store: import the provider's bundle
       // into the grant so it holds both the connection state and the non-secret

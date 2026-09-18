@@ -34,6 +34,21 @@ function guardianCodeEvent(code: string): SlackEventEnvelope {
 }
 
 describe("Slack setup", () => {
+  it("reports the bot event prerequisite through descriptor availability", () => {
+    const descriptor = makeSlackDescriptor({
+      ingress: new SlackIngress(undefined),
+      beginRedirect: async () => "unused",
+      redeem: async () => {
+        throw new Error("unused");
+      },
+    });
+
+    expect(descriptor.connectAvailability?.()).toEqual({
+      available: false,
+      unavailableReason: "Slack bot events are not configured on this Rome instance.",
+    });
+  });
+
   it("requires the exact least-privilege bot scopes", () => {
     expect(missingSlackBotScopes(["chat:write"])).toEqual(["app_mentions:read", "im:history"]);
     expect(missingSlackBotScopes(["im:history", "chat:write", "app_mentions:read"])).toEqual([]);
@@ -59,11 +74,13 @@ describe("Slack setup", () => {
         credential: { material: { botToken: "xoxb-test" }, expiresAt: "never" },
         profile: {
           teamId: "T1",
+          workspaceName: "OAuth Acme",
+          botUsername: "OAuth Rome",
           scopes: ["app_mentions:read", "chat:write", "im:history"],
         },
       }),
       api: {
-        authTest: async () => identity,
+        authTest: async () => ({ teamId: "T1", botUserId: "UBOT" }),
         postMessage: async () => ({ ts: "unused" }),
       },
       generateVerificationCode: () => "123456",
@@ -87,17 +104,14 @@ describe("Slack setup", () => {
 
     await expect(conferralPromise).resolves.toMatchObject({
       credential: {
-        material: {
-          botToken: "xoxb-test",
-          guardianChannelUserId: "T1/UGUARDIAN",
-        },
+        material: { botToken: "xoxb-test" },
       },
       guardianChannelUserId: "T1/UGUARDIAN",
       profile: {
         teamId: "T1",
-        workspaceName: "Acme",
+        workspaceName: "OAuth Acme",
         botUserId: "UBOT",
-        botUsername: "Rome",
+        botUsername: "OAuth Rome",
       },
     });
     expect(liveTalkHandler).toHaveBeenCalledTimes(1);
@@ -149,15 +163,10 @@ describe("Slack setup", () => {
         name: "workspace",
         state: "authorized",
         credential: {
-          material: {
-            kind: "inline",
-            record: {
-              botToken: "xoxb-test",
-              guardianChannelUserId: "T1/UGUARDIAN",
-            },
-          },
+          material: { kind: "inline", record: { botToken: "xoxb-test" } },
           expiresAt: "never",
         },
+        profile: { guardianChannelUserId: "T1/UGUARDIAN" },
       }),
       updateGrant,
     } as unknown as GrantLedger;
@@ -183,6 +192,7 @@ describe("Slack setup", () => {
         {
           connectionId: "slack-connection",
           persist: async () => {},
+          profile: () => undefined,
           registerIngress: () => () => {},
         },
       ),
@@ -238,16 +248,14 @@ describe("Slack setup", () => {
     const talker = descriptor.capabilities.talker?.build(
       {
         workspace: {
-          material: {
-            botToken: "xoxb-test",
-            guardianChannelUserId: "T1/UGUARDIAN",
-          },
+          material: { botToken: "xoxb-test" },
           expiresAt: "never",
         },
       },
       {
         connectionId: "slack-connection",
         persist: async () => {},
+        profile: () => ({ guardianChannelUserId: "T1/UGUARDIAN" }),
         registerIngress: () => () => {},
       },
     );
@@ -281,16 +289,14 @@ describe("Slack setup", () => {
     const talker = descriptor.capabilities.talker?.build(
       {
         workspace: {
-          material: {
-            botToken: "xoxb-test",
-            guardianChannelUserId: "T1/UGUARDIAN",
-          },
+          material: { botToken: "xoxb-test" },
           expiresAt: "never",
         },
       },
       {
         connectionId: "slack-connection",
         persist: async () => {},
+        profile: () => ({ guardianChannelUserId: "T1/UGUARDIAN" }),
         registerIngress: () => () => {},
       },
     );

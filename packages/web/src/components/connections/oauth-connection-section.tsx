@@ -261,18 +261,30 @@ export function OAuthConnectionSection({
         {expired && (
           <p className="text-ui text-warning-fg">{t("connections.oauth.accessExpired")}</p>
         )}
-        {pendingRedirectControls ?? (
-          <Button
-            variant={expired ? "default" : "outline"}
-            size="sm"
-            disabled={setup.busy}
-            aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-            onClick={() => beginConnect(true)}
-          >
-            {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
-            {t("connections.oauth.reconnect")}
-          </Button>
-        )}
+        {pendingRedirectControls ??
+          (setup.state ? (
+            <SetupRenderer
+              service={card.service}
+              state={setup.state}
+              busy={setup.busy}
+              error={setup.error}
+              onSubmit={setup.submit}
+              onCancel={setup.cancel}
+              onRetry={() => beginConnect(true)}
+              labels={{ continue: t("common.connect") }}
+            />
+          ) : (
+            <Button
+              variant={expired ? "default" : "outline"}
+              size="sm"
+              disabled={setup.busy}
+              aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+              onClick={() => beginConnect(true)}
+            >
+              {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
+              {t("connections.oauth.reconnect")}
+            </Button>
+          ))}
       </div>
     </ConnectionSlotCard>
   );

@@ -17,6 +17,10 @@
  * `insertEventIfAbsent`) — the call site already awaits `checkAndRecord`.
  */
 export interface InboundDedup {
+  /** Report whether `key` has completed successfully. */
+  has(key: string): Promise<boolean>;
+  /** Record `key` after its handler has completed successfully. */
+  record(key: string): Promise<void>;
   /**
    * Atomically record `key` and report whether it was already present.
    *
@@ -37,13 +41,22 @@ export class InMemoryInboundDedup implements InboundDedup {
 
   constructor(private readonly maxEntries = 1000) {}
 
-  async checkAndRecord(key: string): Promise<boolean> {
-    if (this.seen.has(key)) return true;
+  async has(key: string): Promise<boolean> {
+    return this.seen.has(key);
+  }
+
+  async record(key: string): Promise<void> {
+    if (this.seen.has(key)) return;
     this.seen.add(key);
     if (this.seen.size > this.maxEntries) {
       const oldest = this.seen.values().next().value;
       if (oldest !== undefined) this.seen.delete(oldest);
     }
+  }
+
+  async checkAndRecord(key: string): Promise<boolean> {
+    if (this.seen.has(key)) return true;
+    await this.record(key);
     return false;
   }
 }

@@ -20,16 +20,19 @@ import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
 };
 
 const {
+  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
   syncProviderTokenFile,
   syncGithubShellIntegrationForProvider,
 } = rs.hoisted(() => ({
+  pendingRomeCloudOAuthProvider: rs.fn<() => Promise<"slack" | null>>(async () => null),
   redeemRomeCloudOAuthHandoff: rs.fn(),
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
 rs.mock("../../lib/rome-cloud-oauth.js", () => ({
+  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
   createRomeCloudOAuthStartRedirect: rs.fn(),
   createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
@@ -109,6 +112,7 @@ async function postRedeem(deps: ApiDeps) {
 describe("POST /oauth/redeem — ledger-only provider write path", () => {
   beforeEach(() => {
     rs.clearAllMocks();
+    pendingRomeCloudOAuthProvider.mockResolvedValue(null);
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();
@@ -149,15 +153,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
   });
 
   it("slack: refuses the fallback path because it carries no guardian proof", async () => {
-    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
-      provider: "slack",
-      profile: "default",
-      tokens: {
-        accessToken: "xoxb-redeemed",
-        raw: { authed_user: { access_token: "xoxp-redeemed" }, team: { id: "T123" } },
-      },
-      metadata: null,
-    });
+    pendingRomeCloudOAuthProvider.mockResolvedValueOnce("slack");
     const registry = makeRegistry();
 
     const res = await postRedeem(makeDeps(registry));
@@ -167,6 +163,7 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       error:
         "Reconnect Slack from Settings so Rome can verify the guardian before enabling bot conversations.",
     });
+    expect(redeemRomeCloudOAuthHandoff).not.toHaveBeenCalled();
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("github")).toHaveLength(0);
   });

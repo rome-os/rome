@@ -6,6 +6,7 @@ import { setInstanceTokenInMemory } from "./instance-identity.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
+  pendingRomeCloudOAuthProvider,
   redeemRomeCloudOAuthHandoff,
 } from "./rome-cloud-oauth.js";
 
@@ -78,6 +79,14 @@ describe("Rome Cloud OAuth brokering", () => {
       await createRomeCloudOAuthStartRedirect(db, "github");
       const [row] = await db.select().from(oauthPendingAttempts);
       expect(row.tenant).toBe("");
+    });
+
+    it("identifies the provider before consuming a pending handoff", async () => {
+      const url = await createRomeCloudOAuthStartRedirect(db, "slack");
+      const state = new URL(url).searchParams.get("state")!;
+
+      await expect(pendingRomeCloudOAuthProvider(db, state)).resolves.toBe("slack");
+      await expect(pendingRomeCloudOAuthProvider(db, "unknown-state")).resolves.toBeNull();
     });
   });
 

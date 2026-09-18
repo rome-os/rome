@@ -79,6 +79,8 @@ export const slackGrantProfileSchema = z
     workspaceName: identityField,
     botUserId: identityField,
     botUsername: identityField,
+    /** Guardian identity proven by the one-time Slack DM setup step. */
+    guardianChannelUserId: identityField,
   })
   .strict();
 export type SlackGrantProfile = z.infer<typeof slackGrantProfileSchema>;

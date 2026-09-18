@@ -200,6 +200,7 @@ function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: St
     {
       connectionId: "wechat-test",
       persist: async () => {},
+      profile: () => undefined,
       registerIngress: () => () => {},
     },
   );

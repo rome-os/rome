@@ -305,6 +305,7 @@ describe("the WeChat personal Talker", () => {
     const kit = {
       connectionId: "conn-wechat-user",
       persist: async () => {},
+      profile: () => undefined,
       registerIngress: () => () => {},
     } satisfies RuntimeKit;
     const credential: Credential = {

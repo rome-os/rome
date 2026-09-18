@@ -9,7 +9,9 @@ Rome uses its existing Slack connection for both workspace operations and bot co
 - Rome ignores ordinary channel messages, bot-authored messages, and messages without text.
 - The first release sends and receives completed text messages only. It does not handle files, images, or streamed partial answers.
 
-During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready.
+During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready. The code expires after five minutes, locks after five incorrect code attempts, and is cancelled if setup is cancelled or replaced.
+
+The guardian's linked Slack account is admitted automatically. Other workspace members must complete Rome's normal pairing approval before their message reaches the agent; until then, Rome replies only with pairing guidance.
 
 ## Slack app configuration
 
@@ -25,7 +27,7 @@ Subscribe to `message.im`, `app_mention`, and the scope-free `app_uninstalled` a
 Do not add channel-message subscriptions. Rome must not receive unmentioned channel traffic.
 The manifest also enables a writable App Home Messages tab so workspace members can find and direct-message the bot.
 
-Slack signs every Events API request. Rome verifies the signature against the untouched request body and rejects timestamps older than five minutes. It routes the event only to a bot token for the same workspace.
+Slack signs every Events API request. Rome limits the streaming request body before buffering it, verifies the signature against those exact untouched bytes, and rejects timestamps older than five minutes. It routes the event only to a bot token for the same workspace.
 
 ## Deployment check
 

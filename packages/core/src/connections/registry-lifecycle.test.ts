@@ -300,6 +300,43 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
 // Scenario 13 — kit.persist write-through
 
 describe("Scenario 13 — kit.persist write-through", () => {
+  it("kit.profile exposes only needed non-secret grant profiles across rehydration", async () => {
+    const { ledger, close } = makeLedger();
+    try {
+      const first = makePasteTalk();
+      const registry = new ConnectionRegistry({ ledger });
+      registry.register(first.descriptor);
+      const conn = await registry.connect("fake-telegram");
+      await registry.importCredential(conn.id, "bot", first.validCredential(), {
+        guardianChannelUserId: "T1/U1",
+      });
+      await registry.stopAll();
+
+      let capturedKit: import("./types.js").RuntimeKit | null = null;
+      const rehydrated = makePasteTalk();
+      const originalBuild = rehydrated.descriptor.capabilities.talker!.build.bind(
+        rehydrated.descriptor.capabilities.talker!,
+      );
+      rehydrated.descriptor.capabilities.talker = {
+        ...rehydrated.descriptor.capabilities.talker!,
+        build(creds, kit) {
+          capturedKit = kit;
+          return originalBuild(creds, kit);
+        },
+      };
+      const restarted = new ConnectionRegistry({ ledger });
+      restarted.register(rehydrated.descriptor);
+      await restarted.load();
+
+      expect(capturedKit).not.toBeNull();
+      expect(capturedKit!.profile("bot")).toEqual({ guardianChannelUserId: "T1/U1" });
+      expect(() => capturedKit!.profile("user")).toThrow(/not in this capability's needs/);
+      await restarted.stopAll();
+    } finally {
+      close();
+    }
+  });
+
   it("kit.persist updates ledger in place without stop/build or onUnlocked", async () => {
     const { ledger, close } = makeLedger();
     try {
