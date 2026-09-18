@@ -15,9 +15,22 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, basename, join, resolve } from "node:path";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { extname, dirname, basename, join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { create as tarCreate } from "tar";
-import { hashArtifact, packBundle, sourceRootForArtifactPath } from "./packaging/index.js";
+import {
+  hashArtifact,
+  packBundle,
+  parseAppManifest,
+  parseManifestObject,
+  resolvePathWithinBase,
+  safeIsFile,
+  sourceRootForArtifactPath,
+} from "./packaging/index.js";
+import { renderOgSvg, type OgIcon } from "./og/template.js";
+import { svgToPng } from "./og/rasterize.js";
 import type { SpecSource } from "./lockfile.js";
 import { getInstanceToken } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
@@ -210,31 +223,142 @@ export async function publishAppBundle(
   return { status: "rejected", httpStatus: response.status, message };
 }
 
+const STORE_CARD_PATH = "assets/store-card.png";
+const ICON_MIMES: Record<string, OgIcon["mime"]> = {
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+};
+
+/**
+ * Whether the listing names a key itself; an author's value always wins. A key
+ * present with no value counts: appending a second one would make the document
+ * reject as a duplicate mapping key, and it reads as "leave this alone".
+ */
+function declares(yamlText: string, key: "image" | "image_alt"): boolean {
+  try {
+    const doc = parseYaml(yamlText) as Record<string, unknown> | null;
+    return doc !== null && typeof doc === "object" && key in doc;
+  } catch {
+    // Let the store report the malformed listing; never generate over it.
+    return true;
+  }
+}
+
+/**
+ * Render the listing's share card from the packed manifest, with the template
+ * instances draw for their own app links. The listing URL is unknown before
+ * upload — the store assigns the handle and slug in its response — so the card
+ * carries no link line.
+ */
+async function renderStoreCard(artifactRoot: string): Promise<{ png: Buffer; name: string }> {
+  const manifestPath = join(artifactRoot, "app.yaml");
+  const manifest = parseAppManifest(await parseManifestObject(manifestPath), manifestPath);
+  const name = manifest.name ?? manifest.id;
+
+  let icon: OgIcon | null = null;
+  if (manifest.icon) {
+    const resolveRoot = manifest.appRoot
+      ? resolvePathWithinBase(artifactRoot, manifest.appRoot, `appRoot for app "${manifest.id}"`)
+      : artifactRoot;
+    const iconPath = resolvePathWithinBase(
+      resolveRoot,
+      manifest.icon,
+      `icon for app "${manifest.id}"`,
+    );
+    const mime = ICON_MIMES[extname(iconPath).toLowerCase()];
+    if (mime && safeIsFile(iconPath)) icon = { mime, bytes: await readFile(iconPath) };
+  }
+
+  const png = await svgToPng(
+    renderOgSvg({ name, description: manifest.tagline ?? null, link: null, icon }),
+  );
+  return { png, name };
+}
+
+/**
+ * Copy the listing into a temp dir, add the generated card, and name it in the
+ * manifest. The author's `.rome_store` is never written to, and appending the
+ * keys to the raw text keeps their comments and ordering intact.
+ */
+async function stageSidecarWithCard(
+  artifactRoot: string,
+  storeRoot: string,
+  yamlText: string | null,
+): Promise<string> {
+  const { png, name } = await renderStoreCard(artifactRoot);
+  const staged = await mkdtemp(join(tmpdir(), "rome-store-sidecar-"));
+  const stagedRoot = join(staged, ".rome_store");
+  if (yamlText === null) {
+    await mkdir(stagedRoot, { recursive: true });
+  } else {
+    await cp(storeRoot, stagedRoot, { recursive: true });
+  }
+  await mkdir(join(stagedRoot, "assets"), { recursive: true });
+  await writeFile(join(stagedRoot, STORE_CARD_PATH), png);
+
+  const alt = `${name} on the Rome App Store`;
+  const generated =
+    "\n# Added at publish time because this listing named no image.\n" +
+    `image: ${STORE_CARD_PATH}\n` +
+    (yamlText !== null && declares(yamlText, "image_alt")
+      ? ""
+      : `image_alt: ${JSON.stringify(alt)}\n`);
+  // A listing invented here carries the image and nothing else: the store
+  // already derives the title and description from the app manifest, and
+  // overriding them would change listing copy as a side effect of a card.
+  const head = yamlText === null ? "" : yamlText.replace(/\n*$/, "\n");
+  await writeFile(join(stagedRoot, "rome_store.yaml"), head + generated.replace(/^\n/, ""));
+  return staged;
+}
+
+/**
+ * The `.rome_store` sidecar, uploaded beside the bundle and excluded from it.
+ * A listing that names no `image` gets a generated share card, so an app
+ * published from an instance does not fall back to the site-wide default.
+ * Card failures are logged and the listing ships as authored.
+ */
 async function packStoreSidecar(artifactRoot: string): Promise<Buffer | null> {
   const sourceRoot = sourceRootForArtifactPath(artifactRoot);
-  const storeRoot = sourceRoot
-    ? join(sourceRoot, ".rome_store")
-    : join(artifactRoot, ".rome_store");
-  if (!existsSync(join(storeRoot, "rome_store.yaml"))) return null;
+  const authored = sourceRoot ? join(sourceRoot, ".rome_store") : join(artifactRoot, ".rome_store");
+  const manifestPath = join(authored, "rome_store.yaml");
+  const yamlText = existsSync(manifestPath) ? await readFile(manifestPath, "utf-8") : null;
 
-  const chunks: Buffer[] = [];
-  const stream = tarCreate(
-    {
-      gzip: true,
-      cwd: dirname(storeRoot),
-      portable: true,
-      noMtime: true,
-      filter: (entryPath) =>
-        !entryPath.split("/").some((segment) => segment === "node_modules" || segment === ".git"),
-    },
-    [basename(storeRoot)],
-  );
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-    stream.on("end", () => resolvePromise());
-    stream.on("error", rejectPromise);
-  });
-  return Buffer.concat(chunks);
+  let storeRoot = authored;
+  let staged: string | null = null;
+  if (yamlText === null || !declares(yamlText, "image")) {
+    try {
+      staged = await stageSidecarWithCard(artifactRoot, authored, yamlText);
+      storeRoot = join(staged, ".rome_store");
+    } catch (err) {
+      log.warn("store card generation failed; publishing the listing as authored", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      if (yamlText === null) return null;
+    }
+  }
+
+  try {
+    const chunks: Buffer[] = [];
+    const stream = tarCreate(
+      {
+        gzip: true,
+        cwd: dirname(storeRoot),
+        portable: true,
+        noMtime: true,
+        filter: (entryPath) =>
+          !entryPath.split("/").some((segment) => segment === "node_modules" || segment === ".git"),
+      },
+      [basename(storeRoot)],
+    );
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.on("end", () => resolvePromise());
+      stream.on("error", rejectPromise);
+    });
+    return Buffer.concat(chunks);
+  } finally {
+    if (staged) await rm(staged, { recursive: true, force: true });
+  }
 }
 
 function toBlobPart(bytes: Uint8Array): ArrayBuffer {

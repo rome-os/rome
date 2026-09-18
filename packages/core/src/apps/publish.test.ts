@@ -59,6 +59,42 @@ async function listTarEntries(bytes: Buffer): Promise<string[]> {
   return entries;
 }
 
+async function readTarFile(bytes: Buffer, path: string): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let found = false;
+  await new Promise<void>((resolve, reject) => {
+    const parser = new Parser({
+      onReadEntry: (entry) => {
+        if (entry.path === path) {
+          found = true;
+          entry.on("data", (chunk: Buffer) => chunks.push(chunk));
+        } else {
+          entry.resume();
+        }
+      },
+    });
+    parser.on("error", reject);
+    parser.on("end", () => resolve());
+    parser.end(bytes);
+  });
+  return found ? Buffer.concat(chunks) : null;
+}
+
+/** A source artifact whose manifest carries a name and tagline but no listing. */
+async function makeSourceArtifactWithoutStoreSidecar(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "rome-publish-nocard-test-"));
+  const source = join(root, "notes");
+  const artifact = join(source, ".rome", "artifact");
+  await mkdir(join(artifact, "dist"), { recursive: true });
+  await writeFile(
+    join(artifact, "app.yaml"),
+    "formatVersion: 1\nid: notes\nname: Notes\nversion: 1.2.3\ndescription: t\n" +
+      'tagline: "Everything you meant to write down."\n',
+  );
+  await writeFile(join(artifact, "dist", "index.js"), "export {};\n");
+  return artifact;
+}
+
 const OK_PAYLOAD = {
   listing: { id: "notes", handle: "notes", slug: "notes" },
   version: {
@@ -172,7 +208,9 @@ describe("publishAppBundle", () => {
     // The uploaded bytes are a real bundle the store can extract a manifest from.
     const entries = await listTarEntries(body);
     expect(entries).toContain("a1b2c3hash/app.yaml");
-    expect(form.get("store")).toBeNull();
+    // Even an app with no listing of its own ships a generated share card.
+    const store = Buffer.from(await (form.get("store") as Blob).arrayBuffer());
+    expect(await listTarEntries(store)).toContain(".rome_store/assets/store-card.png");
   });
 
   it("normalizes a legacy publish response without sourceAvailable to false", async () => {
@@ -215,6 +253,89 @@ describe("publishAppBundle", () => {
     expect(bundleEntries.some((entry) => entry.includes(".rome_store"))).toBe(false);
     expect(storeEntries).toContain(".rome_store/rome_store.yaml");
     expect(storeEntries).toContain(".rome_store/assets/hero.png");
+  });
+
+  it("generates a share card when the listing names no image", async () => {
+    const bundle = await makeSourceArtifactWithStoreSidecar();
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init! };
+      return new Response(JSON.stringify(OK_PAYLOAD), { status: 201 });
+    }) as typeof fetch;
+
+    await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl });
+
+    const form = (captured!.init.body as FormData).get("store") as Blob;
+    const store = Buffer.from(await form.arrayBuffer());
+    expect(await listTarEntries(store)).toContain(".rome_store/assets/store-card.png");
+    const card = await readTarFile(store, ".rome_store/assets/store-card.png");
+    expect(card!.subarray(0, 8)).toEqual(Buffer.from("89504e470d0a1a0a", "hex"));
+    const listing = (await readTarFile(store, ".rome_store/rome_store.yaml"))!.toString();
+    expect(listing).toContain("title: Notes");
+    expect(listing).toContain("image: assets/store-card.png");
+    expect(listing).toContain("image_alt:");
+  });
+
+  it("leaves a listing that names image with no value alone", async () => {
+    const bundle = await makeSourceArtifactWithStoreSidecar();
+    const storeRoot = join(bundle, "..", "..", ".rome_store");
+    await writeFile(join(storeRoot, "rome_store.yaml"), "title: Notes\nimage:\n");
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init! };
+      return new Response(JSON.stringify(OK_PAYLOAD), { status: 201 });
+    }) as typeof fetch;
+
+    await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl });
+
+    const store = Buffer.from(
+      await ((captured!.init.body as FormData).get("store") as Blob).arrayBuffer(),
+    );
+    expect(await listTarEntries(store)).not.toContain(".rome_store/assets/store-card.png");
+    // A second `image` key would make the store reject the listing outright.
+    const listing = (await readTarFile(store, ".rome_store/rome_store.yaml"))!.toString();
+    expect(listing.match(/^image:/gm)).toHaveLength(1);
+  });
+
+  it("leaves an authored image alone", async () => {
+    const bundle = await makeSourceArtifactWithStoreSidecar();
+    const storeRoot = join(bundle, "..", "..", ".rome_store");
+    await writeFile(join(storeRoot, "rome_store.yaml"), "title: Notes\nimage: assets/hero.png\n");
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init! };
+      return new Response(JSON.stringify(OK_PAYLOAD), { status: 201 });
+    }) as typeof fetch;
+
+    await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl });
+
+    const store = Buffer.from(
+      await ((captured!.init.body as FormData).get("store") as Blob).arrayBuffer(),
+    );
+    expect(await listTarEntries(store)).not.toContain(".rome_store/assets/store-card.png");
+    const listing = (await readTarFile(store, ".rome_store/rome_store.yaml"))!.toString();
+    expect(listing).toContain("image: assets/hero.png");
+  });
+
+  it("builds a listing for an app that has none, so its card still ships", async () => {
+    const bundle = await makeSourceArtifactWithoutStoreSidecar();
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), init: init! };
+      return new Response(JSON.stringify(OK_PAYLOAD), { status: 201 });
+    }) as typeof fetch;
+
+    await publishAppBundle(bundle, await hashArtifact(bundle), { fetch: fetchImpl });
+
+    const store = Buffer.from(
+      await ((captured!.init.body as FormData).get("store") as Blob).arrayBuffer(),
+    );
+    expect(await listTarEntries(store)).toContain(".rome_store/assets/store-card.png");
+    const listing = (await readTarFile(store, ".rome_store/rome_store.yaml"))!.toString();
+    expect(listing).toContain("image: assets/store-card.png");
+    // The store derives title and description from the manifest; a card must
+    // not quietly rewrite them.
+    expect(listing).not.toContain("title:");
   });
 
   it("does not treat .rome_store edits as artifact drift before publish", async () => {

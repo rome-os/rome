@@ -16,13 +16,6 @@
 // (which chats exist) and `history` (what was said), both live queries against
 // the client's own store.
 //
-// Conferral is observational and physical. The guardian opens Rome's desktop,
-// scans the QR with their phone, and confirms the login there — the same
-// desktop surface LinkedIn's setup uses. Recovering the store key needs ptrace
-// on the live client, which this container cannot do, so that one step runs as
-// a root script on the hosting VM (channels/wechat-user-keys.ts) and hands back
-// only the passphrase; Rome derives the per-database keys back here.
-//
 // Fault mapping: a reader that reports the account signed out, or a key that no
 // longer fits, is terminal (CredentialRejected → the grant degrades → the
 // guardian reconnects). A reader that merely fails to run is runtime
@@ -49,7 +42,6 @@ import {
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
-import type { RootScriptRunner } from "../../host-execution/root-script-runner.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
@@ -233,14 +225,13 @@ function keysView(remembered: boolean): SetupView {
 
 export interface WechatUserSetupDeps {
   runtime: WechatUserRuntime;
-  /** Recover the store passphrase (the root script). Injectable for tests;
-   *  production wires the action-driven runner. It launches the client under gdb
-   *  and blocks until a login derives the key, so the caller shows the scan
-   *  walkthrough alongside it rather than waiting for a login first. */
+  /** Recover the store passphrase. Injectable for tests. It launches the client
+   *  under gdb in this container and blocks until a login derives the key, so the
+   *  caller shows the scan walkthrough alongside it rather than waiting for a
+   *  login first. */
   recoverPassphrase: (signal: AbortSignal) => Promise<string>;
   /** Stage the capture driver inside this container before recovery runs. */
   stageDriver: () => Promise<void>;
-  ensureRecoveryAvailable?: () => void;
   pollIntervalMs?: number;
   loginTimeoutMs?: number;
   /** How often to re-screenshot the login window into the scan view. */
@@ -301,7 +292,6 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         await runtime.start(signal);
         return waitFor(signal, (status) => status.running && status.state === "ready");
       }
-      deps.ensureRecoveryAvailable?.();
       if (!initial.installed) {
         interact.show(installingView());
         await runtime.install(signal);
@@ -420,11 +410,6 @@ export function toWechatUserInboundMessage(message: WechatUserMessage): InboundM
 // ── descriptor ────────────────────────────────────────────────────────────
 
 export interface WechatUserDescriptorDeps {
-  /** How host-root scripts run — the action-driven runner in production. The
-   *  key recovery is the only thing that needs it, and it may be absent when
-   *  host execution is disabled, in which case connecting fails before installation
-   *  rather than at registration. */
-  rootScriptRunner?: RootScriptRunner;
   /** Injectable client runtime (tests). */
   runtime?: WechatUserRuntime;
   pollIntervalMs?: number;
@@ -441,20 +426,11 @@ export function createWechatUserDescriptor(
   const runtime = deps.runtime ?? new WechatUserRuntime();
   const reader = new WechatUserReader(runtime);
 
-  const ensureRecoveryAvailable = () => {
-    if (!deps.rootScriptRunner) {
-      throw new Error(
-        "Host execution is not enabled on this instance, so Rome cannot recover the WeChat message-store key.",
-      );
-    }
-  };
   const recoverPassphrase = async (signal: AbortSignal): Promise<string> => {
-    ensureRecoveryAvailable();
-    const driverDir = await stageCaptureDriver();
+    const driverDir = await stageCaptureDriver(runtime.runtimeDir);
     try {
       return await recoverWechatPassphrase(
-        deps.rootScriptRunner!,
-        { anchorPid: process.pid, driverDir, home: runtime.home },
+        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir },
         signal,
       );
     } finally {
@@ -466,7 +442,6 @@ export function createWechatUserDescriptor(
   sessionScheme.setup = makeWechatUserSetup({
     runtime,
     recoverPassphrase,
-    ensureRecoveryAvailable,
     stageDriver: async () => {},
     ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
   });

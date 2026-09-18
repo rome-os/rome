@@ -221,6 +221,8 @@
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
     "filePill": "#文件 {{index}}",
+    "uploadProgressFor": "{{name}} 的上传进度",
+    "cancelUpload": "取消",
     "send": "发送",
     "sendTitle": "发送",
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",

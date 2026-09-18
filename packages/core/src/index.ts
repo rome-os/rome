@@ -1034,11 +1034,9 @@ async function main() {
     // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
-    // The personal WeChat connection is opt-in; its key recovery drives a
-    // host-root script through the action engine.
+    // The personal WeChat connection is opt-in; its key recovery runs a local
+    // debugger in this container, needing no host execution.
     wechatUserEnabled: config.wechatUserEnabled,
-    hostExecutionEnabled: config.hostExecutionEnabled,
-    actionEngine,
   });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();

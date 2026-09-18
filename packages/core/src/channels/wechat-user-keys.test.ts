@@ -18,30 +18,38 @@ it("stages private drivers and rejects a symlinked home", async () => {
   await symlink(home, join(home, "alias"));
   await expect(stageCaptureDriver(join(home, "alias"))).rejects.toThrow("private parent");
 });
-it("requires both the PID and namespace identity before entering a container", async () => {
-  let script = "";
+it("runs the staged driver in-process and parses the passphrase", async () => {
+  let file = "";
+  let args: string[] = [];
+  let env: Record<string, string> | undefined;
   const result = await recoverWechatPassphrase(
-    {
-      run: async (request) => {
-        script = request.script;
-        return {
-          status: "succeeded",
-          exitCode: 0,
-          stdout: `PASSPHRASE ${"ab".repeat(32)}`,
-          stderr: "",
-          truncated: false,
-          jobId: "test",
-        };
-      },
-    },
-    {
-      anchorPid: 123,
-      pidNamespace: "pid:[456]",
-      driverDir: "/private/capture",
-      home: "/home/rome",
+    { driverDir: "/private/capture", home: "/home/rome", runtimeDir: "/run/user/999" },
+    undefined,
+    async (f, a, opts) => {
+      file = f;
+      args = a;
+      env = opts?.env;
+      return { code: 0, stdout: `PASSPHRASE ${"ab".repeat(32)}`, stderr: "" };
     },
   );
   expect(result).toBe("ab".repeat(32));
-  expect(script).toContain("pid_namespace='pid:[456]'");
-  expect(script).toContain('[ "$ns" = "$anchor" ] && [ "$(readlink "$candidate/ns/pid"');
+  expect(file).toBe("python3");
+  expect(args[0]).toBe("/private/capture/launch-driver.py");
+  expect(env).toEqual({ HOME: "/home/rome", XDG_RUNTIME_DIR: "/run/user/999" });
+});
+it("rejects a capture that exits non-zero or yields no passphrase", async () => {
+  await expect(
+    recoverWechatPassphrase({ driverDir: "/private/capture" }, undefined, async () => ({
+      code: 5,
+      stdout: "",
+      stderr: "no passphrase captured",
+    })),
+  ).rejects.toThrow("did not succeed");
+  await expect(
+    recoverWechatPassphrase({ driverDir: "/private/capture" }, undefined, async () => ({
+      code: 0,
+      stdout: "nothing useful here",
+      stderr: "",
+    })),
+  ).rejects.toThrow("no passphrase");
 });

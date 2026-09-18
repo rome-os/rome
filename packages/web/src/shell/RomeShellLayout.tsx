@@ -7,14 +7,16 @@ import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
 import { SlotOutlet } from "../components/slot";
-import { AppGrid } from "./AppGrid";
+import { AppGrid, APP_NAV } from "./AppGrid";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
 import { useDesktop } from "@/hooks/use-desktop";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
+import { routeTitle } from "@/lib/page-title";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -45,6 +47,12 @@ export function RomeShellLayout() {
   const [appGridControlsHost, setAppGridControlsHost] = useState<HTMLDivElement | null>(null);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // The fallback title for whatever the shell is showing. A routed page that
+  // can name its own subject claims the page slot, which outranks this.
+  // Sourced from the sidebar's own destinations: the nav already has to know
+  // what each route is called, so the title has no list of its own to drift from.
+  const route = routeTitle(location.pathname, APP_NAV);
+  useDocumentTitle(route === null ? null : [route.detail, t(route.key)], "route");
   // The rail is a desktop arrangement: below `md` the sidebar is a slide-over
   // that should always open at full width, so a collapse saved on desktop
   // must not shrink the mobile drawer.

@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAppsList } from "@/hooks/use-apps";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
@@ -79,6 +80,7 @@ export default function AppDetailPage() {
   // it never reads.
   const { apps, error: appsError } = useAppsList();
   const app = apps?.find((a) => a.id === appId) ?? null;
+  useDocumentTitle(app?.displayName ?? null);
   // probeUpdates: false — same contract. The update banner renders only from
   // candidates a previous apps-grid visit left in the query cache.
   const lifecycle = useAppLifecycle(apps, {

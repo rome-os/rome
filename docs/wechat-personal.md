@@ -5,32 +5,24 @@ The personal WeChat connection reads the guardian's account through the Linux de
 ## Runtime requirements
 
 - An x86-64 Linux VM running the Rome container.
-- The [host helper](../packages/host-helper/README.md) installed and enabled on that VM, with its socket directory mounted into the container.
-- `WECHAT_USER_ENABLED=true` and `ROME_HOST_EXECUTION_ENABLED=true` in the container environment.
-- `ROME_HOST_EXECUTION_SOCKET` set to the mounted helper socket.
-- `ROME_DOCKER_USER_MODE=root` so the client and the reader can access the same files under `/home/rome`.
+- `WECHAT_USER_ENABLED=true` in the container environment.
+- The default `ROME_DOCKER_USER_MODE=multi`. Rome, the client, key capture, and the reader run as `rome` and share files under `/home/rome`.
 - At least 1 GB of container shared memory (`shm_size: 1gb` in Compose).
+- The container's default `docker-compose.yml` capabilities (`SYS_ADMIN`, AppArmor unconfined), which let the runtime launch the client under a debugger to recover its store key.
 
-Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. If host execution is disabled, setup stops before downloading the client.
+Set `WECHAT_USER_ENABLED` to `true` to offer this connection. `false` keeps it disabled. Key recovery runs entirely inside the container, so this connection needs no host helper and no host execution.
 
 ## Enable on a Compose deployment
 
-The production [`docker-compose.yml`](../docker-compose.yml) reads every knob below from the `.env` file beside it, and defaults all of them to off. Add these four lines to that `.env` on a VM that runs the host helper:
+The production [`docker-compose.yml`](../docker-compose.yml) reads every knob below from the `.env` file beside it, and keeps the connection disabled by default. Add this line to that `.env`:
 
 ```sh
 WECHAT_USER_ENABLED=true
-ROME_HOST_EXECUTION_ENABLED=true
-ROME_DOCKER_USER_MODE=root
-# Host directory holding the helper's control socket. Bound into the container
-# at /run/rome-host, which is where ROME_HOST_EXECUTION_SOCKET points.
-ROME_HOST_EXECUTION_SOCKET_DIR=/run/rome-host
 ```
 
-Then run `docker compose up -d rome`. Compose recreates the container with the socket directory bound and the connection registered. `docker compose config` prints the resolved values.
+Then run `docker compose up -d rome`. Compose recreates the container with the connection registered. `docker-compose.yml` already fixes `shm_size` at 1 GB and grants the capabilities the debugger needs, so no other knob is required. `docker compose config` prints the resolved values.
 
-The container mounts the socket directory whether or not the helper is installed, so a deployment that leaves these off is unchanged. Rome rejects every submission while `ROME_HOST_EXECUTION_ENABLED` is `false`.
-
-`ROME_DOCKER_USER_MODE=root` changes the whole container, not only WeChat: every process runs as root instead of the `rome` user. Enable it on an instance whose WeChat account the guardian owns.
+Enabling WeChat does not change the Rome service user. The entrypoint prepares the client link and a private session directory before starting Rome and its desktop as `rome`. Explicit `root` mode remains supported, but WeChat does not require it.
 
 The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_size`. The client faults during startup there. Use `docker-compose.yml` for this connection.
 
@@ -45,7 +37,7 @@ The Rome image includes the client libraries, debugger, and QR screenshot tools.
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
 
-Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Persisted reader keys have mode `0600` in a mode `0700` directory. The privileged helper matches both the container PID and its PID namespace before entering it.
+Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Persisted reader keys have mode `0600` in a mode `0700` directory. The debugger launches the client as a child of the runtime user. No host helper is involved.
 
 Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
 

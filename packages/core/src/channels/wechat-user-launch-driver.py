@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch the WeChat client under gdb and capture the store passphrase.
 
-Runs inside the container's namespaces (host root enters them and execs this),
+Runs directly inside the Rome container (Rome spawns it as a local subprocess),
 so client and databases are plain container paths. The passphrase is derived
 once during the first login; launching arms the breakpoint before any code runs
 and re-arms it after every exec (new_objfile), so that first login is caught
@@ -19,9 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wcdb_key_tool as tool  # noqa: E402
 
 WECHAT = "/opt/wechat/wechat"
-# HOME must match the home the Rome runtime reads the store from — the root
-# script sets it, so read it back rather than assuming /root.
-HOME = os.environ.get("HOME", "/root")
+# HOME must match the store the Rome runtime reads.
+HOME = os.environ["HOME"]
+RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR", "/run/user/%d" % os.getuid())
 
 GDB_SCRIPT = r"""
 set pagination off
@@ -114,10 +114,10 @@ def capture(directory):
         script_path = f.name
 
     env = {
-        **os.environ, "DISPLAY": ":99", "HOME": HOME,
+        **os.environ, "DISPLAY": os.environ.get("DISPLAY", ":99"), "HOME": HOME,
         "QT_QPA_PLATFORM": "xcb", "LIBGL_ALWAYS_SOFTWARE": "1",
-        "XDG_RUNTIME_DIR": "/run/user/0",
-        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/0/bus",
+        "XDG_RUNTIME_DIR": RUNTIME_DIR,
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=%s/bus" % RUNTIME_DIR,
     }
     timeout = int(sys.argv[1]) if len(sys.argv) > 1 else 300
     # Own the client from birth: no client may already be running, or gdb would

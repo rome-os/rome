@@ -747,7 +747,10 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     ) as string;
 
     const done = await app.request(`/api/auth/visitor/callback?state=${visitorState}&code=xyz`);
-    expect(done.headers.get("location")).toBe("/login?visitor=error&reason=forbidden");
+    expect(done.status).toBe(302);
+    const target = new URL(done.headers.get("location") as string, "https://rome.example.com");
+    expect(`${target.pathname}${target.search}`).toBe("/login?visitor=error&reason=forbidden");
+    expect(new URLSearchParams(target.hash.slice(1)).get("email")).toBe("stranger@example.com");
     expect(done.headers.get("set-cookie")).toBeNull();
   });
 

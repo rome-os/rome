@@ -221,6 +221,8 @@
     "dropFiles": "Drop files to upload",
     "removeFile": "Remove {{name}}",
     "filePill": "#File {{index}}",
+    "uploadProgressFor": "Upload progress for {{name}}",
+    "cancelUpload": "Cancel",
     "send": "Send",
     "sendTitle": "Send",
     "sendWhileRunningTitle": "Send while agent is working",

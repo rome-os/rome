@@ -5,6 +5,14 @@
 // fallback image lives only in packages/web/index.html; a card without one
 // keeps whatever og:image the shell already has.
 
+// The document title carries the site name; og:title does not. Every platform
+// renders the site beside the card, so repeating it there reads twice, while a
+// tab tooltip that omits it names no instance. Mirrors SITE_NAME and SEPARATOR
+// in packages/web/src/lib/page-title.ts, which composes the same title once the
+// SPA takes over — social-meta.test.ts fails if the two drift.
+const SITE_NAME = "Rome";
+const TITLE_SEPARATOR = " · ";
+
 const START_MARKER = "<!-- rome:social:start -->";
 const END_MARKER = "<!-- rome:social:end -->";
 const TITLE_RE = /<title>[^<]*<\/title>/;
@@ -74,9 +82,10 @@ function socialTags(card: SocialCard, imageValue: string | null): string {
 }
 
 /**
- * Swap the shell's `<title>` and the marked social block for `card`. Returns
- * the input unchanged when there is no card or the markers are absent, so a
- * shell built without them still serves.
+ * Swap the shell's `<title>` and the marked social block for `card`. The
+ * document title gains the site name; `og:title` keeps `card.title` alone.
+ * Returns the input unchanged when there is no card or the markers are absent,
+ * so a shell built without them still serves.
  */
 export function renderSocialMeta(indexHtml: string, card: SocialCard | null): string {
   if (card === null) return indexHtml;
@@ -90,5 +99,6 @@ export function renderSocialMeta(indexHtml: string, card: SocialCard | null): st
   const before = indexHtml.slice(0, start + START_MARKER.length);
   const after = indexHtml.slice(end);
   const withBlock = `${before}\n${socialTags(card, imageValue)}\n    ${after}`;
-  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(card.title)}</title>`);
+  const documentTitle = `${card.title}${TITLE_SEPARATOR}${SITE_NAME}`;
+  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(documentTitle)}</title>`);
 }

@@ -72,6 +72,7 @@ import type { DelegatedSubagentNode } from "@/components/chat/DelegatedSubagentG
 import {
   ChatComposer,
   type ChatComposerHandle,
+  type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import type {
@@ -1044,6 +1045,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // bookkeeping (inflight turn set, optimistic user row, stream attach,
   // teardown). Callers supply the post payload + the optimistic user message
   // content (already JSON-serialized MessagePart[]).
+  // DOMException("AbortError") from an aborted XHR/fetch; matched by name so
+  // it survives the structured-clone boundaries these errors cross.
+  const isAbortError = (err: unknown): boolean =>
+    err instanceof DOMException ? err.name === "AbortError" : (err as Error)?.name === "AbortError";
+
   const runTurnLifecycle = useCallback(
     async (
       sendingSessionId: string,
@@ -1068,7 +1074,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // Transport failure posting the turn — a genuine failed submit.
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
-        setStreamError(t("stream.errors.sendInvalidResponse"));
+        // A cancelled attachment upload is a deliberate act, not a failure:
+        // the composer already restored the draft, so an error banner would
+        // just be noise about something the user chose.
+        if (!isAbortError(err)) setStreamError(t("stream.errors.sendInvalidResponse"));
         throw err;
       });
       if (!result.ok) {
@@ -1190,7 +1199,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   //
   // The session decides whether input joins the active run or starts the next.
   const handleComposerSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
+    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       // The single composer talks to whoever holds the floor — the open
       // handoff's specialist, or the main agent.
       const sendingSessionId = floorSessionIdRef.current;
@@ -1212,6 +1221,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         async () => {
           const formData = new FormData();
           formData.set("text", snapshot.text);
+          if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
           if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
           if (snapshot.largeModelSelection)
@@ -1224,7 +1234,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData);
+          return postSessionTurn(sendingSessionId, formData, {
+            onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+            signal: controls.signal,
+          });
         },
         optimisticContent,
       );

@@ -86,17 +86,6 @@ function setupWith(
 }
 
 describe("makeWechatUserSetup", () => {
-  it("rejects missing host execution before installing the client", async () => {
-    const runtime = fakeRuntime({
-      statuses: [{ ...READY, installed: false, keysReady: false, state: "absent" }],
-    });
-    const fn = createWechatUserDescriptor({ runtime }).auth.session.setup!;
-    const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
-    await session.started();
-    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
-    expect(runtime.install).not.toHaveBeenCalled();
-    expect(runtime.installReader).not.toHaveBeenCalled();
-  });
   it("confers with no guardian interaction when the account is already ready", async () => {
     const { fn } = setupWith(fakeRuntime({ statuses: [READY] }));
     const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});

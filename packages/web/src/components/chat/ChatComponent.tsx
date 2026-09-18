@@ -12,6 +12,7 @@ import {
 import {
   ChatComposer,
   type ChatComposerHandle,
+  type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
@@ -212,7 +213,7 @@ export function ChatComponent({
   );
 
   const handleDraftSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
+    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       if (draftSendInFlightRef.current) return;
       draftSendInFlightRef.current = true;
       setDraftStreamError(null);
@@ -259,6 +260,7 @@ export function ChatComponent({
 
         const formData = new FormData();
         formData.set("text", snapshot.text);
+        if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
         if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
         if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
         if (snapshot.largeModelSelection) {
@@ -271,7 +273,10 @@ export function ChatComponent({
         const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
         if (ws) formData.set("workspace", JSON.stringify(ws));
 
-        const result = await postSessionTurn(newSessionId, formData);
+        const result = await postSessionTurn(newSessionId, formData, {
+          onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+          signal: controls.signal,
+        });
         if (!result.ok) {
           const message =
             result.message ||

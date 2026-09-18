@@ -1,23 +1,4 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
-//
-// Unlike the ilink bot channel (packages/core/src/channels/wechat.ts), this
-// reads the guardian's own account. The official desktop client runs in this
-// container, on the desktop Rome already serves at /desktop, and writes its
-// message store to this container's filesystem. Reading is therefore local: no
-// service to call, no mirror to keep — the client's own SQLite is the store,
-// and Rome queries it where it lies.
-//
-// The client is 744 MB, so it is fetched into a volume when a guardian
-// connects rather than baked into the image. Its shared libraries are not:
-// those live in the image, because WeChat resolves EGL through glvnd and glvnd
-// finds its vendor driver through ldconfig — staging those in a volume and
-// pointing LD_LIBRARY_PATH at it leaves eglGetPlatformDisplayEXT unresolved and
-// the client dies before it draws anything.
-//
-// The store is SQLCipher, keyed by a passphrase the client holds only in
-// memory. Recovering it needs ptrace on the live client, which this container
-// deliberately cannot do; that half runs as root on the hosting VM and is in
-// ./wechat-user-keys.ts. Everything here is unprivileged.
 
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, symlink } from "node:fs/promises";
@@ -136,7 +117,7 @@ export interface WechatUserStatus {
   /** The account's own directory name, which is its WeChat id. */
   wxid?: string;
   /** The client's pid in THIS container's namespace. The key-recovery step
-   *  translates it, because host root sees a different number. */
+   *  is used only inside this container. */
   pid?: number;
 }
 
@@ -203,6 +184,10 @@ export function isWechatUserSessionRejected(error: unknown): boolean {
   return error instanceof WechatUserSessionRejected;
 }
 
+export function wechatRuntimeDir(): string {
+  return join("/run/user", String(process.getuid?.() ?? 0));
+}
+
 // ── runtime ───────────────────────────────────────────────────────────────
 
 export interface WechatUserRuntimeConfig {
@@ -216,6 +201,8 @@ export interface WechatUserRuntimeConfig {
   /** The path the client is exposed at. Defaults to its canonical /opt/wechat;
    *  injectable so tests need no writable /opt. */
   canonicalPrefix?: string;
+  /** Private session directory owned by the runtime user. */
+  runtimeDir?: string;
   run?: RunCommand;
 }
 
@@ -239,17 +226,12 @@ export function loginWindowId(tree: string): string | null {
   return match ? match[1]! : null;
 }
 
-/**
- * The WeChat client as this container runs it: install it, start it on Rome's
- * desktop, and answer what it is doing. Everything here is unprivileged — the
- * container needs no added capability, because the one privileged step runs on
- * the hosting VM instead.
- */
 export class WechatUserRuntime {
   readonly prefix: string;
   readonly home: string;
   readonly display: string;
   readonly canonicalPrefix: string;
+  readonly runtimeDir: string;
   private readonly run: RunCommand;
   private starting: Promise<void> | null = null;
 
@@ -258,6 +240,7 @@ export class WechatUserRuntime {
     this.prefix = config.prefix ?? join(this.home, ".local", "share", "wechat");
     this.display = config.display ?? process.env.DISPLAY ?? ":99";
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
+    this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
     this.run = config.run ?? runCommand;
   }
 
@@ -455,28 +438,29 @@ export class WechatUserRuntime {
       HOME: this.home,
       QT_QPA_PLATFORM: "xcb",
       LIBGL_ALWAYS_SOFTWARE: "1",
-      XDG_RUNTIME_DIR: "/run/user/0",
-      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/0/bus",
+      XDG_RUNTIME_DIR: this.runtimeDir,
+      DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(this.runtimeDir, "bus")}`,
     };
   }
 
-  /**
-   * Bring up the desktop session the client draws into — the XDG runtime dir and
-   * a session bus — without launching the client. Idempotent.
-   *
-   * Key recovery does not start the client the ordinary way; it launches it under
-   * gdb from the hosting VM. That launched client still needs a session bus in
-   * this container (without one it starts and then stalls before drawing), so the
-   * setup calls this first and the client the VM launches finds the bus already
-   * up.
-   */
+  /** Prepare the private session bus before ordinary startup or key capture. */
   async prepareSession(): Promise<void> {
-    await mkdir("/run/user/0", { recursive: true, mode: 0o700 }).catch(() => {});
-    await this.run("sh", [
-      "-c",
-      "pgrep -f '[d]bus-daemon --session' >/dev/null || " +
-        "dbus-daemon --session --fork --address=unix:path=/run/user/0/bus >/dev/null 2>&1 || true",
-    ]).catch(() => {});
+    await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
+    const result = await this.run(
+      "sh",
+      [
+        "-c",
+        'test -S "$1/bus" || exec dbus-daemon --session --fork --address="unix:path=$1/bus"',
+        "wechat-session",
+        this.runtimeDir,
+      ],
+      { env: this.clientEnv() },
+    );
+    if (result.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not start the WeChat session bus: ${result.stderr.trim()}`,
+      );
+    }
   }
 
   /** Resume the saved desktop session without capturing keys or replacing account data. */
@@ -626,7 +610,7 @@ export class WechatUserReader {
   }
 }
 
-/** Read the helper source, so callers that stage it elsewhere (the root script)
+/** Read the helper source, so callers that stage it elsewhere
  *  do not each re-derive where it lives. */
 export function readHelperSource(): Promise<string> {
   return readFile(helperPath(), "utf8");
