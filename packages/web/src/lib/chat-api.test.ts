@@ -98,6 +98,51 @@ describe("postSessionTurn", () => {
     expect(body.has("inputId")).toBe(true);
   });
 
+  it("measures upload progress over the attached files, not the fields sent around them", () => {
+    class FakeXMLHttpRequest {
+      static current: FakeXMLHttpRequest | null = null;
+      readonly upload = {
+        onprogress: null as ((event: ProgressEvent) => void) | null,
+        onload: null as (() => void) | null,
+      };
+      withCredentials = false;
+      body: FormData | null = null;
+      constructor() {
+        FakeXMLHttpRequest.current = this;
+      }
+      open() {}
+      send(body: FormData) {
+        this.body = body;
+      }
+    }
+
+    rs.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const progress: Array<number | null> = [];
+    const body = new FormData();
+    body.set("text", "x".repeat(800));
+    body.append("files", new File([new Uint8Array(100)], "a.bin"));
+    body.set("workspace", "{}");
+    void postSessionTurn("session-1", body, {
+      onUploadProgress: (value) => progress.push(value),
+    });
+    const request = FakeXMLHttpRequest.current;
+    if (!request?.body) throw new Error("XMLHttpRequest was not sent");
+
+    // Files go last, so the file's bytes are the final 100 of the body.
+    expect([...request.body.keys()].at(-1)).toBe("files");
+    request.upload.onprogress?.({
+      lengthComputable: true,
+      loaded: 850,
+      total: 1000,
+    } as ProgressEvent);
+    request.upload.onprogress?.({
+      lengthComputable: true,
+      loaded: 950,
+      total: 1000,
+    } as ProgressEvent);
+    expect(progress).toEqual([0, 0.5]);
+  });
+
   it("aborts the multipart request when the caller's signal fires", async () => {
     class AbortableXHR {
       static current: AbortableXHR | null = null;

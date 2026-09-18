@@ -11,12 +11,12 @@ export interface PendingUploadsListProps {
 }
 
 /**
- * Split the request's single aggregate fraction into one fraction per file.
+ * Split the fraction of attachment bytes sent into one fraction per file.
  *
- * The browser reports progress for the whole multipart body, not per part — but
- * that body is written sequentially, so the files occupy known, ordered byte
- * ranges within it. Mapping the aggregate onto those ranges is therefore a real
- * per-file reading, not a guess: the first file fills, then the second.
+ * `postSessionTurn` measures progress over the files alone, which it writes
+ * last and in order, so the files occupy known, ordered byte ranges of that
+ * total. Mapping the fraction onto those ranges is therefore a real per-file
+ * reading, not a guess: the first file fills, then the second.
  *
  * Part headers and boundaries are ignored. They are a fixed couple of hundred
  * bytes per file against attachment-sized payloads, so the only visible effect

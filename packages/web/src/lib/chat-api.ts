@@ -361,7 +361,7 @@ export type PostTurnResult =
 
 export interface PostSessionTurnOptions {
   /**
-   * Reports the fraction of the multipart request body transferred to the
+   * Reports the fraction of the attached files' bytes transferred to the
    * server. `null` means the browser did not expose a computable total.
    */
   onUploadProgress?: (progress: number | null) => void;
@@ -448,14 +448,31 @@ function postSessionTurnWithProgress(
       reject(new DOMException("The request was aborted", "AbortError"));
       return;
     }
+    // The body is written in entry order, so moving the files to the end puts
+    // them in its last `fileBytes`. Progress is then measured over those bytes
+    // alone; the text, workspace JSON and part headers sent first do not count
+    // as attachment progress.
+    const fileEntries = [...body].filter(
+      (entry): entry is [string, File] => entry[1] instanceof File,
+    );
+    for (const name of new Set(fileEntries.map(([name]) => name))) body.delete(name);
+    for (const [name, file] of fileEntries) body.append(name, file);
+    const fileBytes = fileEntries.reduce((sum, [, file]) => sum + file.size, 0);
     const request = new XMLHttpRequest();
     // Attach upload listeners before open(): despite the spec allowing either
     // order, browsers have historically required this ordering for upload
     // events to fire reliably.
     request.upload.onprogress = (event) => {
-      onUploadProgress(
-        event.lengthComputable && event.total > 0 ? event.loaded / event.total : null,
-      );
+      if (!event.lengthComputable || event.total <= 0) {
+        onUploadProgress(null);
+        return;
+      }
+      if (fileBytes === 0) {
+        onUploadProgress(event.loaded / event.total);
+        return;
+      }
+      const fileStart = event.total - fileBytes;
+      onUploadProgress(Math.max(0, Math.min(1, (event.loaded - fileStart) / fileBytes)));
     };
     // The last progress event is not guaranteed to report the exact total.
     // `load` is the browser's authoritative boundary for a fully transferred
