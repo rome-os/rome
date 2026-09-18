@@ -31,7 +31,7 @@ const definitions = [
     description: "Classify GitHub issues with labels, priorities, and clear reasoning.",
     entry: "index",
     // Installed a minute ago: shows at the top of the sidebar's Recent zone
-    // with the "not opened yet" dot on a plain mock-mode load.
+    // with the "not opened on this device" dot on a plain mock-mode load.
     installedAt: new Date(Date.now() - 60_000).toISOString(),
   },
   {
