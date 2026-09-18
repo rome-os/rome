@@ -30,16 +30,13 @@ export interface SlackDescriptorDeps extends OAuthProviderSetupDeps {
 
 const GUARDIAN_LINK_REQUIRED_REASON = "Reconnect Slack in Settings to link the guardian identity.";
 
-function credentialMaterial(credential: Credential): { botToken: string; userToken?: string } {
+function credentialMaterial(credential: Credential): { botToken: string } {
   if (typeof credential.material === "function") {
     throw new Error("Slack OAuth returned an unsupported external credential.");
   }
   const botToken = credential.material.botToken?.trim();
   if (!botToken) throw new Error("Slack OAuth returned no bot token.");
-  return {
-    botToken,
-    ...(credential.material.userToken ? { userToken: credential.material.userToken } : {}),
-  };
+  return { botToken };
 }
 
 /**
@@ -76,7 +73,11 @@ export async function lockUnlinkedSlackTalk(
 }
 
 export function missingSlackBotScopes(scopes: readonly string[] | undefined): string[] {
-  const present = new Set(scopes ?? []);
+  // Older brokers did not report granted scopes. Unknown metadata must not
+  // masquerade as a confirmed missing-scope result; Slack's API still rejects
+  // an actually insufficient token with `missing_scope` at first use.
+  if (scopes === undefined) return [];
+  const present = new Set(scopes);
   return SLACK_REQUIRED_BOT_SCOPES.filter((scope) => !present.has(scope));
 }
 
@@ -91,6 +92,7 @@ function enrichedSlackProfile(
     workspaceName: identity.workspaceName ?? profile.workspaceName,
     botUserId: identity.botUserId,
     botUsername: identity.botUsername ?? profile.botUsername,
+    appId: identity.appId ?? profile.appId,
     guardianChannelUserId,
   });
 }
@@ -145,7 +147,9 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
     // Subscribe before the instructions reach the browser so an immediate DM
     // cannot land in the gap between showing the code and installing the waiter.
     const guardianLink = ctx.step("slack-guardian-link", (signal) =>
-      waitForSlackGuardianLink(deps.ingress, identity, code, signal),
+      waitForSlackGuardianLink(deps.ingress, identity, code, signal, {
+        expectedAppId: profile.appId ?? identity.appId,
+      }),
     );
     interact.show({
       title: "Link your Slack account",
@@ -176,6 +180,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 
 export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescriptor {
   const descriptor = makeOAuthProviderDescriptor("slack");
+  descriptor.pairing = { replyInOriginatingConversation: true };
   descriptor.connectAvailability = () =>
     deps.ingress.configured
       ? { available: true, unavailableReason: null }
@@ -208,8 +213,12 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
         botToken: material.botToken,
         ingress: deps.ingress,
         api: deps.api,
+        expectedAppId: profile.appId,
         onCredentialFault: (cause) => {
           faultSink?.(new CredentialRejected({ grant: "workspace", cause }));
+        },
+        onTransportFault: (cause) => {
+          faultSink?.(new Disconnected(cause));
         },
       });
 

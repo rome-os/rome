@@ -7,6 +7,19 @@ import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 
 const log = createLogger("channel-pairing");
+const ADDRESSED_GROUP_KINDS = ["mention", "reply", "bot_thread"] as const;
+
+function canReplyInOriginatingConversation(
+  message: InboundMessage,
+  allowAddressedGroup: boolean,
+): boolean {
+  return (
+    message.thread?.kind === "dm" ||
+    (allowAddressedGroup &&
+      ADDRESSED_GROUP_KINDS.includes(message.addressing as (typeof ADDRESSED_GROUP_KINDS)[number]))
+  );
+}
+
 function pairingAccount(
   channel: string,
   id: string,
@@ -45,6 +58,7 @@ export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
   personMappingRepo: PersonMappingRepository;
   talkGrants: (service: string) => readonly string[];
+  replyInOriginatingConversation?: (service: string) => boolean;
 }) {
   return async (
     connectionId: string,
@@ -55,10 +69,10 @@ export function createPairingAdmission(deps: {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);
     if (!channel.success) return true;
     const pairingChannel = channel.data;
+    const allowAddressedGroup = deps.replyInOriginatingConversation?.(service) ?? false;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
-    const displayName =
-      message.senderDisplayName ?? (service === "slack" ? "Slack member" : message.senderId);
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const displayName = message.senderDisplayName ?? message.senderId;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nPairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
     try {
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
@@ -69,6 +83,9 @@ export function createPairingAdmission(deps: {
               channelUserId: message.senderId,
               displayName,
               username: message.senderUsername,
+              ...(canReplyInOriginatingConversation(message, allowAddressedGroup)
+                ? { conversationId: message.conversationId }
+                : {}),
             },
             deps.talkGrants(service),
           );
@@ -103,7 +120,9 @@ export function createPairingAdmission(deps: {
       if (person && person.id !== STRANGER_PERSON_ID) return true;
       if (
         message.thread?.kind !== "dm" &&
-        !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
+        !ADDRESSED_GROUP_KINDS.includes(
+          message.addressing as (typeof ADDRESSED_GROUP_KINDS)[number],
+        )
       )
         return false;
       const request = deps.approvalsRepo.requestAuthorizedPairing(
@@ -113,7 +132,7 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName,
           username: message.senderUsername,
-          ...(message.thread?.kind === "dm" || service === "slack"
+          ...(canReplyInOriginatingConversation(message, allowAddressedGroup)
             ? { conversationId: message.conversationId }
             : {}),
         },

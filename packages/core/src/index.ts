@@ -315,6 +315,8 @@ async function main() {
       personMappingRepo,
       talkGrants: (service) =>
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+      replyInOriginatingConversation: (service) =>
+        connectionRegistry.getDescriptor(service)?.pairing?.replyInOriginatingConversation === true,
     }),
   );
   // Conferral setups: in-memory session store keyed per grant,

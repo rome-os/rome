@@ -26,12 +26,24 @@ export interface InboundDedup {
   checkAndRecord(key: string): Promise<boolean>;
 }
 
-/** Deferred commit variant for ingress that may ask the provider to retry. */
+export type DeferredInboundReservation =
+  | { state: "complete" }
+  | { state: "busy" }
+  | {
+      state: "acquired";
+      commit(): Promise<void>;
+      release(): Promise<void>;
+    };
+
+/**
+ * Deferred commit variant for ingress that may ask the provider to retry.
+ *
+ * A future shared implementation must make `reserve` atomic across processes.
+ * `busy` means another delivery has only reserved the key, so callers must ask
+ * the provider to retry; only `complete` is safe to acknowledge as a duplicate.
+ */
 export interface DeferredInboundDedup {
-  /** Report whether `key` has completed successfully. */
-  has(key: string): Promise<boolean>;
-  /** Record `key` only after its handler has completed successfully. */
-  record(key: string): Promise<void>;
+  reserve(key: string): Promise<DeferredInboundReservation>;
 }
 
 /**
@@ -41,26 +53,56 @@ export interface DeferredInboundDedup {
  * `InboundDedup` docs).
  */
 export class InMemoryInboundDedup implements InboundDedup, DeferredInboundDedup {
-  private readonly seen = new Set<string>();
+  private readonly states = new Map<string, "pending" | "complete">();
+  private completedCount = 0;
 
   constructor(private readonly maxEntries = 1000) {}
 
-  async has(key: string): Promise<boolean> {
-    return this.seen.has(key);
-  }
+  async reserve(key: string): Promise<DeferredInboundReservation> {
+    const existing = this.states.get(key);
+    if (existing === "complete") return { state: "complete" };
+    if (existing === "pending") return { state: "busy" };
 
-  async record(key: string): Promise<void> {
-    if (this.seen.has(key)) return;
-    this.seen.add(key);
-    if (this.seen.size > this.maxEntries) {
-      const oldest = this.seen.values().next().value;
-      if (oldest !== undefined) this.seen.delete(oldest);
-    }
+    this.states.set(key, "pending");
+    let active = true;
+    return {
+      state: "acquired",
+      commit: async () => {
+        if (!active) return;
+        active = false;
+        if (this.states.get(key) !== "pending") return;
+        this.states.delete(key);
+        this.states.set(key, "complete");
+        this.completedCount++;
+        this.evictCompleted();
+      },
+      release: async () => {
+        if (!active) return;
+        active = false;
+        if (this.states.get(key) === "pending") this.states.delete(key);
+      },
+    };
   }
 
   async checkAndRecord(key: string): Promise<boolean> {
-    if (this.seen.has(key)) return true;
-    await this.record(key);
+    if (this.states.has(key)) return true;
+    this.states.set(key, "complete");
+    this.completedCount++;
+    this.evictCompleted();
     return false;
+  }
+
+  private evictCompleted(): void {
+    while (this.completedCount > this.maxEntries) {
+      let removed = false;
+      for (const [key, state] of this.states) {
+        if (state !== "complete") continue;
+        this.states.delete(key);
+        this.completedCount--;
+        removed = true;
+        break;
+      }
+      if (!removed) return;
+    }
   }
 }

@@ -19,9 +19,18 @@ describe("InMemoryInboundDedup", () => {
 
   it("can defer recording until handling succeeds", async () => {
     const dedup = new InMemoryInboundDedup();
-    expect(await dedup.has("event")).toBe(false);
-    await dedup.record("event");
-    expect(await dedup.has("event")).toBe(true);
+    const reservation = await dedup.reserve("event");
+    expect(reservation.state).toBe("acquired");
+    expect((await dedup.reserve("event")).state).toBe("busy");
+    if (reservation.state === "acquired") await reservation.commit();
+    expect((await dedup.reserve("event")).state).toBe("complete");
+  });
+
+  it("releases a failed deferred delivery so a retry can acquire it", async () => {
+    const dedup = new InMemoryInboundDedup();
+    const reservation = await dedup.reserve("event");
+    if (reservation.state === "acquired") await reservation.release();
+    expect((await dedup.reserve("event")).state).toBe("acquired");
   });
 
   it("evicts the oldest key once capacity is exceeded (FIFO)", async () => {

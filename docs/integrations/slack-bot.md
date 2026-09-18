@@ -21,9 +21,11 @@ Outbound text is posted with Slack markup disabled. API calls have a bounded tim
 
 ## Slack app configuration
 
-Use [`infra/slack/rome-bot-manifest.yml`](../../infra/slack/rome-bot-manifest.yml) as the versioned baseline. Before installing it:
+Use [`infra/slack/rome-bot-manifest.yml`](../../infra/slack/rome-bot-manifest.yml) as the versioned baseline. Direct Events API delivery is a single-instance topology: the deployment's Rome Cloud OAuth broker and the instance must use the same dedicated Slack application. A Slack application has one Events request URL, so do not share this direct-delivery app between instances. A multi-instance service needs a Rome Cloud event relay and workspace-to-instance routing, which this direct mode does not provide.
 
-1. Set the OAuth redirect URL to the Rome Cloud Slack OAuth callback.
+Before installing the manifest:
+
+1. Register the same Slack application's client credentials in this deployment's Rome Cloud OAuth broker, then set the OAuth redirect URL to that broker's Slack callback.
 2. Set the Events API request URL to `https://<instance-origin>/api/slack/events`.
 3. Copy the app's signing secret into `SLACK_SIGNING_SECRET` on the Rome instance.
 4. Recreate or restart the Rome service after changing the environment.
@@ -34,6 +36,7 @@ Do not add channel-message subscriptions. Rome must not receive unmentioned chan
 The manifest also enables a writable App Home Messages tab so workspace members can find and direct-message the bot.
 
 Slack signs every Events API request. Rome limits the streaming request body before buffering it, verifies the signature against those exact untouched bytes, and rejects timestamps older than five minutes. It routes the event only to a bot token for the same workspace.
+When Slack supplies the application id in OAuth and event payloads, Rome also rejects delivery from a different application so a mismatched broker app and signing secret fail visibly instead of crossing identities.
 
 ## Deployment check
 

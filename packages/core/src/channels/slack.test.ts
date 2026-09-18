@@ -102,6 +102,21 @@ describe("SlackIngress", () => {
     expect(consumer).toHaveBeenCalledTimes(1);
     expect(later).not.toHaveBeenCalled();
   });
+
+  it("asks Slack to retry a delivery reserved by another process", async () => {
+    const ingress = new SlackIngress("secret", {
+      dedup: { reserve: async () => ({ state: "busy" }) },
+    });
+    const handler = rs.fn();
+    ingress.subscribe(identity.teamId, handler);
+
+    const event = envelope("Ev-busy", { type: "message", channel_type: "im" });
+    await expect(Promise.all([ingress.dispatch(event), ingress.dispatch(event)])).resolves.toEqual([
+      "retry",
+      "retry",
+    ]);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
 
 describe("SlackAdapter", () => {
@@ -142,8 +157,18 @@ describe("SlackAdapter", () => {
         ts: "1700000000.300",
       }),
     );
+    await ingress.dispatch(
+      envelope("single-decode", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "literal &amp;lt; stays encoded once",
+        ts: "1700000000.400",
+      }),
+    );
 
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     expect(messages[0]).toMatchObject({
       conversationId: "D1",
       senderId: "T123/U1",
@@ -162,6 +187,7 @@ describe("SlackAdapter", () => {
     });
     expect(messages[1]?.senderDisplayName).toBeUndefined();
     expect(messages[1]?.thread).toEqual({ kind: "topic" });
+    expect(messages[2]?.text).toBe("literal &lt; stays encoded once");
   });
 
   it("keeps later mentions in one Slack thread conversation", async () => {
@@ -334,7 +360,33 @@ describe("SlackAdapter", () => {
     }
   });
 
-  it("rejects attachment-only output instead of reporting a silent success", async () => {
+  it("posts valid JSON for auth.test and captures the application id", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = rs.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          team_id: "T1",
+          user_id: "UBOT",
+          app_id: "A1",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    globalThis.fetch = fetchMock;
+    try {
+      await expect(slackWebApi.authTest("xoxb-test")).resolves.toMatchObject({
+        teamId: "T1",
+        botUserId: "UBOT",
+        appId: "A1",
+      });
+      expect(fetchMock.mock.calls[0]?.[1]?.body).toBe("{}");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("ignores attachment-only output without claiming a message was sent", async () => {
     const ingress = new SlackIngress("secret");
     const { api, postMessage } = fakeApi();
     const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
@@ -343,8 +395,61 @@ describe("SlackAdapter", () => {
       adapter.send("D1" as never, {
         attachments: [{ type: "image", source: "file:///tmp/image.png" }],
       }),
-    ).rejects.toThrow("text output only");
+    ).resolves.toEqual({});
     expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders a text-only fallback for an approval card", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api, postMessage } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+
+    await adapter.send("D1" as never, {
+      parts: [
+        {
+          type: "approval_card",
+          approvalId: "approval-1",
+          actionName: "send_email",
+          preview: { kind: "generic", title: "Send email", summary: "Send it" },
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(postMessage.mock.calls[0]?.[1].text).toContain(
+      "Rome needs your approval to run send_email.",
+    );
+  });
+
+  it("reports an inbound event from a different Slack application", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api } = fakeApi();
+    const onTransportFault = rs.fn();
+    const handler = rs.fn();
+    const adapter = new SlackAdapter({
+      botToken: "xoxb-test",
+      ingress,
+      api,
+      expectedAppId: "A-CONNECTED",
+      onTransportFault,
+    });
+    adapter.onMessage(handler);
+    await adapter.start();
+
+    await ingress.dispatch({
+      ...envelope("wrong-app", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "hello",
+        ts: "1700000000.900",
+      }),
+      api_app_id: "A-EVENT",
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(onTransportFault).toHaveBeenCalledExactlyOnceWith(expect.any(Error));
   });
 
   it("does not subscribe when stopped during the identity probe", async () => {
@@ -491,5 +596,32 @@ describe("Slack guardian linking", () => {
         }),
       ),
     ).resolves.toBe("unhandled");
+  });
+
+  it("rejects a guardian code delivered by a different Slack application", async () => {
+    const ingress = new SlackIngress("secret");
+    const controller = new AbortController();
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { expectedAppId: "A-CONNECTED" },
+    );
+    const rejection = expect(linking).rejects.toThrow("different app");
+
+    await ingress.dispatch({
+      ...envelope("wrong-app-code", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "ROME-LINK-ABCDEFGH",
+        ts: "1700000014.0",
+      }),
+      api_app_id: "A-EVENT",
+    });
+
+    await rejection;
   });
 });

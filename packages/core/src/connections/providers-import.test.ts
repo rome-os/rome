@@ -182,6 +182,7 @@ describe("grantProfileFromBundle", () => {
       accessToken: "xoxb-bot",
       scope: ["chat:write"],
       raw: {
+        app_id: "A123",
         authed_user: { access_token: "xoxp-user" },
         team: { id: "T123", name: "Acme" },
         bot_user_id: "UBOT",
@@ -194,6 +195,7 @@ describe("grantProfileFromBundle", () => {
       teamId: "T123",
       workspaceName: "Acme",
       botUserId: "UBOT",
+      appId: "A123",
     });
     // The workspace identity lands on the PROFILE, never inside the secret material.
     expect(credentialFromBundle("slack", bundle)?.material).toEqual({

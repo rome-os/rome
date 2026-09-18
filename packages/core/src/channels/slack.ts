@@ -20,6 +20,7 @@ export interface SlackEventEnvelope {
   event_id: string;
   event_time?: number;
   team_id: string;
+  api_app_id?: string;
   event: SlackEvent;
 }
 
@@ -54,7 +55,7 @@ export interface SlackRequestVerification {
  */
 export class SlackIngress {
   private readonly handlers = new Map<string, SlackIngressHandler[]>();
-  private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate">>();
+  private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate" | "retry">>();
   private readonly dedup: DeferredInboundDedup;
   private readonly now: () => number;
   private readonly initialStartupDeadline: number;
@@ -146,13 +147,13 @@ export class SlackIngress {
   /** Dispatch one already-authenticated Events API envelope. */
   async dispatch(
     envelope: SlackEventEnvelope,
-  ): Promise<"delivered" | "duplicate" | "starting" | "unhandled"> {
+  ): Promise<"delivered" | "duplicate" | "retry" | "starting" | "unhandled"> {
     // Concurrent retries share the first delivery. If that delivery fails they
     // all fail, leaving the id unrecorded so Slack can retry it later.
     const pending = this.inFlight.get(envelope.event_id);
     if (pending) {
-      await pending;
-      return "duplicate";
+      const result = await pending;
+      return result === "retry" ? "retry" : "duplicate";
     }
 
     const handlers = this.handlers.get(envelope.team_id);
@@ -176,16 +177,23 @@ export class SlackIngress {
   private async dispatchOnce(
     envelope: SlackEventEnvelope,
     handlers: SlackIngressHandler[],
-  ): Promise<"delivered" | "duplicate"> {
-    if (await this.dedup.has(envelope.event_id)) return "duplicate";
-    for (const handler of handlers) {
-      if ((await handler(envelope)) === true) break;
+  ): Promise<"delivered" | "duplicate" | "retry"> {
+    const reservation = await this.dedup.reserve(envelope.event_id);
+    if (reservation.state === "complete") return "duplicate";
+    if (reservation.state === "busy") return "retry";
+    try {
+      for (const handler of handlers) {
+        if ((await handler(envelope)) === true) break;
+      }
+      // Record only after the registered ingress handlers accept the event. A
+      // synchronous or awaited ingress throw leaves it retryable; downstream Talk
+      // delivery is intentionally fire-and-forget under the Talker contract.
+      await reservation.commit();
+      return "delivered";
+    } catch (error) {
+      await reservation.release();
+      throw error;
     }
-    // Record only after the registered ingress handlers accept the event. A
-    // synchronous or awaited ingress throw leaves it retryable; downstream Talk
-    // delivery is intentionally fire-and-forget under the Talker contract.
-    await this.dedup.record(envelope.event_id);
-    return "delivered";
   }
 }
 
@@ -194,6 +202,7 @@ export interface SlackBotIdentity {
   workspaceName?: string;
   botUserId: string;
   botUsername?: string;
+  appId?: string;
 }
 
 export interface SlackWebApi {
@@ -222,6 +231,7 @@ interface SlackApiResponse {
   user_id?: string;
   user?: string;
   ts?: string;
+  app_id?: string;
 }
 
 async function slackApiCall(
@@ -241,7 +251,7 @@ async function slackApiCall(
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json; charset=utf-8",
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: JSON.stringify(body ?? {}),
       signal: requestSignal,
     });
     if (response.status === 429 && !retriedRateLimit) {
@@ -292,6 +302,7 @@ export const slackWebApi: SlackWebApi = {
       workspaceName: result.team,
       botUserId: result.user_id,
       botUsername: result.user,
+      appId: result.app_id,
     };
   },
   async postMessage(token, input) {
@@ -355,18 +366,25 @@ function slackTimestamp(ts: string): Date {
 }
 
 function decodeSlackText(text: string): string {
-  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-}
-
-function escapeSlackText(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text.replace(/&(amp|lt|gt);/g, (_entity, name: string) => {
+    if (name === "amp") return "&";
+    if (name === "lt") return "<";
+    return ">";
+  });
 }
 
 function splitSlackText(text: string): string[] {
   const chunks: string[] = [];
   let chunk = "";
   for (const codePoint of text) {
-    const escaped = escapeSlackText(codePoint);
+    const escaped =
+      codePoint === "&"
+        ? "&amp;"
+        : codePoint === "<"
+          ? "&lt;"
+          : codePoint === ">"
+            ? "&gt;"
+            : codePoint;
     if (chunk && chunk.length + escaped.length > SLACK_TEXT_CHUNK_LENGTH) {
       chunks.push(chunk);
       chunk = "";
@@ -390,7 +408,9 @@ export class SlackAdapter {
       botToken: string;
       ingress: SlackIngress;
       api?: SlackWebApi;
+      expectedAppId?: string;
       onCredentialFault?: (cause: unknown) => void;
+      onTransportFault?: (cause: unknown) => void;
     },
   ) {}
 
@@ -445,17 +465,23 @@ export class SlackAdapter {
         parts: omittedParts,
       });
     }
-    if (!message.text) {
-      if (omittedAttachments > 0 || omittedParts > 0) {
-        throw new Error("Slack bot conversations support text output only.");
-      }
-      return {};
-    }
+    const fallbackText = message.parts
+      ?.map((part) => {
+        if (part.type === "text") return part.content;
+        if (part.type === "approval_card") {
+          return `Rome needs your approval to run ${part.actionName}. Open Settings → Activity to review it.`;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+    const outboundText = message.text?.trim() || fallbackText?.trim();
+    if (!outboundText) return {};
     const api = this.config.api ?? slackWebApi;
     const { channelId, threadTs } = parseSlackConversationId(conversationId);
     let firstTs: string | undefined;
     try {
-      for (const text of splitSlackText(message.text)) {
+      for (const text of splitSlackText(outboundText)) {
         const sent = await api.postMessage(this.config.botToken, {
           channel: channelId,
           text,
@@ -476,6 +502,22 @@ export class SlackAdapter {
     const identity = this.identity;
     const event = envelope.event;
     if (!identity || !this.handler) return false;
+
+    if (
+      this.config.expectedAppId &&
+      envelope.api_app_id &&
+      envelope.api_app_id !== this.config.expectedAppId
+    ) {
+      const error = new Error(
+        `Slack event app ${envelope.api_app_id} does not match connected app ${this.config.expectedAppId}.`,
+      );
+      log.error("slack event app mismatch", {
+        expectedAppId: this.config.expectedAppId,
+        receivedAppId: envelope.api_app_id,
+      });
+      this.config.onTransportFault?.(error);
+      return true;
+    }
 
     if (event.type === "app_uninstalled") {
       this.config.onCredentialFault?.(new SlackApiError(event.type));
@@ -559,10 +601,12 @@ export function isSlackGuardianLinkEvent(
   envelope: SlackEventEnvelope,
   code: string,
   botUserId: string,
+  expectedAppId?: string,
 ): envelope is SlackEventEnvelope & { event: Required<Pick<SlackEvent, "user" | "text">> } {
   const event = envelope.event;
   return (
     event.type === "message" &&
+    (!expectedAppId || !envelope.api_app_id || envelope.api_app_id === expectedAppId) &&
     event.channel_type === "im" &&
     !event.bot_id &&
     !event.subtype &&
@@ -578,7 +622,7 @@ export function waitForSlackGuardianLink(
   identity: SlackBotIdentity,
   code: string,
   signal: AbortSignal,
-  options: { expiresInMs?: number; maxFailedAttempts?: number } = {},
+  options: { expiresInMs?: number; maxFailedAttempts?: number; expectedAppId?: string } = {},
 ): Promise<{ channelUserId: string }> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -611,9 +655,23 @@ export function waitForSlackGuardianLink(
         const event = envelope.event;
         const sender = typeof event.user === "string" ? event.user : null;
         if (
+          options.expectedAppId &&
+          envelope.api_app_id &&
+          envelope.api_app_id !== options.expectedAppId &&
+          typeof event.text === "string" &&
+          event.text.trim().toUpperCase() === code.toUpperCase()
+        ) {
+          finish(
+            new Error(
+              "Slack sent the guardian code from a different app. Check the OAuth app and signing-secret configuration.",
+            ),
+          );
+          return true;
+        }
+        if (
           sender &&
           !lockedSenders.has(sender) &&
-          isSlackGuardianLinkEvent(envelope, code, identity.botUserId)
+          isSlackGuardianLinkEvent(envelope, code, identity.botUserId, options.expectedAppId)
         ) {
           finish({ channelUserId: slackChannelUserId(identity.teamId, envelope.event.user) });
           return true;

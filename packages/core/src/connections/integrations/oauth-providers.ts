@@ -79,6 +79,8 @@ export const slackGrantProfileSchema = z
     workspaceName: identityField,
     botUserId: identityField,
     botUsername: identityField,
+    /** Slack application id captured from OAuth and checked on inbound events. */
+    appId: identityField,
     /** Guardian identity proven by the one-time Slack DM setup step. */
     guardianChannelUserId: identityField,
   })

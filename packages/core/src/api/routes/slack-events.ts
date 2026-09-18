@@ -43,6 +43,7 @@ export function slackEventsRoutes(deps: Pick<ApiDeps, "slackIngress">): Hono {
       signature: c.req.header("x-slack-signature"),
     });
     if (!verification.ok) {
+      log.warn("slack request rejected", { reason: verification.reason });
       return c.json({ error: "Invalid Slack request." }, 401);
     }
 
@@ -77,7 +78,7 @@ export function slackEventsRoutes(deps: Pick<ApiDeps, "slackIngress">): Hono {
 
     try {
       const result = await ingress.dispatch(payload);
-      if (result === "starting") {
+      if (result === "starting" || result === "retry") {
         c.header("Retry-After", "1");
         return c.json({ error: "Slack workspace handler is starting." }, 503);
       }

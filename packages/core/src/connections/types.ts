@@ -243,6 +243,11 @@ export interface GrantCustody {
 export interface ConnectionDescriptor {
   service: string;
   auth: Record<GrantName, AuthScheme>;
+  /** Admission behavior derived from this channel's addressing semantics. */
+  pairing?: {
+    /** An approval may be announced back in the addressed group/thread. */
+    replyInOriginatingConversation?: boolean;
+  };
   /** Optional host prerequisite for a Rome Cloud OAuth provider's connect URL. */
   connectAvailability?: () => { available: boolean; unavailableReason: string | null };
   /** Revive a grant's stored opaque profile record: re-parse it with this

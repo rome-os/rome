@@ -81,6 +81,7 @@ describe("channel pairing approvals", () => {
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      replyInOriginatingConversation: (service) => service === "slack",
     });
     await admit(
       "connection",
@@ -127,6 +128,7 @@ describe("channel pairing approvals", () => {
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      replyInOriginatingConversation: (service) => service === "slack",
     });
 
     await admit(
@@ -154,7 +156,7 @@ describe("channel pairing approvals", () => {
 
     expect(feature).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith("connection", "C1:1700000000.1", {
-      text: "✅ Slack member (`T1/U123`) is paired with Rome. You can start chatting now.",
+      text: "✅ `T1/U123` is paired with Rome. You can start chatting now.",
     });
   });
 
@@ -593,7 +595,7 @@ describe("channel pairing approvals", () => {
         : service === "discord"
           ? "<@123> (`123`)"
           : service === "slack"
-            ? "Slack member (`T1/U123`)"
+            ? "`T1/U123`"
             : '<at user_id="ou_123">Owner</at> (`ou_123`)';
     const message: InboundMessage = {
       senderId: id,
@@ -630,7 +632,7 @@ describe("channel pairing approvals", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2].text).toContain(`🔗 Pair ${account} with Rome.`);
     expect(send.mock.calls[0][2].text).toContain(
-      `Learn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
+      `Pairing Guide: https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`,
     );
     expect(await admit("connection", service, message, router)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);

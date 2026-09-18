@@ -52,6 +52,7 @@ describe("Slack setup", () => {
   it("requires the exact least-privilege bot scopes", () => {
     expect(missingSlackBotScopes(["chat:write"])).toEqual(["app_mentions:read", "im:history"]);
     expect(missingSlackBotScopes(["im:history", "chat:write", "app_mentions:read"])).toEqual([]);
+    expect(missingSlackBotScopes(undefined)).toEqual([]);
   });
 
   it("stays pending until the guardian DMs the one-time code", async () => {
