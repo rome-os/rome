@@ -38,6 +38,7 @@ import {
 } from "../../lib/public-access-config.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
+import { enrichGuardianActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
 import { getEmbeddedAppHref, getFullAppHref } from "../../lib/app-routes.js";
@@ -494,9 +495,18 @@ export function appsRoutes(deps: ApiDeps): Hono {
     // resolved here, per manifest fetch, and delivered on the bootstrap so the
     // app UI can gate owner-only affordances without probing a route. Advisory
     // only — enforcement stays in the app's API handler.
+    const guardianActor = guardianSession
+      ? await enrichGuardianActor(deps.db, guardianSession)
+      : null;
     const caller =
       guardianSession !== null
-        ? ({ kind: "guardian", userId: guardianSession.userId } as const)
+        ? ({
+            kind: "guardian",
+            userId: guardianSession.userId,
+            ...(guardianActor?.kind === "guardian" && guardianActor.email
+              ? { email: guardianActor.email }
+              : {}),
+          } as const)
         : viewer !== null
           ? ({ kind: "visitor", accountId: viewer.accountId, email: viewer.email } as const)
           : ({ kind: "anonymous" } as const);
