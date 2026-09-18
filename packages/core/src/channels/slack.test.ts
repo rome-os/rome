@@ -419,6 +419,22 @@ describe("SlackAdapter", () => {
     }
   });
 
+  it("fails fast when Slack's requested rate-limit wait exceeds the retry bound", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = rs
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "31" } }));
+    globalThis.fetch = fetchMock;
+    try {
+      await expect(
+        slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" }),
+      ).rejects.toThrow("31000ms rate-limit wait");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("normalizes a non-Error abort reason while waiting to retry", async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = rs
@@ -819,5 +835,56 @@ describe("Slack guardian linking", () => {
     });
     controller.abort(new Error("test complete"));
     await expect(linking).rejects.toThrow("test complete");
+  });
+
+  it("does not await rejected-code feedback and contains feedback failures", async () => {
+    const ingress = new SlackIngress("secret");
+    const controller = new AbortController();
+    let rejectFeedback!: (reason: Error) => void;
+    const feedback = new Promise<void>((_resolve, reject) => {
+      rejectFeedback = reject;
+    });
+    const onRejectedAttempt = rs.fn(() => feedback);
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { onRejectedAttempt },
+    );
+
+    const dispatch = ingress.dispatch(
+      envelope("non-blocking-rejection", {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "ROME-LINK-WRONG000000",
+        ts: "1700000017.0",
+      }),
+    );
+    await expect(
+      Promise.race([
+        dispatch,
+        new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 100)),
+      ]),
+    ).resolves.toBe("delivered");
+    expect(onRejectedAttempt).toHaveBeenCalledTimes(1);
+
+    rejectFeedback(new Error("Slack feedback failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(
+      ingress.dispatch(
+        envelope("correct-after-feedback-failure", {
+          type: "message",
+          channel_type: "im",
+          channel: "D1",
+          user: "U1",
+          text: "ROME-LINK-ABCDEFGH",
+          ts: "1700000017.1",
+        }),
+      ),
+    ).resolves.toBe("delivered");
+    await expect(linking).resolves.toEqual({ channelUserId: "T123/U1" });
   });
 });

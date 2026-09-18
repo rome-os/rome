@@ -305,11 +305,17 @@ async function slackApiCall(
     if (response.status === 429 && !retriedRateLimit) {
       retriedRateLimit = true;
       const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
-      const waitMs = Math.min(
-        SLACK_RATE_LIMIT_MAX_WAIT_MS,
-        Math.max(0, Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1_000 : 1_000),
+      const requestedWaitMs = Math.max(
+        0,
+        Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1_000 : 1_000,
       );
-      await abortableDelay(waitMs, signal);
+      if (requestedWaitMs > SLACK_RATE_LIMIT_MAX_WAIT_MS) {
+        throw new SlackApiError(
+          "ratelimited",
+          `Slack API requested a ${requestedWaitMs}ms rate-limit wait, exceeding the ${SLACK_RATE_LIMIT_MAX_WAIT_MS}ms retry limit.`,
+        );
+      }
+      await abortableDelay(requestedWaitMs, signal);
       continue;
     }
     if (!response.ok) {
@@ -800,10 +806,27 @@ export function waitForSlackGuardianLink(
         if (locked) {
           lockedSenders.add(sender);
         }
-        if (event.channel && options.onRejectedAttempt) {
-          await options
-            .onRejectedAttempt({ channelId: event.channel, attempts, maxAttempts, locked })
-            .catch(() => {});
+        const rejectedAttempt = options.onRejectedAttempt;
+        if (event.channel && rejectedAttempt) {
+          const channelId = event.channel;
+          // Slack must receive an Events API acknowledgement within a few seconds.
+          // Rejection feedback is best-effort and may itself be rate-limited, so
+          // contain both synchronous and asynchronous failures without making the
+          // authenticated event dispatch wait for chat.postMessage.
+          void Promise.resolve()
+            .then(() =>
+              rejectedAttempt({
+                channelId,
+                attempts,
+                maxAttempts,
+                locked,
+              }),
+            )
+            .catch((error) => {
+              log.warn("slack guardian-link rejection feedback failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
         }
         // Link-looking messages are setup credentials, not agent requests.
         return true;

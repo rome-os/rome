@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import { SlackAdapter, SlackIngress } from "../../channels/slack.js";
+import { SlackAdapter, SlackIngress, waitForSlackGuardianLink } from "../../channels/slack.js";
 import { SLACK_EVENT_BODY_LIMIT_BYTES, slackEventsRoutes } from "./slack-events.js";
 
 function signedRequest(
@@ -185,6 +185,48 @@ describe("POST /slack/events", () => {
     expect((await app.request(signedRequest(secret, body))).status).toBe(200);
     expect((await app.request(signedRequest(secret, body))).status).toBe(200);
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("acknowledges a rejected guardian code without waiting for feedback delivery", async () => {
+    const secret = "secret";
+    const ingress = new SlackIngress(secret);
+    const controller = new AbortController();
+    let finishFeedback!: () => void;
+    const feedback = new Promise<void>((resolve) => {
+      finishFeedback = resolve;
+    });
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      { teamId: "T1", botUserId: "UBOT" },
+      "ROME-LINK-ABCDEFGH",
+      controller.signal,
+      { onRejectedAttempt: () => feedback },
+    );
+    const app = new Hono().route("/", slackEventsRoutes({ slackIngress: ingress }));
+    const body = JSON.stringify({
+      type: "event_callback",
+      event_id: "Ev-wrong-guardian-code",
+      team_id: "T1",
+      event: {
+        type: "message",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "ROME-LINK-WRONG000000",
+        ts: "1700000000.2",
+      },
+    });
+
+    const response = await Promise.race([
+      app.request(signedRequest(secret, body)),
+      new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 100)),
+    ]);
+    expect(response).not.toBe("timed-out");
+    expect((response as Response).status).toBe(200);
+
+    finishFeedback();
+    controller.abort(new Error("test complete"));
+    await expect(linking).rejects.toThrow("test complete");
   });
 
   it("keeps an event retryable while adapter startup is still identifying the bot", async () => {
