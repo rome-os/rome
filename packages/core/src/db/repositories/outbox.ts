@@ -3,6 +3,8 @@ import { v4 as uuid } from "uuid";
 import { SEND_IDEMPOTENCY_RETENTION_MS, type OutboxMessage } from "@rome/api-types/people";
 import { outboundMessages, outboundSendReceipts } from "../schema.js";
 import type { DrizzleDb, DrizzleTx } from "../index.js";
+import { ReplyDeliveryRepository } from "./reply-delivery.js";
+import type { DeliveryAttempt } from "../../connections/delivery/transport.js";
 
 /**
  * The outbox: messages Rome has been asked to send and has not yet seen land.
@@ -39,6 +41,10 @@ export interface OutboxAccount {
 
 export class OutboxRepository {
   constructor(private readonly db: DrizzleDb) {}
+
+  async recordDelivery(attempt: DeliveryAttempt): Promise<void> {
+    await new ReplyDeliveryRepository(this.db).record(attempt);
+  }
 
   /** Record the attempt before it is made, so a process that dies mid-send
    *  leaves evidence rather than silence. */

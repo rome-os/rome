@@ -1,7 +1,11 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import {
+  createAppLogger,
+  getCurrentActionContext,
+  MessageDeliveryError,
+} from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -259,7 +263,8 @@ export async function executeSendMessage(
   input: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
-  const { channel, text, attachments, turnId, parts } = input;
+  const { channel, text, attachments, parts } = input;
+  const turnId = input.turnId ?? getCurrentActionContext()?.turnId;
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
@@ -301,7 +306,14 @@ export async function executeSendMessage(
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
     return delivery.messageId
-      ? { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } }
+      ? {
+          status: "ok",
+          data: {
+            messageId: delivery.messageId,
+            threadId: deliveredThreadId,
+            ...(delivery.parts ? { parts: delivery.parts } : {}),
+          },
+        }
       : { status: "ok" };
   }
 
@@ -332,7 +344,13 @@ export async function executeSendMessage(
     delivery,
   );
   return delivery.messageId
-    ? { status: "ok", data: { messageId: delivery.messageId } }
+    ? {
+        status: "ok",
+        data: {
+          messageId: delivery.messageId,
+          ...(delivery.parts ? { parts: delivery.parts } : {}),
+        },
+      }
     : { status: "ok" };
 }
 
@@ -435,8 +453,18 @@ export function createSendMessageAction(
       },
       required: ["channel"],
     },
-    execute: async (input: Record<string, unknown>): Promise<ActionResult> =>
-      executeSendMessage(talkRouter, input as unknown as SendMessageInput, deps),
+    execute: async (input: Record<string, unknown>): Promise<ActionResult> => {
+      try {
+        return await executeSendMessage(talkRouter, input as unknown as SendMessageInput, deps);
+      } catch (error) {
+        if (!(error instanceof MessageDeliveryError)) throw error;
+        return {
+          status: "error",
+          error: error.message,
+          delivery: { outcome: error.kind, receipts: error.receipts },
+        };
+      }
+    },
     // Ground-truth render of the bound call. Pure over args (no I/O), so it
     // surfaces the message body and channel — the decision-relevant facts — but
     // deliberately omits the raw threadId/channelUserId recipient, which would

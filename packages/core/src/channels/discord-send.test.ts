@@ -44,6 +44,7 @@ describe("DiscordAdapter.sendMessage", () => {
     ).resolves.toEqual({
       messageId: "discord-attachment-1",
       threadId: channel.id,
+      parts: [{ messageId: "discord-attachment-1", kind: "document" }],
     });
     expect(send).toHaveBeenCalledTimes(1);
   });

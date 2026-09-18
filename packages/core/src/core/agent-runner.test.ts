@@ -393,6 +393,53 @@ describe("AgentRunner", () => {
     }
   });
 
+  it("registers backend turns before delivery attaches and closes them on early return", async () => {
+    const interrupt = rs.fn(async () => undefined);
+    const source = {
+      key: { agentName: "main", channelThreadKey: "telegram:guardian" },
+      sessionId: "backend-session",
+      sendTurn: () => ({
+        turnId: "backend-turn",
+        interrupt,
+        events: (async function* () {
+          yield {
+            type: "turn_start",
+            turnId: "backend-turn",
+            sessionId: "backend-session",
+            userPrompt: "resume",
+            agent: "main",
+          } as const;
+          yield { type: "text_delta", content: "Resumed", agent: "main" } as const;
+        })(),
+      }),
+    };
+    const manager = { acquire: async () => source } as unknown as AgentSessionManager;
+    const streams = createAgentTurnStreamRegistry();
+    const iterator = new AgentRunner(manager, undefined, undefined, streams)
+      .run({
+        agentName: "main",
+        prompt: "resume",
+        initiatedBy: "system",
+        threadContext: {
+          channel: "telegram",
+          threadId: "guardian",
+          channelUserId: "guardian",
+          connectionId: "telegram:test",
+        },
+      })
+      [Symbol.asyncIterator]();
+    await iterator.next();
+    const active = streams.get("backend-turn")!;
+    const stopDelivery = rs.fn();
+    active.onInterrupt!(stopDelivery);
+    await active.interrupt!("user-stop");
+    expect(stopDelivery).toHaveBeenCalledTimes(1);
+    expect(interrupt).toHaveBeenCalledWith("user-stop");
+    expect(active.messages()).toHaveLength(1);
+    await iterator.return!();
+    expect(active.finished).toBe(true);
+  });
+
   it("publishes forked runs for live session inspection", async () => {
     const source = {
       key: { agentName: "main", channelThreadKey: "webchat:parent-chat" },

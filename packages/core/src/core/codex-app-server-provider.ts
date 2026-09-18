@@ -551,8 +551,8 @@ export class CodexAppServerProvider implements ModelProvider {
         }
         if (params.outputSchema) return;
         const msg: AgentMessage = turnPhase
-          ? { type: "text", content: item.text, turnPhase }
-          : { type: "text", content: item.text };
+          ? { type: "text", content: item.text, turnPhase, blockId: item.id }
+          : { type: "text", content: item.text, blockId: item.id };
         turnSink.push(msg);
         return;
       }
@@ -665,7 +665,11 @@ export class CodexAppServerProvider implements ModelProvider {
           const p = params2 as AgentMessageDeltaNotification;
           if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
           if (p.delta && !params.outputSchema)
-            (activeTurn?.sink ?? sink).push({ type: "text_delta", content: p.delta });
+            (activeTurn?.sink ?? sink).push({
+              type: "text_delta",
+              content: p.delta,
+              blockId: p.itemId,
+            });
           return;
         }
         case Notify.itemStarted: {

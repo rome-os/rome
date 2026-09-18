@@ -1,5 +1,6 @@
 import { configureImApiTrace } from "./channels/diagnostics/api-trace.js";
 import { createPairingAdmission } from "./channels/pairing.js";
+import { ReplyDeliveryRepository } from "./db/repositories/reply-delivery.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -67,7 +68,7 @@ import { ComputerUseService } from "./computer-use/service.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
-import { WebChatRepository } from "./db/repositories/webchat.js";
+import { WebChatRepository, channelConversationId } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
@@ -307,6 +308,8 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const replyDeliveryRepo = new ReplyDeliveryRepository(db);
+  await replyDeliveryRepo.recoverInterrupted();
   const talkRouter = createTalkRouter(
     connectionRegistry,
     createPairingAdmission({
@@ -315,6 +318,9 @@ async function main() {
       talkGrants: (service) =>
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     }),
+    settingsRepo,
+    replyDeliveryRepo,
+    config.deliveryProfile,
   );
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
@@ -711,6 +717,8 @@ async function main() {
     webchatRepo,
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
+    talkRouter,
+    approvalsRepo,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -756,6 +764,23 @@ async function main() {
     talkRouter,
     resolveWorkingDir: resolveContinuationWorkingDir,
     conversations: appRuntimeRepositories.conversations!,
+    createRunDelivery: async (params, turnId) => {
+      if (!params.connectionId || !params.channelUserId) return null;
+      const conversation = await webchatRepo.getSession(
+        channelConversationId(params.channel, params.threadId),
+      );
+      if (conversation?.sourceThreadType !== "private") return null;
+      const person = await personMappingRepo.findByChannelUser(
+        params.channel,
+        params.channelUserId,
+      );
+      if (person?.bondLevel !== "guardian") return null;
+      const delivery = await talkRouter.createRunDelivery(params.connectionId, turnId, {
+        conversationId: params.threadId as import("@rome-os/app-runtime").ConversationId,
+      });
+      if (delivery) agentTurnStreamRegistry.get(turnId)?.onInterrupt?.(() => delivery.stop());
+      return delivery;
+    },
   });
 
   const approvalHandler = new ApprovalHandler(

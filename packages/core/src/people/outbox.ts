@@ -11,6 +11,9 @@
 // is exactly a send whose entry is not there yet.
 
 import { matchesSendRequest, type OutboxMessage } from "@rome/api-types/people";
+import { MessageDeliveryError, type MessageReceipt } from "@rome-os/app-runtime";
+import { randomUUID } from "node:crypto";
+import type { DeliveryAttempt } from "../connections/delivery/transport.js";
 import { createLogger } from "../logger.js";
 import type { MessageAccount, Messages } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
@@ -131,14 +134,65 @@ async function attempt(
   row: OutboxRow,
   target: SendTarget,
 ): Promise<OutboxMessage> {
+  const deliveryAttempt: DeliveryAttempt = {
+    runId: `people:${row.id}:${randomUUID()}`,
+    blockIx: 0,
+    partIx: 0,
+    sourceStart: 0,
+    sourceEnd: [...row.text].length,
+    revision: 1,
+    target: { conversationId: target.conversationId },
+    operation: "create",
+    outcome: "attempting",
+  };
+  await deps.outboxRepo.recordDelivery(deliveryAttempt);
+  const recordOutcome = async (outcome: DeliveryAttempt["outcome"], receipts: MessageReceipt[]) => {
+    try {
+      for (const [partIx, receipt] of receipts.entries()) {
+        await deps.outboxRepo.recordDelivery({
+          ...deliveryAttempt,
+          partIx,
+          outcome: "accepted",
+          receipt,
+        });
+      }
+      if (outcome !== "accepted" || receipts.length === 0) {
+        await deps.outboxRepo.recordDelivery({
+          ...deliveryAttempt,
+          partIx: receipts.length,
+          outcome,
+        });
+      }
+    } catch (error) {
+      log.error("people delivery evidence write failed", {
+        outboxId: row.id,
+        error: String(error),
+      });
+    }
+  };
   let receipt: Awaited<ReturnType<typeof sendToTarget>>;
   try {
     receipt = await sendToTarget(deps, target, row.text);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const known = error instanceof MessageDeliveryError ? error.receipts : [];
+    const unknown = !(error instanceof MessageDeliveryError) || error.kind === "unknown";
+    await recordOutcome(unknown ? "unknown" : "failed", known);
+    const detail = error instanceof Error ? error.message : String(error);
+    const message =
+      error instanceof MessageDeliveryError && error.kind === "unknown"
+        ? `Delivery outcome unknown: ${detail}`
+        : detail;
     await deps.outboxRepo.refused(row.id, message);
     return wire({ ...row, state: "failed", error: message });
   }
+
+  await recordOutcome("accepted", [
+    {
+      conversationId: target.conversationId,
+      ...(receipt.messageId ? { messageId: receipt.messageId } : {}),
+      ...(receipt.parts ? { parts: receipt.parts } : {}),
+    },
+  ]);
 
   await deps.outboxRepo.accepted(row.id, receipt.messageId);
 

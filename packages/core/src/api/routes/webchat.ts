@@ -1,3 +1,4 @@
+import { AssistantTextAssembler } from "../../core/assistant-text.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -3253,14 +3254,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         runOnStream(stream, "webchat send", async () => {
           try {
             let resultContent = "";
-            let lastCompletedText:
-              | {
-                  blockIx: number;
-                  content: string;
-                  turnPhase?: "commentary" | "final";
-                }
-              | undefined;
-            let finalTextBlockIx: number | undefined;
+            const textAssembly = new AssistantTextAssembler();
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
@@ -3269,7 +3263,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // late subscriber gets one event with the latest block's
               // accumulated text.
               if (msg.type === "text_delta") {
-                stream.assistantText += msg.content;
+                const snapshot = textAssembly.append(msg.content, msg.blockId);
+                stream.assistantText = snapshot.content;
+                stream.assistantBlockIx = snapshot.blockIx;
                 emitToStream(
                   stream,
                   "assistant_text",
@@ -3286,11 +3282,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // fresh index; the client keeps showing this block until that
               // block's first delta arrives (delayed fold).
               if (msg.type === "text") {
-                const blockIx = stream.assistantBlockIx;
+                const completed = textAssembly.complete(msg.content, msg.turnPhase, msg.blockId);
+                const blockIx = completed.blockIx;
                 // Keeps the live preview and its persisted replacement on the
                 // same complete block content during their handoff.
-                if (stream.assistantText !== msg.content) {
+                if (stream.assistantText !== msg.content || stream.assistantBlockIx !== blockIx) {
                   stream.assistantText = msg.content;
+                  stream.assistantBlockIx = blockIx;
                   emitToStream(
                     stream,
                     "assistant_text",
@@ -3322,24 +3320,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     });
                   }
                 }
-                lastCompletedText = {
-                  blockIx,
-                  content: msg.content,
-                  turnPhase: msg.turnPhase,
-                };
-                if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
-                stream.assistantBlockIx += 1;
+                stream.assistantBlockIx = textAssembly.blockIx;
                 stream.assistantText = "";
               }
               if (msg.type === "turn_end" && stream.assistantText) {
-                const blockIx = stream.assistantBlockIx;
                 const partial = {
                   type: "text" as const,
                   content: stream.assistantText,
                   turnPhase: "final" as const,
                 };
-                lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
-                finalTextBlockIx = blockIx;
+                textAssembly.complete(partial.content, "final");
                 stream.traceBlocks.push(partial);
                 emitTraceBlock(stream, partial);
                 stream.assistantBlockIx += 1;
@@ -3551,21 +3541,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // In-turn commentary was already persisted per-block as its own live
             // message; this is the final answer only. `text` is the final answer
             // for non-webchat consumers; webchat persists the tagged part.
-            if (
-              !resultContent &&
-              lastCompletedText &&
-              finalTextBlockIx === lastCompletedText.blockIx
-            ) {
-              resultContent = lastCompletedText.content;
-            }
+            const finalText = textAssembly.final(resultContent);
+            resultContent = finalText.content;
             if (resultContent) {
-              const reusableResultBlockIx =
-                lastCompletedText?.turnPhase === undefined &&
-                lastCompletedText?.content === resultContent
-                  ? lastCompletedText.blockIx
-                  : undefined;
-              const resultBlockIx =
-                finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
+              const resultBlockIx = finalText.blockIx;
               await deps.actionEngine.run(
                 "send_message",
                 {

@@ -19,6 +19,24 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
+export const replyDeliveryParts = sqliteTable(
+  "reply_delivery_parts",
+  {
+    runId: text("run_id").notNull(),
+    blockIx: integer("block_ix").notNull(),
+    partIx: integer("part_ix").notNull(),
+    revision: integer("revision").notNull(),
+    sourceStart: integer("source_start").notNull(),
+    sourceEnd: integer("source_end").notNull(),
+    target: text("target", { mode: "json" }).notNull(),
+    receipt: text("receipt", { mode: "json" }),
+    operation: text("operation").notNull(),
+    outcome: text("outcome").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.blockIx, table.partIx] })],
+);
+
 // Superseded by `routines`. No code reads or writes this table; kept only
 // pending a removal + drop migration. Do not add new readers/writers.
 export const events = sqliteTable("events", {

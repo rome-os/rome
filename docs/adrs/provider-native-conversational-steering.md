@@ -27,6 +27,6 @@ Codex uses `turn/steer` with the expected native turn id and `clientUserMessageI
 
 Claude uses the existing streaming prompt with a UUID and `priority: next`. Replayed user messages confirm inclusion. An input retained beyond a result starts a separate Rome turn. A `UserPromptSubmit` gate prevents that native loop from executing before its new Rome owner exists. Adoption does not enqueue the input again.
 
-Provider-retained continuations precede independent queued work so an SDK cannot execute that continuation under another caller's turn. Independent `sendTurn` callers remain FIFO relative to one another and keep one result per call. External-channel handlers do not opt into streaming until their reply ownership can follow the same run-based contract.
+Provider-retained continuations precede independent queued work so an SDK cannot execute that continuation under another caller's turn. Independent `sendTurn` callers remain FIFO relative to one another and keep one result per call. Guardian direct-message handlers use run-owned [channel delivery](../architecture/channels.md#guardian-reply-delivery). Other external-channel handlers retain independent turn calls.
 
 Unknown deliveries, including unfinished inputs after a backend restart, remain visible and are not automatically replayed. Stop targets one active turn and leaves later inputs intact. Provider upgrades must revalidate consumption events and the native startup gates.

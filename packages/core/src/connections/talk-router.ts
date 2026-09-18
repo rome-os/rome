@@ -10,10 +10,21 @@ import type {
 import type { Connection, ConnectionId } from "./types.js";
 import type { ConnectionRegistry } from "./registry.js";
 import { createLogger } from "../logger.js";
+import { KeyedMutex } from "../lib/keyed-mutex.js";
+import { DeliveryScheduler } from "./delivery/scheduler.js";
+import { physicalDeliveryScope } from "./delivery/physical-operation.js";
+import { resolveDeliveryProfile } from "./delivery/profile.js";
+import type { DeliveryProfile } from "./delivery/profile.js";
+import { type DeliveryRepository, type DeliveryTarget } from "./delivery/transport.js";
+import { RunDelivery } from "./delivery/run-delivery.js";
 
 const log = createLogger("talk-router");
 
 export class ConnectionTalkRouter implements TalkRouter {
+  private readonly deliveryScheduler = new DeliveryScheduler();
+  private readonly sends = new KeyedMutex();
+  private readonly runDeliveries = new Map<string, RunDelivery>();
+  private readonly creatingDeliveries = new Map<string, Promise<RunDelivery | null>>();
   private readonly handlers = new Map<
     ConnectionId,
     Set<(message: InboundMessage) => Promise<void>>
@@ -29,6 +40,9 @@ export class ConnectionTalkRouter implements TalkRouter {
       message: InboundMessage,
       router: TalkRouter,
     ) => Promise<boolean>,
+    private readonly deliverySettings?: { get(key: string): Promise<unknown> },
+    private readonly deliveryRepository?: DeliveryRepository,
+    private readonly deliveryDefaults: Partial<DeliveryProfile> = {},
   ) {
     registry.onUnlocked("talk", (connection) => this.attach(connection));
   }
@@ -57,7 +71,98 @@ export class ConnectionTalkRouter implements TalkRouter {
     message: OutgoingMessage,
   ): Promise<MessageReceipt> {
     const talk = this.requireTalk(connectionId);
-    return talk.send(conversationId, message);
+    const signal = message.turnId ? this.runDeliveries.get(message.turnId)?.signal : undefined;
+    return this.sends.runExclusive(`${connectionId}\0${conversationId}`, async () => {
+      signal?.throwIfAborted();
+      const feature = talk.feature("textDelivery");
+      if (!feature) return talk.send(conversationId, message);
+      const described = await feature.describe();
+      const profile = resolveDeliveryProfile(
+        described.profile,
+        await this.deliverySettings?.get(`connection_delivery:${connectionId}`),
+        described.supportsUpdate,
+        this.deliveryDefaults,
+      );
+      return physicalDeliveryScope.run(
+        {
+          profile,
+          scheduler: this.deliveryScheduler,
+          signal,
+          assertAuthorized: () => {
+            talk.feature("textDelivery");
+          },
+        },
+        () => talk.send(conversationId, message),
+      );
+    });
+  }
+
+  async createRunDelivery(
+    connectionId: string,
+    runId: string,
+    target: DeliveryTarget,
+  ): Promise<RunDelivery | null> {
+    const existing = this.runDeliveries.get(runId);
+    if (existing) return existing;
+    const pending = this.creatingDeliveries.get(runId);
+    if (pending) return pending;
+    const creation = this.prepareRunDelivery(connectionId, runId, target);
+    this.creatingDeliveries.set(runId, creation);
+    try {
+      return await creation;
+    } finally {
+      this.creatingDeliveries.delete(runId);
+    }
+  }
+
+  private async prepareRunDelivery(
+    connectionId: string,
+    runId: string,
+    target: DeliveryTarget,
+  ): Promise<RunDelivery | null> {
+    const talk = this.requireTalk(connectionId);
+    const feature = talk.feature("textDelivery");
+    if (!feature || !this.deliveryRepository) return null;
+    const described = await feature.describe();
+    const profile = resolveDeliveryProfile(
+      described.profile,
+      await this.deliverySettings?.get(`connection_delivery:${connectionId}`),
+      described.supportsUpdate,
+      this.deliveryDefaults,
+    );
+    const delivery = new RunDelivery(
+      runId,
+      target,
+      {
+        profile,
+        codec: {
+          render: (source, settled) => feature.render({ source, settled }),
+          length: (text) => feature.measure({ text }),
+        },
+        assertAuthorized: () => {
+          talk.feature("textDelivery");
+        },
+        create: (destination, text) => feature.create({ ...destination, text }),
+        ...(described.supportsUpdate
+          ? { update: (receipt: MessageReceipt, text: string) => feature.update({ receipt, text }) }
+          : {}),
+      },
+      this.deliveryScheduler,
+      this.deliveryRepository,
+      (error) =>
+        log.error("delivery evidence write failed", {
+          runId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    );
+    this.runDeliveries.set(runId, delivery);
+    if (this.runDeliveries.size > 256) {
+      for (const [id, run] of this.runDeliveries) {
+        if (id !== runId && run.terminal) this.runDeliveries.delete(id);
+        if (this.runDeliveries.size <= 256) break;
+      }
+    }
+    return delivery;
   }
 
   feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null {
@@ -116,6 +221,15 @@ export class ConnectionTalkRouter implements TalkRouter {
 export function createTalkRouter(
   registry: ConnectionRegistry,
   admit?: ConstructorParameters<typeof ConnectionTalkRouter>[1],
+  deliverySettings?: { get(key: string): Promise<unknown> },
+  deliveryRepository?: DeliveryRepository,
+  deliveryDefaults?: Partial<DeliveryProfile>,
 ): ConnectionTalkRouter {
-  return new ConnectionTalkRouter(registry, admit);
+  return new ConnectionTalkRouter(
+    registry,
+    admit,
+    deliverySettings,
+    deliveryRepository,
+    deliveryDefaults,
+  );
 }

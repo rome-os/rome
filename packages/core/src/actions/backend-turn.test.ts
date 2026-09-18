@@ -1,9 +1,88 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationRepository, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId, ConversationRepository, TalkRouter } from "@rome-os/app-runtime";
+import type { AgentMessage } from "../types.js";
+import { RunDelivery } from "../connections/delivery/run-delivery.js";
+import { DeliveryScheduler } from "../connections/delivery/scheduler.js";
+import { plainTextCodec } from "../connections/delivery/transport.js";
+import { telegramDeliveryProfile } from "../connections/integrations/delivery-profiles.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
 describe("backend turn delivery", () => {
+  it.each([
+    false,
+    true,
+  ])("observes an approval continuation and closes its owner on failure=%s", async (fail) => {
+    const visible: string[] = [];
+    let owner: RunDelivery | undefined;
+    const router = {
+      list: async () => [],
+      send: rs.fn(),
+      subscribe: () => () => {},
+      feature: () => null,
+    } as TalkRouter;
+    const runner = createBackendTurnRunner({
+      agentRunner: createMockAgentRunner([]),
+      talkRouter: router,
+      async createRunDelivery(_params, turnId) {
+        owner = new RunDelivery(
+          turnId,
+          { conversationId: "dm" as ConversationId },
+          {
+            profile: {
+              ...telegramDeliveryProfile("synthetic"),
+              operationSpacingMs: 0,
+              createSpacingMs: 0,
+              updateSpacingMs: 0,
+              conversationSpacingMs: 0,
+            },
+            codec: plainTextCodec,
+            assertAuthorized() {},
+            async create(target, text) {
+              visible.push(text);
+              return { ...target, messageId: "one" };
+            },
+            async update(_receipt, text) {
+              visible[0] = text;
+            },
+          },
+          new DeliveryScheduler(),
+          { async record() {} },
+          () => {},
+        );
+        return owner;
+      },
+    });
+    async function* messages(): AsyncIterable<AgentMessage> {
+      yield {
+        type: "turn_start",
+        turnId: "approval-run",
+        sessionId: "session",
+        userPrompt: "approved",
+      };
+      yield { type: "text_delta", content: "part" };
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(visible).toEqual(["part"]);
+      if (fail) throw new Error("provider failed");
+      yield { type: "text", content: "answer", turnPhase: "final" };
+      yield { type: "result", content: "answer" };
+    }
+    const observed = runner.observeContinuation!(
+      {
+        agentName: "main",
+        sessionId: "session",
+        channel: "synthetic",
+        threadId: "dm",
+        prompt: "approved",
+      },
+      messages(),
+    );
+    if (fail) await expect(observed).rejects.toThrow("provider failed");
+    else await observed;
+    expect(visible).toEqual([fail ? "part" : "answer"]);
+    expect(owner?.terminal).toBe(true);
+    expect(router.send).not.toHaveBeenCalled();
+  });
   it("records the provider delivery id for a messaging-channel continuation", async () => {
     const agentRunner = createMockAgentRunner([
       [

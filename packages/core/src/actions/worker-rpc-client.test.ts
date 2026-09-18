@@ -13,6 +13,28 @@ import {
 describe("WorkerRpc in-process fallback", () => {
   const originalSend = process.send;
 
+  it("preserves partial delivery receipts across the IPC response", async () => {
+    process.send = ((request: { clientId: string; id: number }) => {
+      queueMicrotask(() =>
+        process.emit("message", {
+          type: "rpc_response",
+          clientId: request.clientId,
+          id: request.id,
+          error: "ambiguous second send",
+          deliveryError: {
+            kind: "unknown",
+            receipts: [{ conversationId: "dm", messageId: "first" }],
+          },
+        }),
+      );
+      return true;
+    }) as typeof process.send;
+    await expect(getWorkerRpc().call("talk.send", {})).rejects.toMatchObject({
+      kind: "unknown",
+      receipts: [{ conversationId: "dm", messageId: "first" }],
+    });
+  });
+
   afterEach(() => {
     process.send = originalSend;
     setWorkerRpcInProcessDispatcher(null);

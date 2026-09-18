@@ -383,7 +383,7 @@ export interface PlaceWidget {
  */
 export type ActionResult<T = unknown> =
   | { status: "ok"; data?: T }
-  | { status: "error"; error: string }
+  | { status: "error"; error: string; delivery?: { outcome: string; receipts: MessageReceipt[] } }
   | { status: "pending_approval"; approval: PendingApproval }
   | { status: "pending_interaction"; interaction: PendingInteraction }
   | { status: "handoff"; handoff: Handoff }
@@ -657,6 +657,7 @@ export interface TurnEndMessage {
 export interface TextMessage {
   type: "text";
   content: string;
+  blockId?: string;
   /** Provider-agnostic role of this text within its turn. `commentary` =
    *  in-turn narration emitted between/before tool calls; `final` = the turn's
    *  closing answer (also carried by the terminal `result` block). Sourced from
@@ -677,6 +678,7 @@ export interface TextMessage {
 export interface TextDeltaMessage {
   type: "text_delta";
   content: string;
+  blockId?: string;
 }
 
 export interface ThinkingMessage {
@@ -958,6 +960,8 @@ export interface ForkRunParams {
 }
 
 export interface AgentRunnerInterface {
+  /** Admits a guardian DM input without waiting for its run. Null leaves ordinary run delivery to the caller. */
+  admitConversationInput?(params: RunParams): Promise<{ turnId: string } | null>;
   run(params: RunParams): AsyncIterable<AgentMessage>;
   runForked?(params: ForkRunParams): AsyncIterable<AgentMessage>;
   /**
@@ -1434,6 +1438,26 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
+export type MessageDeliveryFailureKind =
+  | "rate-limit"
+  | "formatting"
+  | "unsupported"
+  | "authorization"
+  | "failed"
+  | "unknown";
+
+/** Known receipts remain accepted when a later physical operation fails. Unknown creates must not be replayed automatically. */
+export class MessageDeliveryError extends Error {
+  constructor(
+    readonly kind: MessageDeliveryFailureKind,
+    message: string,
+    readonly receipts: MessageReceipt[] = [],
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+  }
+}
+
 export interface TalkHistory {
   query(input: {
     conversationId?: ConversationId;
@@ -1527,12 +1551,44 @@ export interface TalkInteractions {
 }
 
 export interface TalkFeatureMap {
+  textDelivery: TalkTextDelivery;
   history: TalkHistory;
   inboundMedia: TalkInboundMedia;
   activity: TalkActivity;
   directory: TalkDirectory;
   directMessaging: TalkDirectMessaging;
   interactions: TalkInteractions;
+}
+
+export interface TalkDeliveryProfile {
+  mode: "edit" | "blocks" | "final";
+  unsupportedMode: "blocks" | "final";
+  budgetKey: string;
+  operationSpacingMs: number;
+  createSpacingMs: number;
+  updateSpacingMs: number;
+  conversationSpacingMs: number;
+  burstCapacity: number;
+  maxPartSize: number;
+  coalesceMs: number;
+  maxPendingAgeMs: number;
+  maxPendingBytes: number;
+  maxQueuedOperations: number;
+  formatting: "plain" | "native";
+  formattingFallback: boolean;
+}
+
+/** Text mutations address owned physical messages, independently of interaction cards. */
+export interface TalkTextDelivery {
+  render(input: { source: string; settled: boolean }): string;
+  measure(input: { text: string }): number;
+  describe(): Promise<{ profile: TalkDeliveryProfile; supportsUpdate: boolean }>;
+  create(input: {
+    conversationId: ConversationId;
+    text: string;
+    replyToMessageId?: string;
+  }): Promise<MessageReceipt>;
+  update(input: { receipt: MessageReceipt; text: string }): Promise<void>;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;

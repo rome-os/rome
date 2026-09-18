@@ -9,9 +9,11 @@ export interface ActiveAgentTurnStream {
   initiatorId?: string;
   startedAt: string;
   finished: boolean;
+  interrupted?: boolean;
   messages(): readonly StreamAgentMessage[];
   subscribe(listener: (message: StreamAgentMessage) => void): () => void;
   waitForFinish(): Promise<void>;
+  onInterrupt?(listener: () => void | Promise<void>): () => void;
   /** Present only when the owner can safely interrupt this turn in isolation. */
   interrupt?(reason?: string): Promise<void>;
 }
@@ -52,6 +54,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       }
       const values: StreamAgentMessage[] = [];
       const listeners = new Set<(message: StreamAgentMessage) => void>();
+      const interruptListeners = new Set<() => void | Promise<void>>();
       let resolveFinished!: () => void;
       const finishedPromise = new Promise<void>((resolve) => {
         resolveFinished = resolve;
@@ -70,7 +73,19 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
           return () => listeners.delete(listener);
         },
         waitForFinish: () => finishedPromise,
-        interrupt: input.interrupt,
+        onInterrupt(listener) {
+          interruptListeners.add(listener);
+          if (stream.interrupted) void Promise.resolve(listener()).catch(() => {});
+          return () => interruptListeners.delete(listener);
+        },
+        interrupt: input.interrupt
+          ? async (reason) => {
+              stream.interrupted = true;
+              // Close output admission before awaiting provider interruption or transport cleanup.
+              const cleanups = [...interruptListeners].map((listener) => listener());
+              await Promise.all([input.interrupt!(reason), ...cleanups]);
+            }
+          : undefined,
         publish(message) {
           if (stream.finished) return;
           values.push(message);
@@ -79,6 +94,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         finish() {
           if (stream.finished) return;
           stream.finished = true;
+          interruptListeners.clear();
           if (
             input.conversation &&
             activeByConversation.get(conversationKey(input.conversation)) === stream

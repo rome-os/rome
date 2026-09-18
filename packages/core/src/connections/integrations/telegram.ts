@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { telegramDeliveryProfile } from "./delivery-profiles.js";
+import { textDeliveryFeature } from "./text-delivery-feature.js";
 // Telegram connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Telegram is a Talker with a single `bot` grant (a pasted bot token). The
@@ -269,6 +272,12 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             },
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
+                textDelivery: textDeliveryFeature(
+                  telegramDeliveryProfile(
+                    "telegram:" + createHash("sha256").update(token.token).digest("hex"),
+                  ),
+                  adapter,
+                ),
                 inboundMedia: inboundMediaFeature(adapter),
                 // A Telegram private chat carries the user's own id as its chat
                 // id, so the address is already the conversation.

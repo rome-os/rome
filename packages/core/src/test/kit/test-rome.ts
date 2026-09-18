@@ -107,6 +107,7 @@ export interface TestRome {
   actionEngine: ActionEngine;
   agentLoader: AgentLoader;
   agentRunner: AgentRunner;
+  agentSessions: ReturnType<typeof createAgentSessionManager>;
   approvalHandler: ApprovalHandler;
   talkRouter: TalkRouter;
   seed: TestRomeSeed;
@@ -324,6 +325,7 @@ async function buildHarness(
     actionEngine,
     agentLoader,
     agentRunner,
+    agentSessions: agentSessionManager,
     approvalHandler,
     talkRouter,
     seed,

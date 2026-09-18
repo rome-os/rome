@@ -1,3 +1,4 @@
+import { MessageDeliveryError } from "@rome-os/app-runtime";
 import type { ChildProcess } from "node:child_process";
 import { actionExecutionContext } from "./context.js";
 import { replayContext } from "./replay.js";
@@ -162,6 +163,11 @@ interface RpcResponseMessage {
   id: number;
   result?: unknown;
   error?: string;
+  deliveryError?: {
+    kind: MessageDeliveryError["kind"];
+    receipts: MessageDeliveryError["receipts"];
+    retryAfterMs?: number;
+  };
 }
 
 export interface WorkerRpcServices {
@@ -244,6 +250,15 @@ export class WorkerRpcServer {
             .catch((err: unknown) => {
               this.respond(worker, request.clientId, request.id, {
                 error: err instanceof Error ? err.message : String(err),
+                ...(err instanceof MessageDeliveryError
+                  ? {
+                      deliveryError: {
+                        kind: err.kind,
+                        receipts: err.receipts,
+                        retryAfterMs: err.retryAfterMs,
+                      },
+                    }
+                  : {}),
               });
             });
         }),
@@ -255,7 +270,7 @@ export class WorkerRpcServer {
     worker: ChildProcess,
     clientId: string,
     id: number,
-    body: { result?: unknown; error?: string },
+    body: Pick<RpcResponseMessage, "result" | "error" | "deliveryError">,
   ): void {
     if (!worker.connected) return;
     const response: RpcResponseMessage = { type: "rpc_response", clientId, id, ...body };

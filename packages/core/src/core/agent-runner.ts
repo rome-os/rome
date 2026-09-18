@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import type { ConversationId } from "@rome-os/app-runtime";
 import type { AgentMessage, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
@@ -545,14 +546,38 @@ export class AgentRunner {
           })
         : null;
 
-    for await (const msg of handle.events) {
-      if (recorder) {
-        await recordAgentTraceBestEffort(recorder, msg, log, {
-          turnId: handle.turnId,
-          source: "agent-runner",
-        });
+    let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | undefined;
+    try {
+      for await (const msg of handle.events) {
+        if (!liveStream && msg.type === "turn_start" && this.turnStreams) {
+          const thread = params.threadContext;
+          liveStream = this.turnStreams.register({
+            sessionId: msg.sessionId,
+            turnId: msg.turnId,
+            agentName,
+            ...(thread?.connectionId
+              ? {
+                  conversation: {
+                    connectionId: thread.connectionId,
+                    conversationId: thread.threadId as ConversationId,
+                  },
+                }
+              : {}),
+            initiatorId: thread?.channelUserId,
+            interrupt: handle.interrupt ? (reason) => handle.interrupt!(reason) : undefined,
+          });
+        }
+        if (recorder) {
+          await recordAgentTraceBestEffort(recorder, msg, log, {
+            turnId: handle.turnId,
+            source: "agent-runner",
+          });
+        }
+        liveStream?.publish(msg);
+        yield msg;
       }
-      yield msg;
+    } finally {
+      liveStream?.finish();
     }
 
     log.info("agent run completed", {

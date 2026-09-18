@@ -9,6 +9,7 @@ export default defineConfig({
   dialect: "sqlite",
   migrations: { table: "__drizzle_migrations_system" },
   tablesFilter: [
+    "reply_delivery_parts",
     "events",
     "sessions",
     "session_turn_checkpoints",

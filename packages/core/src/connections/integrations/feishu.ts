@@ -1,3 +1,5 @@
+import { feishuDeliveryProfile } from "./delivery-profiles.js";
+import { textDeliveryFeature } from "./text-delivery-feature.js";
 // Feishu and Lark connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Feishu is a Talker with a single `app` grant: the custom-app credentials
@@ -528,6 +530,10 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 },
               };
               const features: Partial<TalkFeatureMap> = {
+                textDelivery: textDeliveryFeature(
+                  feishuDeliveryProfile(`feishu:${app.domain ?? "feishu"}:${app.appId}`),
+                  adapter,
+                ),
                 directMessaging: addressIsConversationFeature(),
                 activity,
                 directory,

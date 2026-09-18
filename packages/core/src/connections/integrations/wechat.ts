@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { wechatDeliveryProfile } from "./delivery-profiles.js";
+import { textDeliveryFeature } from "./text-delivery-feature.js";
 // WeChat connection integration. Channel contract: docs/architecture/channels.md.
 //
 // WeChat is a Talker with a single `account` grant: the bot token + the account
@@ -355,6 +358,12 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             },
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
+                textDelivery: textDeliveryFeature(
+                  wechatDeliveryProfile(
+                    "wechat:" + createHash("sha256").update(account.accountId).digest("hex"),
+                  ),
+                  adapter,
+                ),
                 inboundMedia: inboundMediaFeature(adapter),
                 activity: typingActivityFeature(adapter),
               };

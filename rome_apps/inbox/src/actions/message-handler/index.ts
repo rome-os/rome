@@ -12,6 +12,7 @@ import type {
   PersonMappingRepository,
   PersonRecord,
   PolicyEngine,
+  RunParams,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -394,38 +395,45 @@ async function handleTrustedMessage(
     agent: targetAgent,
   });
 
+  const runParams: RunParams = {
+    agentName: targetAgent,
+    prompt: text,
+    channelThreadKey,
+    romeSessionId: conversationId,
+    platformMessageId: messageId,
+    replyTo: parseMessageReplyReference(args.replyTo),
+    threadContext: {
+      connectionId,
+      channel,
+      threadId,
+      parentThreadId: typeof args.parentThreadId === "string" ? args.parentThreadId : undefined,
+      romeSessionId: conversationId,
+      threadPath,
+      channelUserId,
+      threadName: typeof args.threadName === "string" ? args.threadName : undefined,
+      threadType:
+        args.threadType === "private" || args.threadType === "group" ? args.threadType : undefined,
+      projectName:
+        typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined,
+      // Carry the sender's bond level so the core login gate can scope the
+      // guardian-only "no AI tool configured" notice to the guardian (other
+      // trusted senders reach this same path).
+      senderBondLevel: bondLevel,
+    },
+    contextSuffix,
+    workingDir,
+  };
+  if (
+    bondLevel === "guardian" &&
+    args.threadType === "private" &&
+    deps.agentRunner.admitConversationInput
+  ) {
+    const admission = await deps.agentRunner.admitConversationInput(runParams);
+    if (admission) return { status: "ok", data: { action: "admitted", turnId: admission.turnId } };
+  }
   const mainResult = await collectAgentResult(
     deps.agentRunner,
-    {
-      agentName: targetAgent,
-      prompt: text,
-      channelThreadKey,
-      romeSessionId: conversationId,
-      platformMessageId: messageId,
-      replyTo: parseMessageReplyReference(args.replyTo),
-      threadContext: {
-        connectionId,
-        channel,
-        threadId,
-        parentThreadId: typeof args.parentThreadId === "string" ? args.parentThreadId : undefined,
-        romeSessionId: conversationId,
-        threadPath,
-        channelUserId,
-        threadName: typeof args.threadName === "string" ? args.threadName : undefined,
-        threadType:
-          args.threadType === "private" || args.threadType === "group"
-            ? args.threadType
-            : undefined,
-        projectName:
-          typeof args.selectedProjectName === "string" ? args.selectedProjectName : undefined,
-        // Carry the sender's bond level so the core login gate can scope the
-        // guardian-only "no AI tool configured" notice to the guardian (other
-        // trusted senders reach this same path).
-        senderBondLevel: bondLevel,
-      },
-      contextSuffix,
-      workingDir,
-    },
+    runParams,
     deps.emitAgentMessage,
     targetAgent,
   );

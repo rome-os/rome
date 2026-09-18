@@ -1354,8 +1354,13 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     expect(msgs.filter((m) => m.type === "text")).toEqual([
-      { type: "text", content: "Let me check the weather.", turnPhase: "commentary" },
-      { type: "text", content: "It's sunny.", turnPhase: "final" },
+      {
+        type: "text",
+        content: "Let me check the weather.",
+        turnPhase: "commentary",
+        blockId: "m1",
+      },
+      { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "m2" },
     ]);
     const result = msgs.find((m) => m.type === "result");
     expect(result).toMatchObject({ type: "result", content: "It's sunny." });
@@ -2087,7 +2092,7 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     const text = msgs.find((m) => m.type === "text");
-    expect(text).toEqual({ type: "text", content: "plain answer" });
+    expect(text).toEqual({ type: "text", content: "plain answer", blockId: "m1" });
     expect(msgs.find((m) => m.type === "result")).toMatchObject({ content: "plain answer" });
     await session.close();
   });
