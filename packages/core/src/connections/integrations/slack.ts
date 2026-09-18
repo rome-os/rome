@@ -212,7 +212,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescriptor {
   const descriptor = makeOAuthProviderDescriptor("slack");
   descriptor.pairing = { replyInOriginatingConversation: true, plainTextGuidance: true };
-  descriptor.auth.workspace.setup = makeSlackSetup(deps);
+  descriptor.auth[OAUTH_PROVIDER_GRANTS.slack].setup = makeSlackSetup(deps);
   if (!deps.ingress.configured) return descriptor;
   descriptor.capabilities.talker = {
     needs: [OAUTH_PROVIDER_GRANTS.slack] as const,
