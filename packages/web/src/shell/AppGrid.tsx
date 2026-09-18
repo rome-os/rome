@@ -60,7 +60,7 @@ import {
   SortableOverlay,
 } from "@/components/ui/sortable";
 import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
-import { RecentAppsZone } from "./RecentAppsZone";
+import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
   LINK_CLASS,
   RAIL_ACTIVE_CLASS,
@@ -483,6 +483,12 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
               </Tooltip>
             );
           })}
+          <RecentAppsRail
+            apps={recentApps}
+            unopenedIds={unopenedIds}
+            pathname={location.pathname}
+            wrapWithContextMenu={(app, trigger) => withAppContextMenu(app, trigger, false)}
+          />
           {onSearch ? (
             <>
               <Separator className="my-1 w-6" />

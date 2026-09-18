@@ -217,3 +217,53 @@ describe("Recent zone, expanded sidebar", () => {
     expect(screen.queryByText("New")).toBeNull();
   });
 });
+
+describe("Recent zone, collapsed rail", () => {
+  it("shows three tiles and puts the rest behind a More button", async () => {
+    seed(
+      [
+        fixture("a", "Alpha"),
+        fixture("b", "Bravo"),
+        fixture("c", "Charlie"),
+        fixture("d", "Delta"),
+      ],
+      { a: minutesAgo(1), b: minutesAgo(2), c: minutesAgo(3), d: minutesAgo(4) },
+    );
+    const user = userEvent.setup();
+    renderSidebar(true);
+
+    await screen.findByRole("link", { name: "Alpha" });
+    expect(screen.getByRole("link", { name: "Bravo" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Charlie" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Delta" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "More recent apps" }));
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Delta"]);
+  });
+
+  it("has no More button with three or fewer, and no tiles at all with none", async () => {
+    seed([fixture("a", "Alpha")], { a: minutesAgo(1) });
+    const first = renderSidebar(true);
+    await screen.findByRole("link", { name: "Alpha" });
+    expect(screen.queryByRole("button", { name: "More recent apps" })).toBeNull();
+    first.unmount();
+
+    seed([fixture("old", "Old App")], { old: daysAgo(20) });
+    renderSidebar(true);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
+    expect(screen.queryByRole("link", { name: "Old App" })).toBeNull();
+  });
+
+  it("marks a never-opened app on its tile", async () => {
+    seed([fixture("b", "Bravo", { installedAt: minutesAgo(1) })], {});
+    renderSidebar(true);
+
+    await screen.findByRole("link", { name: "Bravo" });
+    expect(screen.getByRole("img", { name: "Not opened yet" })).toBeTruthy();
+  });
+});

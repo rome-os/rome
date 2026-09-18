@@ -1,10 +1,26 @@
-import { ChevronDown, ChevronUp, Pin } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, Pin } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RECENT_APPS_VISIBLE } from "@/lib/recent-apps";
 import { cn } from "@/lib/utils";
-import { LINK_CLASS, WIDE_ACTIVE_CLASS, WIDE_IDLE_CLASS, isEntryActive } from "./sidebar-shared";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  LINK_CLASS,
+  RAIL_ACTIVE_CLASS,
+  RAIL_IDLE_CLASS,
+  RAIL_LINK_CLASS,
+  WIDE_ACTIVE_CLASS,
+  WIDE_IDLE_CLASS,
+  isEntryActive,
+} from "./sidebar-shared";
 
 interface RecentSidebarApp {
   id: string;
@@ -132,6 +148,94 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
           </button>
         ) : null}
       </nav>
+    </>
+  );
+}
+
+interface RecentAppsRailProps<T extends RecentSidebarApp> {
+  apps: T[];
+  unopenedIds: ReadonlySet<string>;
+  pathname: string;
+  wrapWithContextMenu: (app: T, trigger: ReactNode) => ReactNode;
+}
+
+// Rail form of the zone. A rail is the mode the guardian chose for being
+// compact, so the overflow goes into a menu rather than a nested scroll area.
+// Renders fragments into AppGrid's rail <nav>, inside its TooltipProvider.
+export function RecentAppsRail<T extends RecentSidebarApp>({
+  apps,
+  unopenedIds,
+  pathname,
+  wrapWithContextMenu,
+}: RecentAppsRailProps<T>) {
+  const { t } = useTranslation("common");
+
+  if (apps.length === 0) return null;
+
+  const visible = apps.slice(0, RECENT_APPS_VISIBLE);
+  const overflow = apps.slice(RECENT_APPS_VISIBLE);
+
+  return (
+    <>
+      <Separator className="my-1 w-6" />
+      {visible.map((app) => {
+        if (!app.href) return null;
+        const active = isEntryActive(pathname, app.href);
+        return (
+          <Tooltip key={app.id}>
+            {wrapWithContextMenu(
+              app,
+              <TooltipTrigger asChild>
+                <Link
+                  to={app.href}
+                  aria-label={app.displayName}
+                  className={`${RAIL_LINK_CLASS} ${active ? RAIL_ACTIVE_CLASS : RAIL_IDLE_CLASS}`}
+                >
+                  <SidebarAppIcon app={app} />
+                  {unopenedIds.has(app.id) ? (
+                    <span
+                      role="img"
+                      aria-label={t("sidebar.notOpened")}
+                      className="absolute right-2 top-2 h-2 w-2 rounded-full bg-info"
+                    />
+                  ) : null}
+                </Link>
+              </TooltipTrigger>,
+            )}
+            <TooltipContent side="right">{app.displayName}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+      {overflow.length > 0 ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("sidebar.moreRecentApps")}
+                  className={`${RAIL_LINK_CLASS} ${RAIL_IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                >
+                  <Ellipsis className="h-4 w-4" aria-hidden />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t("sidebar.moreRecentApps")}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent side="right" align="start">
+            {overflow.map((app) =>
+              app.href ? (
+                <DropdownMenuItem key={app.id} asChild>
+                  <Link to={app.href}>
+                    <SidebarAppIcon app={app} />
+                    {app.displayName}
+                  </Link>
+                </DropdownMenuItem>
+              ) : null,
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </>
   );
 }
