@@ -19,7 +19,15 @@ const DIAGRAM_CANVAS = '[data-streamdown="mermaid-block"] > :last-child';
 const ZOOM_STACK = '[data-streamdown="mermaid"] :has(> button[title="Zoom in"])';
 
 /** Every floating part, on both fences. */
-const CHROME = [CODE_LABEL, DIAGRAM_LABEL, CODE_ACTIONS, DIAGRAM_ACTIONS, ZOOM_STACK];
+const TABLE_ACTIONS = '[data-streamdown="table-wrapper"] > :first-child:not(:has(> table))';
+const CHROME = [
+  CODE_LABEL,
+  DIAGRAM_LABEL,
+  CODE_ACTIONS,
+  DIAGRAM_ACTIONS,
+  ZOOM_STACK,
+  TABLE_ACTIONS,
+];
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

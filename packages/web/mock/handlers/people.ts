@@ -322,19 +322,19 @@ export const sentinelSenders: SentinelRow[] = (
       // the page was written lands in.
       channel: "feishu",
       channelUserId: "ou_9f21c04ab7",
-      displayName: "林晓",
-      lastMessage: "会议纪要已经发到群里了",
+      displayName: "Xiao Lin",
+      lastMessage: "I shared the meeting notes in the group chat.",
       lastMessageAt: secondsAgo(5 * DAY),
     },
     {
-      // A second log row for 林晓, newer than the one above. The log keys on the
+      // A second log row for Xiao Lin, newer than the one above. The log keys on the
       // exchange rather than the sender, so one account can hold several — and
       // a reader that takes the first would preview an older line than the one
       // sitting at the top of this account's own timeline.
       channel: "feishu",
       channelUserId: "ou_9f21c04ab7",
-      displayName: "林晓",
-      lastMessage: "另外周五的场地换到 3 楼了",
+      displayName: "Xiao Lin",
+      lastMessage: "Also, Friday's meeting has moved to the third floor.",
       lastMessageAt: secondsAgo(2 * DAY),
     },
     {
@@ -439,7 +439,7 @@ export const whatsappContacts: WhatsAppContactRow[] = [
   {
     jid: QUIET_CJK_JID,
     phoneNumber: "8613800138000",
-    name: "李阿姨 Li Ayi",
+    name: "Auntie Li",
     notify: null,
     verifiedName: null,
     imgUrl: null,

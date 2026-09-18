@@ -35,6 +35,7 @@ function mockConnectionsFetch(
 ): ReturnType<typeof rs.spyOn> {
   return rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url === "/api/approvals") return new Response("[]", { status: 200 });
     if (url === "/api/settings") return ok({});
     if (url === "/api/tailscale/devices") {
       return ok({ mode: "oauth", configured: false, devices: [] });

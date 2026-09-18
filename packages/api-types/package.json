@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
+    "./computer-use": "./src/computer-use.ts",
     "./conversation-settings": "./src/conversation-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",
     "./app-manager-errors": "./src/app-manager-errors.ts",

@@ -64,31 +64,38 @@
   --markdown-body-font-size: var(--rome-font-size-14);
   --markdown-body-line-height: var(--rome-line-height-143);
 
-  --markdown-heading-1-font-size: var(--rome-font-size-20);
-  --markdown-heading-1-line-height: var(--rome-line-height-120);
+  /* The 14px strut leaves the line box at 20px, which cannot hold a 14px
+     monospace tint clear of the line above. One step down keeps it clear. */
+  --markdown-inline-code-font-size: var(--rome-font-size-13);
+
+  --markdown-heading-1-font-size: var(--rome-font-size-22);
+  --markdown-heading-1-line-height: var(--rome-line-height-127);
   --markdown-heading-2-font-size: var(--rome-font-size-18);
   --markdown-heading-2-line-height: var(--rome-line-height-133);
   --markdown-heading-3-font-size: var(--rome-font-size-16);
-  --markdown-heading-3-line-height: var(--rome-line-height-125);
+  --markdown-heading-3-line-height: var(--rome-line-height-150);
   --markdown-heading-4-font-size: var(--rome-font-size-14);
   --markdown-heading-4-line-height: var(--rome-line-height-143);
   --markdown-heading-floor-font-size: var(--rome-font-size-14);
   --markdown-heading-floor-line-height: var(--rome-line-height-143);
 
   --markdown-block-space-between: var(--rome-space-2);
-  --markdown-heading-1-space-before: var(--rome-space-3);
+  --markdown-heading-1-space-before: var(--rome-space-4);
   --markdown-heading-1-space-after: var(--rome-space-1);
-  --markdown-heading-2-space-before: var(--rome-space-3);
+  --markdown-heading-2-space-before: var(--rome-space-4);
   --markdown-heading-2-space-after: var(--rome-space-1);
-  --markdown-heading-3-space-before: var(--rome-space-2);
-  --markdown-heading-4-space-before: var(--rome-space-2);
-  --markdown-heading-floor-space-before: var(--rome-space-2);
+  --markdown-heading-3-space-before: var(--rome-space-3);
+  --markdown-heading-3-space-after: var(--rome-space-1);
+  --markdown-heading-4-space-before: var(--rome-space-3);
+  --markdown-heading-4-space-after: var(--rome-space-1);
+  --markdown-heading-floor-space-before: var(--rome-space-3);
+  --markdown-heading-floor-space-after: var(--rome-space-1);
   --markdown-list-space-block: var(--rome-space-1);
-  --markdown-code-block-space-block: var(--rome-space-2);
-  --markdown-blockquote-space-block: var(--rome-space-2);
-  --markdown-table-space-block: var(--rome-space-2);
+  --markdown-code-block-space-block: var(--rome-space-3);
+  --markdown-blockquote-space-block: var(--rome-space-3);
+  --markdown-table-space-block: var(--rome-space-3);
   --markdown-rule-space-block: var(--rome-space-2);
-  --markdown-media-space-block: var(--rome-space-2);
+  --markdown-media-space-block: var(--rome-space-3);
 }
 
 .rome-markdown > * {
@@ -163,12 +170,39 @@
   padding-block: var(--markdown-list-item-space-block);
 }
 
+/* Markers hang outside the text column, so a wrapped item's second line
+   aligns with its first line's text and the list keeps its shape. Streamdown
+   sets them inside, where a wrapped line runs back under the marker. A nested
+   list indents from its item's text, not from the outer marker. */
+.rome-markdown :is([data-streamdown="ordered-list"], [data-streamdown="unordered-list"]) {
+  list-style-position: outside;
+  /* An em of the body, so the indent follows the density the body renders at. */
+  padding-inline-start: calc(var(--markdown-body-font-size) * 1.5);
+}
+
+.rome-markdown
+  [data-streamdown="list-item"]
+  > :is([data-streamdown="ordered-list"], [data-streamdown="unordered-list"]) {
+  margin-block: 0;
+  padding-inline-start: calc(var(--markdown-body-font-size) * 1.25);
+}
+
+.rome-markdown [data-streamdown="list-item"]::marker {
+  color: var(--muted-foreground);
+}
+
 .rome-markdown > [data-streamdown="code-block"] {
   margin-block: var(--markdown-code-block-space-block);
 }
 
 .rome-markdown > [data-streamdown="blockquote"] {
   margin-block: var(--markdown-blockquote-space-block);
+}
+
+/* The bar marks a quote. Italic adds nothing a CJK face can render — it
+   synthesises an oblique — so the quote sets upright at muted ink. */
+.rome-markdown [data-streamdown="blockquote"] {
+  font-style: normal;
 }
 
 .rome-markdown > [data-streamdown="table-wrapper"] {
@@ -201,7 +235,15 @@
       [data-streamdown="mermaid-block"],
       [data-streamdown="mermaid"]
     )
-  + * {
+  + :not([data-streamdown^="heading-"]) {
+  margin-block-start: 0;
+}
+
+/* A heading's space-before is the heading's own, whatever block precedes it:
+   the rule above would otherwise leave a heading after a list with only the
+   list's trailing margin above it. Two headings in a row are one group, and
+   the second keeps only the first's space-after. */
+.rome-markdown > [data-streamdown^="heading-"] + [data-streamdown^="heading-"] {
   margin-block-start: 0;
 }
 
@@ -232,12 +274,17 @@
   @apply rounded-16;
 }
 
-/* Inline padding only. Padding on an inline box paints outside the line box
-   without growing it, and at 14px IBM Plex Mono's 1.3em content box already
-   fills 18.2px of a 20px prose line — a vertical step would spill the tint
-   over the lines above and below. The face carries that breathing room
+/* Inline padding only, on a size the prose line can hold. Padding on an inline
+   box paints outside the line box without growing it, so a vertical step would
+   spill the tint over the lines above and below. That leaves the content area
+   as the whole of the tint, and IBM Plex Mono sets it at 1.3em — Streamdown's
+   own fixed 14px paints 18.2px. Standard's line box opens to 21px and holds
+   it; compact's stops at 20px, where inline code on consecutive lines reads as
+   one slab rather than two spans. The token carries that difference, so this
+   rule only has to spend it. The face carries the rest of the breathing room
    itself: its ascent clears the caps by a third of an em. */
 [data-streamdown="inline-code"] {
+  font-size: var(--markdown-inline-code-font-size);
   @apply px-2;
 }
 
@@ -254,6 +301,81 @@
    and let the surrounding Streamdown frame inherit the app's surface. */
 [data-streamdown="code-block-body"] pre {
   background-color: transparent !important;
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────
+   Streamdown frames a table as a card: a tinted, bordered, padded wrapper
+   around a bordered scroller, with 14px cells and a permanent row of buttons
+   above. Rome sets the table as text in the column: cells at the body size,
+   a rule under the header, hairlines between rows, and the first column's ink
+   on the paragraph edge. The buttons float over the header's inline end and
+   join the same reveal as a fence's chrome. */
+.rome-markdown [data-streamdown="table-wrapper"] {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rome-markdown [data-streamdown="table-wrapper"] > :has(> table) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rome-markdown [data-streamdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rome-markdown [data-streamdown="table-wrapper"] :is(thead, tbody, [data-streamdown="table-row"]) {
+  border: 0;
+  background: transparent;
+}
+
+.rome-markdown [data-streamdown="table-header-cell"] {
+  padding: var(--rome-space-2) var(--rome-space-3);
+  border-bottom: 1px solid var(--foreground);
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.rome-markdown [data-streamdown="table-cell"] {
+  padding: var(--rome-space-2) var(--rome-space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: top;
+}
+
+.rome-markdown
+  :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
+  padding-inline-start: 0;
+}
+
+.rome-markdown
+  :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):last-child {
+  padding-inline-end: 0;
+}
+
+/* The button row is the wrapper's first child and the only one without the
+   table; it carries no `data-streamdown` hook of its own. It joins the fence
+   chrome's reveal below. */
+.rome-markdown [data-streamdown="table-wrapper"] > :first-child:not(:has(> table)) {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  z-index: 10;
+  padding: var(--rome-space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--rome-radius-8);
+  background-color: var(--surface-elevated);
+  box-shadow: var(--rome-shadow-1);
 }
 
 /* ── Fenced block chrome ──────────────────────────────────────────────────
@@ -396,7 +518,7 @@
    A coarse pointer has no hover state to reveal anything with, so there the
    chrome stays put. Streamdown portals a fullscreen diagram to document.body,
    outside `.rome-markdown` — its zoom stack is the whole interface at that
-   point, and stays visible. */
+   point, and stays visible. A table's button row rides the same reveal. */
 @media (hover: hover) {
   .rome-markdown
     :is(
@@ -404,20 +526,26 @@
       [data-streamdown="mermaid-block"] > :first-child,
       [data-streamdown="code-block-actions"],
       [data-streamdown="mermaid-block-actions"],
-      [data-streamdown="mermaid"] :has(> button[title="Zoom in"])
+      [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
+      [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
     ) {
     opacity: 0;
     transition: opacity 120ms ease-out;
   }
 
   .rome-markdown
-    :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]):is(:hover, :focus-within)
+    :is(
+      [data-streamdown="code-block"],
+      [data-streamdown="mermaid-block"],
+      [data-streamdown="table-wrapper"]
+    ):is(:hover, :focus-within)
     :is(
       [data-streamdown="code-block-header"],
       [data-streamdown="mermaid-block"] > :first-child,
       [data-streamdown="code-block-actions"],
       [data-streamdown="mermaid-block-actions"],
-      [data-streamdown="mermaid"] :has(> button[title="Zoom in"])
+      [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
+      [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
     ) {
     opacity: 1;
   }
@@ -429,7 +557,8 @@
         [data-streamdown="mermaid-block"] > :first-child,
         [data-streamdown="code-block-actions"],
         [data-streamdown="mermaid-block-actions"],
-        [data-streamdown="mermaid"] :has(> button[title="Zoom in"])
+        [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
+        [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
       ) {
       transition: none;
     }

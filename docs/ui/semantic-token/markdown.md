@@ -5,6 +5,7 @@ A semantic token doc for Markdown typography and rhythm. [ui-semantic-tokens.md]
 | Group | Token roster |
 |---|---|
 | Body typography | `--markdown-body-font-size`, `--markdown-body-line-height`, `--markdown-body-font-weight`, `--markdown-body-letter-spacing` |
+| Inline code | `--markdown-inline-code-font-size` |
 | Heading typography | `--markdown-heading-{1…4}-font-size`, `--markdown-heading-{1…4}-line-height`, `--markdown-heading-floor-font-size`, `--markdown-heading-floor-line-height`, `--markdown-heading-font-weight`, `--markdown-heading-letter-spacing` |
 | Block rhythm | `--markdown-block-space-between`, `--markdown-heading-{1…4}-space-before`, `--markdown-heading-{1…4}-space-after`, `--markdown-heading-floor-space-before`, `--markdown-heading-floor-space-after` |
 | Lists | `--markdown-list-space-block`, `--markdown-list-item-space-block` |
@@ -20,6 +21,7 @@ Markdown names a document grammar, not a dashboard text role. The prefix separat
 - `--markdown-body-line-height` — Used for Markdown body leading. Not used for control labels.
 - `--markdown-body-font-weight` — Used for Markdown body weight. Not used for heading emphasis.
 - `--markdown-body-letter-spacing` — Used for Markdown body tracking. Not used for code tracking.
+- `--markdown-inline-code-font-size` — Used for Markdown inline code size. Not used for fenced code blocks.
 - `--markdown-heading-1-font-size` — Used for Markdown Heading 1 size. Not used for page titles.
 - `--markdown-heading-1-line-height` — Used for Markdown Heading 1 leading. Not used for page titles.
 - `--markdown-heading-2-font-size` — Used for Markdown Heading 2 size. Not used for dashboard sections.
@@ -63,6 +65,7 @@ Font weight and letter spacing have no primitive scales. The kit owns their fixe
 | `--markdown-body-line-height` | `--rome-line-height-125` | `--rome-line-height-143` |
 | `--markdown-body-font-weight` | `400` | `400` |
 | `--markdown-body-letter-spacing` | `0` | `0` |
+| `--markdown-inline-code-font-size` | `--rome-font-size-14` | `--rome-font-size-13` |
 | `--markdown-heading-1-font-size` | `--rome-font-size-24` | `--rome-font-size-20` |
 | `--markdown-heading-1-line-height` | `--rome-line-height-133` | `--rome-line-height-120` |
 | `--markdown-heading-2-font-size` | `--rome-font-size-22` | `--rome-font-size-18` |
@@ -98,6 +101,7 @@ Font weight and letter spacing have no primitive scales. The kit owns their fixe
 
 - Standard body and Headings 1–5 rise from 16px through 24px in 2px steps. Heading 6 shares the heading floor. `[mech]`
 - Compact body and Headings 1–4 rise from 14px through 20px in 2px steps. Headings 4–6 share the 14px floor. `[mech]`
+- Inline code is sized against the line box, not the body. Its monospace tint paints a 1.3em content area, and the two densities declare the same 20px line but do not resolve to the same line box: standard opens to 21px and holds 14px, compact stops at 20px and takes one step down. Inline code on consecutive lines stays two spans rather than one slab. `[mech]`
 - Every heading weighs 500. Size, ink, and position preserve hierarchy when a CJK fallback resolves that weight to Regular. `[mech]`
 - A heading keeps its level typography when nested in a quotation or list. Only top-level document blocks receive the outer rhythm tokens. `[mech]`
 - The first top-level block has no leading margin, including when the document opens with a heading. `[mech]`

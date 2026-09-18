@@ -299,7 +299,7 @@ export default function CallbackPage() {
           // in, and it has no session to return to anyway.
           <>
             <p className="mt-3 text-ui text-destructive-fg">{displayConnectionFailure}</p>
-            <p className="mt-3 text-body text-muted-foreground">
+            <p className="mt-3 text-ui text-muted-foreground">
               {t("callback.connectionFailedBody")}
             </p>
           </>
@@ -314,11 +314,11 @@ export default function CallbackPage() {
             </a>
           </>
         ) : setupCancelled ? (
-          <p className="mt-3 text-body text-muted-foreground">{t("callback.cancelledBody")}</p>
+          <p className="mt-3 text-ui text-muted-foreground">{t("callback.cancelledBody")}</p>
         ) : delivered ? (
-          <p className="mt-3 text-body text-muted-foreground">{t("callback.deliveredBody")}</p>
+          <p className="mt-3 text-ui text-muted-foreground">{t("callback.deliveredBody")}</p>
         ) : (
-          <p className="mt-3 text-body text-muted-foreground">{t("callback.description")}</p>
+          <p className="mt-3 text-ui text-muted-foreground">{t("callback.description")}</p>
         )}
       </div>
     </main>

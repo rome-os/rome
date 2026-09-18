@@ -183,7 +183,7 @@ function SpecimenFrame({ specimen }: { specimen: Specimen }) {
     <section className="space-y-2">
       <div>
         <h2 className="text-section text-foreground">{specimen.title}</h2>
-        <p className="max-w-2xl text-body text-muted-foreground">{specimen.note}</p>
+        <p className="max-w-2xl text-ui text-muted-foreground">{specimen.note}</p>
       </div>
       <div className="w-full max-w-2xl">
         <ChatBlockPreview

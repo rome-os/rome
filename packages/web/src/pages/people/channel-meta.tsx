@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
+import { WeChatIcon } from "@/components/brand-icons/connection-badges";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils";
  */
 export interface ChannelMeta {
   labelKey: string;
-  Glyph: (props: { className?: string }) => React.JSX.Element;
+  /** The channel's mark. Omitted when Rome has no monochrome one for it — the
+   *  generic glyph stands in, and the name still reads as the channel's own. */
+  Glyph?: (props: { className?: string }) => React.JSX.Element;
 }
 
 function WhatsAppGlyph({ className }: { className?: string }) {
@@ -69,6 +72,24 @@ function LinkedInGlyph({ className }: { className?: string }) {
   );
 }
 
+function EmailGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+      <path d="m3.5 7.5 7.14 5a2.4 2.4 0 0 0 2.72 0l7.14-5" />
+    </svg>
+  );
+}
+
 /** The glyph a channel with no entry of its own draws with: a speech bubble,
  *  which reads as "a channel" without claiming to be any particular one. */
 function GenericChannelGlyph({ className }: { className?: string }) {
@@ -88,23 +109,53 @@ function GenericChannelGlyph({ className }: { className?: string }) {
   );
 }
 
+/**
+ * A badge names the network a person is reachable on, not the credential Rome
+ * reads it through: the guardian's own WeChat client and a WeChat official
+ * account are both "WeChat". Which of the two carried a message is a
+ * Connections question, and that surface already answers it.
+ */
 export const CHANNEL_META: Record<string, ChannelMeta> = {
   whatsapp: { labelKey: "channels.whatsapp", Glyph: WhatsAppGlyph },
   telegram: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
+  telegram_user: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
   discord: { labelKey: "channels.discord", Glyph: DiscordGlyph },
   webchat: { labelKey: "channels.webchat", Glyph: WebchatGlyph },
   linkedin: { labelKey: "channels.linkedin", Glyph: LinkedInGlyph },
+  wechat: { labelKey: "channels.wechat", Glyph: WeChatIcon },
+  wechat_user: { labelKey: "channels.wechat", Glyph: WeChatIcon },
+  email: { labelKey: "channels.email", Glyph: EmailGlyph },
+  feishu: { labelKey: "channels.feishu" },
 };
 
-/** A channel Rome has no entry for renders under its own raw name — the branch
- *  every channel added after this page was written lands in. */
+/**
+ * What a channel is called in front of a person.
+ *
+ * A channel Rome has no entry for is the branch every channel added after this
+ * page was written lands in — a Rome App's above all — and its name there is an
+ * id, written for code. Spell it the way a person writes a name: `city_lights`
+ * reads "City Lights". An internal name never reaches the page.
+ */
 export function channelLabel(t: TFunction<"people">, channel: string): string {
   const meta = CHANNEL_META[channel];
-  return meta ? t(meta.labelKey) : channel;
+  return meta ? t(meta.labelKey) : humanizeChannel(channel);
+}
+
+/** Which separator an id spells its words with is the channel's own business —
+ *  a channel name is any string without a colon — so every run of characters
+ *  that is neither a letter nor a digit is one. An id holding no letter or
+ *  digit at all has no name in it to title, and stands as it is: a badge
+ *  reading nothing says less than one reading the id. */
+function humanizeChannel(channel: string): string {
+  const words = channel
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+  return words.length > 0 ? words.join(" ") : channel;
 }
 
 export function ChannelGlyph({ channel, className }: { channel: string; className?: string }) {
-  const { Glyph } = CHANNEL_META[channel] ?? { Glyph: GenericChannelGlyph };
+  const Glyph = CHANNEL_META[channel]?.Glyph ?? GenericChannelGlyph;
   return <Glyph className={cn("size-4 shrink-0", className)} />;
 }
 
@@ -127,7 +178,7 @@ export function ChannelPill({
   children?: React.ReactNode;
 }) {
   const { t } = useTranslation("people");
-  const { Glyph } = CHANNEL_META[channel] ?? { Glyph: GenericChannelGlyph };
+  const Glyph = CHANNEL_META[channel]?.Glyph ?? GenericChannelGlyph;
   return (
     <Badge variant="outline" className="shrink-0 text-muted-foreground">
       <Glyph />

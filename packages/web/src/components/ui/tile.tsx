@@ -18,7 +18,7 @@ export const Tile = forwardRef<HTMLButtonElement, TileProps>(function Tile(
       type={type}
       aria-pressed={selected}
       className={cn(
-        "flex flex-col items-start gap-1 rounded-8 border p-3 text-left transition focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-offset-0 focus-visible:outline-ring",
+        "flex flex-col items-start gap-1 rounded-8 border p-3 text-left transition outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
         selected
           ? "border-brand bg-brand/5 ring-1 ring-brand"
           : "border-border-strong bg-surface hover:bg-surface-muted",

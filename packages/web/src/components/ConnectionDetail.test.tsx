@@ -29,6 +29,7 @@ afterEach(() => {
 function mockCeremonyFetch(routes: Record<string, unknown> = {}) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
+    if (url === "/api/approvals") return new Response("[]", { status: 200 });
     for (const [needle, payload] of Object.entries(routes)) {
       if (url.includes(needle)) {
         return new Response(JSON.stringify(payload), { status: 200 });

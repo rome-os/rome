@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { Check, Globe, Lock, Mail, X } from "lucide-react";
+import { Globe, Lock, Mail, X } from "lucide-react";
 import type {
   AppAccessMode,
   AppInstallResponse,
@@ -24,8 +24,8 @@ import {
 import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { cn } from "@/lib/utils";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { fetchJson } from "@/lib/fetch-json";
 import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "@/hooks/use-apps";
@@ -560,7 +560,15 @@ export function useAppLifecycle(
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
-          <div className="grid gap-2" role="radiogroup" aria-label={t("installed.access")}>
+          <RadioGroup
+            aria-label={t("installed.access")}
+            value={accessModeDraft}
+            onValueChange={(next) => {
+              setAccessModeDraft(next as AppAccessMode);
+              setAccessDialogError("");
+            }}
+            disabled={accessSaving}
+          >
             {[
               {
                 mode: "private" as const,
@@ -582,39 +590,38 @@ export function useAppLifecycle(
               },
             ].map((option) => {
               const Icon = option.icon;
-              const selected = accessModeDraft === option.mode;
+              const id = `app-access-mode-${option.mode}`;
               return (
-                <button
+                // The card paint sits on the label and follows the radio's own
+                // state, so what is highlighted can never disagree with what is
+                // checked. The focus edge is on the card for the same reason it
+                // used to be: roving focus lands on the checked option, so an
+                // edge drawn only around the 16px circle inside an
+                // already-highlighted card says almost nothing.
+                <label
                   key={option.mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={accessSaving}
-                  onClick={() => {
-                    setAccessModeDraft(option.mode);
-                    setAccessDialogError("");
-                  }}
-                  className={cn(
-                    "flex min-h-20 w-full items-start gap-3 rounded-8 border px-3 py-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
-                    selected
-                      ? "border-foreground bg-surface-muted text-foreground"
-                      : "border-border bg-surface text-muted-foreground hover:border-border-strong hover:text-foreground",
-                  )}
+                  htmlFor={id}
+                  className="flex min-h-20 items-start gap-3 rounded-8 border border-border bg-surface px-3 py-3 text-muted-foreground outline-1 outline-offset-0 outline-transparent transition-colors hover:border-border-strong hover:text-foreground has-data-[state=checked]:border-foreground has-data-[state=checked]:bg-surface-muted has-data-[state=checked]:text-foreground has-focus-visible:outline-solid has-focus-visible:outline-ring/50 has-disabled:opacity-60"
                 >
-                  <Icon className="mt-1 h-4 w-4 shrink-0" aria-hidden />
+                  <span className="flex h-5 shrink-0 items-center">
+                    {/* The card already dims as a whole, and nested opacity
+                        multiplies, so the item keeps its own full opacity
+                        rather than landing at 30% inside a card at 60%. */}
+                    <RadioGroupItem id={id} value={option.mode} className="disabled:opacity-100" />
+                  </span>
+                  <span className="flex h-5 shrink-0 items-center">
+                    <Icon className="size-4" aria-hidden />
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-ui">{option.title}</span>
                     <span className="mt-1 block text-aux text-muted-foreground">
                       {option.description}
                     </span>
                   </span>
-                  {selected ? (
-                    <Check className="mt-1 h-4 w-4 shrink-0 text-foreground" aria-hidden />
-                  ) : null}
-                </button>
+                </label>
               );
             })}
-          </div>
+          </RadioGroup>
 
           {accessModeDraft === "cloud-email" ? (
             <div className="space-y-2">

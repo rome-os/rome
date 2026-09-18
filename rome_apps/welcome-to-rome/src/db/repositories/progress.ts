@@ -15,11 +15,9 @@ export interface AppIdea {
  *  ../../hooks/turn-middleware/script.ts. */
 export type WelcomeNode =
   | "greet"
-  | "await_email"
-  | "await_email_receipt"
-  | "await_choice"
-  | "await_browser"
-  | "await_questions"
+  | "await_names"
+  | "await_ai"
+  | "await_question"
   | "await_scouts"
   | "await_idea"
   | "done";
@@ -30,6 +28,8 @@ export interface WelcomeProgress {
   introSummary: string | null;
   ideas: AppIdea[];
   ideasGeneratedAt: string | null;
+  /** Null until the connect-AI step resolves. */
+  aiConnected: boolean | null;
   completedAt: string | null;
 }
 
@@ -39,6 +39,7 @@ const EMPTY: WelcomeProgress = {
   introSummary: null,
   ideas: [],
   ideasGeneratedAt: null,
+  aiConnected: null,
   completedAt: null,
 };
 
@@ -48,16 +49,17 @@ interface ProgressPatch {
   introSummary?: string | null;
   appIdeas?: string | null;
   appIdeasGeneratedAt?: string | null;
+  aiConnected?: boolean | null;
   completedAt?: string | null;
 }
 
+// A cursor from a script version that no longer exists reads as `greet`, so a
+// conversation parked on a removed step restarts instead of stalling.
 const NODES: readonly WelcomeNode[] = [
   "greet",
-  "await_email",
-  "await_email_receipt",
-  "await_choice",
-  "await_browser",
-  "await_questions",
+  "await_names",
+  "await_ai",
+  "await_question",
   "await_scouts",
   "await_idea",
   "done",
@@ -114,6 +116,7 @@ export class ProgressRepository {
       introSummary: row.introSummary,
       ideas: parseIdeas(row.appIdeas),
       ideasGeneratedAt: row.appIdeasGeneratedAt,
+      aiConnected: row.aiConnected ?? null,
       completedAt: row.completedAt,
     };
   }
@@ -138,6 +141,8 @@ export class ProgressRepository {
         patch.appIdeasGeneratedAt !== undefined
           ? patch.appIdeasGeneratedAt
           : (existing?.appIdeasGeneratedAt ?? null),
+      aiConnected:
+        patch.aiConnected !== undefined ? patch.aiConnected : (existing?.aiConnected ?? null),
       completedAt:
         patch.completedAt !== undefined ? patch.completedAt : (existing?.completedAt ?? null),
       updatedAt: now,
@@ -159,6 +164,7 @@ export class ProgressRepository {
       introSummary: next.introSummary,
       ideas: parseIdeas(next.appIdeas),
       ideasGeneratedAt: next.appIdeasGeneratedAt,
+      aiConnected: next.aiConnected,
       completedAt: next.completedAt,
     };
   }
@@ -179,6 +185,7 @@ export class ProgressRepository {
       introSummary: null,
       appIdeas: null,
       appIdeasGeneratedAt: null,
+      aiConnected: null,
       completedAt: null,
     });
   }

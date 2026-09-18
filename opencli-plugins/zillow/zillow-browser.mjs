@@ -154,7 +154,7 @@ function hasReadablePhotos(pageData) {
 async function navigateAndRead(page, url, timeoutMs) {
   const currentUrl = await page.evaluate("window.location.href || ''").catch(() => "");
   if (isZillowUrl(currentUrl)) {
-    await page.goto("about:blank", { waitUntil: "none" });
+    await page.goto(new URL("/", url).href, { waitUntil: "none" });
   }
   await page.goto(url);
 

@@ -1,0 +1,144 @@
+{
+  "repositories": [
+    {
+      "id": "demo-triage-repository",
+      "slug": "rome-os/rome",
+      "name": "rome-os/rome",
+      "addedAt": "2026-09-02T13:20:08.248Z"
+    }
+  ],
+  "repoSettings": [
+    {
+      "id": "demo-triage-settings",
+      "repo": "rome-os/rome",
+      "autoTriageEnabled": true,
+      "triggerOnOpen": true,
+      "triggerOnEdit": true,
+      "applyMode": "apply",
+      "dimensionsEnabled": {
+        "type": true,
+        "priority": true,
+        "area": true,
+        "flags": true
+      },
+      "autoCreateLabels": true,
+      "labelMap": {
+        "type": {
+          "bug": "bug",
+          "enhancement": "feature-request",
+          "documentation": "documentation",
+          "question": "question"
+        },
+        "priority": {
+          "low": "P3",
+          "medium": "P2",
+          "high": "P1",
+          "critical": "P0"
+        },
+        "flags": {
+          "needs-triage": "needs-triage",
+          "needs-info": "needs-info"
+        }
+      },
+      "provisionedAt": "2026-09-02T13:20:09.870Z",
+      "customRules": null,
+      "githubWebhookId": null,
+      "webhookChannelUrl": null,
+      "createdAt": "2026-09-02T13:20:08.249Z",
+      "updatedAt": "2026-09-02T13:22:04.335Z",
+      "webhookConnected": true,
+      "eventRoutinesReady": true,
+      "eventRoutineStatus": {
+        "ready": true,
+        "required": ["issues"],
+        "present": ["issues"],
+        "enabled": ["issues"],
+        "missing": [],
+        "disabled": []
+      },
+      "triggerWiringHealthy": true
+    }
+  ],
+  "recentResults": [
+    {
+      "id": "triage-363",
+      "repo": "rome-os/rome",
+      "issueNumber": 363,
+      "issueUrl": "https://github.com/rome-os/rome/issues/363",
+      "issueTitle": "opencli: support browser extensions in managed sessions",
+      "actor": "webhook:edited",
+      "status": "succeeded",
+      "appliedLabels": ["feature-request", "P2"],
+      "createdLabels": [],
+      "reasoning": "This requests a substantial new capability for managed browser sessions rather than reporting broken existing behavior, so it is an enhancement. It has meaningful workflow and security value but no outage or urgent regression, making medium priority appropriate. No existing area/component label specifically represents OpenCLI, Chromium, or extensions, and the detailed requirements and acceptance criteria provide enough information without triage flags.",
+      "classification": {
+        "type": "enhancement",
+        "priority": "medium",
+        "areas": [],
+        "flags": []
+      },
+      "romeSession": null,
+      "error": null,
+      "startedAt": "2026-09-12T01:04:29.335Z",
+      "completedAt": "2026-09-12T01:04:51.081Z",
+      "createdAt": "2026-09-12T01:04:29.327Z"
+    },
+    {
+      "id": "triage-339",
+      "repo": "rome-os/rome",
+      "issueNumber": 339,
+      "issueUrl": "https://github.com/rome-os/rome/issues/339",
+      "issueTitle": "actions: lightweight submission occupies the sole warm worker and repeatedly cold-starts background work",
+      "actor": "webhook:opened",
+      "status": "succeeded",
+      "appliedLabels": ["bug", "P2"],
+      "createdLabels": [],
+      "reasoning": "This is a confirmed performance bug in action-worker allocation: a lightweight parent action occupies the sole warm worker, forcing its detached child onto a repeatedly discarded cold worker. The detailed reproduction, timings, source analysis, and mitigation provide enough information to act without additional flags. It warrants normal-course priority because it causes recurring multi-second latency in affected workflows, but it does not break the system or risk data. No existing label clearly represents the action-worker or worker-pool component, so no area label applies.",
+      "classification": {
+        "type": "bug",
+        "priority": "medium",
+        "areas": [],
+        "flags": []
+      },
+      "romeSession": null,
+      "error": null,
+      "startedAt": "2026-09-10T17:21:32.129Z",
+      "completedAt": "2026-09-10T17:21:46.971Z",
+      "createdAt": "2026-09-10T17:21:32.008Z"
+    },
+    {
+      "id": "triage-326",
+      "repo": "rome-os/rome",
+      "issueNumber": 326,
+      "issueUrl": "https://github.com/rome-os/rome/issues/326",
+      "issueTitle": "people: latest-message icons are not left aligned across rows",
+      "actor": "webhook:opened",
+      "status": "succeeded",
+      "appliedLabels": ["bug", "P3"],
+      "createdLabels": [],
+      "reasoning": "This is a reproducible UI layout defect: message icons and previews are misaligned because timestamp widths vary between rows. The impact is limited to visual consistency and scanability, so low priority is appropriate. The report includes clear reproduction steps, measurements, relevant code, and likely fixes, so neither triage flag is needed; no existing component-area label matches the People page.",
+      "classification": {
+        "type": "bug",
+        "priority": "low",
+        "areas": [],
+        "flags": []
+      },
+      "romeSession": null,
+      "error": null,
+      "startedAt": "2026-09-09T19:57:37.617Z",
+      "completedAt": "2026-09-09T19:57:49.296Z",
+      "createdAt": "2026-09-09T19:57:37.562Z"
+    }
+  ],
+  "counts": {
+    "succeeded": 3,
+    "failed": 0,
+    "queued": 0
+  },
+  "stats": {
+    "totalRepos": 1,
+    "totalTriaged": 3,
+    "succeeded": 3,
+    "failed": 0
+  }
+}

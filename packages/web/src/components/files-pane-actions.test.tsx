@@ -347,10 +347,11 @@ describe("shared file action model", () => {
     // The accent background alone is ~1.2:1 against the sheet surface, under
     // the 3:1 WCAG 1.4.11 asks of a focus indicator, so the outline carries
     // it. `outline-solid` is load-bearing: the base sets outline-hidden, which
-    // zeroes --tw-outline-style, and outline-2 reads that variable.
+    // zeroes --tw-outline-style, and outline-1 reads that variable.
     const row = screen.getByRole("button", { name: "Rename" }).className;
     expect(row).toContain("focus-visible:outline-solid");
-    expect(row).toContain("focus-visible:outline-2");
-    expect(row).toContain("focus-visible:outline-ring");
+    expect(row).toContain("outline-1");
+    expect(row).toContain("outline-transparent");
+    expect(row).toContain("focus-visible:outline-ring/50");
   });
 });

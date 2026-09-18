@@ -445,7 +445,7 @@ export function UnknownEntry({
       {/* With no form open the failure belongs to the dismissal, whose button
           sits on the row above. */}
       {!action && error && (
-        <div className="flex justify-end px-2 pb-2">
+        <div className="flex justify-end px-3 pb-2">
           <MutationError message={error} />
         </div>
       )}
@@ -544,7 +544,7 @@ export function DismissedEntry({ row, variant }: { row: PeopleRow; variant: Peop
         }
       />
       {error && (
-        <div className="flex justify-end px-2 pb-2">
+        <div className="flex justify-end px-3 pb-2">
           <MutationError message={error} />
         </div>
       )}

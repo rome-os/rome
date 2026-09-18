@@ -60,7 +60,9 @@ export function CardDescription({ className, ...props }: ComponentProps<"div">) 
   return (
     <div
       data-slot="card-description"
-      className={cn("text-body text-muted-foreground", className)}
+      // UI, like the Dialog and EmptyState descriptions: a description sits at
+      // the size of the controls it explains and leads by ink, not by size.
+      className={cn("text-ui text-muted-foreground", className)}
       {...props}
     />
   );

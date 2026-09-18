@@ -1,4 +1,5 @@
 // @rstest-environment jsdom
+import { createRef, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -52,6 +53,7 @@ function peopleList(people: PersonResource[]): PeopleList {
 }
 
 interface RenderComposerOptions {
+  composerRef?: Ref<ChatComposerHandle>;
   settings?: Record<string, unknown>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
@@ -94,7 +96,7 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
     ...render(
       <MemoryRouter>
         <QueryClientProvider client={queryClient}>
-          <ChatComposer ref={options.composerRef} onSend={rs.fn()} {...props} />
+          <ChatComposer onSend={rs.fn()} {...props} ref={options.composerRef} />
         </QueryClientProvider>
       </MemoryRouter>,
     ),
@@ -562,7 +564,7 @@ describe("composer textarea height", () => {
   });
 
   // The empty composer is one line box tall, and that box belongs to the
-  // `text-body` role. A px floor here would hold the old number through a
+  // `text-composer` role. A px floor here would hold the old number through a
   // retune of the role and pull the text off the composer's padding, so the
   // floor is declared in line-box units and the resize below never writes one.
   it("declares its floor in line-box units rather than pixels", () => {
@@ -586,5 +588,25 @@ describe("composer textarea height", () => {
     fireEvent.input(textarea, { target: { value: "hi" } });
 
     expect(textarea.style.height).toBe("1px");
+  });
+});
+
+describe("programmatic draft insertion", () => {
+  it("can update the draft without focus or submission while preserving default focus", async () => {
+    const composerRef = createRef<ChatComposerHandle>();
+    const onSend = rs.fn();
+    renderComposer({ onSend }, { composerRef });
+    const input = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    const focus = rs.spyOn(input, "focus");
+    rs.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    act(() => composerRef.current?.insertText("Build an app", { focus: false }));
+    expect(input.value).toBe("Build an app");
+    expect(focus).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    act(() => composerRef.current?.insertText("Keep editing"));
+    expect(focus).toHaveBeenCalled();
   });
 });

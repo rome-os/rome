@@ -42,8 +42,7 @@ function cdpEndpoint(): string {
 
 /**
  * The production runner: `opencli --cdp-endpoint <server-chrome> <args> -f json`.
- * Resolution mirrors the in-container shell alias (scripts/docker/
- * rome-shell-aliases.sh) so the channel sees the same browser agents do.
+ * Uses Rome's configured Chrome host and port.
  * A non-zero exit is NOT a rejection here — callers classify via the parsers
  * below, which need the captured output either way.
  */
@@ -237,6 +236,7 @@ const snapshotRowSchema = z.object({
   participant_count: z.number().nullish(),
   message_id: z.string().min(1),
   sent_at: z.string().nullish(),
+  sender_participant_id: z.string().nullish(),
   sender_name: z.string().nullish(),
   sender_type: z.string().nullish(),
   sender_profile_url: z.string().nullish(),
@@ -264,6 +264,7 @@ export interface LinkedInSnapshotMessage {
   participantCount: number | null;
   messageId: string;
   sentAt: Date | null;
+  senderParticipantId: string | null;
   senderName: string | null;
   senderType: string | null;
   senderProfileUrl: string | null;
@@ -288,6 +289,7 @@ export function parseThreadSnapshot(result: OpencliResult): LinkedInSnapshotMess
     participantCount: row.participant_count ?? null,
     messageId: row.message_id,
     sentAt: parseIsoDate(row.sent_at),
+    senderParticipantId: row.sender_participant_id || null,
     senderName: row.sender_name ?? null,
     senderType: row.sender_type ?? null,
     senderProfileUrl: row.sender_profile_url ?? null,

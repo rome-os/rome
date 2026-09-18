@@ -70,3 +70,25 @@ export function emitAskQuestion(
     output: [{ type: "text", text: JSON.stringify(payload) }],
   });
 }
+
+// The host's BUILT-IN connect-AI card (rome-web's ai-tools-card). The webchat
+// drain trusts it only when the emitting tool is `connect_ai`
+// (packages/core/src/api/routes/webchat.ts). It resolves next turn as
+// `{ connected: true }` or `{ skip: true }` (parsed via readResolutionJson).
+const CONNECT_AI_TOOL = "connect_ai";
+
+export function emitConnectAi(emit: (event: AgentMessage) => void): void {
+  const toolUseId = randomUUID();
+  emit({ type: "tool_use", id: toolUseId, tool: CONNECT_AI_TOOL, input: {} });
+  const payload = {
+    pendingInteraction: true,
+    appId: "core",
+    render: { kind: "inline", componentId: "ai-tools-card", props: {}, builtin: true },
+  };
+  emit({
+    type: "tool_result",
+    toolUseId,
+    tool: CONNECT_AI_TOOL,
+    output: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+}

@@ -169,6 +169,7 @@ describe("parseThreadSnapshot", () => {
             returned_message_count: 2,
             message_id: "m1",
             sent_at: "2026-08-19T20:52:09.488Z",
+            sender_participant_id: "ACoAAAda0001",
             sender_name: "Ada Lovelace",
             sender_type: "member",
             sender_profile_url: "https://www.linkedin.com/in/ada/",
@@ -191,6 +192,7 @@ describe("parseThreadSnapshot", () => {
     );
     expect(messages).toHaveLength(2);
     expect(messages[0].sentAt?.toISOString()).toBe("2026-08-19T20:52:09.488Z");
+    expect(messages[0].senderParticipantId).toBe("ACoAAAda0001");
     expect(messages[0].reactionCount).toBe(1);
     expect(messages[1].sentAt).toBeNull();
     expect(messages[1].senderIsSelf).toBe(true);

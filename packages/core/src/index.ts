@@ -1,3 +1,4 @@
+import { createPairingAdmission } from "./channels/pairing.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -57,9 +58,11 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
+import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
+import { ComputerUseService } from "./computer-use/service.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -245,10 +248,21 @@ async function main() {
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
+  // The personal WeChat account contributes a people-timeline source only when
+  // the connection is enabled; its store is the client's own database, read live.
+  const wechatUserReader = config.wechatUserEnabled
+    ? new WechatUserReader(new WechatUserRuntime())
+    : undefined;
+  const channels = channelList({
+    db,
+    whatsAppAccounts,
+    linkedInAccounts,
+    ...(wechatUserReader ? { wechatUserReader } : {}),
+  });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db);
+  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
+  const computerUse = new ComputerUseService(settingsRepo);
 
   // Instance token: the DB is the single runtime read path. A cloud VM
   // gets ROME_INSTANCE_TOKEN injected into its env — seed it into the DB so the
@@ -272,7 +286,13 @@ async function main() {
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
   await webchatRepo.recoverInterruptedInputs();
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  // `routineEngine` is built further down; the closure only runs on a profile
+  // write, which happens after boot.
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+  });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
@@ -285,7 +305,15 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
-  const talkRouter = createTalkRouter(connectionRegistry);
+  const talkRouter = createTalkRouter(
+    connectionRegistry,
+    createPairingAdmission({
+      approvalsRepo,
+      personMappingRepo,
+      talkGrants: (service) =>
+        connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+    }),
+  );
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
@@ -631,7 +659,7 @@ async function main() {
     isEnabled: () => resolveAutoUpgradeEnabled(config),
   });
 
-  const capabilityDiscovery = new CapabilityDiscovery();
+  const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
   try {
     await capabilityDiscovery.start();
   } catch (err) {
@@ -1006,6 +1034,9 @@ async function main() {
     // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
+    // The personal WeChat connection is opt-in; its key recovery runs a local
+    // debugger in this container, needing no host execution.
+    wechatUserEnabled: config.wechatUserEnabled,
   });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
@@ -1210,6 +1241,7 @@ async function main() {
   // boot's — the dashboard reads the result via /api/build-info. The stored
   // version is committed after "Rome started" below.
   const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
+  computerUse.start();
 
   // Wire the process-global feature-flag backend (Statsig) when a server secret
   // is configured, then apply any FEATURE_GATE_* env overrides on top, then
@@ -1276,6 +1308,7 @@ async function main() {
       ogImageStore,
       db,
       settingsRepo,
+      computerUse,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
@@ -1535,6 +1568,7 @@ async function main() {
     }
 
     stopInstanceHeartbeat();
+    await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
 
     capabilityDiscovery.stop();

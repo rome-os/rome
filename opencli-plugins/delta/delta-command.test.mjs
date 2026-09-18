@@ -13,8 +13,14 @@ export class ArgumentError extends Error {}
 export class CommandExecutionError extends Error {}
 export class AuthRequiredError extends Error {constructor(domain,message){super(message);this.domain=domain;}}
 `)}`;
+const formUrl = new URL("./delta-form.mjs", import.meta.url).href;
+const formStubUrl = `data:text/javascript,${encodeURIComponent(`
+  export * from ${JSON.stringify(formUrl)};
+  export async function submitDeltaSearch() {}
+`)}`;
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "./delta-form.mjs") return { url: formStubUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/registry")
       return { url: registryUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/errors") return { url: errorsUrl, shortCircuit: true };
@@ -34,6 +40,9 @@ function pageFor(data) {
   let reads = 0;
   return {
     async goto() {},
+    async selectTab(index) {
+      assert.equal(index, 0);
+    },
     async wait() {},
     async evaluate(fn) {
       if (typeof fn === "string" || fn.name !== "readDeltaPage") return true;
@@ -60,6 +69,21 @@ test("returns SkyMiles plus cash taxes and a separate card-member offer", async 
   assert.equal(rows[0].taxes, 6);
   assert.equal(rows[0].card_member_miles, 28300);
 });
+
+for (const day of ["05", "5"]) {
+  test(`returns awards when Delta displays Oct ${day}`, async () => {
+    const data = fixture();
+    data.search.segments[0].departure_date = "2026-10-05";
+    data.date_heading = `Mon, Oct ${day}, 2026`;
+    data.rows = [data.rows[0]];
+    data.total = 1;
+    const rows = await command.func(pageFor(data), { ...args, depart: "2026-10-05" });
+    assert.ok(rows.length > 0);
+    assert.equal(rows[0].departure_date, "2026-10-05");
+    assert.equal(rows[0].miles, 33300);
+    assert.equal(rows[0].taxes, 6);
+  });
+}
 
 test("cash command does not require the miles flag or any account read", async () => {
   const data = fixture();

@@ -58,21 +58,21 @@ describe("ApprovalsRepository", () => {
       description: "Run command",
     });
 
-    await repo.approve(id1);
+    await repo.resolvePending(id1, "approve", "test-guardian");
 
     const pending = await repo.findPending();
     expect(pending).toHaveLength(1);
     expect(pending[0].type).toBe("action_execution");
   });
 
-  it("approve() sets status=approved and resolvedAt/resolvedBy", async () => {
+  it("resolvePending(approve) sets status=approved and resolvedAt/resolvedBy", async () => {
     const id = await repo.create({
       type: "person_mapping",
       requestedBy: "sentinel",
       description: "Add Bob",
     });
 
-    await repo.approve(id, "admin-user");
+    await repo.resolvePending(id, "approve", "admin-user");
 
     const approval = await repo.findById(id);
     expect(approval!.status).toBe("approved");
@@ -80,14 +80,14 @@ describe("ApprovalsRepository", () => {
     expect(approval!.resolvedAt).toBeInstanceOf(Date);
   });
 
-  it("reject() sets status=rejected and resolvedAt/resolvedBy", async () => {
+  it("resolvePending(reject) sets status=rejected and resolvedAt/resolvedBy", async () => {
     const id = await repo.create({
       type: "person_mapping",
       requestedBy: "sentinel",
       description: "Add Charlie",
     });
 
-    await repo.reject(id, "admin-user");
+    await repo.resolvePending(id, "reject", "admin-user");
 
     const approval = await repo.findById(id);
     expect(approval!.status).toBe("rejected");
@@ -136,9 +136,9 @@ describe("ApprovalsRepository", () => {
       requestedBy: "assistant",
       description: "Execute once",
     });
-    await repo.resolvePending(id, "approve");
+    await repo.resolvePending(id, "approve", "test-guardian");
 
-    const second = await repo.resolvePending(id, "reject");
+    const second = await repo.resolvePending(id, "reject", "test-guardian");
     expect(second.outcome).toBe("already_resolved");
   });
 
@@ -148,7 +148,7 @@ describe("ApprovalsRepository", () => {
       requestedBy: "assistant",
       description: "Claim me",
     });
-    await repo.resolvePending(id, "approve");
+    await repo.resolvePending(id, "approve", "test-guardian");
 
     const first = await repo.claimExecution(id);
     const second = await repo.claimExecution(id);
@@ -164,9 +164,8 @@ describe("ApprovalsRepository", () => {
       type: "action_execution",
       requestedBy: "assistant",
       description: "Not queued",
+      status: "approved",
     });
-    // Approve directly (bypasses resolvePending, so executionState stays "idle")
-    await repo.approve(id);
 
     const claimed = await repo.claimExecution(id);
     expect(claimed).toBe(false);
@@ -181,7 +180,7 @@ describe("ApprovalsRepository", () => {
       requestedBy: "assistant",
       description: "Finish me",
     });
-    await repo.resolvePending(id, "approve");
+    await repo.resolvePending(id, "approve", "test-guardian");
     await repo.claimExecution(id);
 
     await repo.markExecuted(id);
@@ -198,7 +197,7 @@ describe("ApprovalsRepository", () => {
       requestedBy: "assistant",
       description: "Retry me",
     });
-    await repo.resolvePending(id, "approve");
+    await repo.resolvePending(id, "approve", "test-guardian");
     await repo.claimExecution(id);
     await repo.markExecutionFailed(id, "network timeout");
 
@@ -216,7 +215,7 @@ describe("ApprovalsRepository", () => {
       requestedBy: "assistant",
       description: "Already succeeded",
     });
-    await repo.resolvePending(id, "approve");
+    await repo.resolvePending(id, "approve", "test-guardian");
     await repo.claimExecution(id);
     await repo.markExecuted(id);
 

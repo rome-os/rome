@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.4](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.3...app-web-sdk-v0.3.4) (2026-09-15)
+
+
+### Features
+
+* **onboarding:** collapse cloud setup into the welcome conversation ([#222](https://github.com/rome-os/rome/issues/222)) ([00c96f7](https://github.com/rome-os/rome/commit/00c96f714d753ebe9cfb079d888d72daf04b8da5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.2.2 to ^0.3.0
+
 ## [0.3.3](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.2...app-web-sdk-v0.3.3) (2026-09-10)
 
 

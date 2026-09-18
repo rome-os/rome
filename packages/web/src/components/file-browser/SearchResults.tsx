@@ -50,7 +50,7 @@ export function SearchResults({ onMobileBack }: { onMobileBack: () => void }) {
               <div className="mb-1 break-all text-aux text-info-fg">
                 {result.file}:{result.line}
               </div>
-              <div className="line-clamp-2 text-body text-foreground">{result.content}</div>
+              <div className="line-clamp-2 text-ui text-foreground">{result.content}</div>
             </button>
           ))}
         </div>

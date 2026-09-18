@@ -247,7 +247,7 @@ export function SourceConnect(props: SourceConnectProps) {
 
         {step === "source" ? (
           <div className="space-y-2">
-            <p className="text-body text-muted-foreground">
+            <p className="text-ui text-muted-foreground">
               Choose where to keep this project in sync.
             </p>
             {loading ? (
@@ -269,7 +269,7 @@ export function SourceConnect(props: SourceConnectProps) {
 
         {step === "auth" && source ? (
           <div className="space-y-3">
-            <p className="text-body text-muted-foreground">
+            <p className="text-ui text-muted-foreground">
               {source.reason ?? `${source.label} is not connected yet.`} Connect your account to
               continue.
             </p>
@@ -405,7 +405,7 @@ export function SourceConnect(props: SourceConnectProps) {
 
         {step === "strategy" && conflictTarget ? (
           <div className="space-y-3">
-            <p className="text-body text-muted-foreground">
+            <p className="text-ui text-muted-foreground">
               Both this folder and <span className="text-foreground">{conflictTarget.label}</span>{" "}
               already have content. How should we reconcile them?
             </p>

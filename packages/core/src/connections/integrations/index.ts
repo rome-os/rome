@@ -26,6 +26,7 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { createWechatDescriptor } from "./wechat.js";
+import { createWechatUserDescriptor } from "./wechat-user.js";
 import { makeWebchatDescriptor } from "./webchat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
@@ -33,6 +34,7 @@ export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
+export { createWechatUserDescriptor, WECHAT_USER_SERVICE } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeWebchatDescriptor } from "./webchat.js";
@@ -72,6 +74,8 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
+  /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
+  wechatUserEnabled?: boolean;
 }
 
 /**
@@ -83,7 +87,7 @@ export function registerBuiltinConnections(
   registry: ConnectionRegistry,
   deps: BuiltinConnectionDeps,
 ): void {
-  registry.register(makeTelegramDescriptor({ personMappingRepo: deps.personMappingRepo }));
+  registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
       conversationSettings: deps.conversationSettings,
@@ -94,6 +98,13 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(createWechatDescriptor());
+  // The personal WeChat connection is opt-in (see config `wechatUserEnabled`).
+  // It runs the client in this container and recovers its store key with a
+  // local debugger, so it needs no host execution — only the container's own
+  // capability to ptrace the client it launches.
+  if (deps.wechatUserEnabled) {
+    registry.register(createWechatUserDescriptor());
+  }
   registry.register(
     createFeishuDescriptor({
       conversationSettings: deps.conversationSettings,

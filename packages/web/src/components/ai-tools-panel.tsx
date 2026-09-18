@@ -1,4 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
+import {
+  Measure,
+  Section,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+  SectionActions,
+} from "@rome-os/ui/page";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -202,6 +210,18 @@ const AI_TOOL_PROVIDERS = [
 ] as const;
 
 export type AiToolProviderId = (typeof AI_TOOL_PROVIDERS)[number]["statusKey"];
+
+/** Whether any provider this panel would show is signed in. The connect step in
+ *  chat probes `/api/ai-tools/status` and reads the answer through this, so it
+ *  and the panel cannot disagree on what counts as connected. */
+export function hasConnectedAiProvider(
+  status: Partial<Record<string, { loggedIn?: boolean } | null>>,
+  hiddenProviders: readonly AiToolProviderId[] = [],
+): boolean {
+  return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
+    (provider) => status[provider.statusKey]?.loggedIn === true,
+  );
+}
 
 const LOGOUT_PROVIDER_CONFIG = {
   claude: {
@@ -758,211 +778,202 @@ export function AiToolsPanel({
   const visibleProviders = AI_TOOL_PROVIDERS.filter(
     (provider) => !hiddenProviders.includes(provider.statusKey),
   );
-  const anyConnected = visibleProviders.some(
-    (provider) => toolStatus[provider.statusKey]?.loggedIn === true,
-  );
+  const anyConnected = hasConnectedAiProvider(toolStatus, hiddenProviders);
   const logoutConfig = logoutProvider ? LOGOUT_PROVIDER_CONFIG[logoutProvider] : null;
 
   useEffect(() => {
     if (!loadingStatus) onConnectedChange?.(anyConnected);
   }, [anyConnected, loadingStatus, onConnectedChange]);
 
+  const PanelMeasure = showHeader ? Measure : Fragment;
+  const PanelSection = showHeader ? Section : Fragment;
+
   return (
-    <div>
-      {showHeader && (
-        <>
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-title text-foreground">{t("aiTools.title")}</h2>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void handleRefresh()}
-              disabled={refreshPending}
-              className={`shrink-0 ${AI_TOOL_ACTION_BUTTON_CLASS}`}
-            >
-              {refreshPending ? (
-                <Spinner size="sm" aria-hidden />
-              ) : (
-                <RefreshCw className="size-4" aria-hidden />
-              )}
-              {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
-            </Button>
-          </div>
-          {refreshError && (
-            <p role="alert" className="mb-4 text-body text-destructive">
-              {refreshError}
-            </p>
-          )}
-        </>
-      )}
+    <PanelMeasure>
+      <PanelSection>
+        {showHeader && (
+          <>
+            <SectionHeader>
+              <SectionHeading>
+                <SectionTitle>{t("aiTools.title")}</SectionTitle>
+              </SectionHeading>
+              <SectionActions>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRefresh()}
+                  disabled={refreshPending}
+                  className={`shrink-0 ${AI_TOOL_ACTION_BUTTON_CLASS}`}
+                >
+                  {refreshPending ? (
+                    <Spinner size="sm" aria-hidden />
+                  ) : (
+                    <RefreshCw className="size-4" aria-hidden />
+                  )}
+                  {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
+                </Button>
+              </SectionActions>
+            </SectionHeader>
+            {refreshError && (
+              <p role="alert" className="mb-4 text-ui text-destructive">
+                {refreshError}
+              </p>
+            )}
+          </>
+        )}
 
-      <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
-        {visibleProviders.map((provider) => {
-          const status = toolStatus[provider.statusKey];
-          const isLoggedIn = status?.loggedIn === true;
-          // Revoked credentials read as a distinct "needs re-login" badge (and
-          // still offer the sign-in buttons, since loggedIn is false).
-          const needsReauth = status?.needsReauth === true;
-          const providerName = t(`aiTools.providers.${provider.i18nKey}.name` as const);
-          const accountType = formatAccountType(status?.accountType);
-          const usesManagedApiKey =
-            provider.id === "claude-login" &&
-            (status?.authMethod === "stored-compatible" ||
-              configuredAnthropicProvider?.hasApiKey === true);
-          const usesEnvironmentApiKey =
-            provider.id === "claude-login" && status?.authMethod === "environment";
-          const usesApiKey = usesManagedApiKey || usesEnvironmentApiKey;
-          const apiKeyProviderName =
-            configuredAnthropicProvider?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID
-              ? t("aiTools.otherProviders.custom.providerName")
-              : (configuredAnthropicProvider?.providerName ?? accountType ?? providerName);
+        <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+          {visibleProviders.map((provider) => {
+            const status = toolStatus[provider.statusKey];
+            const isLoggedIn = status?.loggedIn === true;
+            // Revoked credentials read as a distinct "needs re-login" badge (and
+            // still offer the sign-in buttons, since loggedIn is false).
+            const needsReauth = status?.needsReauth === true;
+            const providerName = t(`aiTools.providers.${provider.i18nKey}.name` as const);
+            const accountType = formatAccountType(status?.accountType);
+            const usesManagedApiKey =
+              provider.id === "claude-login" &&
+              (status?.authMethod === "stored-compatible" ||
+                configuredAnthropicProvider?.hasApiKey === true);
+            const usesEnvironmentApiKey =
+              provider.id === "claude-login" && status?.authMethod === "environment";
+            const usesApiKey = usesManagedApiKey || usesEnvironmentApiKey;
+            const apiKeyProviderName =
+              configuredAnthropicProvider?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID
+                ? t("aiTools.otherProviders.custom.providerName")
+                : (configuredAnthropicProvider?.providerName ?? accountType ?? providerName);
 
-          const shouldShowUsage =
-            !usesApiKey && shouldShowAiToolUsage(showUsage, status, provider.available);
-          return (
-            <div key={provider.id} className="px-4 py-2">
-              <div className="flex items-center gap-2">
-                <AiToolIcon icon={provider.icon} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <p className="text-ui text-foreground">{providerName}</p>
-                    {provider.available && !loadingStatus && (
-                      <span
-                        className={`inline-flex items-center gap-1 text-aux ${
-                          isLoggedIn
-                            ? "text-success-fg"
-                            : needsReauth
-                              ? "text-warning-fg"
-                              : "text-muted-foreground"
-                        }`}
-                      >
+            const shouldShowUsage =
+              !usesApiKey && shouldShowAiToolUsage(showUsage, status, provider.available);
+            return (
+              <div key={provider.id} className="px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <AiToolIcon icon={provider.icon} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="text-ui text-foreground">{providerName}</p>
+                      {provider.available && !loadingStatus && (
                         <span
-                          className={`size-1.5 rounded-full ${
+                          className={`inline-flex items-center gap-1 text-aux ${
                             isLoggedIn
-                              ? "bg-success"
+                              ? "text-success-fg"
                               : needsReauth
-                                ? "bg-warning"
-                                : "bg-muted-foreground/50"
+                                ? "text-warning-fg"
+                                : "text-muted-foreground"
                           }`}
-                        />
-                        {isLoggedIn
-                          ? usesApiKey
-                            ? t("aiTools.status.apiKeyActive")
-                            : t("aiTools.status.connected")
-                          : needsReauth
+                        >
+                          <span
+                            className={`size-1.5 rounded-full ${
+                              isLoggedIn
+                                ? "bg-success"
+                                : needsReauth
+                                  ? "bg-warning"
+                                  : "bg-muted-foreground/50"
+                            }`}
+                          />
+                          {isLoggedIn
                             ? usesApiKey
-                              ? t("aiTools.status.apiKeyNeedsUpdate")
-                              : t("aiTools.status.needsReauth")
-                            : t("aiTools.status.notConnected")}
-                      </span>
-                    )}
-                    {!provider.available && (
-                      <span className="text-aux text-muted-foreground">
-                        {t("aiTools.status.comingSoon")}
-                      </span>
-                    )}
-                  </div>
-                  {usesApiKey ? (
-                    usesManagedApiKey && configuredAnthropicProvider ? (
-                      <p className="flex items-center gap-2 text-aux text-muted-foreground">
-                        <AnthropicCompatibleProviderLogo
-                          providerId={configuredAnthropicProvider.provider}
-                        />
-                        <span className="text-foreground">{apiKeyProviderName}</span>
-                      </p>
-                    ) : (
-                      <p className="text-aux text-muted-foreground">
-                        {t("aiTools.authSource.environmentApiKey")}
-                      </p>
-                    )
-                  ) : isLoggedIn ? (
-                    <p className="truncate text-aux text-muted-foreground">
-                      {status.authMethod ? (
-                        <>
-                          <span className="hidden sm:inline">
-                            <Trans
-                              i18nKey="aiTools.status.signedInWith"
-                              t={t}
-                              values={{ method: status.authMethod }}
-                              components={{
-                                1: <span className="text-foreground" />,
-                              }}
-                            />
-                          </span>
-                          <span className="sm:hidden">{status.authMethod}</span>
-                          {accountType && (
-                            <>
-                              <span className="mx-2">·</span>
-                              <span className="hidden sm:inline">
-                                <Trans
-                                  i18nKey="aiTools.status.accountType"
-                                  t={t}
-                                  values={{ type: accountType }}
-                                  components={{
-                                    1: <span className="text-foreground" />,
-                                  }}
-                                />
-                              </span>
-                              <span className="sm:hidden">{accountType}</span>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        t("aiTools.status.signedIn")
+                              ? t("aiTools.status.apiKeyActive")
+                              : t("aiTools.status.connected")
+                            : needsReauth
+                              ? usesApiKey
+                                ? t("aiTools.status.apiKeyNeedsUpdate")
+                                : t("aiTools.status.needsReauth")
+                              : t("aiTools.status.notConnected")}
+                        </span>
                       )}
-                    </p>
-                  ) : null}
-                </div>
-                {provider.available && (
-                  <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {provider.id === "claude-login" &&
-                    usesManagedApiKey &&
-                    configuredAnthropicProvider ? (
-                      <ButtonGroup>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={AI_TOOL_ACTION_BUTTON_CLASS}
-                          onClick={openAnthropicProviderDialog}
-                        >
-                          {t("aiTools.otherProviders.changeProvider")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setRemoveAnthropicProviderOpen(true)}
-                          disabled={savingAnthropicProvider}
-                          className={`${AI_TOOL_ACTION_BUTTON_CLASS} text-destructive hover:bg-destructive/10 hover:text-destructive`}
-                        >
-                          {t("common.remove")}
-                        </Button>
-                      </ButtonGroup>
-                    ) : provider.id === "claude-login" && !usesApiKey && !isLoggedIn ? (
-                      <ButtonGroup>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={AI_TOOL_ACTION_BUTTON_CLASS}
-                          onClick={() => setTerminalPreset(provider.id)}
-                        >
-                          {t("aiTools.logIn")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={AI_TOOL_ACTION_BUTTON_CLASS}
-                          title={t("aiTools.otherProviders.apiProvidersTooltip")}
-                          onClick={openAnthropicProviderDialog}
-                        >
-                          {t("aiTools.otherProviders.apiKey")}
-                        </Button>
-                      </ButtonGroup>
-                    ) : (
-                      <>
-                        {provider.id === "claude-login" && (
+                      {!provider.available && (
+                        <span className="text-aux text-muted-foreground">
+                          {t("aiTools.status.comingSoon")}
+                        </span>
+                      )}
+                    </div>
+                    {usesApiKey ? (
+                      usesManagedApiKey && configuredAnthropicProvider ? (
+                        <p className="flex items-center gap-2 text-aux text-muted-foreground">
+                          <AnthropicCompatibleProviderLogo
+                            providerId={configuredAnthropicProvider.provider}
+                          />
+                          <span className="text-foreground">{apiKeyProviderName}</span>
+                        </p>
+                      ) : (
+                        <p className="text-aux text-muted-foreground">
+                          {t("aiTools.authSource.environmentApiKey")}
+                        </p>
+                      )
+                    ) : isLoggedIn ? (
+                      <p className="truncate text-aux text-muted-foreground">
+                        {status.authMethod ? (
+                          <>
+                            <span className="hidden sm:inline">
+                              <Trans
+                                i18nKey="aiTools.status.signedInWith"
+                                t={t}
+                                values={{ method: status.authMethod }}
+                                components={{
+                                  1: <span className="text-foreground" />,
+                                }}
+                              />
+                            </span>
+                            <span className="sm:hidden">{status.authMethod}</span>
+                            {accountType && (
+                              <>
+                                <span className="mx-2">·</span>
+                                <span className="hidden sm:inline">
+                                  <Trans
+                                    i18nKey="aiTools.status.accountType"
+                                    t={t}
+                                    values={{ type: accountType }}
+                                    components={{
+                                      1: <span className="text-foreground" />,
+                                    }}
+                                  />
+                                </span>
+                                <span className="sm:hidden">{accountType}</span>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          t("aiTools.status.signedIn")
+                        )}
+                      </p>
+                    ) : null}
+                  </div>
+                  {provider.available && (
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      {provider.id === "claude-login" &&
+                      usesManagedApiKey &&
+                      configuredAnthropicProvider ? (
+                        <ButtonGroup>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={AI_TOOL_ACTION_BUTTON_CLASS}
+                            onClick={openAnthropicProviderDialog}
+                          >
+                            {t("aiTools.otherProviders.changeProvider")}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRemoveAnthropicProviderOpen(true)}
+                            disabled={savingAnthropicProvider}
+                            className={`${AI_TOOL_ACTION_BUTTON_CLASS} text-destructive hover:bg-destructive/10 hover:text-destructive`}
+                          >
+                            {t("common.remove")}
+                          </Button>
+                        </ButtonGroup>
+                      ) : provider.id === "claude-login" && !usesApiKey && !isLoggedIn ? (
+                        <ButtonGroup>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={AI_TOOL_ACTION_BUTTON_CLASS}
+                            onClick={() => setTerminalPreset(provider.id)}
+                          >
+                            {t("aiTools.logIn")}
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -972,368 +983,387 @@ export function AiToolsPanel({
                           >
                             {t("aiTools.otherProviders.apiKey")}
                           </Button>
-                        )}
-                        {!usesApiKey &&
-                          (isLoggedIn ? (
+                        </ButtonGroup>
+                      ) : (
+                        <>
+                          {provider.id === "claude-login" && (
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={logoutProvider === provider.statusKey && logoutPending}
-                              aria-label={
-                                logoutProvider === provider.statusKey && logoutPending
-                                  ? t("aiTools.loggingOut")
-                                  : undefined
-                              }
-                              onClick={() => {
-                                setLogoutError(null);
-                                setLogoutProvider(
-                                  provider.id === "codex-login" ? "codex" : "claude",
-                                );
-                              }}
-                              className={`${AI_TOOL_ACTION_BUTTON_CLASS} shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive`}
+                              className={AI_TOOL_ACTION_BUTTON_CLASS}
+                              title={t("aiTools.otherProviders.apiProvidersTooltip")}
+                              onClick={openAnthropicProviderDialog}
                             >
-                              {logoutProvider === provider.statusKey && logoutPending ? (
-                                <>
-                                  <Spinner size="sm" label={t("aiTools.loggingOut")} />
-                                  <span aria-hidden>{t("aiTools.loggingOut")}</span>
-                                </>
-                              ) : (
-                                t("aiTools.logOut")
-                              )}
+                              {t("aiTools.otherProviders.apiKey")}
                             </Button>
-                          ) : (
-                            <AiToolSignInButtons
-                              methods={getSignInMethods(provider.id, t, {
-                                openChatgptModal: () => setChatgptModalOpen(true),
-                                openDeviceLogin: () => setDeviceLoginModalOpen(true),
-                                openTerminal: (preset) => setTerminalPreset(preset),
-                              })}
-                            />
-                          ))}
-                      </>
-                    )}
-                  </div>
+                          )}
+                          {!usesApiKey &&
+                            (isLoggedIn ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={logoutProvider === provider.statusKey && logoutPending}
+                                aria-label={
+                                  logoutProvider === provider.statusKey && logoutPending
+                                    ? t("aiTools.loggingOut")
+                                    : undefined
+                                }
+                                onClick={() => {
+                                  setLogoutError(null);
+                                  setLogoutProvider(
+                                    provider.id === "codex-login" ? "codex" : "claude",
+                                  );
+                                }}
+                                className={`${AI_TOOL_ACTION_BUTTON_CLASS} shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive`}
+                              >
+                                {logoutProvider === provider.statusKey && logoutPending ? (
+                                  <>
+                                    <Spinner size="sm" label={t("aiTools.loggingOut")} />
+                                    <span aria-hidden>{t("aiTools.loggingOut")}</span>
+                                  </>
+                                ) : (
+                                  t("aiTools.logOut")
+                                )}
+                              </Button>
+                            ) : (
+                              <AiToolSignInButtons
+                                methods={getSignInMethods(provider.id, t, {
+                                  openChatgptModal: () => setChatgptModalOpen(true),
+                                  openDeviceLogin: () => setDeviceLoginModalOpen(true),
+                                  openTerminal: (preset) => setTerminalPreset(preset),
+                                })}
+                              />
+                            ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {shouldShowUsage && (
+                  <>
+                    <div className="my-3 border-t border-border" />
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
+                      <UsageBar
+                        label={t("aiTools.usage.fiveHour")}
+                        window={status.usage?.fiveHour}
+                        windowKey="fiveHour"
+                        resetsInLabel="settings:aiTools.usage.resetsIn"
+                      />
+                      <div className="hidden bg-border sm:block" aria-hidden />
+                      <UsageBar
+                        label={t("aiTools.usage.sevenDay")}
+                        window={status.usage?.sevenDay}
+                        windowKey="sevenDay"
+                        resetsInLabel="settings:aiTools.usage.resetsIn"
+                      />
+                    </div>
+                  </>
                 )}
               </div>
+            );
+          })}
+        </div>
 
-              {shouldShowUsage && (
-                <>
-                  <div className="my-3 border-t border-border" />
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
-                    <UsageBar
-                      label={t("aiTools.usage.fiveHour")}
-                      window={status.usage?.fiveHour}
-                      windowKey="fiveHour"
-                      resetsInLabel="settings:aiTools.usage.resetsIn"
-                    />
-                    <div className="hidden bg-border sm:block" aria-hidden />
-                    <UsageBar
-                      label={t("aiTools.usage.sevenDay")}
-                      window={status.usage?.sevenDay}
-                      windowKey="sevenDay"
-                      resetsInLabel="settings:aiTools.usage.resetsIn"
-                    />
-                  </div>
-                </>
+        <Dialog
+          open={anthropicProviderDialogOpen}
+          onClose={closeAnthropicProviderDialog}
+          ariaLabel={t("aiTools.otherProviders.title")}
+          size="lg"
+        >
+          <DialogHeader onClose={closeAnthropicProviderDialog} closeLabel={t("common.cancel")}>
+            <div className="flex items-center gap-2">
+              <DialogTitle>{t("aiTools.otherProviders.title")}</DialogTitle>
+              <span className="text-aux text-warning-fg">
+                {t("aiTools.otherProviders.experimental")}
+              </span>
+            </div>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <DialogDescription>{t("aiTools.otherProviders.dialogDescription")}</DialogDescription>
+            <div
+              className={
+                selectedProvider?.kind === "custom"
+                  ? "max-w-xs"
+                  : "grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,3fr)]"
+              }
+            >
+              <Field>
+                <FieldLabel htmlFor={`${uid}-anthropic-provider`}>
+                  {t("aiTools.otherProviders.providerLabel")}
+                </FieldLabel>
+                <Select
+                  value={selectedAnthropicProvider}
+                  onValueChange={handleAnthropicProviderChange}
+                >
+                  <SelectTrigger id={`${uid}-anthropic-provider`} className="w-full">
+                    <SelectValue placeholder={t("aiTools.otherProviders.providerPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {anthropicProviders.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <span className="flex items-center gap-2">
+                          <AnthropicCompatibleProviderLogo providerId={provider.id} />
+                          <span>
+                            {provider.id === CUSTOM_ANTHROPIC_PROVIDER_ID
+                              ? t("aiTools.otherProviders.custom.providerName")
+                              : provider.name}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {selectedProvider?.kind !== "custom" && (
+                <Field>
+                  <FieldLabel htmlFor={`${uid}-anthropic-api-key`}>
+                    {t("aiTools.otherProviders.apiKeyLabel")}
+                  </FieldLabel>
+                  <Input
+                    id={`${uid}-anthropic-api-key`}
+                    type="password"
+                    value={anthropicApiKey}
+                    onChange={(event) => setAnthropicApiKey(event.target.value)}
+                    placeholder={
+                      configuredAnthropicProvider?.hasApiKey
+                        ? t("aiTools.otherProviders.apiKeyPlaceholderReplace")
+                        : t("aiTools.otherProviders.apiKeyPlaceholderNew")
+                    }
+                    className="w-full"
+                  />
+                </Field>
               )}
             </div>
-          );
-        })}
-      </div>
-
-      <Dialog
-        open={anthropicProviderDialogOpen}
-        onClose={closeAnthropicProviderDialog}
-        ariaLabel={t("aiTools.otherProviders.title")}
-        size="lg"
-      >
-        <DialogHeader onClose={closeAnthropicProviderDialog} closeLabel={t("common.cancel")}>
-          <div className="flex items-center gap-2">
-            <DialogTitle>{t("aiTools.otherProviders.title")}</DialogTitle>
-            <span className="text-aux text-warning-fg">
-              {t("aiTools.otherProviders.experimental")}
-            </span>
-          </div>
-        </DialogHeader>
-        <DialogBody className="space-y-4">
-          <DialogDescription>{t("aiTools.otherProviders.dialogDescription")}</DialogDescription>
-          <div
-            className={
-              selectedProvider?.kind === "custom"
-                ? "max-w-xs"
-                : "grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,3fr)]"
-            }
-          >
-            <Field>
-              <FieldLabel htmlFor={`${uid}-anthropic-provider`}>
-                {t("aiTools.otherProviders.providerLabel")}
-              </FieldLabel>
-              <Select
-                value={selectedAnthropicProvider}
-                onValueChange={handleAnthropicProviderChange}
-              >
-                <SelectTrigger id={`${uid}-anthropic-provider`} className="w-full">
-                  <SelectValue placeholder={t("aiTools.otherProviders.providerPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {anthropicProviders.map((provider) => (
-                    <SelectItem key={provider.id} value={provider.id}>
-                      <span className="flex items-center gap-2">
-                        <AnthropicCompatibleProviderLogo providerId={provider.id} />
-                        <span>
-                          {provider.id === CUSTOM_ANTHROPIC_PROVIDER_ID
-                            ? t("aiTools.otherProviders.custom.providerName")
-                            : provider.name}
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            {selectedProvider?.kind !== "custom" && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-anthropic-api-key`}>
-                  {t("aiTools.otherProviders.apiKeyLabel")}
-                </FieldLabel>
-                <Input
-                  id={`${uid}-anthropic-api-key`}
-                  type="password"
-                  value={anthropicApiKey}
-                  onChange={(event) => setAnthropicApiKey(event.target.value)}
-                  placeholder={
-                    configuredAnthropicProvider?.hasApiKey
-                      ? t("aiTools.otherProviders.apiKeyPlaceholderReplace")
-                      : t("aiTools.otherProviders.apiKeyPlaceholderNew")
-                  }
-                  className="w-full"
+            {selectedProvider?.kind === "preset" &&
+              selectedProvider.apiKeyEnvVar &&
+              selectedProvider.baseUrl && (
+                <p className="text-aux text-muted-foreground">
+                  {t("aiTools.otherProviders.envHint", {
+                    envVar: selectedProvider.apiKeyEnvVar,
+                    baseUrl: selectedProvider.baseUrl,
+                  })}
+                </p>
+              )}
+            {selectedProvider?.kind === "custom" && (
+              <div className="space-y-3 rounded-12 border border-border bg-muted/20 p-3">
+                <p className="text-ui text-foreground">
+                  {t("aiTools.otherProviders.custom.title")}
+                </p>
+                <SegmentedControl
+                  aria-label={t("aiTools.otherProviders.custom.inputModeLabel")}
+                  size="sm"
+                  value={anthropicEnvEditorMode}
+                  onValueChange={handleAnthropicEnvEditorModeChange}
+                  options={[
+                    { value: "json", label: t("aiTools.otherProviders.custom.jsonMode") },
+                    { value: "fields", label: t("aiTools.otherProviders.custom.fieldsMode") },
+                  ]}
                 />
-              </Field>
+                {anthropicEnvEditorMode === "json" ? (
+                  <Textarea
+                    aria-label={t("aiTools.otherProviders.custom.jsonLabel")}
+                    value={anthropicEnvJson}
+                    onChange={(event) => handleAnthropicEnvJsonChange(event.target.value)}
+                    placeholder={t("aiTools.otherProviders.custom.jsonPlaceholder")}
+                    spellCheck={false}
+                    className="min-h-64 resize-y font-mono text-aux"
+                    aria-invalid={anthropicEnvError ? true : undefined}
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {anthropicEnvEntries.length === 0 ? (
+                      <EmptyState className="rounded-8 border border-dashed border-border">
+                        <EmptyStateTitle>
+                          {t("aiTools.otherProviders.custom.emptyFields")}
+                        </EmptyStateTitle>
+                      </EmptyState>
+                    ) : (
+                      anthropicEnvEntries.map((entry, index) => (
+                        <div
+                          key={entry.id}
+                          className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto]"
+                        >
+                          <Input
+                            aria-label={t("aiTools.otherProviders.custom.keyAriaLabel", {
+                              index: index + 1,
+                            })}
+                            value={entry.key}
+                            onChange={(event) =>
+                              updateAnthropicEnvEntry(entry.id, "key", event.target.value)
+                            }
+                            placeholder={t("aiTools.otherProviders.custom.keyPlaceholder")}
+                            className="font-mono text-aux max-sm:col-span-2"
+                          />
+                          <Input
+                            aria-label={t("aiTools.otherProviders.custom.valueAriaLabel", {
+                              index: index + 1,
+                            })}
+                            type="text"
+                            value={entry.value}
+                            onChange={(event) =>
+                              updateAnthropicEnvEntry(entry.id, "value", event.target.value)
+                            }
+                            placeholder={t("aiTools.otherProviders.custom.valuePlaceholder")}
+                            className="font-mono text-aux"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-md"
+                            className="text-muted-foreground hover:text-destructive"
+                            aria-label={t("aiTools.otherProviders.custom.removeVariable", {
+                              key: entry.key || index + 1,
+                            })}
+                            onClick={() => {
+                              setAnthropicEnvEntries((entries) =>
+                                entries.filter((candidate) => candidate.id !== entry.id),
+                              );
+                              setAnthropicEnvError(null);
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setAnthropicEnvEntries((entries) => [
+                          ...entries,
+                          createAnthropicEnvEntry(),
+                        ]);
+                        setAnthropicEnvError(null);
+                      }}
+                    >
+                      <Plus />
+                      {t("aiTools.otherProviders.custom.addVariable")}
+                    </Button>
+                  </div>
+                )}
+                {anthropicEnvError && (
+                  <p role="alert" className="text-aux text-destructive">
+                    {t(
+                      `aiTools.otherProviders.custom.errors.${anthropicEnvError}` as
+                        | "aiTools.otherProviders.custom.errors.invalidJson"
+                        | "aiTools.otherProviders.custom.errors.envMustBeObject"
+                        | "aiTools.otherProviders.custom.errors.valuesMustBeStrings"
+                        | "aiTools.otherProviders.custom.errors.emptyKey"
+                        | "aiTools.otherProviders.custom.errors.emptyValue"
+                        | "aiTools.otherProviders.custom.errors.duplicateKey"
+                        | "aiTools.otherProviders.custom.errors.emptyEnv",
+                    )}
+                  </p>
+                )}
+                <p className="text-aux text-muted-foreground">
+                  {t("aiTools.otherProviders.custom.securityHint")}
+                </p>
+              </div>
             )}
-          </div>
-          {selectedProvider?.kind === "preset" &&
-            selectedProvider.apiKeyEnvVar &&
-            selectedProvider.baseUrl && (
-              <p className="text-aux text-muted-foreground">
-                {t("aiTools.otherProviders.envHint", {
-                  envVar: selectedProvider.apiKeyEnvVar,
-                  baseUrl: selectedProvider.baseUrl,
+            {configuredAnthropicProvider?.needsReauth && (
+              <p className="text-ui text-warning-fg">
+                {t("aiTools.otherProviders.needsApiKeyUpdate", {
+                  providerName: configuredAnthropicProvider.providerName,
                 })}
               </p>
             )}
-          {selectedProvider?.kind === "custom" && (
-            <div className="space-y-3 rounded-12 border border-border bg-muted/20 p-3">
-              <p className="text-ui text-foreground">{t("aiTools.otherProviders.custom.title")}</p>
-              <SegmentedControl
-                aria-label={t("aiTools.otherProviders.custom.inputModeLabel")}
-                size="sm"
-                value={anthropicEnvEditorMode}
-                onValueChange={handleAnthropicEnvEditorModeChange}
-                options={[
-                  { value: "json", label: t("aiTools.otherProviders.custom.jsonMode") },
-                  { value: "fields", label: t("aiTools.otherProviders.custom.fieldsMode") },
-                ]}
-              />
-              {anthropicEnvEditorMode === "json" ? (
-                <Textarea
-                  aria-label={t("aiTools.otherProviders.custom.jsonLabel")}
-                  value={anthropicEnvJson}
-                  onChange={(event) => handleAnthropicEnvJsonChange(event.target.value)}
-                  placeholder={t("aiTools.otherProviders.custom.jsonPlaceholder")}
-                  spellCheck={false}
-                  className="min-h-64 resize-y font-mono text-aux"
-                  aria-invalid={anthropicEnvError ? true : undefined}
-                />
-              ) : (
-                <div className="space-y-2">
-                  {anthropicEnvEntries.length === 0 ? (
-                    <EmptyState className="rounded-8 border border-dashed border-border">
-                      <EmptyStateTitle>
-                        {t("aiTools.otherProviders.custom.emptyFields")}
-                      </EmptyStateTitle>
-                    </EmptyState>
-                  ) : (
-                    anthropicEnvEntries.map((entry, index) => (
-                      <div
-                        key={entry.id}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto]"
-                      >
-                        <Input
-                          aria-label={t("aiTools.otherProviders.custom.keyAriaLabel", {
-                            index: index + 1,
-                          })}
-                          value={entry.key}
-                          onChange={(event) =>
-                            updateAnthropicEnvEntry(entry.id, "key", event.target.value)
-                          }
-                          placeholder={t("aiTools.otherProviders.custom.keyPlaceholder")}
-                          className="font-mono text-aux max-sm:col-span-2"
-                        />
-                        <Input
-                          aria-label={t("aiTools.otherProviders.custom.valueAriaLabel", {
-                            index: index + 1,
-                          })}
-                          type="text"
-                          value={entry.value}
-                          onChange={(event) =>
-                            updateAnthropicEnvEntry(entry.id, "value", event.target.value)
-                          }
-                          placeholder={t("aiTools.otherProviders.custom.valuePlaceholder")}
-                          className="font-mono text-aux"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-md"
-                          className="text-muted-foreground hover:text-destructive"
-                          aria-label={t("aiTools.otherProviders.custom.removeVariable", {
-                            key: entry.key || index + 1,
-                          })}
-                          onClick={() => {
-                            setAnthropicEnvEntries((entries) =>
-                              entries.filter((candidate) => candidate.id !== entry.id),
-                            );
-                            setAnthropicEnvError(null);
-                          }}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAnthropicEnvEntries((entries) => [...entries, createAnthropicEnvEntry()]);
-                      setAnthropicEnvError(null);
-                    }}
-                  >
-                    <Plus />
-                    {t("aiTools.otherProviders.custom.addVariable")}
-                  </Button>
-                </div>
-              )}
-              {anthropicEnvError && (
-                <p role="alert" className="text-aux text-destructive">
-                  {t(
-                    `aiTools.otherProviders.custom.errors.${anthropicEnvError}` as
-                      | "aiTools.otherProviders.custom.errors.invalidJson"
-                      | "aiTools.otherProviders.custom.errors.envMustBeObject"
-                      | "aiTools.otherProviders.custom.errors.valuesMustBeStrings"
-                      | "aiTools.otherProviders.custom.errors.emptyKey"
-                      | "aiTools.otherProviders.custom.errors.emptyValue"
-                      | "aiTools.otherProviders.custom.errors.duplicateKey"
-                      | "aiTools.otherProviders.custom.errors.emptyEnv",
-                  )}
-                </p>
-              )}
-              <p className="text-aux text-muted-foreground">
-                {t("aiTools.otherProviders.custom.securityHint")}
+            {anthropicProviderMessage && (
+              <p role="alert" className="text-ui text-destructive">
+                {anthropicProviderMessage}
               </p>
-            </div>
-          )}
-          {configuredAnthropicProvider?.needsReauth && (
-            <p className="text-ui text-warning-fg">
-              {t("aiTools.otherProviders.needsApiKeyUpdate", {
-                providerName: configuredAnthropicProvider.providerName,
-              })}
-            </p>
-          )}
-          {anthropicProviderMessage && (
-            <p role="alert" className="text-ui text-destructive">
-              {anthropicProviderMessage}
-            </p>
-          )}
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="outline" onClick={closeAnthropicProviderDialog}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            onClick={() => void saveAnthropicProviderCredentials()}
-            disabled={
-              !selectedAnthropicProvider ||
-              (selectedProvider?.kind !== "custom" && !anthropicApiKey.trim()) ||
-              savingAnthropicProvider
-            }
-          >
-            {selectedProvider?.kind === "custom"
-              ? t("aiTools.otherProviders.saveConfiguration")
-              : t("aiTools.otherProviders.saveKey")}
-          </Button>
-        </DialogFooter>
-      </Dialog>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAnthropicProviderDialog}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              onClick={() => void saveAnthropicProviderCredentials()}
+              disabled={
+                !selectedAnthropicProvider ||
+                (selectedProvider?.kind !== "custom" && !anthropicApiKey.trim()) ||
+                savingAnthropicProvider
+              }
+            >
+              {selectedProvider?.kind === "custom"
+                ? t("aiTools.otherProviders.saveConfiguration")
+                : t("aiTools.otherProviders.saveKey")}
+            </Button>
+          </DialogFooter>
+        </Dialog>
 
-      {terminalPreset && (
-        <Suspense fallback={null}>
-          <TerminalModal preset={terminalPreset} onClose={handleTerminalClose} />
-        </Suspense>
-      )}
+        {terminalPreset && (
+          <Suspense fallback={null}>
+            <TerminalModal preset={terminalPreset} onClose={handleTerminalClose} />
+          </Suspense>
+        )}
 
-      {chatgptModalOpen && (
-        <Suspense fallback={null}>
-          <ChatGPTLoginModal
-            open={chatgptModalOpen}
-            onClose={() => {
-              setChatgptModalOpen(false);
-              void fetchStatus();
-            }}
-            onConnected={() => {
-              setChatgptModalOpen(false);
-              void fetchStatus();
-            }}
+        {chatgptModalOpen && (
+          <Suspense fallback={null}>
+            <ChatGPTLoginModal
+              open={chatgptModalOpen}
+              onClose={() => {
+                setChatgptModalOpen(false);
+                void fetchStatus();
+              }}
+              onConnected={() => {
+                setChatgptModalOpen(false);
+                void fetchStatus();
+              }}
+            />
+          </Suspense>
+        )}
+
+        {deviceLoginModalOpen && (
+          <Suspense fallback={null}>
+            <CodexDeviceLoginModal
+              open={deviceLoginModalOpen}
+              onClose={() => {
+                setDeviceLoginModalOpen(false);
+                void fetchStatus();
+              }}
+              onConnected={() => {
+                setDeviceLoginModalOpen(false);
+                void fetchStatus();
+              }}
+            />
+          </Suspense>
+        )}
+
+        {logoutConfig && (
+          <RomeConfirmDialog
+            open
+            icon={logoutConfig.icon}
+            title={t(logoutConfig.titleKey)}
+            description={logoutError ?? t(logoutConfig.descriptionKey)}
+            confirmLabel={t("aiTools.logOut")}
+            destructive
+            confirmDisabled={logoutPending}
+            onConfirm={() => void handleLogout()}
+            onCancel={() => setLogoutProvider(null)}
           />
-        </Suspense>
-      )}
+        )}
 
-      {deviceLoginModalOpen && (
-        <Suspense fallback={null}>
-          <CodexDeviceLoginModal
-            open={deviceLoginModalOpen}
-            onClose={() => {
-              setDeviceLoginModalOpen(false);
-              void fetchStatus();
-            }}
-            onConnected={() => {
-              setDeviceLoginModalOpen(false);
-              void fetchStatus();
-            }}
+        {configuredAnthropicProvider && (
+          <RomeConfirmDialog
+            open={removeAnthropicProviderOpen}
+            title={t("aiTools.otherProviders.removeConfirm.title", {
+              providerName: configuredAnthropicProvider.providerName,
+            })}
+            description={t("aiTools.otherProviders.removeConfirm.description", {
+              providerName: configuredAnthropicProvider.providerName,
+            })}
+            confirmLabel={t("common.remove")}
+            destructive
+            confirmDisabled={savingAnthropicProvider}
+            onConfirm={() => void clearAnthropicProviderCredentials()}
+            onCancel={() => setRemoveAnthropicProviderOpen(false)}
           />
-        </Suspense>
-      )}
-
-      {logoutConfig && (
-        <RomeConfirmDialog
-          open
-          icon={logoutConfig.icon}
-          title={t(logoutConfig.titleKey)}
-          description={logoutError ?? t(logoutConfig.descriptionKey)}
-          confirmLabel={t("aiTools.logOut")}
-          destructive
-          confirmDisabled={logoutPending}
-          onConfirm={() => void handleLogout()}
-          onCancel={() => setLogoutProvider(null)}
-        />
-      )}
-
-      {configuredAnthropicProvider && (
-        <RomeConfirmDialog
-          open={removeAnthropicProviderOpen}
-          title={t("aiTools.otherProviders.removeConfirm.title", {
-            providerName: configuredAnthropicProvider.providerName,
-          })}
-          description={t("aiTools.otherProviders.removeConfirm.description", {
-            providerName: configuredAnthropicProvider.providerName,
-          })}
-          confirmLabel={t("common.remove")}
-          destructive
-          confirmDisabled={savingAnthropicProvider}
-          onConfirm={() => void clearAnthropicProviderCredentials()}
-          onCancel={() => setRemoveAnthropicProviderOpen(false)}
-        />
-      )}
-    </div>
+        )}
+      </PanelSection>
+    </PanelMeasure>
   );
 }

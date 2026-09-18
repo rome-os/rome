@@ -11,13 +11,15 @@ An alignment claim is unfalsifiable until membership is written down. Absent the
 | Role | Owns | Members |
 |---|---|---|
 | [Control](#control) | Height, padding, radius, focus edge | Inline: `Button`, `IconButton`, `Input`, `CommandInput`, `SelectTrigger`, `SegmentedControl`, `Toggle`, `TabsTrigger`, Calendar `button_previous` and `button_next`, Calendar dropdown triggers, `CalendarDayButton`. Future: the Combobox, DatePicker and SearchField triggers. Block: `Textarea` |
-| [Selection control](#selection-control) | An intrinsic size off the control scale, and a hit area larger than its box | `Switch`, plus `Checkbox` and `Radio` when they land |
+| [Selection control](#selection-control) | An intrinsic size off the control scale, and a hit area larger than its box | `Switch`, `Checkbox`, `RadioGroupItem` |
 | [Surface](#surface) | Radius, elevation, padding, separation from the layer below | `Card`, `Tile`, `Alert`, `PopoverContent`, `DropdownMenuContent`, `ContextMenuContent`, `SelectContent`, `TooltipContent`, `Toaster`, `Dialog`, `Sheet` |
 | [Inline content](#inline-content) | A smaller scale of its own | `Badge`, `Avatar`, `Spinner`, Calendar `weekday`, `week_number_header`, and `week_number`. Future: `Kbd` and `Tag` |
-| [Layout](#layout) | All spacing between its children | `Field`, `FieldGroup`, `ButtonGroup`, Calendar `months`, `month`, `nav`, `table`, `weekdays`, and `week` |
+| [Layout](#layout) | All spacing between its children | `Field`, `FieldGroup`, `ButtonGroup`, `RadioGroup`, Calendar `months`, `month`, `nav`, `table`, `weekdays`, and `week` |
 | [Table section](#table-section) | Row-group boundaries | `TableHeader`, `TableBody` |
 | [Table row](#table-row) | Row separation and interaction-state fill | `TableRow` |
 | [Table cell](#table-cell) | Cell inset, alignment, header typography | `TableHead`, `TableCell` |
+| [List section](#list-section) | Row separation | `List` |
+| [List row](#list-row) | Height floor, inset, gap, interaction-state fill | `ListRow`, with its parts `ListRowContent`, `ListRowTitle`, `ListRowDescription` |
 
 `Tile` still lives in `packages/web`. The kit stages it for a later move. It already holds a role here, so the move carries no reclassification.
 
@@ -32,23 +34,25 @@ A control takes pointer or keyboard input directly. A member is **inline** or **
 
 - Padding is horizontal and symmetric, taken from a token, never from a raw spacing step. Which token follows from how the content sits: a member whose content starts at an alignment edge takes `--control-px-start-*`, and a member whose content is centred takes `--control-px-center-*`. Height is specified, so `border-box` absorbs a border there. Width is not. A member that can paint a border declares the width unconditionally, and a variant changes only the color. `[mech]`
 
-  The start inset is shared because it is an alignment edge: it is where content starts reading, so every such member stacked in one column lines up on it. A centred label is not an edge — nothing lines up against it — so the centre group is free to sit tighter, and it is a group rather than each component's own step so that one size name still means one inset across the members that share it. The two agree at `md` and `lg` and diverge at `sm`.
+  A field inside a surface that already frames it takes `Input`'s `plain` variant: no border, radius, fill, or hover of its own, with the surface's edge as the frame. It keeps the step's height, inset, glyph reserve, and focus edge. `CommandInput` is the in-tree case. A plain field is the answer where an outlined field would otherwise have its border painted over. `[mech]`
+
+  The start inset is shared because it is an alignment edge: it is where content starts reading, so every such member stacked in one column lines up on it. A centred label is not an edge — nothing lines up against it — so the centre group answers to the box's own proportion instead: at every step the inset is wider than the air the line box leaves above and below, so a label reads as sitting in a button rather than a square tile. It is a group rather than each component's own step so that one size name still means one inset across the members that share it. The two agree at `sm` and the centre group sits wider at `md` and `lg`.
 
   Alignment is the axis, not component kind. A `Button` rendered start-aligned is on the shared start inset. A `SelectTrigger` would be on the centre group if it ever centred its value. The check is the component's own alignment, so it can be read straight off the source. `[mech]`
 
-  No member trims one side for a glyph sitting there. An optical correction is a decision for the whole role, not a per-component one, and until the role makes it the padding stays symmetric. `[mech]`
+  The role makes one optical correction, and members apply it rather than judging it: a glyph at the edge of centred content sits `--control-gap` from that edge, the same distance it sits from its label, so the air on both sides of the glyph reads as equal. Start-aligned content keeps the full inset, since its glyph sits on the alignment edge. Steps outside the scale and the square members take no correction, having no token inset to correct. `[mech]`
 - Radius is a `--control-r-*` step. `[mech]`
-- The focus edge is one geometry throughout: a 2px `outline` in `--ring` at `outline-offset: 0`, sitting outside the box. It stays outside because `ring` and the control fills sit a step apart on one ramp, so an inset edge does not separate from them. A translucent halo (`focus-visible:ring-*`) never appears. `[mech]`
+- The focus edge is one geometry throughout: a 1px `outline` in `--ring` at 50% alpha, carried at rest as `outline-transparent` with `outline-style: none`, so gaining focus changes the style and the color and never the width. A member that paints a border takes `-outline-offset-1`, which lands the edge on that border. A member with no painted border takes `outline-offset: 0`, outside the box, because `ring` and the control fills sit a step apart on one ramp and an edge inset over a fill does not separate from it. The invalid edge stays 2px of solid `--destructive`, so an error outranks focus. A translucent halo (`focus-visible:ring-*`) never appears. `[mech]`
 - A member carries no margin, and sets no fixed width. Spacing belongs to Layout. `w-full` reaches the outermost element. `[mech]`
 - Geometry is written in bracket form — `h-[var(--control-h-md)]`, never `h-(--control-h-md)` — so `tailwind-merge` classifies it and a caller's `className` wins. `[mech]`
-- Typography is a role utility (`text-ui`, `text-body`), never derived from the size step. `[mech]`
+- Typography is a role utility (`text-ui`, `text-aux`), never derived from the size step. `[mech]`
 
 ### Inline members
 
 The role exists for these: any two at the same size, dropped into one row, are the same height and centered against each other with no adjustment at the call site.
 
 - A size name is a composition contract before it is a lookup. The same name on any two members yields the same outer height. A member that omits a name cannot join a row at that size. It does not fall back to the nearest step. `[mech]`
-- **The shared vocabulary is two steps: `sm` (28px) and `md` (36px).** Every member carries both, names them from that set and no other, and takes the matching `--control-h-*` and `--control-r-*` step. A member with a private spelling for a shared height is the divergence this clause prevents, whatever pixel it lands on. `[mech]`
+- **The shared vocabulary is two steps: `sm` (28px) and `md` (32px).** Every member carries both, names them from that set and no other, and takes the matching `--control-h-*` and `--control-r-*` step. A member with a private spelling for a shared height is the divergence this clause prevents, whatever pixel it lands on. `[mech]`
 
   Two, because two is what mixed rows use. A census of every call site in `packages/web` and `rome_apps` puts 270 of 292 on `sm` or `md`, and those are the only steps more than one kind of member is ever asked for.
 
@@ -74,10 +78,10 @@ The role exists for these: any two at the same size, dropped into one row, are t
 
 A switch or checkbox reads as a glyph, not as a box. Sizing one to a control height makes it the loudest thing in a form row.
 
-- Size is intrinsic and off the control scale. `Switch` is 18×32px at `default`, 14×24px at `sm`. `[mech]`
-- The hit area reaches the touch floor through a pseudo-element (`after:-inset-*`), never through the box, so the row height stays the label's. `[mech]`
+- Size is intrinsic and off the control scale. `Switch` is 18×32px at `default`, 14×24px at `sm`. `Checkbox` and `RadioGroupItem` are 16px, one square and one round. `[mech]`
+- The hit area grows through a pseudo-element (`after:-inset-*`), never through the box, so the row height stays the label's. It grows freely on the axis the member has no neighbour on, and by at most half the gap on the axis it is stacked along, so one member's hit area stops before the next member's box begins. A group that can be laid out either way reads its own `orientation` for both the layout and the insets, so the axis the items sit on is the axis the insets answer to. A sibling `<label>` is what makes a whole row a target. `[mech]`
 - Width is never fillable, and a member is labelled by a sibling, never by text of its own. `[mech]`
-- The focus edge is the Control clause above, unchanged. `[mech]`
+- The focus edge is the Control clause above, at `outline-offset: 0` for every member. A member fills its box in the checked state, so the inset the Control clause gives a painted border would land the edge on that fill and mark nothing in the one state it exists to report. `[mech]`
 
 ## Surface
 
@@ -109,7 +113,7 @@ Inline content sits inside a line of text or a table cell. It answers to the tex
 
 - The scale is the member's own, never `--control-h-*`. `Badge` reads `--badge-h` (22px), `--badge-px`, `--badge-gap`. `Avatar` reads a square 24 / 32 / 40px step. `[mech]`
 - A member is center-alignable in a line of text and in a table cell without raising the row height. `[mech]`
-- Typography is `text-aux` or smaller, never `text-body`. `[mech]`
+- Typography is `text-aux` or smaller, never `text-ui`. `[mech]`
 - Interactivity does not promote the role. A clickable `Badge` gains the Control focus edge and nothing else — not the height, not the padding, not the radius step. `[llm]`
 
 > Prefer: a dismissible `Badge` at `--badge-h`, 22px tall in a table cell, carrying a focus edge.
@@ -124,11 +128,12 @@ A layout component owns the space between its children and has no appearance of 
 - A container with an appearance of its own is not Layout. `SegmentedControl`'s track fills and rounds, so it is one Control, not a layout around three. `[mech]`
 - `ButtonGroup` is the one member permitted to restyle its children, collapsing the adjoining radii and borders of the controls inside it. `[mech]`
 - All spacing between siblings comes from a layout component (`gap-*`, `space-y-*`). No sibling sets a margin to space itself. `[llm]`
+- A layout that carries a role of its own — `RadioGroup` is a radiogroup — requires the accessible name that role needs, in its type rather than in its docs. `[mech]`
 
 > Prefer: `Field` supplying the gap between a label and its input.
 > Over: `FieldLabel` supplying `mb-1`, which every other consumer of that label then has to undo.
 
-The kit ships no general `Stack`, `Row`, or `Grid`. Spacing between arbitrary siblings is a raw `flex` and `gap-*` at the call site until those land.
+The kit ships no general `Stack`, `Row`, or `Grid`. Spacing between arbitrary siblings is a raw `flex` and `gap-*` at the call site until those land. `ListRow` is not that `Row`: it is one record in a list, and holds the [List row](#list-row) role.
 
 ## Table section
 
@@ -152,6 +157,26 @@ A table cell aligns content within a shared column.
 - The composite sets the shared table typography. A header cell owns the header-row height and uses muted Auxiliary typography. `[mech]`
 - A body cell takes its height from content plus its vertical inset. `[mech]`
 - Inline content keeps its own scale inside a cell. A `Badge` never takes a `--control-h-*` height to size the row. `[mech]`
+
+## List section
+
+A list section groups the rows of one list and draws the boundary between them.
+
+- A section sets no height, padding, typography, or fill. Rows own that geometry. `[mech]`
+- `List` separates each pair of adjacent rows with a hairline, so a row draws no border of its own and the last row needs no special case. A section that is a list in the document too passes a `<ul>` or an `<ol>` through `asChild`, so the separator stays the section's rather than becoming the page's. `[mech]`
+
+## List row
+
+A list row is one record in a list: a person in the directory, a setting beside its control, a run in a history. It is the box around the controls it holds, so it sits on a scale of its own.
+
+- **The vocabulary is two steps: `sm` (36px) and `md` (40px).** Each names a floor, not a height. A row holding one line of `text-ui` sits on the floor, and a row holding a title and a description grows past it. `[mech]`
+- A floor is written as its `--control-h-*` step plus 8px, not as the `--rome-size-*` step it equals, so a row clears the control it holds by the same margin at either step and retuning the control scale carries the row scale with it. `[mech]`
+- The floor, the horizontal inset, and the vertical inset each come from a `--row-*` token of the row's step. A row never reads `--control-h-*`: a row on the control scale would be as tall as the button inside it and no taller. `[mech]`
+- A row is a flex row that centers its parts on the cross axis and owns the gap between them. The gap is one value at either step, so it takes no `--row-*` token of its own. A caller that needs columns lined up down the list passes a grid template in `className`, and keeps the inset, the floor, and the paint. `[mech]`
+- A row draws no border and carries no margin. Separation belongs to the List section. `[mech]`
+- Hover and focus paint appear only on a row that is itself the click target, through `interactive`, which the row accepts only alongside `asChild`. A row that takes no focus cannot show the focus edge the paint includes. The hover fill is `--surface-hover`, and the selected fill is `--primary` at low alpha, deepening on hover only where the row is interactive. `[mech]`
+- The focus edge is the Control geometry at `-outline-offset-1`. A row is full-bleed inside a list, and most lists sit in a clipped card, so an edge outside the box would be cut away on both sides. `[mech]`
+- `ListRowTitle` reads `text-ui` and `ListRowDescription` reads `text-aux`. A part never takes a size from the row's step. `[mech]`
 
 ## Composites
 
@@ -177,7 +202,7 @@ A composite takes no role. Each of its parts takes one. `Select` is a Control (`
 Any component that holds a glyph, in any role.
 
 - The component sets the size, never the call site. A component that renders or receives an `<svg>` and leaves it unsized has no default — it has whatever each caller happened to write, which is how the same chip ended up at 12px and 14px in one tree. `[mech]`
-- A glyph tracks the box it sits in, not the label beside it. `Button` is the ladder: its text is `text-ui` at every size while its glyph runs 12 / 14 / 16 / 16 across the 24 / 28 / 36 / 44px boxes — a half-box at the two small steps, then held at 16px. Pick from that ladder, and where half a box is not a step, take the next one up: `Badge` is 22px and takes 12px. `[mech]`
+- A glyph tracks the box it sits in, not the label beside it. `Button` is the ladder: its text is `text-ui` at every size while its glyph runs 12 / 14 / 16 / 16 across the 24 / 28 / 32 / 44px boxes — a half-box at the two small steps, then held at 16px. Pick from that ladder, and where half a box is not a step, take the next one up: `Badge` is 22px and takes 12px. `[mech]`
 - A member with a size axis carries the glyph on that axis, so `sm` and `md` differ. `Button`, `IconButton`, `Input`, `SelectTrigger`, and `SegmentedControl` all give 14px at `sm` and 16px at `md`, which is what keeps a field and a button on one `sm` row from disagreeing about their glyphs. `SegmentedControl` reads the track, not the segment, for the same reason its height does: the track is the box that joins the row. `[mech]`
 - A component never writes a size on a glyph it hands to something else to hold, because that opts the glyph out of the holder's rule. `Calendar`'s one `Chevron` renderer feeds both a nav button and the dropdown caption. Sizing it there would give the two rows one number and make each host's rule dead. `[mech]`
 - A member with no size axis takes the glyph of the step it already pads on, rather than deriving a second answer from its own box. `TabsTrigger` is the case: its 32px list sits between the shared heights, it takes the `sm` centred inset, and so its glyph is `sm`'s 14px. Padding at one step and sizing the glyph at another is the drift this rule exists to stop. `[mech]`
@@ -199,6 +224,8 @@ Naming the gap beats a wrong assignment.
 | `Command` | Composite root. Deliberately takes no role of its own. |
 | `CommandEmpty`, `CommandGroup`, `CommandItem`, `CommandList`, `CommandSeparator` | Internal states, grouping, rows, scrolling, and separators of the `Command` composite. The caller-owned popup boundary is its Surface. |
 | `EmptyState`, `Stepper` | Not yet surveyed against the contracts. |
+| The page layout tier | `Page`, `Section`, `PageNav` with its `PageNavLink`, and the body components each layout in [layouts.md](layouts.md) contributes — List's `ListToolbar`, `ListCollection`, `ListGrid`, and `ListFooter`, and Form's `FormRows` with the `FormRow` anatomy of `FormRowIcon`, `FormRowHeading`, `FormRowLabel`, `FormRowDescription`, and `FormRowControl`. They own the space between regions of a page rather than between a component's children, which is a tier above Layout. `FormRows` also paints its own border and fill, which Layout rules out. Naming that tier is a roster decision the catalogue has not taken yet. |
+| `Toolbar` | Owns the space between its children and paints nothing, which reads as Layout. It also takes keyboard input, which the Layout contract rules out. |
 | `Breadcrumb` | Its default `text-ui` typography violates the Inline content contract. Its `BreadcrumbEllipsis` collapse marker is 20px tall and raises the row at the required `text-aux` line height. The marker only represents omitted crumbs, so its presentation-only semantics do not change the role decision. The 14px separator fits that role, but the composite cannot take a role until all parts fit. |
 
 ## Known divergences
@@ -208,7 +235,7 @@ In-tree today. Each is a conflict the roster exposes, not a rule it grants.
 | Divergence | Detail |
 |---|---|
 | `CommandInput` exposes no size | Fixed at the `md` step, so a row containing it cannot be resized as a unit. `Textarea` has none either, but as a block member only its padding and typography are at stake. |
-| `CommandInput` paints no focus edge | The only Control member without one. Its row is a full-bleed header inside `Command`'s `overflow-hidden`. The role's edge — 2px at `outline-offset: 0`, outside the box — therefore lands beyond the clip, which cuts it away on three sides. The geometry the role fixes cannot render at this position. Independently, `cmdk` holds focus in the input for the whole life of the surface, so an edge keyed to it stays lit and marks nothing. Its one transition is a tab to a trailing control and back. The header reads against the list by `border-b-border`, and trailing controls keep their own edges. Reinstating the edge means first moving the row off the clip boundary. |
+| `CommandInput` paints no focus edge | Its field is `Input`'s `plain` variant, which keeps the edge, and `CommandInput` turns it off. The row is a full-bleed header inside `Command`'s `overflow-hidden`, so an edge is clipped on three sides, and cmdk holds focus in the field for the life of the surface, so an edge keyed to it stays lit and marks nothing. The row's bottom rule is what reads the header against the list. |
 | No adornment slot on `Input` | A leading icon is hand-positioned at five `packages/web` call sites (`absolute left-3 top-1/2 -translate-y-1/2`), each picking its own icon size and its own compensating left padding. |
 | Off-scale control steps | `Button size="xs"` and `IconButton size="xs"` are 24px, and `TabsList` is 32px. Neither is a `--control-h-*` step. The `xs` pair is deliberate and stated above. `TabsList` is not. |
 | Two members pad off the groups | Both follow from the row above. `Button size="xs"` pads from a spacing step, because neither padding group carries an `xs`. `TabsTrigger` takes the `sm` centred step: it has no size axis, and its 32px list sits between the shared heights, so the step is picked rather than looked up. |

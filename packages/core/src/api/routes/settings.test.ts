@@ -5,6 +5,9 @@ import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../routines/guardian-timezone.js";
+import { COOKIE_NAME, createSession } from "../../lib/auth.js";
+
+const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 
 async function putSettings(app: Hono, body: Record<string, unknown>) {
   return app.request("/settings", {
@@ -198,6 +201,62 @@ describe("Settings API", () => {
 
       expect(res.status).toBe(200);
       expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /settings/guardian-timezone/detected", () => {
+    async function postDetected(timezone: unknown, cookie: string | null = GUARDIAN_COOKIE) {
+      return app.request("/settings/guardian-timezone/detected", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(cookie ? { Cookie: cookie } : {}),
+        },
+        body: JSON.stringify({ timezone }),
+      });
+    }
+
+    // An allow-listed dashboard visitor also reaches `phase: "ready"`, so the
+    // SPA posts its browser zone too and the edge forwards it. The zone belongs
+    // to the guardian, so the route refuses anyone without a guardian session.
+    it("refuses a caller with no guardian session", async () => {
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected("Asia/Tokyo", null);
+
+      expect(res.status).toBe(403);
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();
+      expect(reactivate).not.toHaveBeenCalled();
+    });
+
+    it("adopts the browser zone when none is stored and reschedules floating routines", async () => {
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected("Asia/Tokyo");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: "set", tzid: "Asia/Tokyo" });
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBe("Asia/Tokyo");
+      expect(reactivate).toHaveBeenCalledOnce();
+    });
+
+    it("never overwrites a stored zone", async () => {
+      await putSettings(app, { [GUARDIAN_TIMEZONE_SETTING_KEY]: "Europe/Paris" });
+      const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
+
+      const res = await postDetected("Asia/Tokyo");
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ status: "unchanged", tzid: "Europe/Paris" });
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBe("Europe/Paris");
+      expect(reactivate).not.toHaveBeenCalled();
+    });
+
+    it("rejects a value that is not an IANA zone", async () => {
+      const res = await postDetected("Mars/Olympus");
+
+      expect(res.status).toBe(400);
+      expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();
     });
   });
 });

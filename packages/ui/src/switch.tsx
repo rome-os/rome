@@ -26,7 +26,7 @@ function Switch({
         "[--switch-inset:1px] [--switch-h:calc(var(--switch-thumb)_+_2_*_var(--switch-inset))] [--switch-travel:calc(var(--switch-w)_-_var(--switch-inset)_-_var(--switch-thumb))]",
         "data-[size=default]:[--switch-thumb:1rem] data-[size=default]:[--switch-w:2rem]",
         "data-[size=sm]:[--switch-thumb:0.75rem] data-[size=sm]:[--switch-w:1.5rem]",
-        "focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive",
+        "outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive",
         "data-checked:bg-primary data-unchecked:bg-input dark:data-unchecked:bg-input/80 data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className,
       )}

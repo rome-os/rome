@@ -151,6 +151,17 @@ function renderIndex(initialEntry = "/sessions") {
   );
 }
 
+/** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
+function renderFullMode(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   setRouterHistoryIndex(0);
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
@@ -192,6 +203,50 @@ describe("sessionsViewportClass", () => {
   it("protects the top edge in full mode without shrinking its bottom surface", () => {
     expect(sessionsViewportClass(true)).toContain("pt-safe");
     expect(sessionsViewportClass(true)).not.toContain("pb-safe");
+  });
+});
+
+describe("SessionsPage landmarks", () => {
+  // The shell owns the one `main` on /sessions/*. /full/apps/sessions/* mounts
+  // outside it, so there the page owns it — on every view, or a reader crossing
+  // overview -> all -> detail passes through a page with no landmark.
+  it("gives each full-mode view one main with the safe-area frame", async () => {
+    rs.mocked(getSessionMetrics).mockResolvedValue({
+      scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
+      totals: {
+        sessionCount: 0,
+        runCount: 0,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 0,
+          costUsd: null,
+          costedRunCount: 0,
+        },
+        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
+      },
+      projections: [],
+    });
+
+    for (const entry of ["/full/apps/sessions", "/full/apps/sessions/all"]) {
+      const view = renderFullMode(entry);
+      await waitFor(() => {
+        const mains = view.container.querySelectorAll("main");
+        expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
+        expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
+        expect(mains[0].className).toContain("pt-safe");
+      });
+      cleanup();
+    }
+  });
+
+  it("leaves the landmark to the shell on the in-shell mount", async () => {
+    const view = renderIndex("/sessions/all");
+    await waitFor(() => {
+      expect(view.container.querySelectorAll("main").length).toBe(0);
+    });
   });
 });
 
@@ -505,5 +560,66 @@ describe("SessionsPage explorer", () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     expect(await screen.findByRole("button", { name: "Back to sessions" })).toBeTruthy();
+  });
+
+  it("filters from the popover, shows what is set as a chip, and sorts from a column header", async () => {
+    rs.mocked(listRomeSessions).mockResolvedValue({
+      sessions: [
+        {
+          ...FORK_SESSION,
+          id: "review-session",
+          displayTitle: "Review pull request 42",
+          type: "action",
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 50,
+      nextOffset: null,
+      facets: {
+        types: [{ value: "action", count: 1 }],
+        sourceChannels: [{ value: null, count: 1 }],
+      },
+    });
+
+    renderIndex("/sessions/all");
+    expect((await screen.findAllByText("Review pull request 42")).length).toBeGreaterThan(0);
+
+    // Type and Source live behind one control, so neither is on the row until
+    // the popover opens.
+    expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
+    const typeField = await screen.findByRole("combobox", { name: "Type" });
+    fireEvent.keyDown(typeField, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: /Automation/ }));
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: "action" })),
+    );
+
+    // What is set shows as a removable chip under the toolbar.
+    const chip = await screen.findByRole("button", { name: "Clear Type: Automation" });
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: undefined })),
+    );
+    expect(screen.queryByRole("button", { name: "Clear Type: Automation" })).toBeNull();
+
+    // The table header carries the order: first click takes the field at its
+    // useful end, a second reverses it.
+    const runs = screen.getByRole("button", { name: "Runs" });
+    fireEvent.click(runs);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: "runs", sortDirection: "desc" }),
+      ),
+    );
+    expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("descending");
+    fireEvent.click(runs);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: "runs", sortDirection: "asc" }),
+      ),
+    );
+    expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
   });
 });

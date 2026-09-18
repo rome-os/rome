@@ -21,9 +21,7 @@ export function WebchatConnectionCard({ card }: { card: ConnectionCard }) {
       role="primary"
       icon={<ConnectionBrandBadge connection="webchat" />}
     >
-      <p className="text-body text-muted-foreground">
-        {t("connections.cards.webchat.bot.alwaysOn")}
-      </p>
+      <p className="text-ui text-muted-foreground">{t("connections.cards.webchat.bot.alwaysOn")}</p>
     </ConnectionSlotCard>
   );
 }

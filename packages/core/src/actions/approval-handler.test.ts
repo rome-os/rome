@@ -85,7 +85,11 @@ describe("ApprovalHandler", () => {
       expect(childA.calls).toEqual([{ id: 1 }]);
       expect(childB.calls).toEqual([]);
 
-      const resolved = await rome.repos.approvals.resolvePending(approvalId, "approve");
+      const resolved = await rome.repos.approvals.resolvePending(
+        approvalId,
+        "approve",
+        "test-guardian",
+      );
       expect(resolved.outcome).toBe("resolved");
       childA.calls.length = 0;
 
@@ -136,7 +140,7 @@ describe("ApprovalHandler", () => {
         string,
         unknown
       >;
-      await rome.repos.approvals.resolvePending(approvalId, "approve");
+      await rome.repos.approvals.resolvePending(approvalId, "approve", "test-guardian");
 
       await rome.approvalHandler.onApproved(approvalId);
 

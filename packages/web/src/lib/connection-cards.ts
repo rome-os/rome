@@ -205,16 +205,25 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
   };
 }
 
+/** Personal-account services that present as a `session` slot on their brand's
+ *  card rather than a card of their own. One brand, two credentials: Telegram's
+ *  bot and the guardian's own account; WeChat's official bot and the guardian's
+ *  own account read off the hosting VM. */
+const FOLDED_ACCOUNT_SERVICES: Record<string, string> = {
+  telegram_user: "telegram",
+  wechat_user: "wechat",
+};
+
 export function buildConnectionCards(
   connections: ApiConnection[],
   composio?: ComposioCliStatus | null,
 ): ConnectionCard[] {
   const cards = new Map<string, ConnectionCard>();
-  let telegramUser: ApiConnection | undefined;
+  const folded = new Map<string, ApiConnection>();
 
   for (const connection of connections) {
-    if (connection.service === "telegram_user") {
-      telegramUser = connection;
+    if (FOLDED_ACCOUNT_SERVICES[connection.service]) {
+      folded.set(connection.service, connection);
       continue;
     }
     // One card per service: the registry currently holds at most one connection
@@ -225,21 +234,24 @@ export function buildConnectionCards(
     }
   }
 
-  // The Telegram personal account is its own registry service but presents as
-  // the `session` slot of the Telegram card (one brand, two credentials).
-  if (telegramUser) {
-    const telegram = cards.get("telegram");
-    const sessionSlots = toSlots(telegramUser, "session");
-    if (telegram) {
-      telegram.slots.push(...sessionSlots);
-      telegram.degradation ??= runtimeDegradation(telegramUser);
+  // A personal account is its own registry service but presents as the
+  // `session` slot of its brand's card. The brand card may be absent — a
+  // service can be registered without the bot half ever being connected — so
+  // the fold creates it rather than dropping the account.
+  for (const [service, connection] of folded) {
+    const brand = FOLDED_ACCOUNT_SERVICES[service]!;
+    const sessionSlots = toSlots(connection, "session");
+    const card = cards.get(brand);
+    if (card) {
+      card.slots.push(...sessionSlots);
+      card.degradation ??= runtimeDegradation(connection);
     } else {
-      cards.set("telegram", {
-        service: "telegram",
-        label: serviceLabel("telegram"),
+      cards.set(brand, {
+        service: brand,
+        label: serviceLabel(brand),
         kind: "channel",
         alwaysOn: false,
-        degradation: runtimeDegradation(telegramUser),
+        degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
       });

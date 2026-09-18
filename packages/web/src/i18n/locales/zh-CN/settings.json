@@ -110,6 +110,15 @@
             "reply": "有人在微信上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
+        },
+        "session": {
+          "title": "你的微信账号",
+          "bullets": {
+            "read": "读取你自己的微信聊天、群聊和历史消息",
+            "recap": "回顾你不在时错过的内容",
+            "search": "直接找到别人说过的话，不用翻聊天记录"
+          },
+          "privacyNote": "只读——Rome 永远不会替你发送微信消息。微信运行在你自己的实例上，聊天记录在那里读取，不会离开该实例。随时可以断开连接。"
         }
       },
       "linkedin": {
@@ -406,6 +415,10 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
+    },
+    "wechatUser": {
+      "fallbackName": "微信账号",
+      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {
@@ -709,7 +722,31 @@
       "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
     },
     "uptimePrefix": "已运行 {{uptime}}",
-    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}"
+    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",
+    "computerUse": {
+      "title": "计算机操作",
+      "description": "通过 OpenCLI 连接的浏览器。上次在线时间记录最近一次确认连接的时间。",
+      "refresh": "刷新",
+      "loadFailed": "无法刷新浏览器连接",
+      "loading": "正在检查浏览器连接…",
+      "daemon": {
+        "running": "运行中",
+        "unavailable": "不可用"
+      },
+      "daemonUnavailable": "无法访问 OpenCLI。浏览器连接状态无法确认。",
+      "empty": "尚未发现浏览器连接。安装 OpenCLI 扩展并将其连接到此实例。",
+      "browser": "浏览器 {{id}}",
+      "profile": "配置文件 {{id}}",
+      "extensionVersion": "扩展 v{{version}}",
+      "status": {
+        "connected": "已连接",
+        "disconnected": "已断开",
+        "unknown": "未知"
+      },
+      "lastSeen": "上次在线",
+      "notReported": "未提供",
+      "installExtension": "安装 OpenCLI 扩展"
+    }
   },
   "system": {
     "title": "系统",

@@ -8,7 +8,7 @@ import { FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Timestamp } from "@rome-os/ui/timestamp";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
 // The Inbox page reads the same host endpoints the Settings page used before
@@ -133,10 +133,7 @@ export default function InboxPage() {
       <PageBody>
         {/* Header renders above the load switch so a slow read leaves the page
             identity in place instead of blanking the route. */}
-        <div>
-          <h1 className="text-title text-foreground">{t("page.title")}</h1>
-          <p className="mt-1 text-body text-muted-foreground">{t("page.description")}</p>
-        </div>
+        <PageHeader title={t("page.title")} description={t("page.description")} />
 
         {toast && (
           <div className="fixed right-4 top-4 z-50 rounded-8 border border-success-border bg-success-bg px-4 py-2 text-ui text-success-fg shadow-10">
@@ -182,7 +179,7 @@ function TriageActivitySection({
   return (
     <section>
       <h2 className="text-section text-foreground">{t("triage.title")}</h2>
-      <p className="mb-4 mt-1 text-body text-muted-foreground">{t("triage.description")}</p>
+      <p className="mb-4 mt-1 text-ui text-muted-foreground">{t("triage.description")}</p>
       {entries.length === 0 ? (
         <p className="text-ui text-muted-foreground">{ts("sentinelLog.empty")}</p>
       ) : (
@@ -223,9 +220,9 @@ function TriageActivitySection({
                 />
               </div>
 
-              {entry.text && <p className="mb-1 text-body text-foreground">{entry.text}</p>}
+              {entry.text && <p className="mb-1 text-ui text-foreground">{entry.text}</p>}
               {entry.response && (
-                <p className="text-body italic text-muted-foreground">
+                <p className="text-ui italic text-muted-foreground">
                   {ts("sentinelLog.responsePrefix", {
                     response: entry.response,
                   })}
@@ -319,7 +316,7 @@ function TriagePolicySection({
   return (
     <section>
       <h2 className="text-section text-foreground">{t("policy.title")}</h2>
-      <p className="mb-6 mt-1 text-body text-muted-foreground">{t("policy.description")}</p>
+      <p className="mb-6 mt-1 text-ui text-muted-foreground">{t("policy.description")}</p>
 
       <div className="space-y-8">
         {/* Review interval */}
@@ -354,7 +351,7 @@ function TriagePolicySection({
         {/* Trusted levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.trustedLevels.title")}</h3>
-          <p className="mb-4 text-body text-muted-foreground">
+          <p className="mb-4 text-ui text-muted-foreground">
             {ts("trust.trustedLevels.description")}
           </p>
           <div className="space-y-3">
@@ -373,7 +370,7 @@ function TriagePolicySection({
         {/* Reply-to levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.replyToLevels.title")}</h3>
-          <p className="mb-4 text-body text-muted-foreground">
+          <p className="mb-4 text-ui text-muted-foreground">
             {ts("trust.replyToLevels.description")}
           </p>
           <div className="space-y-3">
@@ -456,7 +453,7 @@ function MessageSourcesSection({ connections }: { connections: ConnectionLite[] 
   return (
     <section>
       <h2 className="text-section text-foreground">{t("sources.title")}</h2>
-      <p className="mb-4 mt-1 text-body text-muted-foreground">
+      <p className="mb-4 mt-1 text-ui text-muted-foreground">
         <Trans
           i18nKey="sources.description"
           ns="inbox"

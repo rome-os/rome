@@ -154,7 +154,10 @@ appears in a label only once it disambiguates.
 
 ## Channels are glyphs, never colors
 
-`CHANNEL_META` ships an icon per channel, drawn in `currentColor` at muted foreground.
+`CHANNEL_META` ships a name and an icon per channel, drawn in `currentColor` at muted
+foreground. The name is the network's — `wechat_user`, the guardian's own client, is
+"WeChat" like any other WeChat account — and a channel with no entry is titled from its
+id rather than printed as one.
 
 <Specimen title="Channel glyphs">
   <ChannelGlyphSet />

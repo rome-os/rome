@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.1.18](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.17...rome-web-components-v0.1.18) (2026-09-17)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.2
+
+## [0.1.17](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.16...rome-web-components-v0.1.17) (2026-09-16)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.1
+
+## [0.1.16](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.15...rome-web-components-v0.1.16) (2026-09-15)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.0
+
+## [0.1.15](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.14...rome-web-components-v0.1.15) (2026-09-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.2.8
+
 ## [0.1.14](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.13...rome-web-components-v0.1.14) (2026-09-10)
 
 

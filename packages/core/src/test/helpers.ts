@@ -433,7 +433,7 @@ export async function buildTestDeps(
   const sentinelLogRepo = new SentinelLogRepository(db);
   const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db);
+  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.
@@ -441,7 +441,11 @@ export async function buildTestDeps(
   const appKeyInjector = new AppKeyInjector({});
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
+  const appRuntimeRepositories = createAppRuntimeRepositories({
+    settingsRepo,
+    webchatRepo,
+    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+  });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
@@ -645,6 +649,13 @@ export async function buildTestDeps(
     publicAccessState,
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
+    computerUse: {
+      getStatus: async () => ({
+        daemon: { status: "unavailable", version: null },
+        checkedAt: new Date().toISOString(),
+        connections: [],
+      }),
+    },
     favorService: unavailableFavorService,
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.

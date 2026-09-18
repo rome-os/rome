@@ -40,6 +40,9 @@ export interface WorkspaceContextSnapshot {
 /** Whole-block cap. */
 export const WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT = 2000;
 
+/** Per-project summary cap in Unicode code points, including the truncation marker. */
+export const PROJECT_SUMMARY_CHAR_LIMIT = 160;
+
 export interface PromptBuildOptions {
   /**
    * Core agents inherit Rome's platform prompt. App-owned agents start from
@@ -556,7 +559,15 @@ export class PromptBuilder {
         continue;
       }
 
-      return paragraphLines.join(" ");
+      const summary = paragraphLines.join(" ");
+      const characters = Array.from(summary);
+      if (characters.length > PROJECT_SUMMARY_CHAR_LIMIT) {
+        return `${characters
+          .slice(0, PROJECT_SUMMARY_CHAR_LIMIT - 1)
+          .join("")
+          .trimEnd()}…`;
+      }
+      return summary;
     }
 
     return null;

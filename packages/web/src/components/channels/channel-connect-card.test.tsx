@@ -93,6 +93,25 @@ function stubFetch(overrides: (url: string, init?: RequestInit) => Response | nu
     });
 }
 
+it.each([
+  "telegram",
+  "discord",
+  "feishu",
+])("%s connection alone does not claim the guardian is paired", (service) => {
+  stubFetch();
+  const config = CHANNEL_CONFIGS[service];
+  renderCard(
+    <ChannelConnectCard
+      config={config}
+      slot={connected(config.defaultGrant, "Rome Bot")}
+      role="primary"
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+  expect(screen.queryByText(/linked as guardian/)).toBeNull();
+});
+
 // ── Shared frame (via Discord) ──────────────────────────────────────────────
 
 describe("ChannelConnectCard — shared frame", () => {
@@ -110,7 +129,7 @@ describe("ChannelConnectCard — shared frame", () => {
     expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
   });
 
-  it("renders the connected card with @identity, guardian-linked copy, and Disconnect", () => {
+  it("renders the connected card with @identity and Disconnect", () => {
     stubFetch();
     renderCard(
       <ChannelConnectCard
@@ -121,7 +140,7 @@ describe("ChannelConnectCard — shared frame", () => {
       />,
     );
     expect(screen.getByText("@rome_helper")).toBeTruthy();
-    expect(screen.getByText("Your Discord account is linked as guardian.")).toBeTruthy();
+    expect(screen.queryByText(/linked as guardian/)).toBeNull();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
   });
 

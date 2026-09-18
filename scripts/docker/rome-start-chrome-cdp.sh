@@ -228,7 +228,7 @@ wait_for_external_cdp() {
 }
 
 start_stealth_guard() {
-  if [[ "$ENABLE_STEALTH" == "0" ]]; then
+  if [[ "${ROME_ENABLE_CDP_AUTOMATION:-false}" != "true" || "$ENABLE_STEALTH" == "0" ]]; then
     return 0
   fi
 

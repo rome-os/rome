@@ -85,7 +85,7 @@ describe("Card", () => {
 
     expect(title.tagName).toBe("H3");
     expect(title.className).toContain("text-section");
-    expect(description.className).toContain("text-body");
+    expect(description.className).toContain("text-ui");
     expect(description.className).toContain("text-muted-foreground");
   });
 

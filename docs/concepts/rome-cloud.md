@@ -31,6 +31,7 @@ An instance authenticates its guardian to Rome Cloud over a standard OAuth 2.0 /
 - Identity is a verifiable token. The assertion is asymmetrically signed, and the instance verifies it against the published JWKS, selecting the key by `kid` — so key rotation is additive, with no client change. The issuer is validated ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) mix-up protection), and the subject is the authenticated account. No separate unsigned identity body exists to reconcile against a second lookup.
 - Ownership is enforced at authorization. Rome Cloud issues a code only to the account that owns the instance, so a verified assertion names the confirmed owner and the instance performs no cross-account reconciliation.
 - PKCE S256 is mandatory on every authorization, and codes are single-use.
+- On an instance with no [guardian](people.md#guardian) seat, sign-in completes setup. The instance creates the seat, names the guardian from the assertion's `name` claim (falling back to the local part of its email), gives the agent a preset name and purpose, and marks setup complete. The guardian lands in the welcome conversation, which confirms both names and connects an AI provider.
 - The durable instance credential is presented only to Rome Cloud, never to a service edge. Possession of it is the only way to act as the instance, and revoke is terminal ([decision](../adrs/no-rebind-from-public-instance-id.md)).
 
 **Not to be confused with:**

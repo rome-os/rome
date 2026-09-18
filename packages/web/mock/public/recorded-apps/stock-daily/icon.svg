@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect width="24" height="24" rx="5.5" fill="#052e16"/>
+
+  <!-- Mingcute stock-fill (Iconify: mingcute:stock-fill) — two candlesticks with wicks -->
+  <g transform="translate(4 4) scale(0.667)" fill="#4ade80">
+    <path d="M8 2a1 1 0 0 1 1 1v2a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3v4a1 1 0 1 1-2 0v-4a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3V3a1 1 0 0 1 1-1m9 0a1 1 0 0 1 .993.883L18 3v4a3 3 0 0 1 2.995 2.824L21 10v6a3 3 0 0 1-2.824 2.995L18 19v2a1 1 0 0 1-1.993.117L16 21v-2a3 3 0 0 1-2.995-2.824L13 16v-6a3 3 0 0 1 2.824-2.995L16 7V3a1 1 0 0 1 1-1"/>
+  </g>
+</svg>

@@ -247,7 +247,7 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
           </div>
         ) : isLogin ? (
           <>
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-body text-muted-foreground">
+            <ol className="flex list-decimal flex-col gap-1 pl-5 text-ui text-muted-foreground">
               <li>{t("terminal.claudeLogin.step1")}</li>
               <li>{t("terminal.claudeLogin.step2")}</li>
               <li>{t("terminal.claudeLogin.step3")}</li>

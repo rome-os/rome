@@ -96,6 +96,13 @@
         "mock/main.tsx",
         "mock/rsbuild.config.ts",
         "mock/rsbuild.static.config.ts",
+        "mock/**/*.test.{ts,tsx}",
+        // The mock build loads these through NormalModuleReplacementPlugin
+        // paths, which Knip cannot follow as imports.
+        "mock/TourAppsPage.tsx",
+        "mock/TourChatComposer.tsx",
+        "mock/use-tour-scroll.ts",
+        "mock/use-tour-workspace.ts",
         // The desktop VNC suite reaches both of these through a string, not an
         // import: playwright.desktop-vnc.config.ts names the rsbuild config in
         // its `webServer.command`, and that config swaps @novnc/novnc for

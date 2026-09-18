@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The chat composer's empty height is one `text-body` line box, and the box's
+ * The chat composer's empty height is one `text-composer` line box, and the box's
  * own padding is the only inset around it — so the space above the first line
  * of typed text equals the space below the toolbar row.
  *
@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
  * and lays out no text, so the unit tests can only pin that the declaration is
  * in line-box units and that the resize handler writes no floor of its own.
  * Whether `1lh` actually derives the role's line box, and whether the two
- * insets come out equal, is visible only here. A retune of Body that breaks
+ * insets come out equal, is visible only here. A retune of Composer that breaks
  * either fails in this spec and nowhere else.
  */
 
@@ -20,7 +20,7 @@ const BOX = "[data-chat-composer-box]";
 // last child" would quietly become one of those and measure the wrong gap.
 const TOOLBAR = "[data-chat-composer-toolbar]";
 
-test("the empty composer is one body line box, inset only by the box's padding", async ({
+test("the empty composer is one composer line box, inset only by the box's padding", async ({
   page,
 }) => {
   await page.goto("/chat");

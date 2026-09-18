@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { List } from "@/components/ui/list-row";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
 import { DismissedEntry, UnknownEntry } from "./people/triage";
 import {
@@ -187,24 +188,24 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   return (
     <PageShell>
       <PageBody>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-title text-foreground">{tCommon("nav.people")}</h1>
-          </div>
-          {/* Both of this page's one-of-N controls are the kit's radiogroups
-              rather than buttons wearing `role="radio"`: Radix supplies the
-              roving focus and arrow-key movement the role promises, which a row
-              of tab stops does not have. */}
-          <SegmentedControl<PeopleView>
-            aria-label={t("views.label")}
-            value={view}
-            onValueChange={(next) => go({ view: next })}
-            options={[
-              { value: "latest", label: t("views.latest") },
-              { value: "directory", label: t("views.directory") },
-            ]}
-          />
-        </div>
+        {/* Both of this page's one-of-N controls are the kit's radiogroups
+            rather than buttons wearing `role="radio"`: Radix supplies the
+            roving focus and arrow-key movement the role promises, which a row
+            of tab stops does not have. */}
+        <PageHeader
+          title={tCommon("nav.people")}
+          actions={
+            <SegmentedControl<PeopleView>
+              aria-label={t("views.label")}
+              value={view}
+              onValueChange={(next) => go({ view: next })}
+              options={[
+                { value: "latest", label: t("views.latest") },
+                { value: "directory", label: t("views.directory") },
+              ]}
+            />
+          }
+        />
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input
@@ -339,7 +340,7 @@ function LatestView({
   // above it already says which view is on screen.
   return (
     <section>
-      <div className="flex flex-col">
+      <List>
         {rows.map((row) =>
           row.kind === "account" ? (
             renderUnplaced(row)
@@ -347,7 +348,7 @@ function LatestView({
             <StreamRow key={row.id} row={row} onOpen={() => onOpen(row)} />
           ),
         )}
-      </div>
+      </List>
     </section>
   );
 }
@@ -394,7 +395,7 @@ function DirectoryView({
               {counts[group.level]}
             </span>
           </div>
-          <div className="flex flex-col">
+          <List>
             {group.rows.map((row) =>
               row.kind === "account" ? (
                 renderUnplaced(row)
@@ -402,7 +403,7 @@ function DirectoryView({
                 <DirectoryRow key={row.id} row={row} onOpen={() => onOpen(row)} />
               ),
             )}
-          </div>
+          </List>
         </section>
       ))}
     </>

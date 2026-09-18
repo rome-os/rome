@@ -44,6 +44,9 @@ Most progress in AI comes from scaling models. Rome scales the other axis, the e
 
 Rome is a guardrailed environment where human and agent collaborate, and the collaboration compounds. Agents build their own harnesses, design their own SOPs, and orchestrate workflows under your guidance. Proven capabilities stick. Every interaction raises the ceiling for the next.
 
+Rome also works as an open source alternative to [Grok Bot and Meta's Muse](#how-rome-compares)
+for persistent agents, scheduled tasks, and custom apps.
+
 <p align="center">
   <a href="https://www.youtube.com/watch?v=lyNGYEw4a6Y">
     <img
@@ -208,8 +211,9 @@ comparison is who and what stands behind the app.
 
 | | What accumulates | What runs repeated work | Where you operate it | Hosting |
 | --- | --- | --- | --- | --- |
-| **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | A saved action, without re-running the agent | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
-| **Grok Bot** (xAI) | Per-bot memory, files, and preferences, plus a shared cloud computer, in xAI's cloud | The model, every time | A chat thread | Hosted only |
+| **Rome** | Actions, skills, and apps as git-tracked code, plus memory and app-private data | Saved actions, with model calls as needed | A purpose-built app, plus chat channels (Telegram, Discord, WhatsApp) | Self-hosted or Rome Cloud |
+| **[Grok Bot](https://docs.x.ai/grok-bot/overview)** (xAI) | Memory, skills, and files on a shared cloud computer | Bots running skills and routines | Chat, file previews, and computer access | xAI-hosted |
+| **[Muse](https://introducing.muse.ai/)** (Meta) | Memory, goals, files, and interactive artifacts | Scheduled and event-triggered agent work | Muse app, WhatsApp, goals, and artifacts | Meta-hosted |
 | **Hermes Agent** (Nous Research) | Bounded memory notes and skill documents, as text | The model, or a script-only cron job\* | A chat thread (chat clients, desktop app, or CLI) | Self-hosted |
 | **Manus** | Files, tools, and databases on a persistent cloud computer, plus knowledge and playbooks | The model, or scripts left on its machine\* | A chat session, plus standalone web apps it builds | Hosted, with app-code export |
 
@@ -217,17 +221,16 @@ comparison is who and what stands behind the app.
 answers only to its timer. A Rome action is a building block: agents, apps,
 and interfaces all call it, and it can pause for approval.
 
-**Grok Bot** gives your named agents an always-on cloud computer, tool
-connections, scheduling, and agent-to-agent delegation. Each bot keeps its own
-memory, files, and preferences, while all of an account's bots share one cloud
-computer. Everything lives in xAI's hosted stack, bound to one vendor's
-models, so leaving means losing what accumulated. The interface is a messenger
-thread: a good place to ask for something
-once and a poor place to operate: inbox triage needs a queue with statuses, a
-price tracker needs a table with history and thresholds, and approvals need a
-review queue that shows what will change. In chat, state is invisible until you
-ask, and every check runs the agent again. Rome gives repeated work an app, in
-an environment that is open, exportable, and model-agnostic.
+**[Grok Bot](https://docs.x.ai/grok-bot/overview)** gives persistent bots a
+shared cloud computer. Its
+[skills and routines](https://docs.x.ai/grok-bot/skills-routines-and-automations)
+support repeated work. Rome adds a runtime you can self-host and
+[apps](docs/concepts/apps.md) whose actions, data, and interfaces you can reuse.
+
+**[Muse](https://introducing.muse.ai/)** handles personal tasks with memory,
+scheduled work, and interactive artifacts. Rome covers similar workflows
+through [apps](docs/concepts/apps.md), with source code you can modify and a
+[choice of model provider](docs/concepts/agents.md#model-selection).
 
 **Hermes Agent** is the closest in spirit: MIT-licensed, self-hostable, with
 curated memory, self-written skill documents, and a skill marketplace. What
@@ -267,8 +270,9 @@ an app, while Rome asks you to describe an outcome and leaves an app behind
 when the work deserves one.
 
 The difference is the unit of compounding. Grok Bot compounds hosted bot
-state, Hermes compounds the agent's notes, Manus compounds a machine and its
-files, and Wabi compounds a network of shareable apps. Rome compounds the
+state and skills, and Muse compounds personal context and artifacts.
+Hermes compounds the agent's notes, Manus compounds a machine and its files,
+and Wabi compounds a network of shareable apps. Rome compounds the
 environment: executable, composable capability owned by you ([why that is the
 durable asset](VISION.md)). Building blocks compose: a capability built for
 one task becomes a part in a more ambitious one, so each request can ask for

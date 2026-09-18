@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.3.2](https://github.com/rome-os/rome/compare/ui-v0.3.1...ui-v0.3.2) (2026-09-17)
+
+
+### Features
+
+* **web:** isolate pairing views and add Storybook previews ([#353](https://github.com/rome-os/rome/issues/353)) ([3595492](https://github.com/rome-os/rome/commit/35954927cd9958a2494c3cbc5854e1e5028ff9bb))
+
+
+### Bug Fixes
+
+* **ui:** pull the Markdown heading ladder back to 1.5x the body ([#410](https://github.com/rome-os/rome/issues/410)) ([3a8b183](https://github.com/rome-os/rome/commit/3a8b18344ea62d52a3314e668a52d88346af4a8e))
+
+## [0.3.1](https://github.com/rome-os/rome/compare/ui-v0.3.0...ui-v0.3.1) (2026-09-16)
+
+
+### Features
+
+* **ui:** add the page layout tier with List, and migrate two pages onto it ([#392](https://github.com/rome-os/rome/issues/392)) ([be1b7a3](https://github.com/rome-os/rome/commit/be1b7a368f204e66ac0db928e1733836d283b4a3))
+* **ui:** retune Markdown rhythm for headings, tables, and lists ([#402](https://github.com/rome-os/rome/issues/402)) ([cf2d106](https://github.com/rome-os/rome/commit/cf2d106044a26b63c204d903b15f995e1d1f6de6))
+* **ui:** turn the layout tier into bodies on a Page skeleton, and migrate /settings ([#396](https://github.com/rome-os/rome/issues/396)) ([6dbed23](https://github.com/rome-os/rome/commit/6dbed234e140d2ea986c3b7dce1bd6dbfcdab7b1))
+
+## [0.3.0](https://github.com/rome-os/rome/compare/ui-v0.2.8...ui-v0.3.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui:** replace the Body type role with Composer ([#389](https://github.com/rome-os/rome/issues/389))
+
+### Features
+
+* **ui:** replace the Body type role with Composer ([#389](https://github.com/rome-os/rome/issues/389)) ([5ade8d5](https://github.com/rome-os/rome/commit/5ade8d51409d450eeb7c5e4cedbc87f285e81d05))
+
+
+### Bug Fixes
+
+* **ui:** size Markdown inline code to clear the compact line box ([#391](https://github.com/rome-os/rome/issues/391)) ([2c64d74](https://github.com/rome-os/rome/commit/2c64d7422dc7ba28e99bdd6056954010cdbdf0a5))
+
+## [0.2.8](https://github.com/rome-os/rome/compare/ui-v0.2.7...ui-v0.2.8) (2026-09-14)
+
+
+### Features
+
+* **ui:** add row, checkbox, and radio group primitives ([#367](https://github.com/rome-os/rome/issues/367)) ([848376a](https://github.com/rome-os/rome/commit/848376a9eebceb81341b25a323ea345c936ed200))
+* **ui:** retune type weight, control scale, and focus edge ([#365](https://github.com/rome-os/rome/issues/365)) ([d28d695](https://github.com/rome-os/rome/commit/d28d695aa3ad58cd49ebcd44011da453502815a4))
+
 ## [0.2.7](https://github.com/rome-os/rome/compare/ui-v0.2.6...ui-v0.2.7) (2026-09-10)
 
 

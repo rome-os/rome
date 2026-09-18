@@ -125,6 +125,7 @@ i18n
 if (typeof document !== "undefined") {
   const sync = (lng: string) => {
     document.documentElement.lang = lng;
+    document.documentElement.dir = i18n.dir(lng);
   };
   sync(i18n.language || "en");
   i18n.on("languageChanged", sync);

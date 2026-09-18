@@ -39,12 +39,26 @@ const configSchema = z.object({
   linkedinPollMinMinutes: z.coerce.number().int().positive().default(15),
   linkedinPollMaxMinutes: z.coerce.number().int().positive().default(30),
 
+  // Offer the personal WeChat connection. Off by default: it runs the WeChat
+  // desktop client in the container and recovers its store key via a host-root
+  // script, so it needs host execution enabled and carries WeChat ToS/account
+  // risk. Registered only when this is on, so an instance that does not want it
+  // shows no Connect button that would fail.
+  wechatUserEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
 
   hostExecutionSocket: z.string().startsWith("/").optional(),
   hostExecutionEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  cdpAutomationEnabled: z
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
@@ -147,11 +161,17 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
     raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
   }
+  if (env.ROME_ENABLE_CDP_AUTOMATION !== undefined) {
+    raw.cdpAutomationEnabled = env.ROME_ENABLE_CDP_AUTOMATION;
+  }
   if (env.LINKEDIN_POLL_MIN_MINUTES) {
     raw.linkedinPollMinMinutes = env.LINKEDIN_POLL_MIN_MINUTES;
   }
   if (env.LINKEDIN_POLL_MAX_MINUTES) {
     raw.linkedinPollMaxMinutes = env.LINKEDIN_POLL_MAX_MINUTES;
+  }
+  if (env.WECHAT_USER_ENABLED !== undefined) {
+    raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;
   }
   if (env.ROME_ACTION_MAX_WORKERS) {
     raw.actionWorkerMaxProcesses = env.ROME_ACTION_MAX_WORKERS;

@@ -140,7 +140,7 @@ export function ConnectionSlotCard({
       )}
 
       {copy.bullets.length > 0 && (
-        <div className="space-y-2 text-body text-foreground">
+        <div className="space-y-2 text-ui text-foreground">
           <p>{t(slotHeadingKey(headingRole))}</p>
           <ul className="list-disc space-y-2 pl-5">
             {copy.bullets.map((bullet) => (

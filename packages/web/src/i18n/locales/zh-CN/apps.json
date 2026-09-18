@@ -2,15 +2,7 @@
   "builtinApps": "内置应用",
   "header": {
     "title": "应用",
-    "appStore": "应用商店",
-    "myAppsCount_one": "自建 {{count}}",
-    "myAppsCount_other": "自建 {{count}}",
-    "installedCount_one": "已安装 {{count}}",
-    "installedCount_other": "已安装 {{count}}",
-    "builtinCount_one": "内置 {{count}}",
-    "builtinCount_other": "内置 {{count}}",
-    "updatesCount_one": "{{count}} 项更新",
-    "updatesCount_other": "{{count}} 项更新"
+    "appStore": "应用商店"
   },
   "sections": {
     "my": {
@@ -30,6 +22,7 @@
   "search": {
     "placeholder": "搜索应用",
     "ariaLabel": "搜索应用",
+    "toolbarLabel": "筛选应用",
     "clear": "清除搜索",
     "resultsCount_one": "{{count}} 个结果",
     "resultsCount_other": "{{count}} 个结果",

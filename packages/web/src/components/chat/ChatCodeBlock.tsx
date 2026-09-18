@@ -3,13 +3,11 @@ import {
   createContext,
   isValidElement,
   useContext,
-  useId,
   useState,
   type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRightIcon } from "@radix-ui/react-icons";
-import { Button } from "@/components/ui/button";
+import { CollapsibleCard, CollapsibleSection } from "@/components/chat/CollapsibleCard";
 
 // The live preview and persisted transcript mount different Markdown trees.
 // MessageList owns this map so the replacement can recover the same fence state.
@@ -34,7 +32,6 @@ export function ChatCodeBlock({ children, node }: ChatCodeBlockProps) {
   const [open, setOpen] = useState(() =>
     disclosureKey === null ? true : (disclosureState?.get(disclosureKey) ?? true),
   );
-  const bodyId = useId();
   const code = isValidElement<{ className?: string; "data-block"?: string }>(children)
     ? children
     : null;
@@ -43,31 +40,20 @@ export function ChatCodeBlock({ children, node }: ChatCodeBlockProps) {
   const label = isMermaid ? t("markdown.mermaid") : (language ?? t("markdown.code"));
 
   return (
-    <div className="min-w-0" data-chat-code-block={isMermaid ? "mermaid" : "code"}>
-      <Button
-        variant="ghost"
-        size="sm"
-        align="start"
-        className="w-full text-muted-foreground"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={() =>
-          setOpen((value) => {
-            const next = !value;
-            if (disclosureKey !== null) disclosureState?.set(disclosureKey, next);
-            return next;
-          })
-        }
+    <CollapsibleCard className="min-w-0" data-chat-code-block={isMermaid ? "mermaid" : "code"}>
+      <CollapsibleSection
+        open={open}
+        onOpenChange={(next) => {
+          if (disclosureKey !== null) disclosureState?.set(disclosureKey, next);
+          setOpen(next);
+        }}
+        title={<span className="truncate text-aux text-muted-foreground">{label}</span>}
       >
-        <ChevronRightIcon aria-hidden="true" className={open ? "rotate-90" : ""} />
-        <span className="truncate">{label}</span>
-      </Button>
-      <div id={bodyId} hidden={!open} data-chat-code-block-body="">
         {/* Streamdown's pre renderer marks its child as block code. Keep that
             contract so unlabelled fences do not become inline code. Mount only
             while open so Mermaid measures a visible canvas after expansion. */}
         {open && (code ? cloneElement(code, { "data-block": "true" }) : children)}
-      </div>
-    </div>
+      </CollapsibleSection>
+    </CollapsibleCard>
   );
 }
