@@ -19,6 +19,7 @@ import type { GrantLedger } from "../ledger.js";
 import type { ConnectionDescriptor, Credential, Talker } from "../types.js";
 import {
   makeOAuthProviderDescriptor,
+  OAUTH_PROVIDER_GRANTS,
   redeemOAuthRedirect,
   slackGrantProfileSchema,
   type OAuthProviderSetupDeps,
@@ -211,17 +212,10 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescriptor {
   const descriptor = makeOAuthProviderDescriptor("slack");
   descriptor.pairing = { replyInOriginatingConversation: true, plainTextGuidance: true };
-  descriptor.connectAvailability = () =>
-    deps.ingress.configured
-      ? { available: true, unavailableReason: null }
-      : {
-          available: false,
-          unavailableReason: "Slack bot events are not configured on this Rome instance.",
-        };
   descriptor.auth.workspace.setup = makeSlackSetup(deps);
   if (!deps.ingress.configured) return descriptor;
   descriptor.capabilities.talker = {
-    needs: ["workspace"] as const,
+    needs: [OAUTH_PROVIDER_GRANTS.slack] as const,
     build(creds, kit): Talker {
       const material = credentialMaterial(creds.workspace);
       const profile = slackGrantProfileSchema.parse(kit.profile("workspace") ?? {});

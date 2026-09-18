@@ -29,6 +29,7 @@ export interface InboundDedup {
 export type DeferredInboundReservation =
   | { state: "complete" }
   | { state: "busy" }
+  | { state: "saturated" }
   | {
       state: "acquired";
       commit(): Promise<void>;
@@ -39,8 +40,9 @@ export type DeferredInboundReservation =
  * Deferred commit variant for ingress that may ask the provider to retry.
  *
  * A future shared implementation must make `reserve` atomic across processes.
- * `busy` means another delivery has only reserved the key, so callers must ask
- * the provider to retry; only `complete` is safe to acknowledge as a duplicate.
+ * `busy` means another delivery has only reserved this key; `saturated` means
+ * all bounded capacity is held by other live reservations. Both require a
+ * provider retry; only `complete` is safe to acknowledge as a duplicate.
  */
 export interface DeferredInboundDedup {
   reserve(key: string): Promise<DeferredInboundReservation>;
@@ -68,7 +70,7 @@ export class InMemoryInboundDedup implements InboundDedup, DeferredInboundDedup 
     // cannot allow two handlers to process the same key concurrently.
     if (this.states.size >= this.maxEntries) {
       this.evictOneCompleted();
-      if (this.states.size >= this.maxEntries) return { state: "busy" };
+      if (this.states.size >= this.maxEntries) return { state: "saturated" };
     }
     this.states.set(key, "pending");
     let active = true;

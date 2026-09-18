@@ -134,6 +134,55 @@ describe("SlackIngress", () => {
     ).resolves.toBe("unhandled");
   });
 
+  it("stops retrying a workspace whose handler remains unavailable across rebuilds", async () => {
+    let now = 0;
+    const ingress = new SlackIngress("secret", { now: () => now, startupGraceMs: 0 });
+    ingress.completeInitialRegistration();
+    const releaseFirst = ingress.expectWorkspace(identity.teamId);
+
+    await expect(ingress.dispatch(envelope("Ev-first-backoff", { type: "message" }))).resolves.toBe(
+      "starting",
+    );
+    now = 60_000;
+    const releaseSecond = ingress.expectWorkspace(identity.teamId);
+    now = 120_001;
+    await expect(
+      ingress.dispatch(envelope("Ev-bounded-backoff", { type: "message" })),
+    ).resolves.toBe("unhandled");
+
+    releaseFirst();
+    releaseSecond();
+  });
+
+  it("releases a reservation if its snapshotted handler was removed", async () => {
+    let resolveReservation!: (reservation: {
+      state: "acquired";
+      commit(): Promise<void>;
+      release(): Promise<void>;
+    }) => void;
+    const commit = rs.fn(async () => {});
+    const release = rs.fn(async () => {});
+    const ingress = new SlackIngress("secret", {
+      dedup: {
+        reserve: () =>
+          new Promise((resolve) => {
+            resolveReservation = resolve;
+          }),
+      },
+    });
+    const handler = rs.fn();
+    const unsubscribe = ingress.subscribe(identity.teamId, handler);
+    const dispatch = ingress.dispatch(envelope("Ev-teardown", { type: "message" }));
+    await Promise.resolve();
+    unsubscribe();
+    resolveReservation({ state: "acquired", commit, release });
+
+    await expect(dispatch).resolves.toBe("retry");
+    expect(handler).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds the process-wide unknown-workspace registration grace", async () => {
     let now = 0;
     const ingress = new SlackIngress("secret", { now: () => now, startupGraceMs: 0 });
@@ -166,7 +215,7 @@ describe("SlackAdapter", () => {
         channel_type: "im",
         channel: "D1",
         user: "U1",
-        text: "hello &amp; <@U9|Ada> in <#C9|general> read <https://example.com|docs> not &lt;@U8&gt;",
+        text: "<@UBOT> hello &amp; <@U9|Ada> in <#C9|general> read <https://example.com|docs> not &lt;@U8&gt;",
         ts: "1700000000.100",
       }),
     );
@@ -460,15 +509,20 @@ describe("SlackAdapter", () => {
       );
     globalThis.fetch = fetchMock;
     try {
-      await expect(
-        slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" }),
-      ).resolves.toEqual({ ts: "reply.1" });
+      rs.useFakeTimers();
+      const request = slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" });
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await rs.advanceTimersByTimeAsync(1);
+      await expect(request).resolves.toEqual({ ts: "reply.1" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
         text: "hello",
         mrkdwn: false,
       });
     } finally {
+      rs.useRealTimers();
       globalThis.fetch = originalFetch;
     }
   });
@@ -800,6 +854,32 @@ describe("Slack guardian linking", () => {
     );
 
     await expect(linking).resolves.toEqual({ channelUserId: "T123/UGUARDIAN" });
+  });
+
+  it("invalidates setup after a bounded total of untracked incorrect attempts", async () => {
+    const ingress = new SlackIngress("secret");
+    const linking = waitForSlackGuardianLink(
+      ingress,
+      identity,
+      "ROME-LINK-ABCDEFGH",
+      new AbortController().signal,
+    );
+    const rejection = expect(linking).rejects.toThrow("Too many incorrect");
+
+    for (let attempt = 0; attempt < 500; attempt++) {
+      await ingress.dispatch(
+        envelope(`distributed-guess-${attempt}`, {
+          type: "message",
+          channel_type: "im",
+          channel: `D${attempt}`,
+          user: `U${attempt}`,
+          text: "ROME-LINK-WRONG000000",
+          ts: `1700000011.${attempt}`,
+        }),
+      );
+    }
+
+    await rejection;
   });
 
   it("expires and unregisters a guardian-link code", async () => {

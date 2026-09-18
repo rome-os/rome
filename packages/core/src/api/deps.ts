@@ -52,6 +52,12 @@ import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
 import type { SlackIngress } from "../channels/slack.js";
 
+export interface OAuthRedeemServices {
+  guardianState: typeof import("../lib/guardian-auth-state.js").getGuardianAuthState;
+  pendingProvider: typeof import("../lib/rome-cloud-oauth.js").pendingRomeCloudOAuthProvider;
+  redeemHandoff: typeof import("../lib/rome-cloud-oauth.js").redeemRomeCloudOAuthHandoff;
+}
+
 export interface ApiConfig {
   port: number;
   host: string;
@@ -184,6 +190,8 @@ export interface ApiDeps {
   setupManager?: SetupManager;
   /** Slack Events API verifier/router. Optional in lightweight route tests. */
   slackIngress?: SlackIngress;
+  /** Test seam for the OAuth return leg; production uses the concrete services. */
+  oauthRedeemServices?: OAuthRedeemServices;
 }
 
 export interface ApiHandle {

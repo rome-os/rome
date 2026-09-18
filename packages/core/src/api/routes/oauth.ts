@@ -14,13 +14,7 @@ import {
   redeemRomeCloudOAuthHandoff,
 } from "../../lib/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
-import type { ApiDeps } from "../deps.js";
-
-interface OAuthRedeemServices {
-  guardianState: typeof getGuardianAuthState;
-  pendingProvider: typeof pendingRomeCloudOAuthProvider;
-  redeemHandoff: typeof redeemRomeCloudOAuthHandoff;
-}
+import type { ApiDeps, OAuthRedeemServices } from "../deps.js";
 
 const defaultOAuthRedeemServices: OAuthRedeemServices = {
   guardianState: getGuardianAuthState,
@@ -28,11 +22,9 @@ const defaultOAuthRedeemServices: OAuthRedeemServices = {
   redeemHandoff: redeemRomeCloudOAuthHandoff,
 };
 
-export function oauthRoutes(
-  deps: ApiDeps,
-  redeemServices: OAuthRedeemServices = defaultOAuthRedeemServices,
-): Hono {
+export function oauthRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
+  const redeemServices = deps.oauthRedeemServices ?? defaultOAuthRedeemServices;
 
   app.get("/oauth/providers", async (c) => {
     const providers = getEnabledOAuthProviders().map((provider) => {

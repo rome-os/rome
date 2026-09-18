@@ -242,6 +242,7 @@ describe("OAuthConnectionSection", () => {
 
     expect(await screen.findByRole("button", { name: "Reconnect" })).toBeTruthy();
     expect(screen.queryByText("Slack connected")).toBeNull();
+    if (status === "failed") expect(screen.getByText("Setup failed")).toBeTruthy();
   });
 
   it("shows the unavailable reason and a disabled Connect when the service is unavailable", () => {

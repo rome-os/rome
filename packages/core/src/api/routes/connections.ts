@@ -93,16 +93,8 @@ interface GrantDetailView {
   tokenExpiresAt: string | null;
 }
 
-function connectHint(service: string, descriptor: ConnectionDescriptor): ConnectHint | null {
+function connectHint(service: string): ConnectHint | null {
   if (!isOAuthProvider(service)) return null;
-  const hostAvailability = descriptor.connectAvailability?.();
-  if (hostAvailability && !hostAvailability.available) {
-    return {
-      url: null,
-      available: false,
-      unavailableReason: hostAvailability.unavailableReason,
-    };
-  }
   const link = createRomeCloudOAuthStartUrl(service);
   return {
     url: link.connectUrl,
@@ -151,7 +143,7 @@ function buildConnectionView(
     grants,
     display,
     capabilities: conn.status(),
-    connect: descriptor ? connectHint(conn.service, descriptor) : null,
+    connect: descriptor ? connectHint(conn.service) : null,
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
   };
 }
@@ -223,7 +215,7 @@ function placeholderView(
       act: capStatus("actor"),
       watch: capStatus("watcher"),
     },
-    connect: connectHint(service, descriptor),
+    connect: connectHint(service),
     setups: activeSetups(manager, service, grantNames),
   };
 }

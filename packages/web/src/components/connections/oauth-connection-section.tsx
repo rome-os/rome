@@ -149,6 +149,7 @@ export function OAuthConnectionSection({
   ) : null;
   const connectedSetupState: SetupState | null =
     setup.state && !isTerminalSetup(setup.state) ? setup.state : null;
+  const connectedSetupFailure = setup.state?.status === "failed" ? setup.state.reason : setup.error;
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.
@@ -281,17 +282,22 @@ export function OAuthConnectionSection({
               labels={{ continue: t("common.connect") }}
             />
           ) : (
-            <Button
-              variant={expired ? "default" : "outline"}
-              size="sm"
-              disabled={setup.busy || !!reconnectUnavailableReason}
-              title={reconnectUnavailableReason ?? undefined}
-              aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
-              onClick={() => beginConnect(true)}
-            >
-              {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
-              {t("connections.oauth.reconnect")}
-            </Button>
+            <div>
+              {connectedSetupFailure && (
+                <p className="mb-2 text-ui text-destructive-fg">{connectedSetupFailure}</p>
+              )}
+              <Button
+                variant={expired ? "default" : "outline"}
+                size="sm"
+                disabled={setup.busy || !!reconnectUnavailableReason}
+                title={reconnectUnavailableReason ?? undefined}
+                aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
+                onClick={() => beginConnect(true)}
+              >
+                {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
+                {t("connections.oauth.reconnect")}
+              </Button>
+            </div>
           ))}
         {!connectedSetupState && reconnectUnavailableReason && (
           <p className="text-ui text-muted-foreground">{reconnectUnavailableReason}</p>

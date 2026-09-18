@@ -34,21 +34,6 @@ function guardianCodeEvent(code: string): SlackEventEnvelope {
 }
 
 describe("Slack setup", () => {
-  it("reports the bot event prerequisite through descriptor availability", () => {
-    const descriptor = makeSlackDescriptor({
-      ingress: new SlackIngress(undefined),
-      beginRedirect: async () => "unused",
-      redeem: async () => {
-        throw new Error("unused");
-      },
-    });
-
-    expect(descriptor.connectAvailability?.()).toEqual({
-      available: false,
-      unavailableReason: "Slack bot events are not configured on this Rome instance.",
-    });
-  });
-
   it("does not expose Talk for a connector-only grant when bot ingress is unconfigured", () => {
     const descriptor = makeSlackDescriptor({
       ingress: new SlackIngress(undefined),
@@ -472,6 +457,14 @@ describe("Slack setup", () => {
       event_id: "Ev-user-revoked",
       team_id: identity.teamId,
       event: { type: "tokens_revoked", tokens: { oauth: ["UINSTALLER"] } },
+    });
+    expect(faults).toHaveLength(0);
+
+    await ingress.dispatch({
+      type: "event_callback",
+      event_id: "Ev-other-bot-revoked",
+      team_id: identity.teamId,
+      event: { type: "tokens_revoked", tokens: { bot: ["UOTHERBOT"] } },
     });
     expect(faults).toHaveLength(0);
 

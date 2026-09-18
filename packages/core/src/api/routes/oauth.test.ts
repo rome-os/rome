@@ -68,13 +68,7 @@ function makeDeps(registry?: ConnectionRegistry, slackIngressConfigured = false)
     db: {},
     connectionRegistry: registry,
     slackIngress: { configured: slackIngressConfigured },
-  } as unknown as ApiDeps;
-}
-
-async function postRedeem(deps: ApiDeps) {
-  const app = new Hono().route(
-    "/",
-    oauthRoutes(deps, {
+    oauthRedeemServices: {
       guardianState: async () => ({
         exists: true,
         userId: "guardian-1",
@@ -84,8 +78,12 @@ async function postRedeem(deps: ApiDeps) {
       }),
       pendingProvider: pendingRomeCloudOAuthProvider,
       redeemHandoff: redeemRomeCloudOAuthHandoff,
-    }),
-  );
+    },
+  } as unknown as ApiDeps;
+}
+
+async function postRedeem(deps: ApiDeps) {
+  const app = new Hono().route("/", oauthRoutes(deps));
   const response = await app.request("/oauth/redeem", {
     method: "POST",
     headers: { "content-type": "application/json" },

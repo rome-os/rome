@@ -275,28 +275,6 @@ describe("GET /connections", () => {
       else process.env.PANTHEON_BASE_ORIGIN = prev;
     }
   });
-
-  it("marks Slack unavailable until Events API signing is configured", async () => {
-    const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    registry.register({
-      service: "slack",
-      auth: { workspace: tokenPaste({ label: "token", validate: async () => {} }) },
-      connectAvailability: () => ({
-        available: false,
-        unavailableReason: "Slack bot events are not configured on this Rome instance.",
-      }),
-      capabilities: {},
-    });
-
-    const res = await makeApp(registry).request("/connections");
-    const { connections } = await res.json();
-
-    expect(connections[0].connect).toEqual({
-      url: null,
-      available: false,
-      unavailableReason: "Slack bot events are not configured on this Rome instance.",
-    });
-  });
 });
 
 describe("GET /connections/:id", () => {

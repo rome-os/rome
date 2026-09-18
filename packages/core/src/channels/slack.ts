@@ -11,9 +11,11 @@ const SLACK_INITIAL_STARTUP_GRACE_MS = 30_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 const SLACK_API_TIMEOUT_MS = 15_000;
 export const SLACK_HANDLER_REBUILD_GRACE_MS = 2 * 60_000;
+const SLACK_HANDLER_MAX_UNAVAILABLE_MS = 2 * 60_000;
 const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
 const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
 const SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS = 100;
+const SLACK_GUARDIAN_LINK_MAX_TOTAL_FAILED_ATTEMPTS = 500;
 const SLACK_GUARDIAN_LINK_MAX_FEEDBACK_MESSAGES = 5;
 const SLACK_PENDING_REGISTRATION_GRACE_MS = 30_000;
 
@@ -62,7 +64,11 @@ export class SlackIngress {
   private readonly handlers = new Map<string, SlackIngressHandler[]>();
   private readonly expectedWorkspaces = new Map<
     string,
-    { references: number; expiry?: ReturnType<typeof setTimeout> }
+    {
+      references: number;
+      expiry?: ReturnType<typeof setTimeout>;
+      unhandledDeadline?: number;
+    }
   >();
   private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate" | "retry">>();
   private readonly dedup: DeferredInboundDedup;
@@ -130,12 +136,20 @@ export class SlackIngress {
       teamId,
       options.first ? [handler, ...teamHandlers] : [...teamHandlers, handler],
     );
+    const expected = this.expectedWorkspaces.get(teamId);
+    if (expected) delete expected.unhandledDeadline;
     return () => {
       const current = this.handlers.get(teamId);
       if (!current) return;
       const remaining = current.filter((candidate) => candidate !== handler);
       if (remaining.length > 0) this.handlers.set(teamId, remaining);
-      else this.handlers.delete(teamId);
+      else {
+        this.handlers.delete(teamId);
+        const expected = this.expectedWorkspaces.get(teamId);
+        if (expected) {
+          expected.unhandledDeadline ??= this.now() + SLACK_HANDLER_MAX_UNAVAILABLE_MS;
+        }
+      }
     };
   }
 
@@ -174,6 +188,9 @@ export class SlackIngress {
     const current = this.expectedWorkspaces.get(teamId) ?? { references: 0 };
     if (current.expiry) clearTimeout(current.expiry);
     delete current.expiry;
+    if (!this.handlers.has(teamId)) {
+      current.unhandledDeadline ??= this.now() + SLACK_HANDLER_MAX_UNAVAILABLE_MS;
+    }
     current.references++;
     this.expectedWorkspaces.set(teamId, current);
     let active = true;
@@ -213,7 +230,7 @@ export class SlackIngress {
     const handlers = this.handlers.get(envelope.team_id);
     if (!handlers || handlers.length === 0) {
       return (this.pendingRegistrations > 0 && this.now() < this.pendingRegistrationDeadline) ||
-        this.expectedWorkspaces.has(envelope.team_id) ||
+        this.isWorkspaceExpected(envelope.team_id) ||
         !this.initialRegistrationComplete ||
         this.now() < this.initialStartupDeadline
         ? "starting"
@@ -231,6 +248,12 @@ export class SlackIngress {
     }
   }
 
+  private isWorkspaceExpected(teamId: string): boolean {
+    const expected = this.expectedWorkspaces.get(teamId);
+    if (!expected) return false;
+    return expected.unhandledDeadline === undefined || this.now() < expected.unhandledDeadline;
+  }
+
   private async dispatchOnce(
     envelope: SlackEventEnvelope,
     handlers: SlackIngressHandler[],
@@ -238,8 +261,21 @@ export class SlackIngress {
     const reservation = await this.dedup.reserve(envelope.event_id);
     if (reservation.state === "complete") return "duplicate";
     if (reservation.state === "busy") return "retry";
+    if (reservation.state === "saturated") {
+      log.error("slack inbound dedup saturated", {
+        eventId: envelope.event_id,
+        teamId: envelope.team_id,
+      });
+      return "retry";
+    }
     try {
-      for (const handler of handlers) {
+      const current = this.handlers.get(envelope.team_id);
+      const liveHandlers = current ? handlers.filter((handler) => current.includes(handler)) : [];
+      if (liveHandlers.length === 0) {
+        await reservation.release();
+        return "retry";
+      }
+      for (const handler of liveHandlers) {
         if ((await handler(envelope)) === true) break;
       }
       // Record only after the registered ingress handlers accept the event. A
@@ -317,7 +353,7 @@ async function slackApiCall(
       retriedRateLimit = true;
       const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
       const requestedWaitMs = Math.max(
-        0,
+        1_000,
         Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1_000 : 1_000,
       );
       if (requestedWaitMs > SLACK_RATE_LIMIT_MAX_WAIT_MS) {
@@ -626,7 +662,7 @@ export class SlackAdapter {
       return true;
     }
     if (event.type === "tokens_revoked") {
-      if (event.tokens?.bot && event.tokens.bot.length > 0) {
+      if (event.tokens?.bot?.includes(identity.botUserId)) {
         this.config.onCredentialFault?.(new SlackApiError(event.type));
       }
       return true;
@@ -647,7 +683,7 @@ export class SlackAdapter {
 
     let message: InboundMessage | null = null;
     if (event.type === "message" && event.channel_type === "im") {
-      const text = decodeSlackText(event.text).trim();
+      const text = stripSlackBotMention(event.text, identity.botUserId);
       if (!text) return true;
       const threadTs = event.thread_ts?.trim() || undefined;
       message = {
@@ -760,6 +796,7 @@ export function waitForSlackGuardianLink(
     const lockedSenders = new Set<string>();
     const feedbackBySender = new Map<string, number>();
     let feedbackMessages = 0;
+    let totalFailedAttempts = 0;
     let settled = false;
     const finish = (outcome: { channelUserId: string } | Error) => {
       if (settled) return;
@@ -819,6 +856,15 @@ export function waitForSlackGuardianLink(
           return false;
         }
         if (lockedSenders.has(sender)) return true;
+        totalFailedAttempts++;
+        if (totalFailedAttempts >= SLACK_GUARDIAN_LINK_MAX_TOTAL_FAILED_ATTEMPTS) {
+          finish(
+            new Error(
+              "Too many incorrect Slack guardian-link attempts. Cancel and reconnect to generate a new code.",
+            ),
+          );
+          return true;
+        }
         if (
           !failedAttempts.has(sender) &&
           failedAttempts.size >= SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS

@@ -250,9 +250,6 @@ export interface ConnectionDescriptor {
     /** Guidance must avoid provider markup and use readable plain text. */
     plainTextGuidance?: boolean;
   };
-  /** Optional host prerequisite for a Rome Cloud OAuth provider's connect URL.
-   *  Other setup kinds do not expose a generic connect hint. */
-  connectAvailability?: () => { available: boolean; unavailableReason: string | null };
   /** Revive a grant's stored opaque profile record: re-parse it with this
    *  service's own schema, then map it through the service's pure display
    *  function. Fail-closed — a record that no longer matches the schema throws

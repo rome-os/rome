@@ -40,7 +40,7 @@ describe("InMemoryInboundDedup", () => {
 
     expect(first.state).toBe("acquired");
     expect(second.state).toBe("acquired");
-    expect((await dedup.reserve("third")).state).toBe("busy");
+    expect((await dedup.reserve("third")).state).toBe("saturated");
 
     if (first.state === "acquired") await first.release();
     expect((await dedup.reserve("third")).state).toBe("acquired");

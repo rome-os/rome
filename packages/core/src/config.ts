@@ -103,7 +103,7 @@ const configSchema = z.object({
   anthropicApiKey: z.string().optional(),
 
   // Slack Events API request signing. Optional so instances that do not offer
-  // Slack can still boot; the Connections UI marks Slack unavailable without it.
+  // Slack can still boot in connector-only mode without bot conversations.
   slackSigningSecret: z.string().min(1).optional(),
 
   // Observability
