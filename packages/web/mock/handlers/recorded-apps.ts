@@ -14,6 +14,7 @@ const definitions = [
     version: "0.4.0",
     description: "Turn a YouTube video into a mind map, key-point summary, and slide deck.",
     entry: "index",
+    installedAt: null,
   },
   {
     id: "code-review",
@@ -21,6 +22,7 @@ const definitions = [
     version: "0.30.2",
     description: "Review pull requests with severity-ranked findings and a clear verdict.",
     entry: "66",
+    installedAt: null,
   },
   {
     id: "issue-triage",
@@ -28,6 +30,9 @@ const definitions = [
     version: "0.2.2",
     description: "Classify GitHub issues with labels, priorities, and clear reasoning.",
     entry: "index",
+    // Installed a minute ago: shows at the top of the sidebar's Recent zone
+    // with the "not opened yet" dot on a plain mock-mode load.
+    installedAt: new Date(Date.now() - 60_000).toISOString(),
   },
   {
     id: "fitness-tracker",
@@ -35,6 +40,8 @@ const definitions = [
     version: "0.2.0",
     description: "Follow a weekly workout plan with five-minute video modules.",
     entry: "index",
+    // Installed three days ago, to make Recent-zone ordering visible.
+    installedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
   },
   {
     id: "stock-daily",
@@ -42,6 +49,7 @@ const definitions = [
     version: "0.6.0",
     description: "Read daily market reports with index summaries, analysis, and sources.",
     entry: "index",
+    installedAt: null,
   },
 ];
 
@@ -69,6 +77,7 @@ export const recordedApps: InstalledAppCard[] = definitions.map((app) => ({
   projectPath: null,
   origin: "appstore",
   iconUrl: `/recorded-apps/${app.id}/icon.svg`,
+  installedAt: app.installedAt,
 }));
 
 const activity = reviews.map((review) => ({

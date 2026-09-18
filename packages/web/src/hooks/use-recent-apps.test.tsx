@@ -115,4 +115,30 @@ describe("useAppLastOpened", () => {
 
     await waitFor(() => expect(result.current).toEqual({ a: opened }));
   });
+
+  it("re-reads the mirror when another document (a split-view iframe) records an open", async () => {
+    const { result } = renderHook(() => useAppLastOpened(), { wrapper });
+    const opened = new Date().toISOString();
+
+    localStorage.setItem(APP_LAST_OPENED_STORAGE_KEY, JSON.stringify({ a: opened }));
+    window.dispatchEvent(new StorageEvent("storage", { key: APP_LAST_OPENED_STORAGE_KEY }));
+
+    await waitFor(() => expect(result.current).toEqual({ a: opened }));
+  });
+
+  it("ignores storage events for other keys", async () => {
+    const { result } = renderHook(() => useAppLastOpened(), { wrapper });
+    // Let the settings-merge effect settle first (server and local both empty
+    // here), so it doesn't race the assertion below and pick up the localStorage
+    // write made after it.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/settings", expect.anything()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const opened = new Date().toISOString();
+    localStorage.setItem(APP_LAST_OPENED_STORAGE_KEY, JSON.stringify({ a: opened }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "rome-sidebar-pins" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current).toEqual({});
+  });
 });
