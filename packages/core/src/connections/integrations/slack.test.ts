@@ -66,7 +66,7 @@ describe("Slack setup", () => {
         persist: async () => {},
         profile: () => ({
           teamId: "T1",
-          guardianChannelUserId: "T1/UGUARDIAN",
+          guardianLinked: true,
         }),
         registerIngress: () => () => {},
       },
@@ -104,7 +104,7 @@ describe("Slack setup", () => {
       {
         connectionId: "slack-connection",
         persist: async () => {},
-        profile: () => ({ teamId: "T1", guardianChannelUserId: "T1/UGUARDIAN" }),
+        profile: () => ({ teamId: "T1", guardianLinked: true }),
         registerIngress: () => () => {},
       },
     );
@@ -119,7 +119,7 @@ describe("Slack setup", () => {
     await expect(ingress.dispatch(guardianCodeEvent("during-backoff"))).resolves.toBe("starting");
   });
 
-  it("keeps a workspace retryable across normal epoch reconciliation", async () => {
+  it("releases a healthy workspace immediately when its epoch is stopped", async () => {
     const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
     ingress.completeInitialRegistration();
     const descriptor = makeSlackDescriptor({
@@ -138,7 +138,7 @@ describe("Slack setup", () => {
       {
         connectionId: "slack-connection",
         persist: async () => {},
-        profile: () => ({ teamId: "T1", guardianChannelUserId: "T1/UGUARDIAN" }),
+        profile: () => ({ teamId: "T1", guardianLinked: true }),
         registerIngress: () => () => {},
       },
     );
@@ -151,7 +151,7 @@ describe("Slack setup", () => {
 
     talker.stop();
 
-    await expect(ingress.dispatch(guardianCodeEvent("during-reconcile"))).resolves.toBe("starting");
+    await expect(ingress.dispatch(guardianCodeEvent("after-stop"))).resolves.toBe("unhandled");
   });
 
   it("requires the exact least-privilege bot scopes", () => {
@@ -208,7 +208,8 @@ describe("Slack setup", () => {
     expect(settled).toBe(false);
     await ingress.dispatch(guardianCodeEvent("123456"));
 
-    await expect(conferralPromise).resolves.toMatchObject({
+    const conferral = await conferralPromise;
+    expect(conferral).toMatchObject({
       credential: {
         material: { botToken: "xoxb-test" },
       },
@@ -218,8 +219,10 @@ describe("Slack setup", () => {
         workspaceName: "OAuth Acme",
         botUserId: "UBOT",
         botUsername: "OAuth Rome",
+        guardianLinked: true,
       },
     });
+    expect(conferral.profile).not.toHaveProperty("guardianChannelUserId");
     expect(liveTalkHandler).toHaveBeenCalledTimes(1);
     expect(liveTalkHandler).toHaveBeenCalledWith(guardianCodeEvent("wrong"));
   });
@@ -286,7 +289,7 @@ describe("Slack setup", () => {
           material: { kind: "inline", record: { botToken: "xoxb-test" } },
           expiresAt: "never",
         },
-        profile: { guardianChannelUserId: "T1/UGUARDIAN" },
+        profile: { guardianLinked: true },
       }),
       updateGrant,
     } as unknown as GrantLedger;
@@ -378,7 +381,7 @@ describe("Slack setup", () => {
       {
         connectionId: "slack-connection",
         persist: async () => {},
-        profile: () => ({ guardianChannelUserId: "T1/UGUARDIAN" }),
+        profile: () => ({ guardianLinked: true }),
         registerIngress: () => () => {},
       },
     );
@@ -419,7 +422,7 @@ describe("Slack setup", () => {
       {
         connectionId: "slack-connection",
         persist: async () => {},
-        profile: () => ({ guardianChannelUserId: "T1/UGUARDIAN" }),
+        profile: () => ({ guardianLinked: true }),
         registerIngress: () => () => {},
       },
     );

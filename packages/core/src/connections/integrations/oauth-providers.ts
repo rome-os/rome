@@ -81,8 +81,9 @@ export const slackGrantProfileSchema = z
     botUsername: identityField,
     /** Slack application id captured from OAuth and checked on inbound events. */
     appId: identityField,
-    /** Guardian identity proven by the one-time Slack DM setup step. */
-    guardianChannelUserId: identityField,
+    /** The one-time Slack DM setup step completed. The actual guardian identity
+     *  lives only in the person mapping written by SetupManager. */
+    guardianLinked: z.literal(true).optional(),
   })
   .strict();
 export type SlackGrantProfile = z.infer<typeof slackGrantProfileSchema>;

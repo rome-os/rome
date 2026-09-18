@@ -63,9 +63,7 @@ export async function lockUnlinkedSlackTalk(
     if (connection.service !== "slack") continue;
     const grant = await ledger.getGrant(connection.id, "workspace");
     if (grant?.state !== "authorized") continue;
-    const linked =
-      typeof grant.profile?.guardianChannelUserId === "string" &&
-      grant.profile.guardianChannelUserId.length > 0;
+    const linked = grant.profile?.guardianLinked === true;
     if (linked) continue;
     await ledger.updateGrant(connection.id, "workspace", {
       state: "degraded",
@@ -95,7 +93,6 @@ export function missingSlackBotScopes(scopes: readonly string[] | undefined): st
 function enrichedSlackProfile(
   profile: SlackGrantProfile,
   identity: SlackBotIdentity,
-  guardianChannelUserId: string,
 ): SlackGrantProfile {
   return slackGrantProfileSchema.parse({
     ...profile,
@@ -104,7 +101,7 @@ function enrichedSlackProfile(
     botUserId: identity.botUserId,
     botUsername: identity.botUsername ?? profile.botUsername,
     appId: identity.appId ?? profile.appId,
-    guardianChannelUserId,
+    guardianLinked: true,
   });
 }
 
@@ -185,7 +182,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
 
     return {
       credential: redeemed.credential,
-      profile: enrichedSlackProfile(profile, identity, channelUserId),
+      profile: enrichedSlackProfile(profile, identity),
       guardianChannelUserId: channelUserId,
       summary: {
         title: "Slack connected",
@@ -213,7 +210,7 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
     build(creds, kit): Talker {
       const material = credentialMaterial(creds.workspace);
       const profile = slackGrantProfileSchema.parse(kit.profile("workspace") ?? {});
-      if (!profile.guardianChannelUserId) {
+      if (!profile.guardianLinked) {
         return {
           start(_deliver, fault): void {
             fault(
@@ -236,9 +233,10 @@ export function makeSlackDescriptor(deps: SlackDescriptorDeps): ConnectionDescri
       const releaseExpectedWorkspace = profile.teamId
         ? deps.ingress.expectWorkspace(profile.teamId)
         : () => {};
-      // Most stops are epoch replacement/reconciliation, so retain a bounded
-      // retry window unless a credential/configuration fault proves otherwise.
-      let retainExpectationForReconnect = true;
+      // Only transient startup failure needs a grace window. A healthy epoch
+      // replacement installs its successor synchronously; explicit revoke and
+      // shutdown must release the workspace immediately.
+      let retainExpectationForReconnect = false;
       const adapter = new SlackAdapter({
         botToken: material.botToken,
         ingress: deps.ingress,

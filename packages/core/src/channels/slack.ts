@@ -11,8 +11,8 @@ const SLACK_INITIAL_STARTUP_GRACE_MS = 30_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 const SLACK_API_TIMEOUT_MS = 15_000;
 export const SLACK_HANDLER_REBUILD_GRACE_MS = 2 * 60_000;
-export const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
-export const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
+const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
+const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
 const SLACK_GUARDIAN_LINK_MAX_TRACKED_SENDERS = 100;
 
 export const SLACK_REQUIRED_BOT_SCOPES = ["app_mentions:read", "chat:write", "im:history"] as const;
@@ -31,6 +31,7 @@ export interface SlackEvent {
   user?: string;
   bot_id?: string;
   subtype?: string;
+  team?: string;
   user_team?: string;
   source_team?: string;
   tokens?: { bot?: string[]; oauth?: string[] };
@@ -45,7 +46,7 @@ export type SlackIngressHandler = (
   envelope: SlackEventEnvelope,
 ) => boolean | void | Promise<boolean | void>;
 
-export interface SlackRequestVerification {
+interface SlackRequestVerification {
   ok: boolean;
   reason?: "not_configured" | "missing_headers" | "stale" | "bad_signature";
 }
@@ -303,6 +304,7 @@ async function slackApiCall(
       signal: requestSignal,
     });
     if (response.status === 429 && !retriedRateLimit) {
+      await response.body?.cancel().catch(() => {});
       retriedRateLimit = true;
       const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
       const requestedWaitMs = Math.max(
@@ -319,6 +321,7 @@ async function slackApiCall(
       continue;
     }
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       throw new SlackApiError(
         response.status === 429 ? "ratelimited" : `http_${response.status}`,
         `Slack API returned HTTP ${response.status}`,
@@ -387,13 +390,14 @@ export function isSlackCredentialError(error: unknown): boolean {
   );
 }
 
-export function slackChannelUserId(teamId: string, userId: string): string {
+function slackChannelUserId(teamId: string, userId: string): string {
   return `${teamId}/${userId}`;
 }
 
-export function isExternalSlackAuthor(envelope: SlackEventEnvelope): boolean {
+function isExternalSlackAuthor(envelope: SlackEventEnvelope): boolean {
   const event = envelope.event;
   return (
+    (typeof event.team === "string" && event.team !== envelope.team_id) ||
     (typeof event.user_team === "string" && event.user_team !== envelope.team_id) ||
     (typeof event.source_team === "string" && event.source_team !== envelope.team_id)
   );
@@ -415,7 +419,7 @@ export function parseSlackConversationId(conversationId: string): {
   };
 }
 
-export function stripSlackBotMention(text: string, botUserId: string): string {
+function stripSlackBotMention(text: string, botUserId: string): string {
   return decodeSlackText(
     text.replace(new RegExp(`<@${escapeRegex(botUserId)}(?:\\|[^>]+)?>`, "g"), ""),
   ).trim();
@@ -681,7 +685,7 @@ function isSlackGuardianLinkAttempt(text: string): boolean {
   return /^ROME-LINK-[A-Z0-9_-]{4,32}$/i.test(text.trim());
 }
 
-export function isSlackGuardianLinkEvent(
+function isSlackGuardianLinkEvent(
   envelope: SlackEventEnvelope,
   code: string,
   botUserId: string,
@@ -752,6 +756,7 @@ export function waitForSlackGuardianLink(
       () => finish(new Error("Slack guardian-link code expired. Retry to generate a new code.")),
       options.expiresInMs ?? SLACK_GUARDIAN_LINK_TTL_MS,
     );
+    expiry.unref();
     unregister = ingress.subscribe(
       identity.teamId,
       async (envelope) => {

@@ -348,8 +348,7 @@ describe("SlackAdapter", () => {
         type: "app_mention",
         channel: "C1",
         user: "U1",
-        user_team: "T-EXTERNAL",
-        source_team: "T-EXTERNAL",
+        team: "T-EXTERNAL",
         text: "<@UBOT> hello",
         ts: "1700000000.500",
       }),
@@ -421,15 +420,34 @@ describe("SlackAdapter", () => {
 
   it("fails fast when Slack's requested rate-limit wait exceeds the retry bound", async () => {
     const originalFetch = globalThis.fetch;
-    const fetchMock = rs
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "31" } }));
+    const cancel = rs.fn();
+    const fetchMock = rs.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(new ReadableStream({ cancel }), {
+        status: 429,
+        headers: { "retry-after": "31" },
+      }),
+    );
     globalThis.fetch = fetchMock;
     try {
       await expect(
         slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" }),
       ).rejects.toThrow("31000ms rate-limit wait");
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(cancel).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("cancels a failed Slack response body before throwing", async () => {
+    const originalFetch = globalThis.fetch;
+    const cancel = rs.fn();
+    globalThis.fetch = rs
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 500 }));
+    try {
+      await expect(slackWebApi.authTest("xoxb-test")).rejects.toThrow("HTTP 500");
+      expect(cancel).toHaveBeenCalledTimes(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

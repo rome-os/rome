@@ -154,7 +154,7 @@ describe("channel pairing approvals", () => {
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     send.mockClear();
 
-    await notifyPairingResolution(router, result.approval);
+    await notifyPairingResolution(router, result.approval, (service) => service === "slack");
 
     expect(feature).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith("connection", "C1:1700000000.1", {

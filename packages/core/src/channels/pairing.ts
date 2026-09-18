@@ -25,10 +25,11 @@ function pairingAccount(
   id: string,
   displayName?: string,
   username?: string,
+  plainText = false,
 ): string {
   const name = username ? `@${username}` : displayName?.replace(/\s+/g, " ").trim();
   const code = `\`${id}\``;
-  if (channel === "slack") return name && name !== id ? `${name} (${id})` : id;
+  if (plainText) return name && name !== id ? `${name} (${id})` : id;
   if (channel === "discord" && /^[1-9][0-9]*$/.test(id)) return `<@${id}> (${code})`;
   if (channel === "feishu" && /^ou_[a-zA-Z0-9_-]+$/.test(id)) {
     const label = (displayName || id)
@@ -51,8 +52,9 @@ function pairingSuccess(
   id: string,
   displayName?: string,
   username?: string,
+  plainText = false,
 ): string {
-  return `✅ ${pairingAccount(channel, id, displayName, username)} is paired with Rome. You can start chatting now.`;
+  return `✅ ${pairingAccount(channel, id, displayName, username, plainText)} is paired with Rome. You can start chatting now.`;
 }
 
 export function createPairingAdmission(deps: {
@@ -77,7 +79,7 @@ export function createPairingAdmission(deps: {
     const displayName = message.senderDisplayName ?? message.senderId;
     const guideUrl = `https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}`;
     const guidance = plainTextGuidance
-      ? `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen Settings → Connections in the Rome Web UI.\n\nPairing Guide: ${guideUrl}`
+      ? `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername, true)} with Rome.\n\nOpen Settings → Connections in the Rome Web UI.\n\nPairing Guide: ${guideUrl}`
       : `🔗 Pair ${pairingAccount(service, message.senderId, displayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](${guideUrl}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
@@ -112,7 +114,13 @@ export function createPairingAdmission(deps: {
         });
         if (result.outcome === "resolved" && result.approval.status === "approved") {
           await router.send(connectionId, message.conversationId, {
-            text: pairingSuccess(service, message.senderId, displayName, message.senderUsername),
+            text: pairingSuccess(
+              service,
+              message.senderId,
+              displayName,
+              message.senderUsername,
+              plainTextGuidance,
+            ),
           });
         }
         if (result.outcome === "invalid_code" && "notify" in result && result.notify) {
@@ -160,6 +168,7 @@ export function createPairingAdmission(deps: {
 export async function notifyPairingResolution(
   router: TalkRouter,
   approval: { id: string; type: string; status: string; payload: unknown },
+  plainTextGuidance: (service: string) => boolean = () => false,
 ) {
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
@@ -176,6 +185,7 @@ export async function notifyPairingResolution(
         payload.channelUserId,
         payload.displayName,
         payload.username,
+        plainTextGuidance(payload.channel),
       ),
     });
   } catch {
