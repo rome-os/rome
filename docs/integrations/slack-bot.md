@@ -11,7 +11,7 @@ Rome uses its existing Slack connection for both workspace operations and bot co
 
 During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready. The code expires after five minutes, locks after five incorrect code attempts, and is cancelled if setup is cancelled or replaced.
 
-The guardian's linked Slack account is admitted automatically. Other workspace members must complete Rome's normal pairing approval before their message reaches the agent; until then, Rome replies only with pairing guidance.
+The guardian's linked Slack account is admitted automatically. Other workspace members must complete Rome's normal pairing approval before their message reaches the agent. Until then, Rome replies only with pairing guidance.
 
 ## Slack app configuration
 
