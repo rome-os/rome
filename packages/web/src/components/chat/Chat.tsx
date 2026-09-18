@@ -1221,6 +1221,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         async () => {
           const formData = new FormData();
           formData.set("text", snapshot.text);
+          if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
           if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
           if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
           if (snapshot.largeModelSelection)

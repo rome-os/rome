@@ -465,6 +465,40 @@ describe("composer attachment uploads", () => {
     );
   });
 
+  it("resends an unchanged draft under the same inputId after a cancel", async () => {
+    const onSend = rs.fn(
+      (_snapshot, controls: ChatComposerSendControls) =>
+        new Promise<void>((_resolve, reject) => {
+          controls.signal.addEventListener("abort", () =>
+            reject(new DOMException("The request was aborted", "AbortError")),
+          );
+        }),
+    );
+    const { container } = renderComposer({ onSend });
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!fileInput) throw new Error("file input not found");
+    fireEvent.change(fileInput, { target: { files: [new File(["a"], "a.txt")] } });
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "first" } });
+
+    const sendThenCancel = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeTruthy());
+    };
+    await sendThenCancel();
+    await sendThenCancel();
+    // The server may have accepted the cancelled request, so the resend
+    // carries the same id and cannot record a second turn.
+    const inputIds = onSend.mock.calls.map(([snapshot]) => snapshot.inputId);
+    expect(inputIds[0]).toBeTruthy();
+    expect(inputIds[1]).toBe(inputIds[0]);
+
+    // An edited draft is a different turn.
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "second" } });
+    await sendThenCancel();
+    expect(onSend.mock.calls[2][0].inputId).not.toBe(inputIds[0]);
+  });
+
   it("restores submitted text and attachments when an upload fails", async () => {
     let rejectSend: ((reason?: unknown) => void) | null = null;
     const sendPending = new Promise<void>((_resolve, reject) => {

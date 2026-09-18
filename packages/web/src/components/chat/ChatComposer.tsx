@@ -66,6 +66,10 @@ export interface ChatComposerSnapshot {
   // The structured skill selection (the `/` chip) is sent as the
   // turn's `skillName` field; `text` carries only the task.
   skillName?: string;
+  // Sent as the turn's `inputId`, which the server records once per session.
+  // Resending an unchanged draft after a failure reuses it, so a turn the server
+  // accepted before the failure is returned rather than recorded twice.
+  inputId?: string;
 }
 
 export interface ChatComposerSendControls {
@@ -300,6 +304,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const uploadInFlightRef = useRef(false);
   // Live for exactly one upload; `cancelUpload` aborts through it.
   const uploadAbortRef = useRef<AbortController | null>(null);
+  // The last failed send, kept until a send succeeds.
+  const failedSendRef = useRef<{
+    inputId: string;
+    text: string;
+    uploads: PendingUpload[];
+    skill: SkillSelection | null;
+  } | null>(null);
 
   // Resize the textarea to fit its content. The `onInput` handler below also
   // runs this math, but only on user typing — programmatic clears (e.g. the
@@ -585,6 +596,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     const rawText = inputText;
     const uploads = pendingUploads;
     const skill = draftSkill;
+    const failed = failedSendRef.current;
+    const inputId =
+      failed && failed.text === text && failed.uploads === uploads && failed.skill === skill
+        ? failed.inputId
+        : crypto.randomUUID();
     const snapshot: ChatComposerSnapshot = {
       text,
       uploads,
@@ -597,6 +613,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       // session to the picked agent.
       agentMention: draftAgentMention ?? undefined,
       skillName: skill?.name,
+      inputId,
     };
 
     // A text-only turn clears optimistically — it is accepted or rejected in
@@ -613,6 +630,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
     try {
       await invokeOnSend(snapshot);
+      failedSendRef.current = null;
       if (!clearsOptimistically) {
         const sentIds = new Set(uploads.map((upload) => upload.id));
         setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
@@ -622,6 +640,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
+      failedSendRef.current = { inputId, text, uploads, skill };
       if (clearsOptimistically) {
         setInputText(text);
         setPendingUploads(uploads);
