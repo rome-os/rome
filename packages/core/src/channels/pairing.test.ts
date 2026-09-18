@@ -115,6 +115,49 @@ describe("channel pairing approvals", () => {
     expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
   });
 
+  it("notifies an approved Slack requester in the originating mention thread", async () => {
+    seedConnection("slack");
+    const send = rs.fn<TalkRouter["send"]>(async (_connection, conversationId) => ({
+      messageId: "sent",
+      conversationId,
+    }));
+    const feature = rs.fn();
+    const router = { send, feature } as unknown as TalkRouter;
+    const admit = createPairingAdmission({
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db),
+    });
+
+    await admit(
+      "connection",
+      "slack",
+      {
+        senderId: "T1/U123",
+        conversationId: "C1:1700000000.1" as ConversationId,
+        messageId: "request",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(),
+        thread: { kind: "topic" },
+        addressing: "mention",
+      },
+      router,
+    );
+    const request = (await repo.findPending())[0];
+    expect(pairingPayload(request)?.conversationId).toBe("C1:1700000000.1");
+    const result = await repo.resolvePending(request.id, "approve", "owner");
+    if (result.outcome !== "resolved") throw new Error("Approval failed");
+    send.mockClear();
+
+    await notifyPairingResolution(router, result.approval);
+
+    expect(feature).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith("connection", "C1:1700000000.1", {
+      text: "✅ Slack member (`T1/U123`) is paired with Rome. You can start chatting now.",
+    });
+  });
+
   it.each([
     ["telegram", "123", "Alice [Smith]", "[@Alice \\[Smith\\]](tg://user?id=123) (`123`)"],
     ["discord", "123", "@everyone", "<@123> (`123`)"],

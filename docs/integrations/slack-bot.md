@@ -7,11 +7,13 @@ Rome uses its existing Slack connection for both workspace operations and bot co
 - A direct message to the Rome bot starts or continues a private conversation.
 - An `@Rome` mention in a channel where the bot is invited starts or continues that channel thread. Rome posts its answer in the thread.
 - Rome ignores ordinary channel messages, bot-authored messages, and messages without text.
-- The first release sends and receives completed text messages only. It does not handle files, images, or streamed partial answers.
+- The first release sends and receives completed text messages only. If a direct message includes text with a file, Rome handles only the text. It does not handle files, images, or streamed partial answers.
 
-During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready. The code expires after five minutes, locks after five incorrect code attempts, and is cancelled if setup is cancelled or replaced.
+During connection, Settings shows a one-time code. The guardian must direct-message that code to the bot before Rome stores the Slack grant or marks Talk ready. The code expires after five minutes, locks each sender after five incorrect code attempts, and is cancelled if setup is cancelled or replaced.
 
 The guardian's linked Slack account is admitted automatically. Other workspace members must complete Rome's normal pairing approval before their message reaches the agent. Until then, Rome replies only with pairing guidance.
+
+Rome does not request Slack's broad `users:read` scope. Pairing approvals therefore identify a requester by the workspace/member ID shown by Slack rather than a fetched profile name. Approval notifications return to the requesting direct message or mention thread. This release does not initiate unsolicited direct messages.
 
 ## Slack app configuration
 

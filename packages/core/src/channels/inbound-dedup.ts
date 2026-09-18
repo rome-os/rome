@@ -9,12 +9,17 @@
  * handled id and skipping repeats prevents that.
  *
  * This is intentionally a small interface so the storage can be swapped without
- * touching the call site. The in-memory implementation below covers the common
+ * touching the call sites. `checkAndRecord` is intentionally distinct from
+ * `has`/`record`: email needs an atomic reservation before dispatch, while
+ * Slack must defer `record` until its ingress handlers accept the event. A
+ * persistent implementation must preserve that atomic `checkAndRecord`
+ * operation rather than implement it as a separate `has` followed by `record`.
+ * The in-memory implementation below covers the common
  * transient-reconnect case (network blip, relay restart, ping timeout — none of
  * which clears the process), but NOT a Rome restart landing in the
  * dispatch→ack window, since it lives only for the process lifetime. To close
  * that gap, drop in a persistent implementation (mirroring the connector's
- * `insertEventIfAbsent`) — the call site already awaits `checkAndRecord`.
+ * `insertEventIfAbsent`) — the call sites already await these operations.
  */
 export interface InboundDedup {
   /** Report whether `key` has completed successfully. */

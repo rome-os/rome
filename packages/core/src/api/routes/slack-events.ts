@@ -77,9 +77,19 @@ export function slackEventsRoutes(deps: Pick<ApiDeps, "slackIngress">): Hono {
 
     try {
       const result = await ingress.dispatch(payload);
-      if (result === "unhandled") {
+      if (result === "starting") {
         c.header("Retry-After", "1");
         return c.json({ error: "Slack workspace handler is starting." }, 503);
+      }
+      if (result === "unhandled") {
+        // A correctly signed event may belong to an unbound/degraded workspace.
+        // Outside a bounded registration window it cannot become deliverable by
+        // retrying, so acknowledge it rather than harming the shared Slack app's
+        // Events API health with an indefinite 5xx loop.
+        log.warn("slack event has no workspace handler", {
+          eventId: payload.event_id,
+          teamId: payload.team_id,
+        });
       }
     } catch (error) {
       log.error("slack event dispatch failed", {

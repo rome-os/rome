@@ -113,7 +113,9 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName,
           username: message.senderUsername,
-          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+          ...(message.thread?.kind === "dm" || service === "slack"
+            ? { conversationId: message.conversationId }
+            : {}),
         },
         deps.talkGrants(service),
       );

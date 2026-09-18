@@ -49,8 +49,12 @@ function credentialMaterial(credential: Credential): { botToken: string; userTok
  */
 export async function lockUnlinkedSlackTalk(
   ledger: GrantLedger,
-  options: { now?: Date; clearCustody?: () => Promise<void> } = {},
+  options: { enabled?: boolean; now?: Date; clearCustody?: () => Promise<void> } = {},
 ): Promise<void> {
+  // A connector-only Slack grant must remain usable on hosts that do not offer
+  // bot conversations. Such a host cannot complete the guardian-link recovery,
+  // so migrating it to degraded would strand the connection permanently.
+  if (options.enabled === false) return;
   let locked = false;
   const degradedAt = options.now ?? new Date();
   const connections = await ledger.listConnections();
@@ -149,7 +153,7 @@ export function makeSlackSetup(deps: SlackDescriptorDeps): SetupFn {
         `${identity.workspaceName ?? "Your Slack workspace"} connected as @${identity.botUsername ?? "Rome"}.`,
         "To finish linking your account as guardian, send this exact code in a direct message to the Rome bot:",
         code,
-        "The code expires in five minutes and locks after five incorrect attempts.",
+        "The code expires in five minutes and locks a sender after five incorrect attempts.",
       ],
       steps: [{ text: `Send ${code} to @${identity.botUsername ?? "Rome"} in Slack` }],
       progress: true,

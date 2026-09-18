@@ -149,7 +149,7 @@ export function OAuthConnectionSection({
 
   // Unavailable on this host — render the unconnected card with a disabled
   // control and the reason.
-  if (card.connect && !card.connect.available) {
+  if (slot.state === "unauthorized" && card.connect && !card.connect.available) {
     const reason = card.connect.unavailableReason ?? t("connections.oauth.unavailable");
     return (
       <ConnectionSlotCard
@@ -219,6 +219,10 @@ export function OAuthConnectionSection({
   // handle/email becomes the connected subtitle when it adds information
   // beyond the title.
   const expired = slot.state === "degraded";
+  const reconnectUnavailableReason =
+    card.connect && !card.connect.available
+      ? (card.connect.unavailableReason ?? t("connections.oauth.unavailable"))
+      : null;
   const accountLine = slot.identity ?? label;
   const accountDetail =
     (slot.display?.email !== accountLine ? slot.display?.email : null) ||
@@ -277,7 +281,8 @@ export function OAuthConnectionSection({
             <Button
               variant={expired ? "default" : "outline"}
               size="sm"
-              disabled={setup.busy}
+              disabled={setup.busy || !!reconnectUnavailableReason}
+              title={reconnectUnavailableReason ?? undefined}
               aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
               onClick={() => beginConnect(true)}
             >
@@ -285,6 +290,9 @@ export function OAuthConnectionSection({
               {t("connections.oauth.reconnect")}
             </Button>
           ))}
+        {!setup.state && reconnectUnavailableReason && (
+          <p className="text-ui text-muted-foreground">{reconnectUnavailableReason}</p>
+        )}
       </div>
     </ConnectionSlotCard>
   );

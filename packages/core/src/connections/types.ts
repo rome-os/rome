@@ -243,7 +243,7 @@ export interface GrantCustody {
 export interface ConnectionDescriptor {
   service: string;
   auth: Record<GrantName, AuthScheme>;
-  /** Optional host prerequisite layered over the provider's normal connect URL. */
+  /** Optional host prerequisite for a Rome Cloud OAuth provider's connect URL. */
   connectAvailability?: () => { available: boolean; unavailableReason: string | null };
   /** Revive a grant's stored opaque profile record: re-parse it with this
    *  service's own schema, then map it through the service's pure display

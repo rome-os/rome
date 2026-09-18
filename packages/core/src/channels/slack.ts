@@ -7,6 +7,8 @@ const log = createLogger("slack");
 const SLACK_SIGNATURE_VERSION = "v0";
 const SIGNATURE_MAX_AGE_SECONDS = 5 * 60;
 const SLACK_TEXT_CHUNK_LENGTH = 4_000;
+const SLACK_INITIAL_STARTUP_GRACE_MS = 30_000;
+const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 export const SLACK_GUARDIAN_LINK_TTL_MS = 5 * 60_000;
 export const SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS = 5;
 
@@ -50,12 +52,18 @@ export class SlackIngress {
   private readonly handlers = new Map<string, SlackIngressHandler[]>();
   private readonly inFlight = new Map<string, Promise<"delivered" | "duplicate">>();
   private readonly dedup: InboundDedup;
+  private readonly now: () => number;
+  private readonly initialStartupDeadline: number;
+  private pendingRegistrations = 0;
 
   constructor(
     private readonly signingSecret?: string,
-    options: { dedup?: InboundDedup } = {},
+    options: { dedup?: InboundDedup; now?: () => number; startupGraceMs?: number } = {},
   ) {
     this.dedup = options.dedup ?? new InMemoryInboundDedup(10_000);
+    this.now = options.now ?? Date.now;
+    this.initialStartupDeadline =
+      this.now() + (options.startupGraceMs ?? SLACK_INITIAL_STARTUP_GRACE_MS);
   }
 
   get configured(): boolean {
@@ -115,8 +123,26 @@ export class SlackIngress {
     };
   }
 
+  /**
+   * Mark the bounded window in which a Talk epoch is identifying its workspace
+   * before it can subscribe. This process-wide ingress exists separately from
+   * RuntimeKit.registerIngress because guardian verification must receive Slack
+   * events before a grant (and therefore a connection-scoped runtime) exists.
+   */
+  beginHandlerRegistration(): () => void {
+    this.pendingRegistrations++;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.pendingRegistrations--;
+    };
+  }
+
   /** Dispatch one already-authenticated Events API envelope. */
-  async dispatch(envelope: SlackEventEnvelope): Promise<"delivered" | "duplicate" | "unhandled"> {
+  async dispatch(
+    envelope: SlackEventEnvelope,
+  ): Promise<"delivered" | "duplicate" | "starting" | "unhandled"> {
     // Concurrent retries share the first delivery. If that delivery fails they
     // all fail, leaving the id unrecorded so Slack can retry it later.
     const pending = this.inFlight.get(envelope.event_id);
@@ -126,7 +152,11 @@ export class SlackIngress {
     }
 
     const handlers = this.handlers.get(envelope.team_id);
-    if (!handlers || handlers.length === 0) return "unhandled";
+    if (!handlers || handlers.length === 0) {
+      return this.pendingRegistrations > 0 || this.now() < this.initialStartupDeadline
+        ? "starting"
+        : "unhandled";
+    }
 
     const delivery = this.dispatchOnce(envelope, [...handlers]);
     this.inFlight.set(envelope.event_id, delivery);
@@ -147,8 +177,9 @@ export class SlackIngress {
     for (const handler of handlers) {
       if ((await handler(envelope)) === true) break;
     }
-    // Record only after the complete handler chain succeeds. A throw leaves the
-    // event retryable rather than turning Slack's retry into a silent duplicate.
+    // Record only after the registered ingress handlers accept the event. A
+    // synchronous or awaited ingress throw leaves it retryable; downstream Talk
+    // delivery is intentionally fire-and-forget under the Talker contract.
     await this.dedup.record(envelope.event_id);
     return "delivered";
   }
@@ -195,19 +226,51 @@ async function slackApiCall(
   body: Record<string, string> | undefined,
   signal?: AbortSignal,
 ): Promise<SlackApiResponse> {
-  const response = await fetch(`https://slack.com/api/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal,
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(`https://slack.com/api/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal,
+    });
+    if (response.status === 429 && attempt === 0) {
+      const retryAfterSeconds = Number(response.headers.get("retry-after") ?? "1");
+      const waitMs = Math.min(
+        SLACK_RATE_LIMIT_MAX_WAIT_MS,
+        Math.max(0, Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1_000 : 1_000),
+      );
+      await abortableDelay(waitMs, signal);
+      continue;
+    }
+    if (!response.ok) {
+      throw new SlackApiError(
+        response.status === 429 ? "ratelimited" : `http_${response.status}`,
+        `Slack API returned HTTP ${response.status}`,
+      );
+    }
+    const result = (await response.json()) as SlackApiResponse;
+    if (!result.ok) throw new SlackApiError(result.error ?? "unknown_error");
+    return result;
+  }
+  throw new SlackApiError("ratelimited");
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(signal?.reason);
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
-  if (!response.ok) throw new Error(`Slack API returned HTTP ${response.status}`);
-  const result = (await response.json()) as SlackApiResponse;
-  if (!result.ok) throw new SlackApiError(result.error ?? "unknown_error");
-  return result;
 }
 
 export const slackWebApi: SlackWebApi = {
@@ -280,12 +343,22 @@ function slackTimestamp(ts: string): Date {
   return new Date(Number.parseFloat(ts) * 1_000);
 }
 
+function escapeSlackText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function splitSlackText(text: string): string[] {
-  if (text.length <= SLACK_TEXT_CHUNK_LENGTH) return [text];
   const chunks: string[] = [];
-  for (let offset = 0; offset < text.length; offset += SLACK_TEXT_CHUNK_LENGTH) {
-    chunks.push(text.slice(offset, offset + SLACK_TEXT_CHUNK_LENGTH));
+  let chunk = "";
+  for (const codePoint of text) {
+    const escaped = escapeSlackText(codePoint);
+    if (chunk && chunk.length + escaped.length > SLACK_TEXT_CHUNK_LENGTH) {
+      chunks.push(chunk);
+      chunk = "";
+    }
+    chunk += escaped;
   }
+  if (chunk || chunks.length === 0) chunks.push(chunk);
   return chunks;
 }
 
@@ -312,29 +385,31 @@ export class SlackAdapter {
 
   async start(): Promise<void> {
     const api = this.config.api ?? slackWebApi;
+    const finishRegistration = this.config.ingress.beginHandlerRegistration();
     const generation = ++this.startGeneration;
     this.startAbort?.abort();
     this.unsubscribe?.();
     this.unsubscribe = null;
     const controller = new AbortController();
     this.startAbort = controller;
-    let identity: SlackBotIdentity;
     try {
-      identity = await api.authTest(this.config.botToken, controller.signal);
+      const identity = await api.authTest(this.config.botToken, controller.signal);
+      if (controller.signal.aborted || generation !== this.startGeneration) return;
+      this.identity = identity;
+      this.startAbort = null;
+      this.unsubscribe = this.config.ingress.subscribe(identity.teamId, (envelope) =>
+        this.handleEnvelope(envelope),
+      );
+      log.info("slack adapter started", {
+        teamId: identity.teamId,
+        botUserId: identity.botUserId,
+      });
     } catch (error) {
       if (controller.signal.aborted) return;
       throw error;
+    } finally {
+      finishRegistration();
     }
-    if (controller.signal.aborted || generation !== this.startGeneration) return;
-    this.identity = identity;
-    this.startAbort = null;
-    this.unsubscribe = this.config.ingress.subscribe(identity.teamId, (envelope) =>
-      this.handleEnvelope(envelope),
-    );
-    log.info("slack adapter started", {
-      teamId: identity.teamId,
-      botUserId: identity.botUserId,
-    });
   }
 
   stop(): void {
@@ -392,7 +467,12 @@ export class SlackAdapter {
       return true;
     }
 
-    if (event.bot_id || event.subtype || event.user === identity.botUserId) return true;
+    if (
+      event.bot_id ||
+      (event.subtype && event.subtype !== "file_share") ||
+      event.user === identity.botUserId
+    )
+      return true;
     if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") return true;
 
     let message: InboundMessage | null = null;
@@ -438,7 +518,7 @@ export class SlackAdapter {
 }
 
 export function generateSlackGuardianLinkCode(): string {
-  return `ROME-LINK-${randomBytes(6).toString("base64url").toUpperCase()}`;
+  return `ROME-LINK-${randomBytes(6).toString("hex").toUpperCase()}`;
 }
 
 function isSlackGuardianLinkAttempt(text: string): boolean {
@@ -476,7 +556,8 @@ export function waitForSlackGuardianLink(
       return;
     }
     let unregister = () => {};
-    let failedAttempts = 0;
+    const failedAttempts = new Map<string, number>();
+    const lockedSenders = new Set<string>();
     let settled = false;
     const finish = (outcome: { channelUserId: string } | Error) => {
       if (settled) return;
@@ -497,31 +578,33 @@ export function waitForSlackGuardianLink(
     unregister = ingress.subscribe(
       identity.teamId,
       (envelope) => {
-        if (isSlackGuardianLinkEvent(envelope, code, identity.botUserId)) {
+        const event = envelope.event;
+        const sender = typeof event.user === "string" ? event.user : null;
+        if (
+          sender &&
+          !lockedSenders.has(sender) &&
+          isSlackGuardianLinkEvent(envelope, code, identity.botUserId)
+        ) {
           finish({ channelUserId: slackChannelUserId(identity.teamId, envelope.event.user) });
           return true;
         }
-        const event = envelope.event;
         if (
           event.type !== "message" ||
           event.channel_type !== "im" ||
           event.bot_id ||
           event.subtype ||
+          !sender ||
           event.user === identity.botUserId ||
           typeof event.text !== "string" ||
           !isSlackGuardianLinkAttempt(event.text)
         ) {
           return false;
         }
-        failedAttempts++;
-        if (
-          failedAttempts >= (options.maxFailedAttempts ?? SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS)
-        ) {
-          finish(
-            new Error(
-              "Too many incorrect Slack guardian-link attempts. Retry to generate a new code.",
-            ),
-          );
+        if (lockedSenders.has(sender)) return true;
+        const attempts = (failedAttempts.get(sender) ?? 0) + 1;
+        failedAttempts.set(sender, attempts);
+        if (attempts >= (options.maxFailedAttempts ?? SLACK_GUARDIAN_LINK_MAX_FAILED_ATTEMPTS)) {
+          lockedSenders.add(sender);
         }
         // Link-looking messages are setup credentials, not agent requests.
         return true;

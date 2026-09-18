@@ -144,6 +144,24 @@ describe("POST /slack/events", () => {
     expect(response.headers.get("retry-after")).toBe("1");
   });
 
+  it("acknowledges an unbound workspace after the bounded startup window", async () => {
+    const secret = "secret";
+    let now = 0;
+    const ingress = new SlackIngress(secret, { now: () => now, startupGraceMs: 1_000 });
+    const app = new Hono().route("/", slackEventsRoutes({ slackIngress: ingress }));
+    const body = JSON.stringify({
+      type: "event_callback",
+      event_id: "Ev-unbound",
+      team_id: "T-OTHER",
+      event: { type: "message", channel_type: "im" },
+    });
+    now = 1_001;
+
+    const response = await app.request(signedRequest(secret, body));
+
+    expect(response.status).toBe(200);
+  });
+
   it("does not deduplicate a failed delivery before Slack retries", async () => {
     const secret = "secret";
     const ingress = new SlackIngress(secret);
@@ -169,7 +187,7 @@ describe("POST /slack/events", () => {
 
   it("keeps an event retryable while adapter startup is still identifying the bot", async () => {
     const secret = "secret";
-    const ingress = new SlackIngress(secret);
+    const ingress = new SlackIngress(secret, { startupGraceMs: 0 });
     let finishAuth!: () => void;
     const authReady = new Promise<void>((resolve) => {
       finishAuth = resolve;

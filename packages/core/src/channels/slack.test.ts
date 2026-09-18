@@ -3,7 +3,9 @@ import { describe, expect, it, rs } from "@rstest/core";
 import {
   SlackAdapter,
   SlackIngress,
+  generateSlackGuardianLinkCode,
   parseSlackConversationId,
+  slackWebApi,
   slackThreadConversationId,
   waitForSlackGuardianLink,
   type SlackEventEnvelope,
@@ -56,7 +58,7 @@ describe("SlackIngress", () => {
   });
 
   it("authorizes by workspace and deduplicates Slack retries", async () => {
-    const ingress = new SlackIngress("secret");
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
     const handler = rs.fn(async () => {});
     ingress.subscribe(identity.teamId, handler);
     const event = envelope("Ev1", { type: "message", channel_type: "im" });
@@ -223,6 +225,31 @@ describe("SlackAdapter", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("accepts text from a file-share DM while ignoring the file", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+    const handler = rs.fn();
+    adapter.onMessage(handler);
+    await adapter.start();
+
+    await ingress.dispatch(
+      envelope("file-share", {
+        type: "message",
+        subtype: "file_share",
+        channel_type: "im",
+        channel: "D1",
+        user: "U1",
+        text: "please summarize this",
+        ts: "1700000000.400",
+      }),
+    );
+
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "please summarize this", attachments: [] }),
+    );
+  });
+
   it("posts channel answers in the addressed thread and DMs inline", async () => {
     const ingress = new SlackIngress("secret");
     const { api, postMessage } = fakeApi();
@@ -243,6 +270,41 @@ describe("SlackAdapter", () => {
       threadTs: undefined,
     });
     expect(parseSlackConversationId("D1")).toEqual({ channelId: "D1" });
+  });
+
+  it("escapes Slack control syntax and chunks without splitting a surrogate pair", async () => {
+    const ingress = new SlackIngress("secret");
+    const { api, postMessage } = fakeApi();
+    const adapter = new SlackAdapter({ botToken: "xoxb-test", ingress, api });
+
+    await adapter.send("D1" as never, { text: "hello <!channel> & <@U1>" });
+    await adapter.send("D1" as never, { text: `${"a".repeat(3_999)}😀b` });
+
+    expect(postMessage.mock.calls[0][1].text).toBe("hello &lt;!channel&gt; &amp; &lt;@U1&gt;");
+    expect(postMessage.mock.calls[1][1].text).toBe("a".repeat(3_999));
+    expect(postMessage.mock.calls[2][1].text).toBe("😀b");
+  });
+
+  it("retries one Slack HTTP rate limit using Retry-After", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = rs
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, ts: "reply.1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    globalThis.fetch = fetchMock;
+    try {
+      await expect(
+        slackWebApi.postMessage("xoxb-test", { channel: "D1", text: "hello" }),
+      ).resolves.toEqual({ ts: "reply.1" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("rejects attachment-only output instead of reporting a silent success", async () => {
@@ -292,7 +354,11 @@ describe("SlackAdapter", () => {
 });
 
 describe("Slack guardian linking", () => {
-  it("locks and invalidates a code after five incorrect link attempts", async () => {
+  it("generates an uppercase code with 48 bits of entropy", () => {
+    expect(generateSlackGuardianLinkCode()).toMatch(/^ROME-LINK-[0-9A-F]{12}$/);
+  });
+
+  it("locks one sender after five incorrect attempts without aborting another sender", async () => {
     const ingress = new SlackIngress("secret");
     const controller = new AbortController();
     const fallback = rs.fn(() => true);
@@ -303,8 +369,6 @@ describe("Slack guardian linking", () => {
       "ROME-LINK-ABCDEFGH",
       controller.signal,
     );
-    const rejected = expect(linking).rejects.toThrow("Too many incorrect");
-
     for (let attempt = 0; attempt < 5; attempt++) {
       await ingress.dispatch(
         envelope(`wrong-${attempt}`, {
@@ -317,11 +381,10 @@ describe("Slack guardian linking", () => {
         }),
       );
     }
-    await rejected;
     expect(fallback).not.toHaveBeenCalled();
 
     await ingress.dispatch(
-      envelope("late-correct", {
+      envelope("locked-sender-correct", {
         type: "message",
         channel_type: "im",
         channel: "D1",
@@ -330,11 +393,29 @@ describe("Slack guardian linking", () => {
         ts: "1700000011.0",
       }),
     );
-    expect(fallback).toHaveBeenCalledTimes(1);
+    let settled = false;
+    void linking.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    await ingress.dispatch(
+      envelope("other-sender-correct", {
+        type: "message",
+        channel_type: "im",
+        channel: "D2",
+        user: "U2",
+        text: "ROME-LINK-ABCDEFGH",
+        ts: "1700000011.1",
+      }),
+    );
+    await expect(linking).resolves.toEqual({ channelUserId: "T123/U2" });
+    expect(fallback).not.toHaveBeenCalled();
   });
 
   it("expires and unregisters a guardian-link code", async () => {
-    const ingress = new SlackIngress("secret");
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
     const controller = new AbortController();
     const linking = waitForSlackGuardianLink(
       ingress,
@@ -360,7 +441,7 @@ describe("Slack guardian linking", () => {
   });
 
   it("cancels and unregisters guardian linking when setup is aborted", async () => {
-    const ingress = new SlackIngress("secret");
+    const ingress = new SlackIngress("secret", { startupGraceMs: 0 });
     const controller = new AbortController();
     const linking = waitForSlackGuardianLink(
       ingress,

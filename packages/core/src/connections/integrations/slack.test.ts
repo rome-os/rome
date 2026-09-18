@@ -151,6 +151,20 @@ describe("Slack setup", () => {
     expect(clearCustody).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves connector-only Slack grants intact when bot events are not offered", async () => {
+    const listConnections = rs.fn(async () => []);
+    const clearCustody = rs.fn(async () => {});
+    const ledger = { listConnections } as unknown as GrantLedger;
+
+    await lockUnlinkedSlackTalk(ledger, {
+      enabled: false,
+      clearCustody,
+    });
+
+    expect(listConnections).not.toHaveBeenCalled();
+    expect(clearCustody).not.toHaveBeenCalled();
+  });
+
   it("keeps a guardian-linked workspace grant authorized", async () => {
     const updateGrant = rs.fn(async () => {});
     const clearCustody = rs.fn(async () => {});

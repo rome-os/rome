@@ -104,7 +104,7 @@ describe("generateCaddyfile", () => {
   it("falls back to the gateway page in publicAccess mode and drops forward_auth", () => {
     const out = generateCaddyfile(config({ enableAccessControl: true, allowedApps: [] }));
     expect(out).toContain(
-      "@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*",
+      "@publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/* /api/slack/events",
     );
     expect(out).toContain("handle @publicApi {");
     expect(out).toContain("rewrite * /gateway.html");
@@ -113,6 +113,13 @@ describe("generateCaddyfile", () => {
     expect(out).toContain("encode zstd gzip");
     expect(out).toContain('"not_public"');
     expect(out).not.toContain("forward_auth");
+  });
+
+  it("proxies Slack's HMAC-authenticated event endpoint in public-access mode", () => {
+    const out = generateCaddyfile(config({ enableAccessControl: true, allowedApps: [] }));
+    const matcher = out.split("@publicApi path ")[1]?.split("\n")[0] ?? "";
+    expect(matcher).toContain("/api/slack/events");
+    expect(out.split("handle @publicApi {")[1]?.split("}")[0]).toContain("reverse_proxy");
   });
 
   it("emits per-app routes for each allowed app", () => {
