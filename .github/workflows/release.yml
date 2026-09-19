@@ -38,6 +38,7 @@ on:
           - packages/ui
           - packages/lib
           - packages/web-content
+          - packages/rome-node
       dry_run:
         description: Dry run (validate + pack, no actual upload).
         required: false

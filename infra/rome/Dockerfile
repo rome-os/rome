@@ -126,3 +126,4 @@ WORKDIR /workspace
 # The source workspace is volume-populated at runtime. Keep a stable PATH entry
 # whose target appears as soon as the sync sidecar seeds /workspace.
 RUN ln -sf /workspace/packages/discord-cli/bin/discord.js /usr/local/bin/discord
+RUN ln -sf /workspace/packages/rome-node/bin/rome-node.js /usr/local/bin/rome-node

@@ -62,7 +62,7 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@rome-os/ui": "^0.2.2"
+    "@rome-os/ui": "^0.3.0"
   },
   "peerDependenciesMeta": {
     "@rome-os/ui": {

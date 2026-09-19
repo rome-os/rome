@@ -1,0 +1,44 @@
+{
+  "name": "@rome-os/node",
+  "version": "0.1.0",
+  "description": "Rome device protocol, Gateway client, and remote computer CLI",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "rome-node": "./bin/rome-node.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && ../../scripts/test-env.sh rstest"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@rstest/core": "^0.11.11",
+    "@types/node": "25.2.3",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/rome-node"
+  }
+}

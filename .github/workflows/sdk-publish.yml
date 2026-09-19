@@ -52,7 +52,7 @@ jobs:
             # dispatch, and one missing from here is reachable only by name.
             # Automatic releases ignore this and take exact paths from
             # release-please.
-            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content"]' >> "$GITHUB_OUTPUT"
+            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node"]' >> "$GITHUB_OUTPUT"
           elif [ -n "${PACKAGE:-}" ]; then
             echo "paths=[\"$PACKAGE\"]" >> "$GITHUB_OUTPUT"
           else

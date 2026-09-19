@@ -340,6 +340,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Agent-facing Discord REST CLI. /app is populated from /opt/rome by the
 # entrypoint; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
+RUN ln -sf /app/packages/rome-node/bin/rome-node.js /usr/local/bin/rome-node
 
 # Chrome/CDP launcher assets
 RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/rome-apply-cdp-stealth.sh

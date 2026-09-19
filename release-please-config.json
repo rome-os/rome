@@ -22,6 +22,9 @@
     },
     "packages/web-content": {
       "package-name": "@rome-os/rome-web-components"
+    },
+    "packages/rome-node": {
+      "package-name": "@rome-os/node"
     }
   }
 }

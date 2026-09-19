@@ -50,13 +50,14 @@ The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to t
 
 ## npm packages (via release-please)
 
-Five workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
+Six workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
 
 - `@rome-os/app-runtime` (`packages/app-runtime-sdk/`)
 - `@rome-os/app-web-sdk` (`packages/app-web-sdk/`)
 - `@rome-os/ui` (`packages/ui/`) — the shared component kit
 - `@rome-os/libs` (`packages/lib/`) — internal runtime primitives shared by Rome services
 - `@rome-os/rome-web-components` (`packages/web-content/`) — internal web content components shared by Rome surfaces
+- `@rome-os/node` (`packages/rome-node/`) — the device client and standalone CLI
 
 The SDKs and `@rome-os/ui` are supported public packages. `@rome-os/libs` and
 `@rome-os/rome-web-components` will be published so Rome and Rome Cloud can
@@ -75,7 +76,8 @@ Releases are driven by **Conventional Commits**, not by hand-authored changeset 
   "packages/app-web-sdk":     { "package-name": "@rome-os/app-web-sdk" },
   "packages/ui":              { "package-name": "@rome-os/ui" },
   "packages/lib":             { "package-name": "@rome-os/libs" },
-  "packages/web-content":     { "package-name": "@rome-os/rome-web-components" }
+  "packages/web-content":     { "package-name": "@rome-os/rome-web-components" },
+  "packages/rome-node":       { "package-name": "@rome-os/node" }
 }
 ```
 
@@ -97,7 +99,7 @@ Commit messages drive both the changelog and the version bump. The release workf
 
 The pre-1.0 column reflects our config (`bump-minor-pre-major: true`, `bump-patch-for-minor-pre-major: true`). Once a package cuts `1.0.0`, drop those flags for that entry to get standard semver.
 
-All five packages are still under `0.x.y` today, so the practical rules are:
+All six packages are still under `0.x.y` today, so the practical rules are:
 
 - Removed export, changed signature, behavior change consumers must adapt to → `feat!:` or include `BREAKING CHANGE:` in the body → minor bump.
 - New API or backwards-compatible additive change → `feat:` → patch bump.
