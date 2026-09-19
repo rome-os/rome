@@ -23,10 +23,11 @@ describe("prepareShadowMount", () => {
     const host = document.createElement("div");
     document.body.append(host);
 
-    prepareShadowMount(host, { canvas: "inherit" });
+    prepareShadowMount(host, { canvas: "chat" });
 
     const shellCss = host.shadowRoot?.querySelector("style")?.textContent ?? "";
     expect(shellCss).not.toContain("--background: var(--app-canvas)");
+    expect(shellCss).toContain("--background: var(--chat-canvas)");
     expect(shellCss).toContain("background-color: transparent");
   });
 });

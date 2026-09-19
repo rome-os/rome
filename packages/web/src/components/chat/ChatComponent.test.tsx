@@ -111,6 +111,12 @@ function renderChatComponent(
 }
 
 describe("ChatComponent draft file drops", () => {
+  it("uses the chat canvas before a session exists", () => {
+    const { container } = renderChatComponent();
+
+    expect(container.firstElementChild?.classList.contains("bg-chat-canvas")).toBe(true);
+  });
+
   it("renders the send button as an icon-only control", () => {
     renderChatComponent();
 

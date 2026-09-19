@@ -103,19 +103,20 @@ export async function appendScopedStyles(
 // shadow boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
 export function prepareShadowMount(
   host: HTMLDivElement,
-  { canvas = "app" }: { canvas?: "app" | "inherit" } = {},
+  { canvas = "app" }: { canvas?: "app" | "chat" } = {},
 ): HTMLElement {
   const shadowRoot = host.shadowRoot ?? host.attachShadow({ mode: "open" });
   shadowRoot.replaceChildren();
   // Page hosts select the app canvas so existing bundles that paint `background`
-  // move without a rebuild. Inline components leave that alias alone so they
-  // stay on the surrounding chat canvas. Every other theme value keeps inheriting.
+  // move without a rebuild. Inline components select the chat canvas and keep
+  // their outer host transparent. Every other theme value keeps inheriting.
   const canvasCss =
     canvas === "app"
       ? `
       --background: var(--app-canvas);
       background-color: var(--background);`
       : `
+      --background: var(--chat-canvas);
       background-color: transparent;`;
   const shellStyle = document.createElement("style");
   shellStyle.textContent = `
