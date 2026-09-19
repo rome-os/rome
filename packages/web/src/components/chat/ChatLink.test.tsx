@@ -99,8 +99,10 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md");
   });
 
-  it("preserves query and hash on an absolute same-origin projects URL", () => {
-    // Parity with the relative branch, which never strips query/hash.
+  it("strips query and hash from the followed file path but keeps them on the anchor", () => {
+    // The follow value locates a file, so ?query/#hash must not leak into it
+    // (/resolve would treat `ui.md?foo=bar` as a missing filename). The anchor
+    // keeps the full URL so Cmd/middle-click still opens the exact link.
     stubOrigin("https://staging.romeos.cc");
     const store = createWorkspaceStore();
     const bus = createWorkspaceEventBus();
@@ -108,15 +110,39 @@ describe("ChatLink", () => {
     bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
 
     renderInWorkspace(
-      <ChatLink href="https://staging.romeos.cc/projects/conductor/docs/ui.md?tab=1#top">
+      <ChatLink href="https://staging.romeos.cc/projects/conductor/docs/ui.md?foo=bar#L10">
         docs
       </ChatLink>,
       { store, bus },
     );
-    fireEvent.click(screen.getByText("docs"));
+    const link = screen.getByText("docs") as HTMLAnchorElement;
+    fireEvent.click(link);
 
-    expect(opened).toEqual([{ paths: ["/projects/conductor/docs/ui.md?tab=1#top"], force: true }]);
-    expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md?tab=1#top");
+    expect(opened).toEqual([{ paths: ["/projects/conductor/docs/ui.md"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md");
+    // The affordance still carries the full URL for new-tab / full-page open.
+    expect(link.getAttribute("href")).toBe(
+      "https://staging.romeos.cc/projects/conductor/docs/ui.md?foo=bar#L10",
+    );
+  });
+
+  it("keeps an encoded %3F/%23 as filename content, cutting only a literal ?/#", () => {
+    // The cut is on the raw string, so a percent-encoded question mark or hash
+    // in the filename survives; only the first literal delimiter is dropped.
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: Array<{ paths: string[]; force?: boolean }> = [];
+    bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/projects/default/faq%3F.md?tab=1">faq</ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("faq"));
+
+    expect(opened).toEqual([{ paths: ["/projects/default/faq?.md"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/default/faq?.md");
   });
 
   it("does not follow a projects link to a different *.romeos.cc tenant", () => {

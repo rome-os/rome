@@ -43,12 +43,29 @@ function isProjectsHref(href: string): boolean {
 // the traversal guard (`decodeProjectsHref`/`decodeFileBrowserRoutePath`) can
 // reject them, so `.../projects/a/%2E%2E/secret` would silently collapse to a
 // different path. Slicing the origin off the raw string keeps the guard looking
-// at the same un-canonicalized segments the relative branch validates, and lets
-// query/hash ride along for parity with that branch.
+// at the same un-canonicalized segments the relative branch validates.
+//
+// The returned value locates a file on disk (it is decoded and handed to
+// `/resolve` via the follow signal), so any `?query`/`#fragment` is stripped
+// here — those address the router/new-tab affordance, not the filesystem, and
+// `/resolve` would treat `ui.md?tab=1` as a literal (missing) filename. The
+// anchor keeps the full `href`, so Cmd/middle-click still opens the exact URL.
+// The cut is made on the RAW string so an encoded `%3F`/`%23` stays valid
+// filename content, matching the un-canonicalized handling everywhere else here.
 function getProjectsRouteHref(href: string): string | null {
   if (!isInternalHref(href)) return null;
   const rawPath = getInternalRawPath(href);
-  return rawPath !== null && isProjectsHref(rawPath) ? rawPath : null;
+  if (rawPath === null) return null;
+  const filePath = stripQueryAndFragment(rawPath);
+  return isProjectsHref(filePath) ? filePath : null;
+}
+
+// Drop everything from the first literal `?` or `#`. Operates on the raw
+// (still-percent-encoded) path, so an encoded `%3F`/`%23` inside a filename is
+// preserved rather than mistaken for a query/fragment delimiter.
+function stripQueryAndFragment(path: string): string {
+  const cut = path.search(/[?#]/);
+  return cut === -1 ? path : path.slice(0, cut);
 }
 
 // The raw path+query+hash of an href `isInternalHref` accepted, without the
