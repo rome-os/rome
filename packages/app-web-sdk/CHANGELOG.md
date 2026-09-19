@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.5](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.4...app-web-sdk-v0.3.5) (2026-09-19)
+
+
+### Features
+
+* **ui:** split chat and app canvas tokens ([#447](https://github.com/rome-os/rome/issues/447)) ([d9a491f](https://github.com/rome-os/rome/commit/d9a491f4a2bf8be5dabfb50824d976f19d0fc7f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.2.2 to ^0.3.3
+
 ## [0.3.4](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.3...app-web-sdk-v0.3.4) (2026-09-15)
 
 

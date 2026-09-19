@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3](https://github.com/rome-os/rome/compare/ui-v0.3.2...ui-v0.3.3) (2026-09-19)
+
+
+### Features
+
+* **ui:** split chat and app canvas tokens ([#447](https://github.com/rome-os/rome/issues/447)) ([d9a491f](https://github.com/rome-os/rome/commit/d9a491f4a2bf8be5dabfb50824d976f19d0fc7f6))
+* **web:** preview inline hex colors in chat ([#445](https://github.com/rome-os/rome/issues/445)) ([3c3b4de](https://github.com/rome-os/rome/commit/3c3b4de1850f0c7bf722af9b47dc5bce49279793))
+
 ## [0.3.2](https://github.com/rome-os/rome/compare/ui-v0.3.1...ui-v0.3.2) (2026-09-17)
 
 
