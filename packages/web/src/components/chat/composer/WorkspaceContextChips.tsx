@@ -1,10 +1,11 @@
 // Pre-send workspace-context chips. Session model: docs/concepts/sessions.md.
 //
-// Subscribes to the workspace-context registry and shows what will be
-// injected into the next turn. Built-ins push details directly; app
-// entries show only `appId` (with the app's real icon + display name)
-// because the URL isn't resolved until send time. A compact "+N" pill
-// collapses overflow past the first few chips.
+// Subscribes to the workspace-context registry and shows context cues above
+// the composer. Built-ins push details directly; app entries show only `appId`
+// (with the app's real icon + display name) because the URL isn't resolved
+// until send time. The app already visible in the expanded tools sidebar is
+// deliberately omitted from this row, but remains in the turn-time workspace
+// snapshot. A compact "+N" pill collapses overflow past the first few chips.
 
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import type { TFunction } from "i18next";
@@ -18,6 +19,7 @@ import {
   useWorkspaceContextRegistry,
   type WorkspaceContextBuiltin,
 } from "@/pages/free/workspace-context";
+import { useFreeCells } from "@/pages/free/use-free-cells";
 import { ComposerChip } from "./ComposerChip";
 
 const NO_OP = () => () => {};
@@ -114,6 +116,7 @@ function appChip(
 export function WorkspaceContextChips() {
   const { t } = useTranslation("common");
   const registry = useWorkspaceContextRegistry();
+  const { placements, toolView } = useFreeCells();
   const catalog = useAppsCatalog();
   const [expanded, setExpanded] = useState(false);
 
@@ -125,11 +128,22 @@ export function WorkspaceContextChips() {
 
   if (!registry) return null;
 
+  // The active app placement is already visible beside the composer. Keep
+  // every background placement, including another view of the same app, and
+  // restore this one if the tools sidebar is hidden.
+  const visibleAppPlacementId = toolView.collapsed
+    ? null
+    : (placements.find(
+        (placement) => placement.id === toolView.activeId && placement.type === "app",
+      )?.id ?? null);
   const chips: ChipModel[] = [
     ...registry
       .getBuiltins()
       .map((b) => (b.kind === "projects" ? projectsChip(b, t) : desktopChip(b, t))),
-    ...registry.listApps().map(({ placementId, appId }) => appChip(appId, placementId, catalog)),
+    ...registry
+      .listApps()
+      .filter(({ placementId }) => placementId !== visibleAppPlacementId)
+      .map(({ placementId, appId }) => appChip(appId, placementId, catalog)),
   ];
 
   if (chips.length === 0) return null;
