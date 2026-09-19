@@ -61,6 +61,9 @@
     "close": "关闭",
     "create": "创建",
     "link": "关联",
+    "linkTo": "关联到 {{name}}",
+    "linkSuggested_one": "关联（{{count}} 个建议）",
+    "linkSuggested_other": "关联（{{count}} 个建议）",
     "markStranger": "视为陌生人",
     "createProfile": "创建资料",
     "creating": "创建中…",
@@ -160,7 +163,9 @@
   },
   "linkForm": {
     "label": "关联到已有人物",
-    "selectPlaceholder": "选择一位人物…"
+    "selectPlaceholder": "选择一位人物…",
+    "recommendedLabel_one": "同名——推荐",
+    "recommendedLabel_other": "同名——{{count}} 个推荐"
   },
   "placeMenu": {
     "create": "创建资料…",

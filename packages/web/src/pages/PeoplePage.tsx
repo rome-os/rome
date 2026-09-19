@@ -18,8 +18,10 @@ import {
   levelCounts,
   parsePeopleFilter,
   PEOPLE_VIEW_PATH,
+  buildLinkTargetIndex,
   peoplePath,
   personPath,
+  recommendedLinkTargets,
   SEARCH_PARAM,
   streamRows,
   type LevelCounts,
@@ -154,6 +156,11 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         .map((row) => ({ id: row.id, displayName: row.displayName, bondLevel: row.level })),
     [rows],
   );
+  // Fold the eligible people once per read, not once per unplaced row: the
+  // recommendation for each Unknown row is then a single lookup rather than a
+  // rescan of every person, which is what keeps a keystroke or the 30s poll
+  // from re-folding a paged batch of rows against the whole people list.
+  const linkTargetIndex = useMemo(() => buildLinkTargetIndex(linkTargets), [linkTargets]);
 
   // Only a person has a dossier: a dossier is a merged history, and a history
   // is what a person has. An account nobody has placed carries its evidence on
@@ -178,11 +185,22 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   // on the row rather than a click away — and the directory renders them as the
   // contacts line every other row is, with the gestures behind a `⋯` menu at
   // the end of it.
+  // An Unknown account whose name is an existing person's, exactly, is offered
+  // that person as a recommended link target — computed from this read's own
+  // people, so it is always current and never a stored suggestion. Dismissed
+  // (Stranger) accounts are never a source, which `recommendedLinkTargets`
+  // enforces and this branch already keeps them out of.
   const unplaced = (row: PeopleRow, variant: PeopleView) =>
     row.level === "stranger" ? (
       <DismissedEntry key={row.id} row={row} variant={variant} />
     ) : (
-      <UnknownEntry key={row.id} row={row} people={linkTargets} variant={variant} />
+      <UnknownEntry
+        key={row.id}
+        row={row}
+        people={linkTargets}
+        recommendations={recommendedLinkTargets(row, linkTargetIndex)}
+        variant={variant}
+      />
     );
 
   return (

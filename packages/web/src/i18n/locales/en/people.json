@@ -61,6 +61,9 @@
     "close": "Close",
     "create": "Create",
     "link": "Link",
+    "linkTo": "Link to {{name}}",
+    "linkSuggested_one": "Link — {{count}} suggested",
+    "linkSuggested_other": "Link — {{count}} suggested",
     "markStranger": "Treat as stranger",
     "createProfile": "Create profile",
     "creating": "Creating…",
@@ -160,7 +163,9 @@
   },
   "linkForm": {
     "label": "Link to existing person",
-    "selectPlaceholder": "Select a person…"
+    "selectPlaceholder": "Select a person…",
+    "recommendedLabel_one": "Same name — recommended",
+    "recommendedLabel_other": "Same name — {{count}} recommended"
   },
   "placeMenu": {
     "create": "Create profile…",
