@@ -42,7 +42,7 @@ function MemoryCategory({ icon, label }: { icon: ReactNode; label: string }) {
 function MemoryFolderPanel() {
   const { t } = useTranslation("files");
   return (
-    <div className="flex flex-1 flex-col items-center overflow-y-auto bg-background px-6 py-10">
+    <div className="flex flex-1 flex-col items-center overflow-y-auto bg-surface px-6 py-10">
       <div className="my-auto w-full max-w-lg space-y-5">
         <section className="rounded-16 border border-border bg-surface p-6 text-center shadow-1 sm:p-8">
           <div className="mx-auto flex size-12 items-center justify-center rounded-16 bg-primary/10 text-primary">

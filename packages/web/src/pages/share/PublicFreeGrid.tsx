@@ -123,7 +123,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
       {hasApps && (
         <aside
           style={{ "--rome-apps-left": CHAT_COLUMN_WIDTH } as CSSProperties}
-          className={`fixed inset-0 z-20 bg-background md:left-[var(--rome-apps-left)] md:h-dvh max-md:top-[var(--rome-mobile-header-height)] ${
+          className={`fixed inset-0 z-20 bg-surface md:left-[var(--rome-apps-left)] md:h-dvh max-md:top-[var(--rome-mobile-header-height)] ${
             mobileTab === "chat" ? "max-md:hidden" : ""
           }`}
         >

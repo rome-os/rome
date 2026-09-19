@@ -996,7 +996,7 @@ function SessionsIndexPage({
         data-safe-area-bounded
         className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
       >
-        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
+        <header className="shrink-0 border-b border-border bg-surface px-5 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
               {viewSwitch}

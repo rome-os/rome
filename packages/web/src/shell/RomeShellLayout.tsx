@@ -151,7 +151,7 @@ export function RomeShellLayout() {
         ) : null}
         {!hideSidebar ? (
           <aside
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:border-r-transparent md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
@@ -235,8 +235,23 @@ export function RomeShellLayout() {
             edge. Publish that left offset so a `fixed` child like the trace
             drawer can align to the chat column. The public share tree has no
             shell, so its drawer falls back to 0px. */}
+        {/* The pane. A routed page renders on `surface`, raised off the canvas
+            the sidebar keeps, and separated from it by a gutter rather than a
+            hairline. Mobile drops the inset — a 12px gutter on a phone is a
+            margin, not a desktop — and keeps the fill.
+
+            The free canvas splits this column into one pane per region
+            (ToolWorkspace), so where it mounts, the frame steps back and lets
+            those regions carry the paint.
+
+            `overflow-clip` rather than `overflow-hidden`: a page whose own
+            column paints to the edge would otherwise square off the pane's
+            corners, but `hidden` makes this a scroll container, and the
+            `sticky bottom-0` composers inside would start sticking to the
+            column's end instead of the viewport. `clip` clips and stays out
+            of the scroll chain. */}
         <main
-          className="flex min-w-0 flex-1 flex-col bg-background"
+          className="flex min-w-0 flex-1 flex-col bg-surface md:m-3 md:ml-0 md:overflow-clip md:rounded-12 md:border md:border-border md:has-[[data-slot=tool-workspace]]:border-transparent md:has-[[data-slot=tool-workspace]]:bg-transparent"
           style={
             {
               "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
@@ -247,7 +262,7 @@ export function RomeShellLayout() {
           {!hideSidebar ? (
             <header
               data-app-titlebar="header"
-              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
+              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-surface px-2 pt-safe md:hidden"
             >
               <IconButton
                 size="md"

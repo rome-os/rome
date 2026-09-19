@@ -4,7 +4,11 @@ A semantic token doc for the surface role group. [ui-semantic-tokens.md](../../a
 
 The roster: `--background`, `--surface`, `--surface-muted`, `--surface-elevated`, `--surface-hover`, `--card`, `--popover`, `--color-sidebar`, `--overlay`.
 
-Rome renders four depths: the page canvas, a raised card, a floating layer above the card, and a region recessed inside a card. `--card` and `--popover` are aliases, not depths of their own. `[mech]`
+Rome renders four depths: the page canvas, a raised pane, a floating layer above the pane, and a region recessed inside it. `--card` and `--popover` are aliases, not depths of their own. `[mech]`
+
+**A routed page renders in a pane, not on the canvas.** The shell raises the content column onto `--surface`, inset from the canvas on desktop and full-bleed on a phone, and the canvas is what remains around it: the sidebar and the gutters. When the free canvas splits that column, each region is a pane of its own and the gutter runs between them. A page therefore writes `bg-surface` for anything that has to paint, and `--background` belongs to the shell. `[mech]`
+
+A card inside a pane is an outlined region of the same step rather than a second lift, which is what its `border-border` hairline has always drawn. That is why the pane needs no change to `Card`, `FormRows`, `List`, or `Table`. `[llm]`
 
 ## Why this name
 
@@ -15,10 +19,10 @@ Each token names where a region sits in the stack, never how light the region is
 
 ## Usage statement
 
-- `--background` — Used for the page canvas behind every region. Not used for a card, and never assumed to be white.
-- `--surface` — Used for a raised card, panel, or table row floating on the canvas. Not used for the canvas.
+- `--background` — Used for the canvas the shell keeps: the sidebar, and the gutters around a pane. Not used by a routed page, not used for a card, and never assumed to be white.
+- `--surface` — Used for the pane a routed page renders in, and for a card, panel, or table row inside it. Not used for the canvas.
 - `--surface-muted` — Used for a region recessed inside a card: a well, a code block, a table header. Not used for a region that floats.
-- `--surface-elevated` — Used for the highest layer: popovers, menus, floating panels. Not used for a card sitting in the page flow.
+- `--surface-elevated` — Used for the highest layer: popovers, menus, and panels that float above a pane, such as the trace drawer. Not used for a card sitting in the page flow.
 - `--surface-hover` — Used for the hover and active fill of a row or list item. Not used as a resting fill.
 - `--card` — Used by shadcn-derived primitives that expect a `card` token. Not used directly in Rome code, which writes `--surface`.
 - `--popover` — Used by shadcn-derived primitives that expect a `popover` token. Not used directly in Rome code.
@@ -42,6 +46,7 @@ Ash's dark half maps the same steps as Ember's, against its own palette. Every t
 ## Constraints
 
 - The canvas is never white. A raised surface reads as raised because the canvas sits below it. `[mech]`
+- The pane belongs to the shell. A page, a layout, and a kit primitive never place it and never read whether they are inside one. `[mech]`
 - The stack reverses between modes. In light the canvas is darker than the card, and a recessed region is darker still. In dark every layer rises from the canvas, and no layer sits below it. `[mech]`
 - Two pairs collapse in some themes. Slate light resolves `--surface` and `--surface-elevated` to the same white, and every dark half resolves `--surface-muted` and `--surface-elevated` to the same step. A layer that must read as floating carries a border or a shadow, never fill alone. `[mech]`
 - `--surface-hover` states a transient fill. A row at rest takes `--surface`. `[mech]`

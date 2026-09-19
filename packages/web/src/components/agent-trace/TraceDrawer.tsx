@@ -43,13 +43,15 @@ export function traceDrawerOpenPlacementClass(hasApps: boolean): string {
     // A widget already owns the surface beside chat. Keep it visible and cover
     // the actual desktop chat column, regardless of how wide that column may
     // become. Mobile keeps the base full-chat overlay below its header.
-    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-0 md:w-[var(--rome-chat-col)]";
+    return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 md:bottom-3 md:left-[var(--rome-chat-left,0px)] md:right-auto md:top-3 md:w-[var(--rome-chat-col)] md:rounded-12";
   }
 
   // With no widgets, width alone chooses the presentation: a narrow chat is
   // covered from its real left edge through the viewport's right edge, while a
   // wide chat keeps 480px for a docked inspector.
-  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-0 @max-5xl/chat:md:top-0 @max-5xl/chat:md:w-auto @5xl/chat:left-auto @5xl/chat:right-0 @5xl/chat:top-0 @5xl/chat:w-[480px] @5xl/chat:border-l @5xl/chat:border-border";
+  // The desktop insets match the pane's gutter, so a drawer docked beside the
+  // chat sits inside the same frame rather than covering the canvas around it.
+  return "fixed bottom-0 left-0 right-0 top-[var(--rome-mobile-header-height)] z-30 @max-5xl/chat:md:bottom-3 @max-5xl/chat:md:left-[var(--rome-chat-left,0px)] @max-5xl/chat:md:right-3 @max-5xl/chat:md:top-3 @max-5xl/chat:md:w-auto @max-5xl/chat:md:rounded-12 @5xl/chat:bottom-3 @5xl/chat:left-auto @5xl/chat:right-3 @5xl/chat:top-3 @5xl/chat:w-[480px] @5xl/chat:rounded-12 @5xl/chat:border @5xl/chat:border-border";
 }
 
 export function traceDrawerContentInsetClass(open: boolean, hasApps: boolean): string {
@@ -302,7 +304,7 @@ export function TraceDrawer({
         // transition shares the chat column's 200ms width transition, so on
         // desktop the drawer's left edge rides the chat column's right edge
         // exactly as the old width animation did.
-        className={`flex flex-col overflow-hidden bg-background ${
+        className={`flex flex-col overflow-hidden bg-surface-elevated shadow-10 ${
           !hasApps ? "@5xl/chat:transition-transform @5xl/chat:duration-200 @5xl/chat:ease-out" : ""
         } ${
           open

@@ -73,6 +73,9 @@ describe("traceDrawerOpenPlacementClass", () => {
     expect(classes).toContain("md:left-[var(--rome-chat-left,0px)]");
     expect(classes).toContain("md:right-auto");
     expect(classes).toContain("md:w-[var(--rome-chat-col)]");
+    // The pane's gutter, so the overlay sits inside the frame it covers.
+    expect(classes).toContain("md:top-3");
+    expect(classes).toContain("md:bottom-3");
     expect(classes).not.toContain("@5xl/chat:w-[480px]");
   });
 
@@ -83,7 +86,7 @@ describe("traceDrawerOpenPlacementClass", () => {
     expect(classes).not.toContain("top-12");
     expect(classes).not.toContain("pb-safe");
     expect(classes).toContain("@max-5xl/chat:md:left-[var(--rome-chat-left,0px)]");
-    expect(classes).toContain("@max-5xl/chat:md:right-0");
+    expect(classes).toContain("@max-5xl/chat:md:right-3");
     expect(classes).toContain("@max-5xl/chat:md:w-auto");
     expect(classes).not.toContain(["@max-5xl/chat:md:w-", "[var(--rome-chat-col)]"].join(""));
   });
@@ -92,8 +95,11 @@ describe("traceDrawerOpenPlacementClass", () => {
     const classes = traceDrawerOpenPlacementClass(false);
 
     expect(classes).toContain("@5xl/chat:left-auto");
-    expect(classes).toContain("@5xl/chat:right-0");
+    expect(classes).toContain("@5xl/chat:right-3");
     expect(classes).toContain("@5xl/chat:w-[480px]");
+    // Docked inside the gutter rather than flush to the viewport edge.
+    expect(classes).toContain("@5xl/chat:top-3");
+    expect(classes).toContain("@5xl/chat:bottom-3");
   });
 
   it("reserves side-panel space only for an open trace with no apps", () => {

@@ -63,7 +63,7 @@ function OverviewIdentity({
   return (
     <div className="flex min-w-0 items-center gap-3">
       {model ? (
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-8 border border-border bg-background">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-8 border border-border bg-surface">
           <ModelProviderIcon
             model={model.state === "known" ? model.name : null}
             provider={model.state === "known" ? model.provider : null}
@@ -398,7 +398,7 @@ export function SessionsOverview({
                     size="sm"
                     className={
                       trendBy === "model"
-                        ? "bg-background shadow-1 hover:bg-background"
+                        ? "bg-surface shadow-1 hover:bg-surface"
                         : "text-muted-foreground"
                     }
                     onClick={() => onTrendByChange("model")}
@@ -410,7 +410,7 @@ export function SessionsOverview({
                     size="sm"
                     className={
                       trendBy === "app"
-                        ? "bg-background shadow-1 hover:bg-background"
+                        ? "bg-surface shadow-1 hover:bg-surface"
                         : "text-muted-foreground"
                     }
                     onClick={() => onTrendByChange("app")}

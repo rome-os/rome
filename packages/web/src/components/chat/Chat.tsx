@@ -1615,7 +1615,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             </div>
           )}
 
-          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-background/65 max-md:hidden">
+          <div className="z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-surface/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-surface/65 max-md:hidden">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <AgentAvatar
                 iconUrl={pinnedAgentMention?.iconUrl}

@@ -10,7 +10,7 @@ The catalogue enters one layout at a time, each landing with a dashboard page mi
 
 ## The shared frame
 
-`Page` is the frame a routed page renders into. It carries the padding `p-4 sm:p-6 lg:p-8` at full width, centers nothing, and stacks the regions inside it 24px apart. A page that needs a different frame — full-bleed, or centered on both axes — takes a layout that ships one. Every other page takes `Page` directly and stacks its body under the header.
+`Page` is the frame a routed page renders into. It carries the padding `p-4 sm:p-6 lg:p-8` at full width, centers nothing, and stacks the regions inside it 24px apart. The shell has already raised the column it fills onto a [pane](semantic-token/surfaces.md#surfaces), so `Page` paints nothing and no layout places one. A page that needs a different frame — full-bleed, or centered on both axes — takes a layout that ships one. Every other page takes `Page` directly and stacks its body under the header.
 
 `PageHeader` holds the identity block. `PageHeaderNav` takes a breadcrumb or a back link on its own line, `PageHeading` groups `PageTitle` with `PageDescription`, and `PageActions` sits opposite the heading. `PageTitle` is the one `h1` a page carries. A `Section` inside the page carries an `h2` through `SectionTitle`. The roles come from [typography.md](semantic-token/typography.md), so a layout writes `text-title`, `text-section`, `text-ui`, and `text-aux` and never a raw size.
 

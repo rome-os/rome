@@ -1778,7 +1778,7 @@ function CreateRoutineModal({
                               value={field.state.value}
                               onChange={(e) => field.handleChange(e.target.value)}
                               onBlur={field.handleBlur}
-                              className="appearance-none bg-background [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                              className="appearance-none bg-surface [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
                             />
                           </Field>
                         )}

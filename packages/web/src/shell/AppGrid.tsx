@@ -607,7 +607,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                 const pin = pins.find((p) => pinKey(p) === value);
                 if (!pin) return null;
                 return (
-                  <div className="flex h-8 items-center gap-1 rounded-8 border border-border bg-background px-1 py-1 text-ui text-foreground shadow-10">
+                  <div className="flex h-8 items-center gap-1 rounded-8 border border-border bg-surface-elevated px-1 py-1 text-ui text-foreground shadow-10">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center text-subtle-foreground">
                       <GripVertical className="h-3.5 w-3.5" aria-hidden />
                     </span>

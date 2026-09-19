@@ -163,11 +163,12 @@ export function ToolWorkspace({
     <div
       ref={rootRef}
       data-testid="tool-workspace"
+      data-slot="tool-workspace"
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
       style={{ "--rome-chat-col": open && !compact ? `${chatWidth}px` : "100%" } as CSSProperties}
     >
       <div
-        className="relative flex min-h-0 min-w-0 flex-col"
+        className="relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface md:rounded-12 md:border md:border-border"
         data-testid="workspace-chat"
         style={{
           display: compact && open ? "none" : undefined,
@@ -187,7 +188,10 @@ export function ToolWorkspace({
           aria-valuemax={Math.round(available - MIN_PANE_WIDTH)}
           aria-valuenow={Math.round(chatWidth)}
           data-resizing={resizing || undefined}
-          className="relative z-40 w-px shrink-0 cursor-col-resize touch-none before:absolute before:inset-y-0 before:-inset-x-1 after:pointer-events-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border-subtle after:transition-[width] hover:after:w-1 focus-visible:outline-ring/50 focus-visible:after:w-1 data-[resizing]:after:w-1"
+          // The hairline between the two regions is a canvas gutter now, so the
+          // handle widens to it and drops the painted line; hover and drag tint
+          // the gutter instead of thickening a rule.
+          className="relative z-40 w-3 shrink-0 cursor-col-resize touch-none rounded-full transition-colors before:absolute before:inset-y-0 before:-inset-x-1 hover:bg-surface-hover focus-visible:outline-ring/50 data-[resizing]:bg-surface-hover"
           onDoubleClick={() => changeRatio(DEFAULT_RATIO)}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -224,7 +228,7 @@ export function ToolWorkspace({
         value={view.activeId ?? ""}
         onValueChange={selectTool}
         activationMode="automatic"
-        className="min-h-0 min-w-0 flex-1 gap-0 bg-background"
+        className="min-h-0 min-w-0 flex-1 gap-0 overflow-hidden bg-surface md:rounded-12 md:border md:border-border"
         style={{ display: open ? undefined : "none" }}
       >
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
