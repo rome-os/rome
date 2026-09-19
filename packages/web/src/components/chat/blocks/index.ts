@@ -14,4 +14,4 @@ export {
   formatTraceNumber,
   formatUsd,
 } from "./TracePayload";
-export { renderSingleBlock, renderFlatBlocks } from "./render";
+export { renderSingleBlock, renderFlatBlocks, routineCreatedRecordKey } from "./render";

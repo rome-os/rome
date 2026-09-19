@@ -293,6 +293,19 @@ function findRoutine(id: string): Routine | undefined {
   return routines.find((routine) => routine.id === id);
 }
 
+export interface MockRoutineCreatedContext {
+  sessionId: string;
+  turnId: string;
+  toolUseId: string;
+}
+
+type MockRoutineCreatedListener = (context: MockRoutineCreatedContext, routine: Routine) => void;
+let routineCreatedListener: MockRoutineCreatedListener | undefined;
+
+export function setMockRoutineCreatedListener(listener: MockRoutineCreatedListener): void {
+  routineCreatedListener = listener;
+}
+
 export const routineHandlers = [
   http.get("/api/routines", () => HttpResponse.json(routines)),
   // Also the write behind the transcript's routine_draft_card: turning that card
@@ -301,9 +314,10 @@ export const routineHandlers = [
     const body = (await request.json()) as Omit<
       Routine,
       "id" | "createdAt" | "lastFiredAt" | "nextRunAt" | "lastRun"
-    >;
+    > & { webchatContext?: MockRoutineCreatedContext };
+    const { webchatContext, ...routineBody } = body;
     const created: Routine = {
-      ...body,
+      ...routineBody,
       id: `routine-new-${nextRoutineId++}`,
       createdAt: new Date().toISOString(),
       lastFiredAt: null,
@@ -312,6 +326,7 @@ export const routineHandlers = [
     };
     routines.unshift(created);
     runs[created.id] = [];
+    if (webchatContext) routineCreatedListener?.(webchatContext, created);
     return HttpResponse.json(created, { status: 201 });
   }),
   http.get("/api/routines/:id/runs", ({ params, request }) => {
