@@ -11,9 +11,10 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 // two link shapes the agent emits lives here, and everything else falls through
 // to the default react-router link.
 //
-//   /projects/<project>/<path>  → open the projects panel + select the file
-//                                 (reuses the same follow signal ChatWidget
-//                                 publishes when an agent links a file).
+//   /projects/<project>/<path> or a Rome-hosted absolute form
+//                              → open the projects panel + select the file
+//                                (reuses the same follow signal ChatWidget
+//                                publishes when an agent links a file).
 //   /apps/<appId>[/<route>][?q]  → open that app's workspace tile, preserving
 //                                 the in-app sub-route and query params so the
 //                                 tile lands on the exact linked page.
@@ -23,6 +24,22 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 
 function isProjectsHref(href: string): boolean {
   return href === "/projects" || href.startsWith("/projects/");
+}
+
+function getProjectsRouteHref(href: string): string | null {
+  if (isProjectsHref(href)) return href;
+
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  const isCurrentOrigin = typeof window !== "undefined" && url.origin === window.location.origin;
+  const isRomeHosted = url.hostname === "romeos.cc" || url.hostname.endsWith(".romeos.cc");
+  return (isCurrentOrigin || isRomeHosted) && isProjectsHref(url.pathname) ? url.pathname : null;
 }
 
 // The markdown pipeline percent-encodes hrefs (micromark's normalizeUri), so a
@@ -106,12 +123,13 @@ export function ChatLink(props: MarkdownLinkProps) {
   const href = props.href;
 
   if (store && href) {
-    if (isProjectsHref(href)) {
+    const projectsHref = getProjectsRouteHref(href);
+    if (projectsHref) {
       return (
         <WorkspaceLink
           {...props}
           onActivate={() => {
-            const path = decodeProjectsHref(href) ?? href;
+            const path = decodeProjectsHref(projectsHref) ?? projectsHref;
             // `force` bypasses the user's manual close of the panel — an
             // explicit click is an explicit request to see the file.
             eventBus?.emit("projects:opened", { paths: [path], force: true });

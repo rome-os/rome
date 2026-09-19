@@ -54,6 +54,37 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBe("/projects/default/image-summary-39.png");
   });
 
+  it("opens the linked file from an absolute Rome projects URL", () => {
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: Array<{ paths: string[]; force?: boolean }> = [];
+    bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/projects/conductor/docs/ui.md">UI docs</ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("UI docs"));
+
+    expect(opened).toEqual([{ paths: ["/projects/conductor/docs/ui.md"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md");
+  });
+
+  it("leaves an absolute projects-shaped URL on another host external", () => {
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ChatLink href="https://example.com/projects/conductor/docs/ui.md">external docs</ChatLink>,
+      { store, bus },
+    );
+    const link = screen.getByText("external docs") as HTMLAnchorElement;
+    fireEvent.click(link);
+
+    expect(link.target).toBe("_blank");
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
   it("decodes a percent-encoded /projects href into a logical path", () => {
     // The markdown renderer percent-encodes non-ASCII/spaced hrefs; the follow
     // signal must carry the decoded logical path or /resolve misses the file.
