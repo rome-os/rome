@@ -3,7 +3,11 @@
 ## Prerequisites
 
 - [OrbStack](https://orbstack.dev/) or Docker Desktop — Rome and its observability stack run as containers.
-- [Nix](https://nixos.org/) + [direnv](https://direnv.net/) — manage host-side Node.js + pnpm for tools that run outside the container (e.g., `pnpm typecheck` on the host, editor tooling).
+- [Nix](https://nixos.org/) — provides the pinned development toolchain.
+- [direnv](https://direnv.net/) — activates the Nix shell when you enter the repository.
+
+Do not install Node, pnpm, or repository lint tools separately. The flake
+provides them to development shells and CI.
 
 ## First-time setup
 
@@ -38,8 +42,8 @@ prefix = ["/path/to/rome-internal"]
 
 ```bash
 cd rome-internal
-direnv allow          # activates Nix shell (provides node, pnpm)
-pnpm install          # install JS dependencies on the host (used by editor tooling)
+direnv allow
+pnpm install
 ```
 
 6. Start developing:
@@ -47,6 +51,37 @@ pnpm install          # install JS dependencies on the host (used by editor tool
 ```bash
 pnpm dev:all          # Rome container + obs singleton + Traefik singleton
 ```
+
+If direnv is unavailable, enter the shell directly:
+
+```bash
+nix develop
+```
+
+## Pinned toolchain
+
+[`flake.nix`](flake.nix) defines the development and CI shells.
+[`flake.lock`](flake.lock) pins every flake input. Tools that need a release
+outside nixpkgs are pinned by URL and hash in
+[`nix/dev-tools.nix`](nix/dev-tools.nix).
+
+The default shell contains the CI package set plus developer-only browser and
+infrastructure tools. CI uses the smaller `.#ci` shell through
+[`scripts/ci-env.sh`](scripts/ci-env.sh). Both shells use the same Node, pnpm,
+compiler, linters, Git tools, and command-line utilities.
+
+Run the toolchain check after changing the flake or a pinned tool:
+
+```bash
+nix flake check
+```
+
+GitHub Actions installs Nix through
+[`setup-ci`](.github/actions/setup-ci/action.yml). Add a CI tool to
+`ciPackages` in `flake.nix` instead of downloading it in a workflow.
+
+Docker remains a host prerequisite because it must connect to the host's
+container engine. The flake does not replace or shadow the host Docker client.
 
 ## Running processes
 

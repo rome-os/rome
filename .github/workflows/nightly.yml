@@ -10,26 +10,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:ci
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm test:ci
 
   coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:coverage
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm test:coverage
       - uses: actions/upload-artifact@v7
         with:
           name: coverage-report
@@ -40,9 +32,5 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm docker:closure-check
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm docker:closure-check

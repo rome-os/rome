@@ -1,0 +1,23 @@
+name: Set up Rome CI environment
+description: Install Nix, realize the flake CI shell, and restore the pnpm store
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
+
+    - name: Locate pnpm store
+      id: pnpm-store
+      shell: bash
+      run: |
+        path="$("$GITHUB_WORKSPACE/scripts/ci-env.sh" pnpm store path | tail -n 1)"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pnpm store
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-${{ runner.arch }}-

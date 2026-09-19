@@ -3,11 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { AREA_PATHS, AREAS, allAreas, areasForFiles } from "./ci-changed-areas.mjs";
 
-/**
- * Repo root, resolved from the module URL. These tests run on whatever node the
- * runner ships, before `setup-node` pins the version the rest of the repo
- * builds against, so they carry no floor beyond ES modules themselves.
- */
+/** Repo root, resolved from the module URL. */
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TEST_CONFIGS = [
   "rstest.config.ts",
@@ -217,12 +213,20 @@ test("each shard job guards its steps on its own detection output", async () => 
       assert.equal(key, shard, `the ${shard} job guards a step on steps.areas.outputs.${key}`);
     }
 
-    // pnpm/action-setup, setup-node, install, and the suite itself. A guard
-    // dropped from any of them runs that step on a shard meant to stay idle.
+    // The flake environment also runs the detector, so only the workspace
+    // install and the suite stay behind the area guard.
     assert.equal(
       runGuards.length,
-      4,
-      `the ${shard} job has ${runGuards.length} guarded steps, want 4`,
+      2,
+      `the ${shard} job has ${runGuards.length} guarded steps, want 2`,
+    );
+
+    const setupIndex = body.findIndex((line) => line.includes("./.github/actions/setup-ci"));
+    const detectorIndex = body.findIndex((line) => line.includes("id: areas"));
+    assert.ok(setupIndex >= 0, `the ${shard} job does not set up the flake environment`);
+    assert.ok(
+      setupIndex < detectorIndex,
+      `the ${shard} job runs detection before setting up the flake environment`,
     );
 
     assert.ok(

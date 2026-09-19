@@ -19,30 +19,18 @@ jobs:
   # ──────────────────────────────────────────
   # Job 1: Lint + Type Check (fast, catches errors early)
   #
-  # The two checks that need no repo toolchain run first: they cost seconds and
-  # fail on mistakes a reader can see, so a bad PR title or an unformatted script
-  # reports before the ~1m install the rest of the job waits on.
+  # The flake supplies the same pinned Node, pnpm, linters, and native build
+  # tools that developers get from the default shell.
   # ──────────────────────────────────────────
   lint:
     runs-on: ubuntu-latest
-    # Covers the shell and prose tool downloads and every lint pass on top of
-    # the node chain that once fit in 5.
-    timeout-minutes: 10
-    env:
-      # Keep the versions in sync with the flake devShell (flake.nix). The
-      # SHA256s pin the GitHub release artifacts so a tampered/replaced download
-      # fails the job instead of silently running an unknown binary.
-      SHELLCHECK_VERSION: v0.11.0
-      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
-      SHFMT_VERSION: v3.12.0
-      SHFMT_SHA256: d9fbb2a9c33d13f47e7618cf362a914d029d02a6df124064fff04fd688a745ea
-      # 3.19.0 fixes the line mapping Vale reports for comments inside a
-      # multi-paragraph block. On 3.14.1 the reported line drifts from the
-      # third paragraph on, which points a reader at the wrong code.
-      VALE_VERSION: 3.19.0
-      VALE_SHA256: c8f9d6c8055442bc7e9c121b2498e6f0e3fb670f4665e6ee577f1897f7665cf6
+    # Covers the Nix shell realization and every lint pass.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-ci
+      - name: Check the pinned toolchain
+        run: nix flake check --print-build-logs
 
       # Squash-and-merge uses the PR title as the merge commit subject on main,
       # and release-please reads those subjects to decide the next version +
@@ -62,83 +50,45 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: scripts/check-pr-title.sh
+        run: scripts/ci-env.sh scripts/check-pr-title.sh
 
-      - name: Install shellcheck
-        run: |
-          curl -fsSL -o shellcheck.tar.xz \
-            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
-          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum --check --strict -
-          sudo tar -xJf shellcheck.tar.xz --strip-components=1 -C /usr/local/bin "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
-          rm shellcheck.tar.xz
-          shellcheck --version
-      - name: Install shfmt
-        run: |
-          curl -fsSL -o shfmt \
-            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
-          echo "${SHFMT_SHA256}  shfmt" | sha256sum --check --strict -
-          sudo install -m 0755 shfmt /usr/local/bin/shfmt
-          rm shfmt
-          shfmt --version
-      - run: scripts/lint-shell.sh
-
-      # Prose linting for docs/ and for the comments in .ts/.tsx sources. The
-      # style is vendored under .vale/styles, so this needs no `vale sync` and
-      # no network beyond the binary itself.
-      - name: Install vale
-        run: |
-          curl -fsSL -o vale.tar.gz \
-            "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
-          echo "${VALE_SHA256}  vale.tar.gz" | sha256sum --check --strict -
-          sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
-          rm vale.tar.gz
-          vale --version
-
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm lint:sh
       - name: Test Google OpenCLI plugin
-        run: pnpm -C opencli-plugins/google test
+        run: scripts/ci-env.sh pnpm -C opencli-plugins/google test
       - name: Test Delta OpenCLI plugin
-        run: pnpm -C opencli-plugins/delta test
+        run: scripts/ci-env.sh pnpm -C opencli-plugins/delta test
       - name: Test United OpenCLI plugin
-        run: pnpm -C opencli-plugins/united test
+        run: scripts/ci-env.sh pnpm -C opencli-plugins/united test
       - name: Test American Airlines OpenCLI plugin
-        run: pnpm -C opencli-plugins/aa test
+        run: scripts/ci-env.sh pnpm -C opencli-plugins/aa test
       - name: Test Southwest OpenCLI plugin
-        run: pnpm -C opencli-plugins/southwest test
-      - run: pnpm lint
-      - run: pnpm lint:prose
-      - run: pnpm check:ui:tailwind
-      - run: pnpm lint:agents
+        run: scripts/ci-env.sh pnpm -C opencli-plugins/southwest test
+      - run: scripts/ci-env.sh pnpm lint
+      - run: scripts/ci-env.sh pnpm lint:prose
+      - run: scripts/ci-env.sh pnpm check:ui:tailwind
+      - run: scripts/ci-env.sh pnpm lint:agents
 
       # Dead-code analysis. Knip resolves the import graph across every
       # workspace, so it needs the full install above and cannot move to a
       # filtered job. knip.jsonc documents the runtime-discovered entry points
       # and why export-shaped rules remain warnings.
-      - run: pnpm lint:deadcode
+      - run: scripts/ci-env.sh pnpm lint:deadcode
 
-      - run: pnpm typecheck
-      - run: pnpm typecheck:lint-agents
+      - run: scripts/ci-env.sh pnpm typecheck
+      - run: scripts/ci-env.sh pnpm typecheck:lint-agents
 
   # ──────────────────────────────────────────
   # Job 1b: DB schema drift — committed migrations must match the schema files
   # ──────────────────────────────────────────
   db-schema:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: scripts/check-db-schema.sh
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh scripts/check-db-schema.sh
 
   # ──────────────────────────────────────────
   # Job 2: Unit tests, sharded
@@ -163,27 +113,27 @@ jobs:
   # ──────────────────────────────────────────
   unit-tests-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           # The mapping diffs against the merge base, which a shallow clone of
           # the PR head does not contain.
           fetch-depth: 0
-      # Runs on the runner's preinstalled node: the script imports only node
-      # builtins, so a shard the diff does not reach finishes without ever
-      # setting up a toolchain.
+      - uses: ./.github/actions/setup-ci
+      # This script needs only the flake's Node and no workspace install, so a
+      # shard the diff does not reach still skips the dependency install.
       - id: areas
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
+        run: scripts/ci-env.sh node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
       # Checks the mapping this job just read against the dependency closure and
       # the token gates' own scan roots. It carries no condition on purpose: a
       # change that invalidates the mapping can be one the mapping routes away
       # from this shard, so gating the check on the mapping lets the very change
-      # that breaks it skip the check that would catch it. Node builtins only,
-      # so it runs before any toolchain exists.
-      - run: node --test scripts/ci-changed-areas.test.mjs
+      # that breaks it skip the check that would catch it. It runs before the
+      # workspace install.
+      - run: scripts/ci-env.sh node --test scripts/ci-changed-areas.test.mjs
       # An areas step that emits nothing leaves every guard below false, which
       # reads as a shard the diff did not reach rather than a detector that
       # never ran. Skipping is the one outcome this design never infers.
@@ -192,43 +142,36 @@ jobs:
           echo "ci-changed-areas produced no verdict" >&2
           exit 1
       - if: steps.areas.outputs.core == 'true'
-        uses: pnpm/action-setup@v5
+        run: scripts/ci-env.sh pnpm install --frozen-lockfile
       - if: steps.areas.outputs.core == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - if: steps.areas.outputs.core == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.areas.outputs.core == 'true'
-        run: pnpm test:unit:core
+        run: scripts/ci-env.sh pnpm test:unit:core
 
   # ──────────────────────────────────────────
   # Job 2b: the dashboard and the kit (~2m40s, of which ~40s is jsdom setup).
   # ──────────────────────────────────────────
   unit-tests-web:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           # The mapping diffs against the merge base, which a shallow clone of
           # the PR head does not contain.
           fetch-depth: 0
-      # Runs on the runner's preinstalled node: the script imports only node
-      # builtins, so a shard the diff does not reach finishes without ever
-      # setting up a toolchain.
+      - uses: ./.github/actions/setup-ci
+      # This script needs only the flake's Node and no workspace install, so a
+      # shard the diff does not reach still skips the dependency install.
       - id: areas
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
+        run: scripts/ci-env.sh node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
       # Checks the mapping this job just read against the dependency closure and
       # the token gates' own scan roots. It carries no condition on purpose: a
       # change that invalidates the mapping can be one the mapping routes away
       # from this shard, so gating the check on the mapping lets the very change
-      # that breaks it skip the check that would catch it. Node builtins only,
-      # so it runs before any toolchain exists.
-      - run: node --test scripts/ci-changed-areas.test.mjs
+      # that breaks it skip the check that would catch it. It runs before the
+      # workspace install.
+      - run: scripts/ci-env.sh node --test scripts/ci-changed-areas.test.mjs
       # An areas step that emits nothing leaves every guard below false, which
       # reads as a shard the diff did not reach rather than a detector that
       # never ran. Skipping is the one outcome this design never infers.
@@ -237,16 +180,9 @@ jobs:
           echo "ci-changed-areas produced no verdict" >&2
           exit 1
       - if: steps.areas.outputs.web == 'true'
-        uses: pnpm/action-setup@v5
+        run: scripts/ci-env.sh pnpm install --frozen-lockfile
       - if: steps.areas.outputs.web == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - if: steps.areas.outputs.web == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.areas.outputs.web == 'true'
-        run: pnpm test:unit:web
+        run: scripts/ci-env.sh pnpm test:unit:web
 
   # ──────────────────────────────────────────
   # Job 2c: everything else (~1m) — libs, the Discord CLI, the Electron shell,
@@ -254,27 +190,27 @@ jobs:
   # ──────────────────────────────────────────
   unit-tests-rest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           # The mapping diffs against the merge base, which a shallow clone of
           # the PR head does not contain.
           fetch-depth: 0
-      # Runs on the runner's preinstalled node: the script imports only node
-      # builtins, so a shard the diff does not reach finishes without ever
-      # setting up a toolchain.
+      - uses: ./.github/actions/setup-ci
+      # This script needs only the flake's Node and no workspace install, so a
+      # shard the diff does not reach still skips the dependency install.
       - id: areas
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
+        run: scripts/ci-env.sh node scripts/ci-changed-areas.mjs >> "$GITHUB_OUTPUT"
       # Checks the mapping this job just read against the dependency closure and
       # the token gates' own scan roots. It carries no condition on purpose: a
       # change that invalidates the mapping can be one the mapping routes away
       # from this shard, so gating the check on the mapping lets the very change
-      # that breaks it skip the check that would catch it. Node builtins only,
-      # so it runs before any toolchain exists.
-      - run: node --test scripts/ci-changed-areas.test.mjs
+      # that breaks it skip the check that would catch it. It runs before the
+      # workspace install.
+      - run: scripts/ci-env.sh node --test scripts/ci-changed-areas.test.mjs
       # An areas step that emits nothing leaves every guard below false, which
       # reads as a shard the diff did not reach rather than a detector that
       # never ran. Skipping is the one outcome this design never infers.
@@ -283,32 +219,21 @@ jobs:
           echo "ci-changed-areas produced no verdict" >&2
           exit 1
       - if: steps.areas.outputs.rest == 'true'
-        uses: pnpm/action-setup@v5
+        run: scripts/ci-env.sh pnpm install --frozen-lockfile
       - if: steps.areas.outputs.rest == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - if: steps.areas.outputs.rest == 'true'
-        run: pnpm install --frozen-lockfile
-      - if: steps.areas.outputs.rest == 'true'
-        run: pnpm test:unit:rest
+        run: scripts/ci-env.sh pnpm test:unit:rest
 
   # ──────────────────────────────────────────
   # Job 3: Integration Tests (parallel with lint)
   # ──────────────────────────────────────────
   integration-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:integration
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm test:integration
 
   # ──────────────────────────────────────────
   # Job 3b: Layout invariants — real-browser geometry over the mock-mode SPA.
@@ -340,9 +265,9 @@ jobs:
       # rebuilt base layers and refreshed apt libs — so pinning the tag would
       # make the "binaries never differ between runs" claim above false, and
       # would run whatever the tag points at today with the checkout in reach.
-      # The lint job pins its shellcheck and shfmt downloads by SHA256 for the
-      # same reason. The digest is a multi-arch index, so it resolves per
-      # runner architecture the way the tag did.
+      # The flake pins fetched tool artifacts by hash for the same reason. The
+      # digest is a multi-arch index, so it resolves per runner architecture
+      # the way the tag did.
       image: mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
       # The image's default user is root. Run as the runner's own uid instead so
       # the files the job writes into the workspace — the install, the failure
@@ -462,13 +387,9 @@ jobs:
   e2e-tests:
     needs: [unit-tests-core, unit-tests-web, unit-tests-rest, integration-tests]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:e2e
+      - uses: ./.github/actions/setup-ci
+      - run: scripts/ci-env.sh pnpm install --frozen-lockfile
+      - run: scripts/ci-env.sh pnpm test:e2e

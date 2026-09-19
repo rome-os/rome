@@ -35,7 +35,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 
 **Imports carry `.js` extensions even for TypeScript files.** The repo is `"type": "module"`. Inside `packages/core`, `@/*` maps to `./src/*`.
 
-**Biome's npm binary does not run on the host.** NixOS cannot execute it, so `pnpm lint` belongs in CI or the dev container. On the host, use the nixpkgs `biome` from the devShell directly.
+**Biome comes from the devShell, not `node_modules`.** Run `pnpm lint` inside `nix develop`. A shell outside the flake may find another Biome version or no binary at all.
 
 **A migration that breaks an interface first breaks every consumer that has not migrated yet.** Keep existing interfaces, schemas, and contracts working while new behavior lands alongside them, and sequence the break last or behind a switch.
 
