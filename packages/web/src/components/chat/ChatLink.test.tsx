@@ -158,6 +158,21 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBeUndefined();
   });
 
+  it("leaves a non-projects URL on the Rome Cloud control plane external", () => {
+    // romeos.cc (the control plane) is a different origin than this instance's
+    // <slug>.romeos.cc, so it is never treated as internal.
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(<ChatLink href="https://romeos.cc/blog">blog</ChatLink>, { store, bus });
+    const link = screen.getByText("blog") as HTMLAnchorElement;
+    fireEvent.click(link);
+
+    expect(link.target).toBe("_blank");
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
   it("guards traversal on the raw absolute path before URL canonicalization", () => {
     // new URL() collapses `%2E%2E` dot-segments before any guard runs, so the
     // raw path must be validated directly. A relative href with the same
