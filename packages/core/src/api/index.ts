@@ -34,6 +34,7 @@ import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
+import { userActivityRoutes } from "./routes/user-activity.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
 import { accountsRoutes } from "./routes/accounts.js";
 import { accountDecisionRoutes } from "./routes/account-decisions.js";
@@ -129,6 +130,7 @@ export function buildApp(
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
   api.route("/", feedbackRoutes(deps));
+  api.route("/", userActivityRoutes());
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
   api.route("/", onboardRoutes(deps));
