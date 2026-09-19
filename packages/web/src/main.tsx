@@ -20,16 +20,25 @@ injectThemeCss();
 // ID — and never inside widget iframes (see lib/analytics.ts).
 initAnalytics();
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <GuardianTimestampProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </GuardianTimestampProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+/**
+ * Mounts the dashboard into #root. Exported so the regular entry
+ * (src/entry.tsx) and the mock entry (mock/main.tsx) can control when the
+ * app renders: mock mode starts the MSW worker first, then calls this, so the
+ * app stays on the main chunk and keeps Fast Refresh instead of being isolated
+ * behind a dynamic import (see rome-os/rome#383).
+ */
+export function renderApp() {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <GuardianTimestampProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </GuardianTimestampProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
