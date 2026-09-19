@@ -7,6 +7,7 @@ import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import type { ActionExecutionStore } from "../actions/context.js";
 
 const log = createLogger("subagent-execution");
 
@@ -51,6 +52,8 @@ export interface StartSubagentContext {
   workingDir: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  /** Exact origin for this active parent turn only. */
+  originRoute?: ActionExecutionStore["originRoute"];
 }
 
 export interface SubagentExecutionService {
@@ -150,6 +153,7 @@ export function createSubagentExecutionService(deps: {
           },
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
+          originRoute: context.originRoute,
           romeSessionId: child.sessionId,
           romeSessionType: "subagent",
           initiatedBy: "system",

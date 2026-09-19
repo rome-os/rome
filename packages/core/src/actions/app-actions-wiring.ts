@@ -5,7 +5,11 @@ import type { Action, ActionConfig } from "./types.js";
 import type { ChannelMessageHook } from "../hooks/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { ActionExecutionContext, AppRuntimeRepositories } from "@rome-os/app-runtime";
+import type {
+  ActionExecutionContext,
+  AppRuntimeRepositories,
+  OriginMessenger,
+} from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
@@ -87,6 +91,7 @@ interface AppActionServices {
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
   hostExecution?: HostExecutionService;
+  originMessengerFactory?: (appId: string) => OriginMessenger;
 }
 
 interface AppLookup {
@@ -102,6 +107,20 @@ function makeAppLookup(catalog: AppCatalog): AppLookup {
   };
 }
 
+/**
+ * TalkRouter is a Core-wide routing authority. It is retained only for Rome's
+ * internal system app; ordinary app actions get the narrow appContext
+ * capabilities instead (including first-party-gated OriginMessenger).
+ */
+export function sharedDepsForAppAction(
+  ownerId: string,
+  deps: Record<string, unknown>,
+): Record<string, unknown> {
+  if (ownerId === "system") return deps;
+  const { talkRouter: _broadTalkRouter, ...leastPrivilegeDeps } = deps;
+  return leastPrivilegeDeps;
+}
+
 function createAppActionRuntimeDeps(
   record: AppActionRecord,
   catalog: AppCatalog,
@@ -114,7 +133,7 @@ function createAppActionRuntimeDeps(
   }
 
   return {
-    ...deps,
+    ...sharedDepsForAppAction(record.metadata.ownerId, deps),
     ...(record.metadata.ownerId === "system" && services.hostExecution
       ? { hostExecution: services.hostExecution }
       : {}),
@@ -125,6 +144,7 @@ function createAppActionRuntimeDeps(
       routinesRepo: services.routinesRepo,
       repositories: services.repositories,
       favorService: services.favorService,
+      originMessengerFactory: services.originMessengerFactory,
     }),
   } satisfies AppActionRuntimeDeps<Record<string, unknown>>;
 }

@@ -123,6 +123,27 @@ export function createAction(config, deps) {
     expect(context.repositories).toBe(repositories);
   });
 
+  it("binds the narrow origin messenger capability to the owning app", () => {
+    const app = resolvedApp("ctx-app");
+    const originMessenger = {
+      capture: rs.fn(),
+      send: rs.fn(),
+    };
+    const originMessengerFactory = rs.fn(() => originMessenger);
+
+    const context = createRomeAppContext(app, {
+      catalog: catalogFor(app),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: {} as ActionEngine,
+      repositories: createRepositories(),
+      originMessengerFactory,
+    });
+
+    expect(originMessengerFactory).toHaveBeenCalledWith("ctx-app");
+    expect(context.originMessenger).toBe(originMessenger);
+    expect("talkRouter" in context).toBe(false);
+  });
+
   it("exposes adapter ports instead of broad internal repository objects", () => {
     const settingsRepo = {
       get: rs.fn(async () => null),

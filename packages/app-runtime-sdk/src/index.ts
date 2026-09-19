@@ -1436,6 +1436,66 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
+/**
+ * An opaque, instance-local capability for one inbound Talk conversation.
+ * Apps may persist and round-trip this value, but must never parse or construct it.
+ */
+export type OriginReference = string & { readonly __brand: "OriginReference" };
+
+/** A receipt that deliberately omits provider routing coordinates. */
+export interface OriginMessageReceipt {
+  messageId?: string;
+  parts?: Array<{ messageId: string; kind: string }>;
+}
+
+export type OriginCaptureOutcome =
+  | { status: "captured"; origin: OriginReference; expiresAt: string }
+  | {
+      status: "unavailable";
+      reason: "not_inbound_talk_context" | "not_authorized" | "route_unavailable";
+    };
+
+/** Deliberately non-specific so opaque capability validation cannot become an oracle. */
+export type OriginSendUnavailableReason = "origin_unavailable";
+
+export type OriginSendInvalidReason =
+  | "invalid_text"
+  | "invalid_idempotency_key"
+  | "idempotency_conflict";
+
+export type OriginSendOutcome =
+  | {
+      status: "accepted";
+      deduplicated: boolean;
+      receipt: OriginMessageReceipt;
+    }
+  | {
+      status: "unavailable";
+      deduplicated: boolean;
+      reason: OriginSendUnavailableReason;
+    }
+  | { status: "indeterminate"; deduplicated: boolean }
+  | {
+      status: "invalid_request";
+      deduplicated: boolean;
+      reason: OriginSendInvalidReason;
+    };
+
+/**
+ * Least-privilege outbound messaging for first-party apps. The runtime captures
+ * the current genuine inbound Talk origin and accepts only plain text back to
+ * that exact origin; callers cannot supply a provider, connection, recipient,
+ * or conversation.
+ */
+export interface OriginMessenger {
+  capture(): Promise<OriginCaptureOutcome>;
+  send(input: {
+    origin: OriginReference;
+    text: string;
+    idempotencyKey: string;
+  }): Promise<OriginSendOutcome>;
+}
+
 export interface TalkHistory {
   query(input: {
     conversationId?: ConversationId;
@@ -1858,6 +1918,7 @@ export interface RomeAppContext {
   log: Logger;
   repositories: AppRuntimeRepositories;
   favors: AppFavorCapability;
+  originMessenger: OriginMessenger;
   runAction(
     name: string,
     args: Record<string, unknown>,

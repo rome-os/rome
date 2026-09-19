@@ -123,6 +123,11 @@ describe("SubagentExecutionService", () => {
       parentChannelThreadKey: "webchat:parent-1",
       childManager,
       workingDir: "/tmp/project-a",
+      originRoute: {
+        connectionId: "connection:discord",
+        service: "discord",
+        conversationId: "dm:guardian",
+      },
     };
     const parentRef = { sessionId: "parent-1", turnId: "parent-turn-1", toolUseId: "tool-1" };
 
@@ -137,6 +142,7 @@ describe("SubagentExecutionService", () => {
       turnId: "parent-turn-1",
       agentName: "main",
     });
+    expect(first.calls[0].options?.originRoute).toEqual(parent.originRoute);
     expect(registry.getLinkByParent(parentRef)?.child).toEqual({
       sessionId: "child-1",
       turnId: "child-turn-1",

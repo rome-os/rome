@@ -33,6 +33,7 @@ export async function callAction(
       initiator: store.initiator,
       callerAppId: opts?.callerAppId,
       channelContext: store.channelContext,
+      originRoute: store.originRoute,
       sharedContext: store.sharedContext,
       sessionId: store.sessionId,
       agentName: store.agentName,

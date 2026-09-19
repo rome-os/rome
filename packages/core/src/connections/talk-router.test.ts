@@ -90,6 +90,9 @@ describe("ConnectionTalkRouter", () => {
       material: { token: "first" },
       expiresAt: "never",
     });
+    expect(router.exactOriginAvailable(connection.id, "discord")).toBe(true);
+    expect(router.exactOriginAvailable(connection.id, "telegram")).toBe(false);
+    expect(router.exactOriginAvailable("missing", "discord")).toBe(false);
     instances[0]!.deliver?.({
       messageId: "inbound-1",
       conversationId: "general" as ConversationId,
@@ -110,6 +113,7 @@ describe("ConnectionTalkRouter", () => {
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
     await connection.auth.revoke("bot");
+    expect(router.exactOriginAvailable(connection.id, "discord")).toBe(false);
     expect(() => history?.query({ limit: 10 })).toThrow("Talk is unavailable");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "second" },

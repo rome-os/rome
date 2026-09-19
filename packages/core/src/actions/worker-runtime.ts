@@ -28,6 +28,7 @@ import {
   EventBusProxy,
   EventCatalogProxy,
   NotifyServiceProxy,
+  OriginMessengerProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   TalkRouterProxy,
@@ -214,6 +215,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       actionEngine,
       routinesRepo,
       repositories: appRuntimeRepositories,
+      originMessengerFactory: (appId) => new OriginMessengerProxy(appId),
       hostExecution: new HostExecutionService({
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,

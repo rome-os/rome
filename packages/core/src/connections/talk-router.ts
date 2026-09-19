@@ -60,6 +60,24 @@ export class ConnectionTalkRouter implements TalkRouter {
     return talk.send(conversationId, message);
   }
 
+  /**
+   * Core-only preflight for an already captured exact origin. This is not part
+   * of the app-facing TalkRouter contract: it answers only whether the saved
+   * connection is still the same service and currently authorized for Talk.
+   */
+  exactOriginAvailable(connectionId: string, service: string): boolean {
+    try {
+      const connection = this.registry.get(connectionId);
+      return (
+        connection.service === service &&
+        connection.status().talk.state === "unlocked" &&
+        connection.talk !== null
+      );
+    } catch {
+      return false;
+    }
+  }
+
   feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null {
     const current = this.registry.get(connectionId).talk?.feature(name);
     if (!current) {

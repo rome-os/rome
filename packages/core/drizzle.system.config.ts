@@ -35,6 +35,8 @@ export default defineConfig({
     "execution_journal",
     "connections",
     "connection_grants",
+    "origin_routes",
+    "origin_send_attempts",
     "rome_sessions",
     "linkedin_threads",
     "linkedin_messages",

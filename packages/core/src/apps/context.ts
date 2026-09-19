@@ -10,6 +10,7 @@ import {
   type AppRuntimeRepositories,
   type DetachedRunActionOptions,
   type RunActionOptions,
+  type OriginMessenger,
   type RomeAppDefinition as SdkRomeAppDefinition,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
@@ -41,6 +42,7 @@ export interface RomeAppContext {
   log: Logger;
   repositories: AppRuntimeRepositories;
   favors: AppFavorCapability;
+  originMessenger: OriginMessenger;
   runAction(
     name: string,
     args: Record<string, unknown>,
@@ -66,6 +68,7 @@ export interface RomeAppRuntimeServices {
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  originMessengerFactory?: (appId: string) => OriginMessenger;
 }
 
 interface AppApiRequestContext {
@@ -196,6 +199,14 @@ export function createRomeAppContext(
   services: RomeAppRuntimeServices,
 ): RomeAppContext {
   const log = createAppLogger(`app:${app.appId}`, app.appId);
+  const originMessenger: OriginMessenger = services.originMessengerFactory?.(app.appId) ?? {
+    async capture() {
+      return { status: "unavailable", reason: "not_authorized" };
+    },
+    async send() {
+      return { status: "unavailable", deduplicated: false, reason: "origin_unavailable" };
+    },
+  };
   const invokeActionResult = async (
     name: string,
     args: Record<string, unknown>,
@@ -269,6 +280,7 @@ export function createRomeAppContext(
         actor: store?.actor,
         callerAppId: app.appId,
         channelContext: store?.channelContext,
+        originRoute: store?.originRoute,
         sharedContext: store?.sharedContext,
         sessionId: store?.sessionId,
         agentName: store?.agentName,
@@ -332,6 +344,7 @@ export function createRomeAppContext(
         return result;
       },
     },
+    originMessenger,
     // Nested calls preserve the Promise<ActionResult> port; detached
     // calls return only main's acceptance receipt for a new root execution.
     runAction,
