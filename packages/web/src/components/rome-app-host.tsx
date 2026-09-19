@@ -96,22 +96,31 @@ export async function appendScopedStyles(
 // (--app-canvas, --primary, …) are inherited custom properties that pierce the
 // shadow boundary, and the shell toggles `.dark` on <html> (an ancestor of this
 // mount), so the inherited values already track the live theme. App bundles ship
-// no theme values of their own (see packages/app-template). The host adds only
-// the context alias from `background` to `app-canvas`; an app can still override
-// either value on :host. The inner-<body> .dark toggle below remains necessary
-// because selectors, unlike inherited properties, do not cross the shadow
-// boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
-export function prepareShadowMount(host: HTMLDivElement): HTMLElement {
+// no theme values of their own (see packages/app-template). A page host adds the
+// context alias from `background` to `app-canvas`; an inline chat component keeps
+// inheriting the chat context instead. The inner-<body> .dark toggle below remains
+// necessary because selectors, unlike inherited properties, do not cross the
+// shadow boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
+export function prepareShadowMount(
+  host: HTMLDivElement,
+  { canvas = "app" }: { canvas?: "app" | "inherit" } = {},
+): HTMLElement {
   const shadowRoot = host.shadowRoot ?? host.attachShadow({ mode: "open" });
   shadowRoot.replaceChildren();
-  // The host selects the app canvas here so existing app bundles that paint
-  // `background` move with the app-specific token without a rebuild. New apps
-  // can name `app-canvas` directly. Every other theme value keeps inheriting.
+  // Page hosts select the app canvas so existing bundles that paint `background`
+  // move without a rebuild. Inline components leave that alias alone so they
+  // stay on the surrounding chat canvas. Every other theme value keeps inheriting.
+  const canvasCss =
+    canvas === "app"
+      ? `
+      --background: var(--app-canvas);
+      background-color: var(--background);`
+      : `
+      background-color: transparent;`;
   const shellStyle = document.createElement("style");
   shellStyle.textContent = `
     :host {
-      --background: var(--app-canvas);
-      background-color: var(--app-canvas);
+      ${canvasCss}
       display: block;
       min-height: inherit;
     }

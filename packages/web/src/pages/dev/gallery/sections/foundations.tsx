@@ -6,6 +6,8 @@ import { Item, Row, Section, Specimen } from "../kit";
 
 const SURFACE_TOKENS = [
   "background",
+  "chat-canvas",
+  "app-canvas",
   "surface",
   "surface-muted",
   "surface-elevated",

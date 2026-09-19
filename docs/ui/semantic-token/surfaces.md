@@ -46,6 +46,7 @@ Ash's dark half maps the same steps as Ember's, against its own palette. Every t
 ## Constraints
 
 - The chat canvas is never white. Its warm or cool tint keeps long-form reading comfortable. `[mech]`
+- `--chat-canvas` deliberately equals `--background` today. The separate name pins context so chat and generic dashboard pages can diverge without another component migration. `[mech]`
 - The app canvas may resolve to white. Compact UI needs a brighter reading plane than chat prose. `[mech]`
 - A card may share the app canvas fill. Its border and grouping must carry the boundary when the fills collapse. `[mech]`
 - The stack reverses between modes where its fills differ. In light a canvas is darker than a card, and a recessed region is darker still. In dark every distinct layer rises from the canvas. `[mech]`

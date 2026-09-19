@@ -299,7 +299,8 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 - **Ember Flare** (`#e55a22`): The focus ring under Ember and the Ember `info` mark. A slightly hotter step than the accent so a focused control stands apart from a resting primary button.
 
 ### Neutral
-- **Linen Canvas** (`#f4f3ef`): The page ground behind every region. Never assumed to be white.
+- **Linen Chat Canvas** (`#f4f3ef`): The ground behind chat prose and its composer. Kept softly tinted for long-form reading.
+- **Warm App Canvas** (`#fdfcf9`): The brighter ground behind compact app UI. It may share a fill with a card, whose border then carries the boundary.
 - **Warm Paper** (`#fdfcf9`): A raised card, panel, or table row on the canvas. Dialogs and sheets use it too.
 - **Paper White** (`#ffffff`): The highest layer, for popovers, menus, and toasts.
 - **Recessed Linen** (`#efe9e1`): A region recessed inside a card: a well, a code block, a table header, the segmented control track, and the `muted` fill behind ghost-button hover.
@@ -362,7 +363,7 @@ Touch targets on compact surfaces reach 44 to 48px through padding or a `::after
 
 ## Elevation & Depth
 
-Rome is flat at rest. Four depths exist, and tone plus a hairline border tell them apart: the canvas (`background`), a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). In dark mode the stack lightens as it rises, so a recessed region is lighter than the canvas, which is why depth names describe position rather than lightness.
+Rome is flat at rest. Two context canvases sit beneath three content depths: a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). Chat uses `chat-canvas`; compact app UI uses the brighter `app-canvas`; dashboard pages without a dedicated context use `background`. A canvas and card may share a fill, so the card's hairline border must still carry its boundary. In dark mode the distinct steps lighten as they rise, which is why depth names describe position rather than lightness.
 
 Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else in the kit casts. A dashboard page that paints `shadow-1` on a resting card is unfinished migration, not a pattern.
 
@@ -426,9 +427,9 @@ Components are precise and restrained. Each one declares its own typography role
 - **Select trigger:** Matches the input, with the value clamped to one line and a 16px chevron.
 
 ### Segmented Control and Tabs
-- **Segmented control:** A 32px Recessed Linen track with 4px inner padding and 10px radius. Segments are 8px-radius items at 60% ink. The checked segment lifts to the canvas color with `shadow-1` and full ink.
+- **Segmented control:** A 32px Recessed Linen track with 4px inner padding and 10px radius. Segments are 8px-radius items at 60% ink. The checked segment lifts to its context canvas color with `shadow-1` and full ink.
 - **Tabs:** Transparent list, 32px tall. Triggers are `text-ui` at 60% ink, full ink on hover and when active. The active trigger draws a 2px ink underline 5px below the label. No fill.
-- **Switch:** A pill track that fills coral when checked. The thumb is the canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
+- **Switch:** A pill track that fills coral when checked. The thumb follows its context canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
 
 ### Navigation
 - **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.

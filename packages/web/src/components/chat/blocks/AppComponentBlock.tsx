@@ -110,7 +110,7 @@ export function AppComponentBlock({
           },
         };
 
-        mountRoot = prepareShadowMount(rootRef.current);
+        mountRoot = prepareShadowMount(rootRef.current, { canvas: "inherit" });
         await appendScopedStyles(mountRoot.getRootNode() as ShadowRoot, manifest.styleUrls);
         if (disposed) return;
 

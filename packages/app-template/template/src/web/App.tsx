@@ -49,7 +49,7 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
   }, []);
 
   return (
-    <main className="min-h-full bg-app-canvas px-6 py-12">
+    <main className="min-h-full bg-[var(--app-canvas)] px-6 py-12">
       <div className="mx-auto max-w-2xl">
         <div className="flex items-center gap-3">
           <Sparkles className="text-primary" />

@@ -16,6 +16,17 @@ describe("prepareShadowMount", () => {
 
     const shellCss = host.shadowRoot?.querySelector("style")?.textContent ?? "";
     expect(shellCss).toContain("--background: var(--app-canvas)");
-    expect(shellCss).toContain("background-color: var(--app-canvas)");
+    expect(shellCss).toContain("background-color: var(--background)");
+  });
+
+  it("inherits the surrounding canvas for inline chat components", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+
+    prepareShadowMount(host, { canvas: "inherit" });
+
+    const shellCss = host.shadowRoot?.querySelector("style")?.textContent ?? "";
+    expect(shellCss).not.toContain("--background: var(--app-canvas)");
+    expect(shellCss).toContain("background-color: transparent");
   });
 });
