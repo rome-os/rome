@@ -32,8 +32,9 @@ systemPromptPrefix: Complete the requested coding task.
 
 **Validation:**
 
-- `modelId` requires `provider: openai|anthropic` and a nonempty string containing no whitespace. Rome preserves the ID rather than trimming or rewriting it.
+- `modelId` requires `provider: openai|anthropic|pi` and a nonempty string containing no whitespace. Rome preserves the ID rather than trimming or rewriting it.
 - `modelId` cannot be combined with `tier`, legacy `model`, or `codeBacked: true`.
+- `provider: pi` (Pi Coding Agent) is exact-only: it always requires a `modelId` qualified as `<upstream-provider>/<model-id>` (e.g. `openai/gpt-5.6`), never participates in `tier` resolution, and resolves only when that exact model is currently available from the installed Pi (otherwise the turn fails closed rather than substituting another model or provider).
 - Without `modelId`, a tier is required. Legacy `model: opus|sonnet|haiku` remains accepted and normalizes to `large|medium|small`.
 - The same schema validates runtime agent loading and packed-app installation. Older Rome versions that do not recognize `modelId` reject it rather than silently ignoring the pin.
 

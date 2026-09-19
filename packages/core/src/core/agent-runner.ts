@@ -27,7 +27,7 @@ const log = createLogger("agent-runner");
 // (setModel/setPermissionMode/setMcpServers/stopTask) — that vocabulary is
 // Claude-SDK-specific and has no place in the provider contract.
 
-export type ProviderId = "anthropic" | "openai" | "mock";
+export type ProviderId = "anthropic" | "openai" | "pi" | "mock";
 export type ModelTier = "large" | "medium" | "small";
 
 export interface ModelToolDefinition {

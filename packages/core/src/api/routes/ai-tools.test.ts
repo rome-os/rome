@@ -380,6 +380,9 @@ describe("AI tools status API", () => {
       await app.request("/ai-tools/refresh?provider=anthropic", { method: "POST" });
       expect(refresh).toHaveBeenLastCalledWith("anthropic");
 
+      await app.request("/ai-tools/refresh?provider=pi", { method: "POST" });
+      expect(refresh).toHaveBeenLastCalledWith("pi");
+
       // An unknown provider falls back to a full refresh rather than erroring.
       await app.request("/ai-tools/refresh?provider=bogus", { method: "POST" });
       expect(refresh).toHaveBeenLastCalledWith(undefined);

@@ -33,6 +33,23 @@ function optionNames(): string[] {
 }
 
 describe("ModelSelectorMenu", () => {
+  it("shows namespaced Pi choices and preserves a disappeared selection", async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    const { rerender } = render(
+      <ModelSelectorMenu
+        {...props}
+        piModels={[{ id: "openai/gpt", upstreamProvider: "openai", modelId: "gpt", name: "GPT" }]}
+      />,
+    );
+    await user.type(screen.getByPlaceholderText("Search models…"), "openai");
+    await user.click(screen.getByRole("option", { name: /Pi · openai \/ gpt/ }));
+    expect(props.onChange).toHaveBeenCalledWith("pi:openai/gpt");
+
+    rerender(<ModelSelectorMenu {...props} value="pi:custom/missing" piModels={[]} />);
+    expect(screen.getAllByText(/Pi · custom \/ missing \(Unavailable\)/)).toHaveLength(2);
+  });
+
   it("shows only the curated common models and a show-all row when collapsed", () => {
     render(<ModelSelectorMenu {...baseProps()} />);
 

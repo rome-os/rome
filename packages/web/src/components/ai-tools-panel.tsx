@@ -76,6 +76,9 @@ export interface AIToolStatus {
    * re-login" rather than a plain "not connected".
    */
   needsReauth?: boolean;
+  models?: Array<{ id: string; upstreamProvider: string; modelId: string; name: string }>;
+  error?: string;
+  unavailableReason?: "runtime" | "no_credentials" | "no_models" | "discovery_failed";
 }
 
 interface UsageWindowStatus {
@@ -185,6 +188,9 @@ const AI_TOOL_PROVIDERS = [
     available: true,
     statusKey: "codex" as const,
     icon: "chatgpt" as const,
+    // Eligible for Auto/tier model resolution, so signing in satisfies the
+    // onboarding connect-AI step.
+    participatesInAutoResolution: true,
   },
   {
     id: "claude-login",
@@ -192,6 +198,18 @@ const AI_TOOL_PROVIDERS = [
     available: true,
     statusKey: "claude" as const,
     icon: "claude" as const,
+    participatesInAutoResolution: true,
+  },
+  {
+    id: "pi",
+    i18nKey: "pi" as const,
+    available: true,
+    statusKey: "pi" as const,
+    icon: "pi" as const,
+    // Pi is explicit-selection-only: the model-resolver never picks it for an
+    // Auto/tier request, so a Pi-only install must NOT count as a connected
+    // provider (that would let Auto chats fail with no_model_provider_available).
+    participatesInAutoResolution: false,
   },
   {
     id: "gemini-login",
@@ -199,6 +217,7 @@ const AI_TOOL_PROVIDERS = [
     available: false,
     statusKey: "gemini" as const,
     icon: "gemini" as const,
+    participatesInAutoResolution: false,
   },
   {
     id: "grok-login",
@@ -206,6 +225,7 @@ const AI_TOOL_PROVIDERS = [
     available: false,
     statusKey: "grok" as const,
     icon: "grok" as const,
+    participatesInAutoResolution: false,
   },
 ] as const;
 
@@ -218,9 +238,10 @@ export function hasConnectedAiProvider(
   status: Partial<Record<string, { loggedIn?: boolean } | null>>,
   hiddenProviders: readonly AiToolProviderId[] = [],
 ): boolean {
-  return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
-    (provider) => status[provider.statusKey]?.loggedIn === true,
-  );
+  return AI_TOOL_PROVIDERS.filter(
+    (provider) =>
+      provider.participatesInAutoResolution && !hiddenProviders.includes(provider.statusKey),
+  ).some((provider) => status[provider.statusKey]?.loggedIn === true);
 }
 
 const LOGOUT_PROVIDER_CONFIG = {
@@ -511,11 +532,13 @@ export function AiToolsPanel({
       const data = (await res.json()) as {
         claude?: AIToolStatus;
         codex?: AIToolStatus;
+        pi?: AIToolStatus;
         anthropicCompatible?: AnthropicCompatibleConfiguredSummary | null;
       };
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.pi ? { pi: data.pi } : {}),
       });
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
@@ -652,12 +675,14 @@ export function AiToolsPanel({
       const data = (await res.json().catch(() => ({}))) as {
         claude?: AIToolStatus;
         codex?: AIToolStatus;
+        pi?: AIToolStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.pi ? { pi: data.pi } : {}),
       });
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
@@ -889,7 +914,16 @@ export function AiToolsPanel({
                         </span>
                       )}
                     </div>
-                    {usesApiKey ? (
+                    {provider.id === "pi" ? (
+                      <p
+                        className={`text-aux ${status?.error ? "text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {status?.error ??
+                          (isLoggedIn
+                            ? t("aiTools.pi.modelsAvailable", { count: status.models?.length ?? 0 })
+                            : t("aiTools.pi.setupHint"))}
+                      </p>
+                    ) : usesApiKey ? (
                       usesManagedApiKey && configuredAnthropicProvider ? (
                         <p className="flex items-center gap-2 text-aux text-muted-foreground">
                           <AnthropicCompatibleProviderLogo
@@ -942,9 +976,16 @@ export function AiToolsPanel({
                   </div>
                   {provider.available && (
                     <div className="ml-auto flex shrink-0 items-center gap-2">
-                      {provider.id === "claude-login" &&
-                      usesManagedApiKey &&
-                      configuredAnthropicProvider ? (
+                      {provider.id === "pi" ? (
+                        // Pi setup is terminal-managed in the guardian's own
+                        // shell (Rome never runs Pi's shell-capable CLI); the row
+                        // shows discovery status and the global Refresh re-reads it.
+                        <span className="text-aux text-muted-foreground">
+                          {t("aiTools.pi.manageHint")}
+                        </span>
+                      ) : provider.id === "claude-login" &&
+                        usesManagedApiKey &&
+                        configuredAnthropicProvider ? (
                         <ButtonGroup>
                           <Button
                             variant="outline"

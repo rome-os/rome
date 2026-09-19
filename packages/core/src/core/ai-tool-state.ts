@@ -7,11 +7,12 @@ import {
 } from "../lib/ai-tool-probes.js";
 import type { CodexPlanType } from "../lib/codex-cli-auth.js";
 import type { AIToolUsageStatus } from "../lib/provider-usage.js";
+import type { PiDiscoveredModel, PiDiscoveryResult } from "./pi-runtime.js";
 
 const log = createLogger("ai-tool-state");
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
-export type AIToolProviderId = "openai" | "anthropic";
+export type AIToolProviderId = "openai" | "anthropic" | "pi";
 
 export interface ProviderState
   extends Omit<AIToolStatusProbeResult, "loggedIn" | "authMode" | "planType"> {
@@ -27,6 +28,11 @@ export interface AIToolStateValue {
     lunaAccess: boolean;
   };
   claude: ProviderState;
+  pi?: ProviderState & {
+    models: PiDiscoveredModel[];
+    error?: string;
+    unavailableReason?: PiDiscoveryResult["unavailableReason"];
+  };
 }
 
 export interface AIToolState {
@@ -42,13 +48,14 @@ export interface AIToolStateProbes {
   claudeStatus: () => Promise<AIToolStatusProbeResult>;
   codexUsage: () => Promise<AIToolUsageStatus | null>;
   claudeUsage: () => Promise<AIToolUsageStatus | null>;
+  piStatus?: () => Promise<PiDiscoveryResult>;
 }
 
 export interface CreateAIToolStateOptions {
   settingsRepo?: Pick<SettingsRepository, "get">;
   /** Codex probes must be supplied by the shared app-server account service. */
   probes: Pick<AIToolStateProbes, "codexStatus" | "codexUsage"> &
-    Partial<Pick<AIToolStateProbes, "claudeStatus" | "claudeUsage">>;
+    Partial<Pick<AIToolStateProbes, "claudeStatus" | "claudeUsage" | "piStatus">>;
   /** Null disables the hourly timer (used by deterministic unit tests). */
   refreshIntervalMs?: number | null;
   startRefresh?: boolean;
@@ -104,14 +111,33 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
   const probes: AIToolStateProbes = {
     claudeStatus: () => getClaudeStatus(options.settingsRepo),
     claudeUsage: readClaudeUsage,
+    piStatus: async () => ({ loggedIn: false, models: [], unavailableReason: "runtime" }),
     ...options.probes,
   };
-  const value: AIToolStateValue = {
+  const value: AIToolStateValue & { pi: NonNullable<AIToolStateValue["pi"]> } = {
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
+    pi: { quotaExhausted: false, models: [], loggedIn: false, unavailableReason: "runtime" },
   };
 
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
+    if (provider === "pi") {
+      // Match the openai/anthropic branches' isolation: a rejecting Pi probe
+      // must not poison the shared refresh (which would 500 the whole endpoint
+      // and blank Claude/Codex status).
+      const status = await probes.piStatus!().catch((error): PiDiscoveryResult => {
+        log.warn("pi status probe failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { loggedIn: false, models: [], unavailableReason: "discovery_failed" };
+      });
+      value.pi.loggedIn = status.loggedIn;
+      value.pi.models = status.models.map((model) => ({ ...model }));
+      value.pi.error = status.error;
+      value.pi.unavailableReason = status.unavailableReason;
+      value.pi.quotaExhausted = false;
+      return;
+    }
     if (provider === "anthropic") {
       const [status, usage] = await Promise.allSettled([
         probes.claudeStatus(),
@@ -160,13 +186,21 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
 
   const state: AIToolState = {
     get() {
-      return { codex: { ...value.codex }, claude: { ...value.claude } };
+      return {
+        codex: { ...value.codex },
+        claude: { ...value.claude },
+        pi: { ...value.pi, models: value.pi.models.map((model) => ({ ...model })) },
+      };
     },
     async refresh(provider) {
       if (provider) {
         await refreshProviderLocked(provider);
       } else {
-        await Promise.all([refreshProviderLocked("openai"), refreshProviderLocked("anthropic")]);
+        await Promise.all([
+          refreshProviderLocked("openai"),
+          refreshProviderLocked("anthropic"),
+          refreshProviderLocked("pi"),
+        ]);
       }
       return state.get();
     },
@@ -175,16 +209,19 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       // may still hold the old "logged in" answer. Let that work drain first,
       // then make the runtime failure the newest authoritative observation.
       await refreshesInFlight.get(provider);
-      const target = provider === "openai" ? value.codex : value.claude;
+      const target =
+        provider === "openai" ? value.codex : provider === "pi" ? value.pi : value.claude;
       target.loggedIn = false;
       target.needsReauth = true;
       if (provider === "openai") {
         value.codex.solAccess = false;
         value.codex.lunaAccess = false;
       }
+      if (provider === "pi") value.pi.models = [];
     },
     markQuotaExhausted(provider) {
       const applyRuntimeSignal = (): boolean => {
+        if (provider === "pi") return false;
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
         target.quotaExhausted = true;

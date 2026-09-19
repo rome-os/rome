@@ -63,4 +63,14 @@ describe("webchat model selector", () => {
     );
     expect(resolveWebchatLargeModelSelection("bogus")).toBeNull();
   });
+
+  it("preserves and resolves exact qualified Pi selections", () => {
+    const id = "pi:custom%2Fproxy/vendor%2Fmodel";
+    expect(normalizeWebchatLargeModelSelectionId(id)).toBe(id);
+    expect(resolveWebchatLargeModelSelection(id)).toEqual({
+      id,
+      providerId: "pi",
+      model: "custom%2Fproxy/vendor%2Fmodel",
+    });
+  });
 });

@@ -530,6 +530,9 @@
       },
       "grok": {
         "name": "Grok"
+      },
+      "pi": {
+        "name": "Pi（Pi Coding Agent）"
       }
     },
     "status": {
@@ -617,6 +620,12 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "pi": {
+      "modelsAvailable_one": "有 {{count}} 个 Pi 模型可用",
+      "modelsAvailable_other": "有 {{count}} 个 Pi 模型可用",
+      "setupHint": "在你的终端中运行 Pi 以登录或配置模型，然后刷新。",
+      "manageHint": "在你的终端中管理"
     }
   },
   "sentinelLog": {

@@ -34,6 +34,10 @@ allowBuilds:
   workerd: true
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
+  # @google/genai (transitive via @earendil-works/pi-coding-agent) ships a
+  # prebuilt dist and its only lifecycle script is a no-op `preinstall`, so its
+  # build never has to run.
+  "@google/genai": false
   "@whiskeysockets/baileys": false
   bufferutil: false
   core-js: false

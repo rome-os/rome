@@ -7,7 +7,7 @@ import {
   type AIToolStateValue,
   type ProviderState,
 } from "./ai-tool-state.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
+import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("model-resolver");
@@ -142,6 +142,7 @@ function claudeModel(tier: ModelTier, enableFable: boolean): string {
 function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {
   if (providerId === "openai") return state.codex;
   if (providerId === "anthropic") return state.claude;
+  if (providerId === "pi") return state.pi ?? null;
   return null;
 }
 
@@ -191,6 +192,16 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
+  const requirePiModelAccess = (model: string, state: AIToolStateValue): void => {
+    if (state.pi?.models.some((candidate) => candidate.id === model)) return;
+    refreshAfterFailure("pi");
+    throw new ModelResolutionError(`Selected Pi model is unavailable: ${model}`, {
+      code: "model_unavailable",
+      provider: "pi",
+      reason: "model_access_denied",
+    });
+  };
+
   return {
     async getModelProvider(request) {
       const state = options.aiToolState.get();
@@ -199,15 +210,18 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(model, state.codex);
+        if (providerId === "pi") requirePiModelAccess(model, state);
+        else requireModelAccess(model, state.codex);
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
-        const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
+        const selection = resolveWebchatLargeModelSelection(request.selectionId);
+        if (!selection) throw new Error(`Unknown model selection: ${request.selectionId}`);
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(selection.model, state.codex);
+        if (selection.providerId === "pi") requirePiModelAccess(selection.model, state);
+        else requireModelAccess(selection.model, state.codex);
         return { modelProvider: provider, model: selection.model };
       }
 
@@ -220,6 +234,13 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
         requireUsableProvider(provider, state);
+        if (provider.id === "pi") {
+          throw new ModelResolutionError("Pi requires an explicit exact model selection", {
+            code: "model_unavailable",
+            provider: "pi",
+            reason: "model_access_denied",
+          });
+        }
         if (provider.id === "openai") {
           return { modelProvider: provider, model: codexModel(request.tier, state.codex) };
         }

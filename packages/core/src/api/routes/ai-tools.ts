@@ -52,6 +52,12 @@ export function aiToolsRoutes(
     return c.json({
       claude: state.claude,
       codex: state.codex,
+      pi: state.pi ?? {
+        loggedIn: false,
+        quotaExhausted: false,
+        models: [],
+        unavailableReason: "runtime",
+      },
       codexLogin: {
         running: login.running && login.mode === "browser",
         lastExit: null,
@@ -81,7 +87,9 @@ export function aiToolsRoutes(
       // revocation via the shared per-provider in-flight lock.
       const providerParam = c.req.query("provider");
       const provider =
-        providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
+        providerParam === "anthropic" || providerParam === "openai" || providerParam === "pi"
+          ? providerParam
+          : undefined;
       return c.json(await deps.aiToolState.refresh(provider));
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);

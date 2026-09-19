@@ -45,12 +45,12 @@ export interface AgentConfig {
   /** Provider-agnostic reasoning effort. Defaults to `high` when omitted in YAML. */
   reasoningEffort: ReasoningEffort;
   /**
-   * Optional provider pin (yaml `provider: anthropic|openai`). Required for
+   * Optional provider pin (yaml `provider: anthropic|openai|pi`). Required for
    * modelId. With tier, restricts model resolution to this provider.
    * An unavailable pinned provider fails with ModelResolutionError instead
    * of falling back to another provider.
    */
-  providerId?: "anthropic" | "openai";
+  providerId?: "anthropic" | "openai" | "pi";
   systemPromptPrefix: string;
   tools: string[];
   actions?: string[];
