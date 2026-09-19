@@ -74,7 +74,7 @@ export default defineConfig({
   },
   source: {
     entry: {
-      index: resolve(srcDir, "main.tsx"),
+      index: resolve(srcDir, "entry.tsx"),
       "desktop-vnc": resolve(srcDir, "desktop-vnc.ts"),
     },
     define: {
