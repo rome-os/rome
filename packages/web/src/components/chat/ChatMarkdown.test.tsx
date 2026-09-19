@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
+import Markdown from "@/components/markdown";
 import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
@@ -18,17 +19,75 @@ afterEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-function Message({ text }: { text: string }) {
+function Message({ text, chat = true }: { text: string; chat?: boolean }) {
+  const MarkdownComponent = chat ? ChatMarkdown : Markdown;
   return (
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>
         <MemoryRouter>
-          <ChatMarkdown>{text}</ChatMarkdown>
+          <MarkdownComponent>{text}</MarkdownComponent>
         </MemoryRouter>
       </ThemeProvider>
     </I18nextProvider>
   );
 }
+
+describe("ChatMarkdown hexadecimal color previews", () => {
+  it("previews complete three- and six-digit inline-code colors", () => {
+    const { container } = render(<Message text={"Colors: `#fdfcf9`, `#abc`, and `#A1b2C3`."} />);
+
+    const previews = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-chat-color-preview]"),
+    );
+    expect(previews.map((preview) => preview.dataset.chatColorPreview)).toEqual([
+      "#fdfcf9",
+      "#abc",
+      "#A1b2C3",
+    ]);
+    expect(previews.map((preview) => preview.style.backgroundColor)).toEqual([
+      "rgb(253, 252, 249)",
+      "rgb(170, 187, 204)",
+      "rgb(161, 178, 195)",
+    ]);
+    expect(previews.every((preview) => preview.classList.contains("border-border-strong"))).toBe(
+      true,
+    );
+  });
+
+  it("does not preview prose, longer code, fenced code, or unsupported colors", () => {
+    const { container } = render(
+      <Message
+        text={[
+          "Bare #fdfcf9.",
+          "`background: #fdfcf9` `#abcd` `#12345` `#12345678` `#ggg` `red` `rgb(1 2 3)`",
+          "```css",
+          "#abc",
+          "```",
+        ].join("\n\n")}
+      />,
+    );
+
+    expect(container.querySelector("[data-chat-color-preview]")).toBeNull();
+  });
+
+  it("keeps the literal as the inline code's only accessible and copyable text", () => {
+    const { container } = render(<Message text={"Color: `#fdfcf9`."} />);
+    const code = container.querySelector('[data-streamdown="inline-code"]');
+    const preview = code?.querySelector<HTMLElement>("[data-chat-color-preview]");
+
+    expect(code?.textContent).toBe("#fdfcf9");
+    expect(preview?.getAttribute("aria-hidden")).toBe("true");
+    expect(preview?.hasAttribute("tabindex")).toBe(false);
+    expect(preview?.hasAttribute("title")).toBe(false);
+  });
+
+  it("leaves hexadecimal inline code unchanged outside chat Markdown", () => {
+    const { container } = render(<Message chat={false} text={"Color: `#fdfcf9`."} />);
+
+    expect(container.querySelector("[data-chat-color-preview]")).toBeNull();
+    expect(container.querySelector('[data-streamdown="inline-code"]')?.textContent).toBe("#fdfcf9");
+  });
+});
 
 describe("ChatMarkdown collapsible blocks", () => {
   it("re-measures compact text when an inner block collapses", () => {

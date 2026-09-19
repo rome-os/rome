@@ -116,6 +116,7 @@ export interface MarkdownProps {
   /** Rebind Markdown typography and rhythm tokens to their dense values. */
   compact?: boolean;
   preserveSoftBreaks?: boolean;
+  inlineCodeComponent?: Components["inlineCode"];
   linkComponent?: Components["a"];
   preComponent?: Components["pre"];
   theme?: MarkdownTheme;
@@ -279,6 +280,7 @@ function MarkdownImpl({
   className = "",
   compact = false,
   preserveSoftBreaks = false,
+  inlineCodeComponent,
   linkComponent,
   preComponent,
   theme,
@@ -309,9 +311,10 @@ function MarkdownImpl({
       h4: MarkdownHeading4,
       h5: MarkdownHeading5,
       h6: MarkdownHeading6,
+      ...(inlineCodeComponent ? { inlineCode: inlineCodeComponent } : {}),
       ...(preComponent ? { pre: preComponent } : {}),
     }),
-    [linkComponent, preComponent],
+    [inlineCodeComponent, linkComponent, preComponent],
   );
 
   const wrapperClass = cn(
