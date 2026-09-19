@@ -124,6 +124,24 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm typecheck:lint-agents
 
+  oxlint:
+    name: oxlint
+    # Enable after the local trial and rule compatibility review.
+    if: ${{ vars.OXLINT_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint:oxlint
+
   # ──────────────────────────────────────────
   # Job 1b: DB schema drift — committed migrations must match the schema files
   # ──────────────────────────────────────────
