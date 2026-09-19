@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
+import { DASHBOARD_IDENTITY_QUERY_KEY } from "@/hooks/use-dashboard-identity";
 
 // Local-first setup, and the whole of it: the username and password that lock
 // this Rome to its guardian. Creating the account also finishes setup
@@ -88,7 +89,13 @@ function AccountStep() {
         // Setup is complete server-side, so refreshing the auth state flips the
         // phase to `ready` and AuthGate redirects to the welcome app. Navigating
         // here too would race that redirect.
-        await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+        // Discard an anonymous identity request that may have started before
+        // account creation installed the authenticated cookie.
+        await queryClient.cancelQueries({ queryKey: DASHBOARD_IDENTITY_QUERY_KEY });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY }),
+          queryClient.invalidateQueries({ queryKey: DASHBOARD_IDENTITY_QUERY_KEY }),
+        ]);
       } catch {
         setServerError(t("account.networkError"));
       }

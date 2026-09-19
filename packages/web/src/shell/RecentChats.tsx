@@ -28,6 +28,8 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { renameSession } from "@/lib/chat-api";
+import { chatTranscriptCache } from "@/lib/chat-transcript-cache";
+import { useChatTranscriptCacheContext } from "@/lib/chat-transcript-cache-context";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import {
@@ -204,6 +206,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
+  const transcriptCacheContext = useChatTranscriptCacheContext();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
@@ -428,10 +431,11 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/chat/sessions/${id}`, {
+        const response = await fetch(`/api/chat/sessions/${id}`, {
           method: "DELETE",
           credentials: "include",
         });
+        if (response.ok) chatTranscriptCache.delete(transcriptCacheContext, id);
       } catch {
         // ignore — refetch anyway
       }
@@ -441,7 +445,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
         navigate("/chat");
       }
     },
-    [activeSessionId, navigate],
+    [activeSessionId, navigate, transcriptCacheContext],
   );
 
   const startRename = useCallback((session: ChatSession) => {

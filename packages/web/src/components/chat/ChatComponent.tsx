@@ -46,6 +46,7 @@ export interface ChatComponentProps {
   // Pre-pins a skill chip on the draft composer without sending —
   // the structured counterpart of initialDraftText, seeded by the Skills app.
   initialSkillName?: string;
+  cacheProtected?: boolean;
 }
 
 export function ChatComponent({
@@ -57,6 +58,7 @@ export function ChatComponent({
   initialAgentMention,
   initialDraftText,
   initialSkillName,
+  cacheProtected = true,
 }: ChatComponentProps) {
   // `null` when the chat is mounted outside the workspace shell;
   // the draft-send path simply skips workspace injection in that case.
@@ -346,6 +348,7 @@ export function ChatComponent({
         onSessionsChanged={notifySessionsChanged}
         onSessionNotFound={onSessionNotFound ? () => onSessionNotFound() : undefined}
         onSessionMessage={onSessionMessage}
+        cacheProtected={cacheProtected}
       />
     );
   }

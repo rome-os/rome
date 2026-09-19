@@ -4,6 +4,8 @@ import { getRoutedAppId, resolveAuthRouting } from "../lib/auth-routing";
 import { BACKEND_RETRY_INTERVAL_MS, hasSession, useAuthState } from "../lib/auth-state";
 import { reportDetectedTimezoneOnce } from "../lib/guardian-timezone";
 import { BackendUnreachableScreen } from "../components/backend-unreachable";
+import { AuthenticatedChatTranscriptCacheBoundary } from "../lib/chat-transcript-cache-context";
+import { chatTranscriptCache } from "../lib/chat-transcript-cache";
 
 interface PublicAppProbe {
   pathname: string;
@@ -24,6 +26,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // invalidation by login/logout/onboard mutations, and on a polling interval
   // only while the backend is unreachable.
   const state = useAuthState();
+
+  useEffect(() => {
+    if (!hasSession(state.bootstrap)) chatTranscriptCache.activateContext(null);
+  }, [state.bootstrap]);
 
   // A signed-in, onboarded guardian reports the browser timezone once per page
   // load. The server adopts it only while no zone is stored.
@@ -102,5 +108,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <Navigate to={decision.location} replace />;
   }
 
-  return <>{children}</>;
+  return (
+    <AuthenticatedChatTranscriptCacheBoundary>{children}</AuthenticatedChatTranscriptCacheBoundary>
+  );
 }

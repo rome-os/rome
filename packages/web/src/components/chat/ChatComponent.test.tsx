@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
+import { ChatTranscriptCacheContext } from "@/lib/chat-transcript-cache-context";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
 
 rs.mock("@/components/logo", () => ({
@@ -100,14 +101,22 @@ function renderChatComponent(
     return Response.json({}, { status: 404 });
   }) as typeof fetch);
 
-  const result = render(
+  const renderWithCacheContext = (cacheContext: string | null) => (
     <MemoryRouter>
       <QueryClientProvider client={queryClient}>
-        <ChatComponent onSessionCreated={() => {}} {...props} />
+        <ChatTranscriptCacheContext.Provider value={cacheContext}>
+          <ChatComponent onSessionCreated={() => {}} {...props} />
+        </ChatTranscriptCacheContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
-  return { ...result, fetchSpy };
+  const result = render(renderWithCacheContext(null));
+  return {
+    ...result,
+    fetchSpy,
+    rerenderCacheContext: (cacheContext: string | null) =>
+      result.rerender(renderWithCacheContext(cacheContext)),
+  };
 }
 
 describe("ChatComponent draft file drops", () => {
@@ -152,6 +161,15 @@ describe("ChatComponent agent identity", () => {
     renderChatComponent({ sessionId: "session-1" });
 
     await waitFor(() => expect(screen.getByTestId("session-chat").textContent).toBe("Atlas"));
+  });
+
+  it("keeps the existing Chat mounted when authenticated cache identity resolves", () => {
+    const { rerenderCacheContext } = renderChatComponent({ sessionId: "session-1" });
+    const initialChatNode = screen.getByTestId("session-chat");
+
+    rerenderCacheContext("https://rome.test|guardian:guardian-1");
+
+    expect(screen.getByTestId("session-chat")).toBe(initialChatNode);
   });
 });
 

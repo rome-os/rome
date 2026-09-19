@@ -12,6 +12,7 @@ import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/componen
 import { Input } from "@/components/ui/input";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
 import { beginDashboardVisitorLogin, visitorErrorReasonKey } from "@/lib/visitor-login";
+import { DASHBOARD_IDENTITY_QUERY_KEY } from "@/hooks/use-dashboard-identity";
 
 function envFlagEnabled(value: unknown): boolean {
   return ["1", "true", "yes", "on"].includes(
@@ -86,7 +87,14 @@ export default function LoginPage() {
           return;
         }
 
-        await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+        // Discard an anonymous /api/auth/me request that may have started
+        // before the login cookie changed, then force the active boundary to
+        // fetch the authenticated identity.
+        await queryClient.cancelQueries({ queryKey: DASHBOARD_IDENTITY_QUERY_KEY });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY }),
+          queryClient.invalidateQueries({ queryKey: DASHBOARD_IDENTITY_QUERY_KEY }),
+        ]);
         navigate("/");
       } catch {
         setServerError(t("networkError"));

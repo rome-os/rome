@@ -4,7 +4,12 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import type { ChatMessage } from "@/lib/chat-types";
+import { chatTranscriptCache } from "@/lib/chat-transcript-cache";
+import { ChatTranscriptCacheContext } from "@/lib/chat-transcript-cache-context";
 import { RecentChats } from "./RecentChats";
+
+const transcriptCacheContext = "https://rome.test|guardian:guardian-1";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -18,6 +23,7 @@ afterEach(() => {
   cleanup();
   rs.useRealTimers();
   localStorage.clear();
+  chatTranscriptCache.clear();
   rs.restoreAllMocks();
 });
 
@@ -93,8 +99,10 @@ function mockSessions(sessions: MockSession[]) {
 function renderRecentChats(initialEntry = "/chat", onSearch = () => {}) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <RecentChats onSearch={onSearch} />
-      <LocationProbe />
+      <ChatTranscriptCacheContext.Provider value={transcriptCacheContext}>
+        <RecentChats onSearch={onSearch} />
+        <LocationProbe />
+      </ChatTranscriptCacheContext.Provider>
     </MemoryRouter>,
   );
 }
@@ -685,6 +693,15 @@ describe("RecentChats", () => {
     localStorage.setItem("rome-recent-chats-status-filter", "all");
     const spy = mockSessions([archivedSession()]);
     const user = userEvent.setup();
+    const cachedMessage: ChatMessage = {
+      id: "cached-message",
+      sessionId: "archived-1",
+      role: "assistant",
+      content: "cached",
+      createdAt: "2026-07-09T10:00:00.000Z",
+    };
+    chatTranscriptCache.activateContext(transcriptCacheContext);
+    chatTranscriptCache.putComplete(transcriptCacheContext, "archived-1", [cachedMessage]);
 
     renderRecentChats();
     await screen.findByText("Archived chat");
@@ -708,6 +725,7 @@ describe("RecentChats", () => {
         ),
       ).toBe(true),
     );
+    expect(chatTranscriptCache.get(transcriptCacheContext, "archived-1")).toBeUndefined();
   });
 });
 

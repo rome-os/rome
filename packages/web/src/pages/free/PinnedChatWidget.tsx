@@ -14,7 +14,8 @@ export function PinnedChatWidget({
   sessionId: string;
   placementId: string;
 }) {
-  const { removeWidget } = useFreeCells();
+  const { removeWidget, toolView } = useFreeCells();
+  const visible = !toolView.collapsed && toolView.activeId === placementId;
   // A session deleted from the sidebar must not leave a blank card. This only
   // fires from a (re)load of the messages, so a stale card clears on the next
   // /chat reload rather than instantly.
@@ -24,6 +25,7 @@ export function PinnedChatWidget({
       sessionId={sessionId}
       onSessionCreated={() => {}}
       onSessionNotFound={handleNotFound}
+      cacheProtected={visible}
     />
   );
 }

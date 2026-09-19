@@ -19,6 +19,8 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
+import { chatTranscriptCache } from "@/lib/chat-transcript-cache";
+import { useChatTranscriptCacheContext } from "@/lib/chat-transcript-cache-context";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
@@ -133,6 +135,7 @@ export function FreeGrid() {
   const params = useParams<{ "*"?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const transcriptCacheContext = useChatTranscriptCacheContext();
   const { placements, addWidget, removeWidget, toolView, selectTool, setToolsCollapsed } =
     useFreeCells();
   const { apps } = useApps();
@@ -299,13 +302,14 @@ export function FreeGrid() {
   const handleDeleteSession = useCallback(async () => {
     if (!chatSessionId) return;
     try {
-      await deleteSession(chatSessionId);
+      const response = await deleteSession(chatSessionId);
+      if (response.ok) chatTranscriptCache.delete(transcriptCacheContext, chatSessionId);
     } catch {
       // best-effort — the list refresh below reconciles either way
     }
     emitSessionsChanged();
     navigate("/chat");
-  }, [chatSessionId, navigate]);
+  }, [chatSessionId, navigate, transcriptCacheContext]);
 
   const handlePinSession = useCallback(async () => {
     if (!chatSessionId) return;

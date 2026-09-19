@@ -314,8 +314,8 @@ export async function updateSessionProject(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+export async function deleteSession(sessionId: string): Promise<Response> {
+  return fetch(`/api/chat/sessions/${sessionId}`, {
     method: "DELETE",
     credentials: "include",
   });

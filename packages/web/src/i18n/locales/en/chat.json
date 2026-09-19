@@ -60,6 +60,12 @@
     "label": "Question timeline"
   },
   "jumpToLatest": "Jump to the latest message",
+  "history": {
+    "loading": "Loading chat history…",
+    "loadFailed": "Failed to load chat history",
+    "refreshFailed": "Could not refresh chat history",
+    "retry": "Try again"
+  },
   "roles": {
     "agent": "Assistant"
   },

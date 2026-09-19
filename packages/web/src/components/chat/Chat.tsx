@@ -17,6 +17,7 @@ import {
   Pin,
   PinOff,
   PanelRightOpen,
+  RefreshCw,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -92,6 +93,7 @@ import {
   orderChatMessages,
 } from "@/lib/chat-message-ordering";
 import {
+  ChatApiError,
   deleteSession,
   interruptTurn,
   listChatAgents,
@@ -103,12 +105,16 @@ import {
   postSessionTurnJson,
   type PostTurnResult,
 } from "@/lib/chat-api";
+import { AUTH_QUERY_KEY } from "@/lib/auth-state";
+import { queryClient } from "@/lib/query-client";
 import { useArchiveSession, usePinSession } from "@/lib/session-events";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { chatTranscriptCache, type TranscriptSessionToken } from "@/lib/chat-transcript-cache";
+import { useChatTranscriptCacheContext } from "@/lib/chat-transcript-cache-context";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -121,6 +127,7 @@ const TIMELINE_LANDING_MS = 900;
 // Stable empty list so `messages.get(sid) ?? EMPTY_MESSAGES` keeps a constant
 // reference (avoids re-running submission gates every render).
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_MESSAGE_MAP = new Map<string, ChatMessage[]>();
 
 // The turn SSE server emits a keepalive every 15s (TURN_STREAM_KEEPALIVE_
 // INTERVAL_MS in webchat.ts). If nothing arrives for this long the connection
@@ -189,34 +196,38 @@ const sessionNameSchema = z.object({
 });
 
 interface ChatSessionEventsProps {
-  sessionId: string;
-  onMessageInsert: (sessionId: string, message: ChatMessage) => void;
-  onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
-  onReconnect: (sessionId: string) => void;
+  authorization: TranscriptSessionToken;
+  onMessageInsert: (authorization: TranscriptSessionToken, message: ChatMessage) => void;
+  onSessionName: (
+    authorization: TranscriptSessionToken,
+    event: z.infer<typeof sessionNameSchema>,
+  ) => void;
+  onReconnect: (authorization: TranscriptSessionToken) => void;
 }
 
 function ChatSessionEvents({
-  sessionId,
+  authorization,
   onMessageInsert,
   onSessionName,
   onReconnect,
 }: ChatSessionEventsProps) {
+  const { sessionId } = authorization;
   useSseEvents(
     `/api/chat/sessions/${encodeURIComponent(sessionId)}/events`,
     {
       message_insert: {
         schema: chatMessageSchema,
-        fn: (message) => onMessageInsert(sessionId, message),
+        fn: (message) => onMessageInsert(authorization, message),
       },
       session_name: {
         schema: sessionNameSchema,
-        fn: (event) => onSessionName(sessionId, event),
+        fn: (event) => onSessionName(authorization, event),
       },
     },
     {
-      onReconnect: () => onReconnect(sessionId),
+      onReconnect: () => onReconnect(authorization),
       onError: ({ readyState }) => {
-        if (readyState === EventSource.CLOSED) onReconnect(sessionId);
+        if (readyState === EventSource.CLOSED) onReconnect(authorization);
       },
     },
   );
@@ -249,10 +260,18 @@ export interface ChatProps {
   onSessionsChanged?: () => void;
   onSessionNotFound?: (sessionId: string) => void;
   onSessionMessage?: (message: SessionMessage) => void;
+  cacheProtected?: boolean;
 }
 
 export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
-  { sessionId, mainAgentDisplayName, onSessionsChanged, onSessionNotFound, onSessionMessage },
+  {
+    sessionId,
+    mainAgentDisplayName,
+    onSessionsChanged,
+    onSessionNotFound,
+    onSessionMessage,
+    cacheProtected = true,
+  },
   ref,
 ) {
   const { t } = useTranslation("chat");
@@ -277,7 +296,35 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // prop is effectively the source of truth.
   const mainSessionId = sessionId;
   const mainSessionIdRef = useRef(mainSessionId);
-  const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
+  const transcriptCacheContext = useChatTranscriptCacheContext();
+  const transcriptCacheContextRef = useRef(transcriptCacheContext);
+  transcriptCacheContextRef.current = transcriptCacheContext;
+  const eventContextRef = useRef({ context: transcriptCacheContext, revision: 0 });
+  if (eventContextRef.current.context !== transcriptCacheContext) {
+    // Keep the SSE connection stable while the initial identity resolves, but
+    // reconnect it at every real auth boundary so an old authenticated stream
+    // cannot feed messages into the new context.
+    if (eventContextRef.current.context !== null) eventContextRef.current.revision += 1;
+    eventContextRef.current.context = transcriptCacheContext;
+  }
+  const eventContextRevision = eventContextRef.current.revision;
+  const [messagesContext, setMessagesContext] = useState(transcriptCacheContext);
+  const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(() => {
+    const cached = chatTranscriptCache.get(transcriptCacheContext, mainSessionId);
+    return cached ? new Map([[mainSessionId, cached]]) : new Map();
+  });
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const [historyLoadState, setHistoryLoadState] = useState<
+    "loading" | "refreshing" | "ready" | "stale" | "error"
+  >(() => (messages.has(mainSessionId) ? "refreshing" : "loading"));
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
     () => new Map(),
   );
@@ -340,12 +387,92 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const composerRef = useRef<ChatComposerHandle>(null);
   const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
+  const completeHistoriesRef = useRef<Map<string, ChatMessage[]>>(new Map());
+  const requestClockRef = useRef(0);
+  const latestRequestBySessionRef = useRef<Map<string, number>>(new Map());
+  const inFlightRequestsRef = useRef<Map<string, Set<number>>>(new Map());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const authorizationRevokedRef = useRef(false);
+  const [contextAuthorizationRevision, setContextAuthorizationRevision] = useState(0);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
+
+  const clearContextForAuthorization = useCallback(() => {
+    authorizationRevokedRef.current = true;
+    loadedSessionsRef.current.clear();
+    completeHistoriesRef.current.clear();
+    latestRequestBySessionRef.current.clear();
+    inFlightRequestsRef.current.clear();
+    localOptimisticMessageIdsRef.current.clear();
+    locallyStreamingSessionIdsRef.current.clear();
+    inflightTurnsRef.current.clear();
+    for (const controller of turnStreamControllersRef.current.values()) controller.abort();
+    turnStreamControllersRef.current.clear();
+    for (const [id, stream] of streamingSessionsRef.current) {
+      endSessionStream(id, stream.turnId);
+    }
+    const next = new Map<string, ChatMessage[]>();
+    messagesRef.current = next;
+    setMessages(next);
+    setStreamError(null);
+    setHistoryLoadState("error");
+    // Unmount the old EventSource. Its callback also carries the invalidated
+    // cache epoch, so an event delivered before React commits this update is
+    // rejected synchronously.
+    setContextAuthorizationRevision((revision) => revision + 1);
+  }, [endSessionStream, streamingSessionsRef]);
+
+  useEffect(
+    () =>
+      chatTranscriptCache.subscribeAuthorizationRevocations((revocation) => {
+        if (revocation.contextKey !== transcriptCacheContextRef.current) return;
+        clearContextForAuthorization();
+      }),
+    [clearContextForAuthorization],
+  );
+
+  useEffect(() => {
+    if (messagesContext === transcriptCacheContext) return;
+
+    authorizationRevokedRef.current = false;
+
+    if (messagesContext === null && transcriptCacheContext !== null) {
+      // Identity resolved after the first successful history request. Promote
+      // that complete result into the authenticated cache without remounting
+      // Chat (which would duplicate the request/SSE and discard draft state).
+      for (const [id, completeHistory] of completeHistoriesRef.current) {
+        chatTranscriptCache.putComplete(transcriptCacheContext, id, completeHistory);
+      }
+      setMessagesContext(transcriptCacheContext);
+      return;
+    }
+
+    // A concrete identity/origin boundary changed. Never leave the old
+    // transcript visible or allow its in-flight responses to own this Chat.
+    loadedSessionsRef.current.clear();
+    completeHistoriesRef.current.clear();
+    latestRequestBySessionRef.current.clear();
+    inFlightRequestsRef.current.clear();
+    localOptimisticMessageIdsRef.current.clear();
+    const cached = chatTranscriptCache.get(transcriptCacheContext, mainSessionId);
+    const nextMessages = cached ? new Map([[mainSessionId, cached]]) : new Map();
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    setHistoryLoadState(cached ? "refreshing" : "loading");
+    setMessagesContext(transcriptCacheContext);
+  }, [mainSessionId, messagesContext, transcriptCacheContext]);
+
+  useEffect(() => {
+    if (!cacheProtected) return;
+    const owner = Symbol(mainSessionId);
+    chatTranscriptCache.protect(transcriptCacheContext, mainSessionId, owner);
+    return () => {
+      chatTranscriptCache.unprotect(transcriptCacheContext, mainSessionId, owner);
+    };
+  }, [cacheProtected, mainSessionId, transcriptCacheContext]);
 
   // Auto stick-to-bottom against the message scroller — a bounded
   // `overflow-y-auto` node, NOT the document. The chat shell is now
@@ -407,9 +534,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }),
     [mainAgentDisplayName, pinnedAgentMention, t],
   );
+  const visibleMessages =
+    messagesContext !== null && messagesContext !== transcriptCacheContext
+      ? EMPTY_MESSAGE_MAP
+      : messages;
   const view = useMemo(
-    () => buildChatView(messages, mainSessionId, mainIdentity),
-    [messages, mainSessionId, mainIdentity],
+    () => buildChatView(visibleMessages, mainSessionId, mainIdentity),
+    [visibleMessages, mainSessionId, mainIdentity],
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
@@ -600,13 +731,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     if (!mainSessionId) return;
     setDeleteConfirmOpen(false);
     try {
-      await deleteSession(mainSessionId);
+      const response = await deleteSession(mainSessionId);
+      if (response.ok) chatTranscriptCache.delete(transcriptCacheContext, mainSessionId);
     } catch {
       // best-effort — the list refresh below reconciles either way
     }
     notifySessionsChanged();
     navigate("/chat");
-  }, [mainSessionId, notifySessionsChanged, navigate]);
+  }, [mainSessionId, notifySessionsChanged, navigate, transcriptCacheContext]);
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
@@ -650,23 +782,82 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Fetch messages for a session
   const loadMessages = useCallback(
     async (id: string, options: { force?: boolean; dropLocalOptimistic?: boolean } = {}) => {
+      if (
+        authorizationRevokedRef.current ||
+        chatTranscriptCache.isAuthorizationRevoked(transcriptCacheContextRef.current)
+      ) {
+        if (id === mainSessionIdRef.current) setHistoryLoadState("error");
+        return;
+      }
       if (!options.force && loadedSessionsRef.current.has(id)) return;
+      if (!options.force && (inFlightRequestsRef.current.get(id)?.size ?? 0) > 0) return;
+      let hasTranscript = messagesRef.current.has(id);
+      if (!hasTranscript) {
+        const cached = chatTranscriptCache.get(transcriptCacheContext, id);
+        if (cached) {
+          hasTranscript = true;
+          setMessages((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Map(prev);
+            next.set(id, cached);
+            return next;
+          });
+          if (id === mainSessionIdRef.current) setHistoryLoadState("refreshing");
+        }
+      }
+      if (id === mainSessionIdRef.current) {
+        setHistoryLoadState(hasTranscript ? "refreshing" : "loading");
+      }
+      const localRequest = ++requestClockRef.current;
+      latestRequestBySessionRef.current.set(id, localRequest);
+      const inFlight = inFlightRequestsRef.current.get(id) ?? new Set<number>();
+      inFlight.add(localRequest);
+      inFlightRequestsRef.current.set(id, inFlight);
+      const request = chatTranscriptCache.beginRequest(transcriptCacheContext, id);
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      let requestFailed = false;
       try {
         const data = await listSessionMessages(id);
+        const currentContext = transcriptCacheContextRef.current;
+        const latestLocalRequest = latestRequestBySessionRef.current.get(id);
+        const newerRequestInFlight =
+          latestLocalRequest !== undefined &&
+          latestLocalRequest > localRequest &&
+          inFlightRequestsRef.current.get(id)?.has(latestLocalRequest) === true;
+        if (
+          (latestLocalRequest !== localRequest && !newerRequestInFlight) ||
+          !chatTranscriptCache.isRequestContextCurrent(request, currentContext)
+        ) {
+          return;
+        }
         if (data === null) {
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
           // leaving the user staring at an empty active-chat shell.
-          onSessionNotFoundRef.current?.(id);
+          chatTranscriptCache.delete(currentContext, id);
+          loadedSessionsRef.current.delete(id);
+          completeHistoriesRef.current.delete(id);
+          setMessages((prev) => {
+            if (!prev.has(id)) return prev;
+            const next = new Map(prev);
+            next.delete(id);
+            return next;
+          });
+          if (id === mainSessionIdRef.current) setHistoryLoadState("error");
+          if (mountedRef.current) onSessionNotFoundRef.current?.(id);
           return;
         }
         const fetchedMessages = orderChatMessages(data);
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
           : undefined;
+        const reconciledMessages = mergeFetchedChatMessages(
+          messagesRef.current.get(id) ?? [],
+          fetchedMessages,
+          { dropMessageIds },
+        );
         setMessages((prev) => {
           const next = new Map(prev);
           next.set(
@@ -675,19 +866,71 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           );
           return next;
         });
+        completeHistoriesRef.current.set(id, reconciledMessages);
+        if (chatTranscriptCache.canWriteComplete(request, currentContext)) {
+          const cachedMessages = chatTranscriptCache.get(currentContext, id);
+          chatTranscriptCache.putComplete(
+            currentContext,
+            id,
+            cachedMessages
+              ? mergeFetchedChatMessages(cachedMessages, fetchedMessages, { dropMessageIds })
+              : reconciledMessages,
+          );
+        }
         if (options.dropLocalOptimistic) {
           localOptimisticMessageIdsRef.current.delete(id);
         }
         loadedSessionsRef.current.add(id);
+        if (id === mainSessionIdRef.current) setHistoryLoadState("ready");
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
         }
-      } catch {
+      } catch (error) {
+        requestFailed = true;
         // Leave the session unmarked so callers (auto-load + post-stream
         // refresh) can retry on the next trigger.
+        const currentContext = transcriptCacheContextRef.current;
+        if (!chatTranscriptCache.isRequestContextCurrent(request, currentContext)) {
+          return;
+        }
+        if (error instanceof ChatApiError && (error.status === 401 || error.status === 403)) {
+          // Authorization failures are not stale-data refresh failures. Fail
+          // closed before checking local response ownership: an older request
+          // can discover that cached data is no longer authorized even after a
+          // forced refresh supersedes it. Retire local ownership so no pending
+          // response can restore access while the auth gate re-evaluates.
+          const revoked = chatTranscriptCache.revokeAuthorization(currentContext);
+          if (!revoked) clearContextForAuthorization();
+          void queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
+          return;
+        }
+        if (latestRequestBySessionRef.current.get(id) !== localRequest) {
+          return;
+        }
+        const fallbackRequest = Math.max(
+          ...[...(inFlightRequestsRef.current.get(id) ?? [])].filter(
+            (revision) => revision !== localRequest,
+          ),
+        );
+        if (Number.isFinite(fallbackRequest)) {
+          // A forced refresh may fail while the request it superseded is still
+          // in flight. Restore that request's response ownership so its
+          // complete result can finish the load instead of being discarded.
+          latestRequestBySessionRef.current.set(id, fallbackRequest);
+        } else if (id === mainSessionIdRef.current) {
+          setHistoryLoadState(messagesRef.current.has(id) ? "stale" : "error");
+        }
+      } finally {
+        const requests = inFlightRequestsRef.current.get(id);
+        requests?.delete(localRequest);
+        if (requests?.size === 0) inFlightRequestsRef.current.delete(id);
+        if (latestRequestBySessionRef.current.get(id) === localRequest) {
+          latestRequestBySessionRef.current.delete(id);
+        }
+        chatTranscriptCache.finishRequest(request, { failed: requestFailed });
       }
     },
-    [isReadVisibleSession, markSessionRead],
+    [clearContextForAuthorization, isReadVisibleSession, markSessionRead, transcriptCacheContext],
   );
 
   // Load messages when the main session changes (also covers initial mount).
@@ -711,7 +954,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     [mainSessionId, floorSessionId],
   );
   const handleMessageInsert = useCallback(
-    (sid: string, message: ChatMessage) => {
+    (authorization: TranscriptSessionToken, message: ChatMessage) => {
+      const currentContext = transcriptCacheContextRef.current;
+      if (
+        authorizationRevokedRef.current ||
+        chatTranscriptCache.isAuthorizationRevoked(currentContext) ||
+        !chatTranscriptCache.isSessionCurrent(authorization, currentContext)
+      ) {
+        return;
+      }
+      const { sessionId: sid } = authorization;
       if (message.sessionId !== sid) return;
       setMessages((prev) => {
         const next = new Map(prev);
@@ -719,20 +971,44 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         next.set(sid, mergeChatMessage(existing, message));
         return next;
       });
+      const completeHistory = completeHistoriesRef.current.get(sid);
+      if (completeHistory) {
+        completeHistoriesRef.current.set(sid, mergeChatMessage(completeHistory, message));
+      }
+      chatTranscriptCache.upsertMessageIfPresent(transcriptCacheContext, sid, message, (cached) =>
+        mergeChatMessage(cached, message),
+      );
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead],
+    [markSessionRead, transcriptCacheContext],
   );
   const handleSessionName = useCallback(
-    (sid: string, event: z.infer<typeof sessionNameSchema>) => {
+    (authorization: TranscriptSessionToken, event: z.infer<typeof sessionNameSchema>) => {
+      const currentContext = transcriptCacheContextRef.current;
+      if (
+        authorizationRevokedRef.current ||
+        chatTranscriptCache.isAuthorizationRevoked(currentContext) ||
+        !chatTranscriptCache.isSessionCurrent(authorization, currentContext)
+      ) {
+        return;
+      }
+      const { sessionId: sid } = authorization;
       if (event.sessionId === sid && event.name) notifySessionsChanged();
     },
     [notifySessionsChanged],
   );
   const resyncSessionMessages = useCallback(
-    (sid: string) => {
-      void loadMessages(sid, { force: true });
+    (authorization: TranscriptSessionToken) => {
+      const currentContext = transcriptCacheContextRef.current;
+      if (
+        authorizationRevokedRef.current ||
+        chatTranscriptCache.isAuthorizationRevoked(currentContext) ||
+        !chatTranscriptCache.isSessionCurrent(authorization, currentContext)
+      ) {
+        return;
+      }
+      void loadMessages(authorization.sessionId, { force: true });
     },
     [loadMessages],
   );
@@ -746,6 +1022,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
   const consumeStream = useCallback(
     async (res: Response, sessionId: string, turnId: string) => {
+      const streamAuthorization = chatTranscriptCache.captureSession(
+        transcriptCacheContextRef.current,
+        sessionId,
+      );
+      const isStreamAuthorizationCurrent = () => {
+        const currentContext = transcriptCacheContextRef.current;
+        return (
+          !authorizationRevokedRef.current &&
+          !chatTranscriptCache.isAuthorizationRevoked(currentContext) &&
+          chatTranscriptCache.isSessionCurrent(streamAuthorization, currentContext)
+        );
+      };
+      if (!isStreamAuthorizationCurrent()) return;
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
         return;
@@ -783,6 +1072,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             stallTimer = setTimeout(() => resolve("stalled"), STREAM_STALL_TIMEOUT_MS);
           }),
         ]).finally(() => clearTimeout(stallTimer));
+        if (!isStreamAuthorizationCurrent()) {
+          void reader.cancel().catch(() => {});
+          return;
+        }
         if (result === "stalled") {
           // Dead connection. Release the reader and fall through to the
           // final reload; the caller's finally block tears the streaming
@@ -941,6 +1234,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       // After stream ends, reload messages from DB (gets both trace + assistant)
+      if (!isStreamAuthorizationCurrent()) return;
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
     },
     [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
@@ -953,6 +1247,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     // re-runs as the floor resolves, so the live preview reattaches correctly.
     const reattachSessionId = floorSessionId;
     if (!reattachSessionId) return;
+    const isAuthorizationRevoked = () =>
+      authorizationRevokedRef.current ||
+      chatTranscriptCache.isAuthorizationRevoked(transcriptCacheContextRef.current);
+    if (isAuthorizationRevoked()) return;
     if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
 
     let cancelled = false;
@@ -960,14 +1258,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     let streamController: AbortController | null = null;
 
     const schedule = (delayMs: number) => {
-      if (cancelled) return;
+      if (cancelled || isAuthorizationRevoked()) return;
       pollTimer = setTimeout(() => {
         void runOnce();
       }, delayMs);
     };
 
     const runOnce = async () => {
-      if (cancelled) return;
+      if (cancelled || isAuthorizationRevoked()) return;
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
@@ -985,7 +1283,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
         const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
+        if (!turns || turns.length === 0 || cancelled || isAuthorizationRevoked()) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
         attachedTurnId = target.turnId;
@@ -1033,6 +1331,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     floorSessionId,
     consumeStream,
     streamReconnectRevision,
+    contextAuthorizationRevision,
     startSessionStream,
     endSessionStream,
     createTurnStreamController,
@@ -1056,6 +1355,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
     ): Promise<void> => {
+      const turnAuthorization = chatTranscriptCache.captureSession(
+        transcriptCacheContextRef.current,
+        sendingSessionId,
+      );
+      const isTurnAuthorizationCurrent = () => {
+        const currentContext = transcriptCacheContextRef.current;
+        return (
+          !authorizationRevokedRef.current &&
+          !chatTranscriptCache.isAuthorizationRevoked(currentContext) &&
+          chatTranscriptCache.isSessionCurrent(turnAuthorization, currentContext)
+        );
+      };
+      const authorizationRevokedError = () => new Error("Chat authorization was revoked");
+      // ChatComposer restores its optimistically-cleared draft only when
+      // onSend rejects. A revoked context must therefore reject rather than
+      // silently treating a suppressed POST as a successful send.
+      if (!isTurnAuthorizationCurrent()) throw authorizationRevokedError();
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
       // the reply, even if they'd scrolled up to read history.
@@ -1071,6 +1387,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // the textarea (the original bug). So a failed submit rejects here; a
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
+        if (!isTurnAuthorizationCurrent()) {
+          if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+          throw authorizationRevokedError();
+        }
         // Transport failure posting the turn — a genuine failed submit.
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
@@ -1080,6 +1400,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!isAbortError(err)) setStreamError(t("stream.errors.sendInvalidResponse"));
         throw err;
       });
+      if (!isTurnAuthorizationCurrent()) {
+        if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        throw authorizationRevokedError();
+      }
       if (!result.ok) {
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
@@ -1582,15 +1906,24 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
   return (
     <TooltipProvider delayDuration={150}>
-      {sessionEventIds.map((sid) => (
-        <ChatSessionEvents
-          key={sid}
-          sessionId={sid}
-          onMessageInsert={handleMessageInsert}
-          onSessionName={handleSessionName}
-          onReconnect={resyncSessionMessages}
-        />
-      ))}
+      {sessionEventIds.map((sid) => {
+        if (
+          authorizationRevokedRef.current ||
+          chatTranscriptCache.isAuthorizationRevoked(transcriptCacheContext)
+        ) {
+          return null;
+        }
+        const authorization = chatTranscriptCache.captureSession(transcriptCacheContext, sid);
+        return (
+          <ChatSessionEvents
+            key={`${eventContextRevision}:${contextAuthorizationRevision}:${authorization.contextRevision}:${sid}`}
+            authorization={authorization}
+            onMessageInsert={handleMessageInsert}
+            onSessionName={handleSessionName}
+            onReconnect={resyncSessionMessages}
+          />
+        );
+      })}
       <div
         className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
         onDragEnter={handleDragEnter}
@@ -1711,6 +2044,47 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               ref={attachScroller}
               className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
             >
+              {historyLoadState === "stale" && (
+                <div
+                  role="alert"
+                  className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-12 border border-warning-border bg-warning-bg px-3 py-2 text-ui text-warning-fg md:mx-6"
+                >
+                  <span>{t("history.refreshFailed")}</span>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    onClick={() => void loadMessages(mainSessionId, { force: true })}
+                  >
+                    {t("history.retry")}
+                  </Button>
+                </div>
+              )}
+              {historyLoadState === "loading" && !messages.has(mainSessionId) && (
+                <div
+                  role="status"
+                  className="flex min-h-32 flex-1 items-center justify-center gap-2 text-ui text-muted-foreground"
+                >
+                  <RefreshCw className="size-4 animate-spin" aria-hidden />
+                  {t("history.loading")}
+                </div>
+              )}
+              {historyLoadState === "error" && !messages.has(mainSessionId) && (
+                <div
+                  role="alert"
+                  className="flex min-h-32 flex-1 flex-col items-center justify-center gap-3 px-4 text-ui text-muted-foreground"
+                >
+                  <span>{t("history.loadFailed")}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void loadMessages(mainSessionId, { force: true })}
+                  >
+                    {t("history.retry")}
+                  </Button>
+                </div>
+              )}
               <MessageList
                 rows={rows}
                 live={{

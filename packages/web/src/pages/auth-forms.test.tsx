@@ -1,11 +1,13 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
+import { DASHBOARD_IDENTITY_QUERY_KEY } from "@/hooks/use-dashboard-identity";
 import LoginPage from "./LoginPage";
+import OnboardPage from "./OnboardPage";
 
 // These forms run on the TanStack Form + Zod foundation. The behavior under test
 // is purely client-side: invalid input must surface a field error and must never
@@ -25,11 +27,12 @@ function renderPage(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("LoginPage validation", () => {
@@ -67,5 +70,47 @@ describe("LoginPage validation", () => {
 
     expect(screen.queryByText("Username is required.")).toBeNull();
     expect(screen.getByText("Password is required.")).toBeTruthy();
+  });
+
+  it("invalidates the anonymous dashboard identity after local login", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    const { queryClient } = renderPage(<LoginPage />);
+    queryClient.setQueryData(DASHBOARD_IDENTITY_QUERY_KEY, { kind: "anonymous" });
+
+    await user.type(screen.getByLabelText("Username"), "guardian");
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(DASHBOARD_IDENTITY_QUERY_KEY)?.isInvalidated).toBe(true),
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/auth/login",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+  });
+});
+
+describe("OnboardPage identity refresh", () => {
+  it("invalidates the anonymous dashboard identity after account creation", async () => {
+    const user = userEvent.setup();
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const { queryClient } = renderPage(<OnboardPage />);
+    queryClient.setQueryData(DASHBOARD_IDENTITY_QUERY_KEY, { kind: "anonymous" });
+
+    await user.type(screen.getByLabelText("Username"), "guardian");
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(DASHBOARD_IDENTITY_QUERY_KEY)?.isInvalidated).toBe(true),
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/onboard/create-account",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
   });
 });

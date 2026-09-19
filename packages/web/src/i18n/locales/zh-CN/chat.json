@@ -60,6 +60,12 @@
     "label": "提问时间线"
   },
   "jumpToLatest": "回到最新消息",
+  "history": {
+    "loading": "正在加载聊天记录…",
+    "loadFailed": "聊天记录加载失败",
+    "refreshFailed": "聊天记录刷新失败",
+    "retry": "重试"
+  },
   "roles": {
     "agent": "助手"
   },
