@@ -11,10 +11,14 @@
 //   - any other terminal transport failure → Disconnected → runtime backs off
 //     and rebuilds.
 
-import { Bot, GrammyError } from "grammy";
+import { type Bot, GrammyError } from "grammy";
 import { z } from "zod";
 import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
-import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
+import {
+  TelegramAdapter,
+  createTracedTelegramBot,
+  type CreateTelegramBot,
+} from "../../channels/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
@@ -195,7 +199,7 @@ export function makeTelegramSetup(deps: {
  * seams default to the real getMe probe.
  */
 export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): ConnectionDescriptor {
-  const createBot: CreateTelegramBot = deps.createBot ?? ((token) => new Bot(token));
+  const createBot: CreateTelegramBot = deps.createBot ?? createTracedTelegramBot;
   const probeBotIdentity =
     deps.probeBotIdentity ?? ((token, signal) => pingTelegramIdentity(createBot, token, signal));
   const botScheme = tokenPaste({

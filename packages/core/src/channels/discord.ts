@@ -1,3 +1,4 @@
+import { traceDiscordRequest } from "./diagnostics/discord-trace.js";
 import {
   Client,
   GatewayIntentBits,
@@ -350,20 +351,26 @@ export class DiscordAdapter implements ProviderAdapter {
   /** Broker requests that must not survive this credential-owning epoch. */
   private readonly activeApiRequestControllers = new Set<AbortController>();
 
-  constructor(config: {
-    botToken: string;
-    connectionId?: string;
-    conversationSettings?: ConversationSettingsControl & {
-      observe?(descriptor: ConversationDescriptor): void;
-    };
-    maxMessagesPerChannel?: number;
-    listAgents?: () => string[];
-    resolveDiscordPerson?: (
-      channelUserId: string,
-    ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
-    chatStop?: ChatStopHandler;
-    onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  }) {
+  constructor(
+    config: {
+      botToken: string;
+      connectionId?: string;
+      conversationSettings?: ConversationSettingsControl & {
+        observe?(descriptor: ConversationDescriptor): void;
+      };
+      maxMessagesPerChannel?: number;
+      listAgents?: () => string[];
+      resolveDiscordPerson?: (
+        channelUserId: string,
+      ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
+      chatStop?: ChatStopHandler;
+      onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+    },
+    transport: {
+      createClient?: (options: ConstructorParameters<typeof Client>[0]) => Client;
+      createRest?: (options: ConstructorParameters<typeof REST>[0]) => REST;
+    } = {},
+  ) {
     this.connectionId = config.connectionId;
     this.conversationSettings = config.conversationSettings;
     this.maxMessagesPerChannel = config.maxMessagesPerChannel ?? 100;
@@ -371,7 +378,7 @@ export class DiscordAdapter implements ProviderAdapter {
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
-    this.client = new Client({
+    this.client = (transport.createClient ?? ((options) => new Client(options)))({
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -382,10 +389,14 @@ export class DiscordAdapter implements ProviderAdapter {
       partials: [Partials.Channel, Partials.Message],
     });
     this._botToken = config.botToken;
-    this.rest = new REST({
+    this.rest = (transport.createRest ?? ((options) => new REST(options)))({
       version: DISCORD_API_VERSION,
       userAgentAppendix: "Rome Discord broker/1",
     }).setToken(config.botToken);
+    this.client.rest.options.makeRequest = traceDiscordRequest(
+      this.client.rest.options.makeRequest,
+    );
+    this.rest.options.makeRequest = traceDiscordRequest(this.rest.options.makeRequest);
   }
 
   private _botToken: string;

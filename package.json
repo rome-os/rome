@@ -44,6 +44,7 @@
     "test:unit:web": "pnpm --filter rome-web test && pnpm --filter @rome-os/ui test",
     "test:unit:rest": "pnpm --filter @rome-os/libs test && pnpm --filter @rome/discord-cli test && pnpm --filter @rome-os/app-web-sdk test && pnpm --filter rome-desktop test && pnpm test:ci:areas && pnpm test:docker-runtime && pnpm test:release:targets && pnpm test:obs:dashboards && pnpm test:ui:padding && pnpm test:ui:tokens && pnpm test:ui:contract && pnpm test:ui:radius && pnpm test:prose",
     "test:integration": "pnpm --filter @rome/core test:integration",
+    "test:im": "pnpm --filter @rome/core test:im",
     "test:e2e": "pnpm --filter @rome/core test:e2e",
     "test:coverage": "pnpm --filter @rome/discord-cli test && pnpm --filter @rome/core test:coverage && pnpm --filter rome-web test && pnpm --filter @rome-os/ui test",
     "test:ci": "pnpm --filter @rome/discord-cli test && pnpm --filter @rome/core test:ci && pnpm --filter rome-web test",

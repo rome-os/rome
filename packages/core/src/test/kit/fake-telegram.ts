@@ -44,6 +44,7 @@ export interface TelegramApiCall {
  * new API call fails loudly until the fake is taught its semantics.
  */
 const SUPPORTED_SEND_METHODS = new Set([
+  "editMessageText",
   "sendMessage",
   "sendPhoto",
   "sendVideo",
@@ -137,9 +138,16 @@ export class FakeTelegramApi {
         return {
           ok: true,
           result: {
-            message_id: this.nextMessageId++,
+            message_id:
+              method === "editMessageText"
+                ? (payload as { message_id: number }).message_id
+                : this.nextMessageId++,
             date: 0,
-            chat: { id: 0, type: "private", first_name: "FakeChat" },
+            chat: {
+              id: Number((payload as { chat_id: unknown }).chat_id),
+              type: "private",
+              first_name: "FakeChat",
+            },
           },
         };
       }

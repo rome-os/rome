@@ -18,16 +18,14 @@
 // way; ongoing `error` events route through the adapter's `onFault` seam.
 
 import {
-  createLarkChannel,
   type CardActionEvent,
-  Domain,
   type LarkChannel,
-  LoggerLevel,
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
 import {
+  defaultCreateChannel,
   type CreateLarkChannel,
   FeishuAdapter,
   type FeishuConfig,
@@ -383,20 +381,6 @@ export async function registerFeishuAgentApp(opts: {
   const domain =
     result.user_info?.tenant_brand === "lark" || opts.domain === "lark" ? "lark" : "feishu";
   return { appId: result.client_id, appSecret: result.client_secret, domain };
-}
-
-/** Default LarkChannel factory (mirrors the FeishuAdapter default) parameterized
- *  by the pasted `app` material so `validate` can mint a token from it. */
-function defaultCreateChannel(config: FeishuConfig): LarkChannel {
-  return createLarkChannel({
-    appId: config.appId,
-    appSecret: config.appSecret,
-    domain: config.domain === "lark" ? Domain.Lark : Domain.Feishu,
-    transport: "websocket",
-    outbound: { markdownConverter: "builtin" },
-    includeRawEvent: true,
-    loggerLevel: LoggerLevel.warn,
-  });
 }
 
 /**

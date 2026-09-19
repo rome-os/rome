@@ -1,3 +1,4 @@
+import { imApiTraceSchema } from "./channels/diagnostics/api-trace.js";
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
@@ -19,6 +20,7 @@ function isWssDrainUrl(value: string): boolean {
 }
 
 const configSchema = z.object({
+  imApiTrace: imApiTraceSchema,
   // Instance slug — the stable per-instance identifier (the `PANTHEON_SLUG`
   // tenant slug; the local Rome Cloud `dev` tenant in dev). Absent when this
   // instance has no slug. Surfaced here so rollout gating can key on it; see
@@ -130,6 +132,7 @@ export type Config = z.infer<typeof configSchema>;
 
 function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   const raw: Record<string, unknown> = {};
+  if (env.ROME_IM_API_TRACE) raw.imApiTrace = env.ROME_IM_API_TRACE;
 
   // Statsig server secret key (gates the cloud-auth rollout). Absent disables
   // the gate entirely.
