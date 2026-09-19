@@ -2871,6 +2871,7 @@ describe("AgentRunner", () => {
           name: "demo_action",
           type: "system",
           description: "Schedule an event",
+          visibility: "explicit",
           complexity: "simple",
           speed: "fast",
           reliability: "high",
@@ -4464,6 +4465,7 @@ describe("AgentRunner", () => {
           name: "demo_action",
           type: "system",
           description: "Schedule an event",
+          visibility: "explicit",
           complexity: "simple",
           speed: "fast",
           reliability: "high",
@@ -4489,7 +4491,7 @@ describe("AgentRunner", () => {
       });
     });
 
-    it("expands wildcard action access to all registered agent-callable actions", async () => {
+    it("expands wildcard action access to public agent-callable actions", async () => {
       actionRegistry.register({
         config: {
           name: "demo_action",
@@ -4528,17 +4530,43 @@ describe("AgentRunner", () => {
         },
         execute: async () => ({ status: "ok", data: { ok: true } }),
       });
+      actionRegistry.register({
+        config: {
+          name: "internal_action",
+          type: "system",
+          description: "Internal app action",
+          visibility: "explicit",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "write",
+        },
+        inputSchema: { properties: {} },
+        execute: async () => ({ status: "ok", data: { ok: true } }),
+      });
 
-      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      let executionWasRejected = false;
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-wildcard-actions",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (params) {
+          expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
+            "demo_action",
+            "send_message",
+          ]);
+          await expect(params.executeAction("internal_action", {})).rejects.toThrow(
+            /Unknown action: internal_action/,
+          );
+          executionWasRejected = true;
+          yield { type: "result", content: "Done" };
+        }),
+      };
       const runner = createRunner(provider);
 
       await collectMessages(runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }));
 
-      expect(provider.calls).toHaveLength(1);
-      expect(provider.calls[0].actionCatalog.map((tool) => tool.name)).toEqual([
-        "demo_action",
-        "send_message",
-      ]);
+      expect(executionWasRejected).toBe(true);
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {

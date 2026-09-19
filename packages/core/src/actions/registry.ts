@@ -119,21 +119,33 @@ export class ActionRegistryImpl implements ActionRegistry {
 
   /**
    * Return agent-callable actions (those with inputSchema) the agent may use:
-   * everything when the allow-list contains "*", otherwise the named actions
-   * unioned with the globally-granted ones. This is the single resolution point
-   * for both the model-facing tool catalog and the execution gate, so the two
-   * cannot disagree about what an agent is permitted to call.
+   * public actions when the allow-list contains "*", plus actions named in the
+   * allow-list or globally granted. An explicit action never enters through
+   * the wildcard. This is the single resolution point for both the model-facing
+   * tool catalog and the execution gate, so the two cannot disagree about what
+   * an agent is permitted to call.
    */
   getForAgent(names: string[]): Action[] {
+    const result: Action[] = [];
+    const included = new Set<string>();
+
     if (names.includes("*")) {
-      return Array.from(this.actions.values()).filter((action) => !!action.inputSchema);
+      for (const action of this.actions.values()) {
+        if (action.inputSchema && action.config.visibility !== "explicit") {
+          result.push(action);
+          included.add(action.config.name);
+        }
+      }
     }
 
-    const result: Action[] = [];
-    for (const name of new Set([...names, ...this.globalActionNames])) {
+    for (const name of new Set([
+      ...names.filter((name) => name !== "*"),
+      ...this.globalActionNames,
+    ])) {
       const action = this.get(name);
-      if (action && action.inputSchema) {
+      if (action && action.inputSchema && !included.has(action.config.name)) {
         result.push(action);
+        included.add(action.config.name);
       }
     }
     return result;

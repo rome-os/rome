@@ -124,6 +124,8 @@ export interface ActionConfig {
   type: "system" | "custom";
   description: string;
   entry?: string;
+  /** Defaults to public. Explicit actions require an exact agent allow-list entry. */
+  visibility?: "public" | "explicit";
   complexity: "simple" | "moderate" | "complex";
   speed: "fast" | "moderate" | "slow";
   reliability: "high" | "medium" | "low";
@@ -972,10 +974,10 @@ export interface AgentRunnerInterface {
   hasAgent?(name: string): boolean | Promise<boolean>;
   /**
    * Returns true when the named agent is allowed to call the named action —
-   * i.e. the action resolves through the agent's allow-list (or `*`, or a
-   * globally-granted action), the same resolution the agent session uses to
-   * gate tool calls. Lets callers (e.g. the inbox message handler) tailor
-   * guidance to what the routed agent can actually do, instead of assuming.
+   * i.e. the action resolves through the agent's allow-list, a public-action
+   * wildcard, or a global grant. This is the same resolution the agent session
+   * uses to gate tool calls. Lets callers (e.g. the inbox message handler)
+   * tailor guidance to what the routed agent can actually do, instead of assuming.
    * Optional for backwards compatibility; implementations that don't provide
    * it are treated as "cannot" by callers. May be async — the worker-side
    * runner resolves the catalog over RPC, so callers must `await` the result.

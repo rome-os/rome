@@ -5,6 +5,7 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 **Contracts:**
 
 - An agent definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`, and `main` is reserved for Rome Core. Its `actions` and `allowedSubagents` references use canonical `<app-id>:<local-name>` ids for both same-app and cross-app references.
+- An exact `actions` reference grants a public or explicit action. The `*` entry grants only public actions.
 - An agent can remain provider-agnostic by declaring `tier: large|medium|small`. The runtime maps the tier to an available provider and concrete model.
 - An agent whose behavior depends on a provider-specific capability may pin a provider. A provider-pinned tier resolves only on that provider and fails rather than falling back to another provider.
 - An agent that needs a specific model may declare `provider` with `modelId` instead of a tier. Rome requests that exact ID without tier mapping or automatic substitution. The provider and connected account must support the requested model.

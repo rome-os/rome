@@ -6,7 +6,9 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 
 - Actions are owned by [apps](apps.md#rome-apps) and exist only via manifest declaration — no implicit discovery. Disabling an app removes its actions. Enabling it puts them back. Install re-reads the manifest, so a newly added action becomes callable without a process restart.
 - An action definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`. References and runtime calls use the canonical `<app-id>:<local-name>` id.
-- The input schema is the agent-visibility switch. An action with an input schema is exposed to agents as a callable tool. An action without one is invisible to agents and runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
+- An input schema makes an action agent-callable. A public action enters an agent catalog through `actions: ["*"]` or an exact reference. An explicit action enters only through an exact reference.
+- An action without an input schema stays outside every agent catalog. It runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
+- Visibility gates both agent discovery and agent execution. It does not restrict routines, hooks, app APIs, or calls from another action.
 - An approval-gated action never executes before the guardian's decision ([approvals](messaging.md#approvals)).
 - A nested action call shares its caller's root and cancellation lifetime, and the caller must wait for its result. Fire-and-forget of a nested call is invalid: the caller may finish and release its resources while the callee is still running.
 - Intentionally independent work starts **detached**: it becomes a new root execution with no parent. Cancelling the caller does not cancel it, and it can be cancelled separately by its own execution id.

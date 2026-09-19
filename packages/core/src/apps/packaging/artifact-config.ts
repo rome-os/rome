@@ -36,6 +36,7 @@ export const ActionConfigSchema = z
     type: z.enum(["system", "custom"]),
     description: z.string().min(1),
     entry: z.string().min(1).optional(),
+    visibility: z.enum(["public", "explicit"]).default("public"),
     complexity: z.enum(["simple", "moderate", "complex"]),
     speed: z.enum(["fast", "moderate", "slow"]),
     reliability: z.enum(["high", "medium", "low"]),

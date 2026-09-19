@@ -14,6 +14,7 @@ describe("Actions API", () => {
           name: "zeta_action",
           type: "custom",
           description: "Sends a thing",
+          visibility: "explicit",
           complexity: "simple",
           speed: "fast",
           reliability: "high",
@@ -45,7 +46,12 @@ describe("Actions API", () => {
       const res = await app.request("/actions");
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        actions: Array<{ name: string; inputSchema: unknown; requiresApproval: boolean }>;
+        actions: Array<{
+          name: string;
+          visibility: "public" | "explicit";
+          inputSchema: unknown;
+          requiresApproval: boolean;
+        }>;
       };
       const names = body.actions.map((a) => a.name);
       expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
@@ -54,6 +60,7 @@ describe("Actions API", () => {
       expect(zeta).toMatchObject({
         description: "Sends a thing",
         type: "custom",
+        visibility: "explicit",
         sideEffects: "write",
         requiresApproval: true,
         inputSchema: {
@@ -64,7 +71,11 @@ describe("Actions API", () => {
       });
 
       const alpha = body.actions.find((a) => a.name === "alpha_workflow");
-      expect(alpha).toMatchObject({ requiresApproval: false, inputSchema: null });
+      expect(alpha).toMatchObject({
+        visibility: "public",
+        requiresApproval: false,
+        inputSchema: null,
+      });
     } finally {
       testDb.close();
     }

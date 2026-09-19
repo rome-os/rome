@@ -6,6 +6,8 @@ export interface ActionConfig {
   description: string;
   /** Optional relative module entry path from the action directory (default: ./index.ts or ./index.js). */
   entry?: string;
+  /** Defaults to public. Explicit actions require an exact agent allow-list entry. */
+  visibility?: "public" | "explicit";
   complexity: "simple" | "moderate" | "complex";
   speed: "fast" | "moderate" | "slow";
   reliability: "high" | "medium" | "low";
@@ -55,6 +57,6 @@ export interface ActionRegistry {
   has(name: string): boolean;
   getCanonicalName?(name: string): string | undefined;
   list(): string[];
-  /** Return agent-callable actions matching the given names, or all when "*" is present. */
+  /** Return named agent-callable actions plus public actions when "*" is present. */
   getForAgent(names: string[]): Action[];
 }

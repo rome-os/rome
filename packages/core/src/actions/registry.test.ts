@@ -4,12 +4,16 @@ import type { Action } from "./types.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 
-function callableAction(name: string): Action {
+function callableAction(
+  name: string,
+  visibility: Action["config"]["visibility"] = "public",
+): Action {
   return {
     config: {
       name,
       type: "system",
       description: `${name} action`,
+      visibility,
       complexity: "simple",
       speed: "fast",
       reliability: "high",
@@ -85,6 +89,33 @@ describe("ActionRegistryImpl", () => {
     const actions = registry.getForAgent(["*"]);
 
     expect(actions.map((action) => action.config.name)).toEqual(["alpha", "beta"]);
+  });
+
+  it("does not grant an explicit action through '*'", () => {
+    const registry = new ActionRegistryImpl([]);
+    registry.register(callableAction("public_tool"));
+    registry.register(callableAction("internal_tool", "explicit"));
+
+    expect(registry.getForAgent(["*"]).map((action) => action.config.name)).toEqual([
+      "public_tool",
+    ]);
+  });
+
+  it("grants an explicit action by exact name alongside '*'", () => {
+    const registry = new ActionRegistryImpl([]);
+    registry.register(callableAction("public_tool"));
+    registry.register(callableAction("internal_tool", "explicit"));
+
+    expect(
+      registry.getForAgent(["*", "internal_tool"]).map((action) => action.config.name),
+    ).toEqual(["public_tool", "internal_tool"]);
+  });
+
+  it("grants a globally-granted explicit action", () => {
+    const registry = new ActionRegistryImpl(["internal_tool"]);
+    registry.register(callableAction("internal_tool", "explicit"));
+
+    expect(registry.getForAgent([]).map((action) => action.config.name)).toEqual(["internal_tool"]);
   });
 
   it("grants a globally-granted action to an agent whose allow-list omits it", () => {
