@@ -23,7 +23,7 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
       {color ? (
         <span
           aria-hidden="true"
-          className="ml-1 inline-block size-3 rounded-2 border border-border-strong align-middle"
+          className="ml-1 inline-block size-3 rounded-4 border border-border-strong align-middle"
           data-chat-color-preview={color}
           style={{ backgroundColor: color }}
         />
