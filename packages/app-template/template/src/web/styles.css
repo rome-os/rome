@@ -18,6 +18,6 @@
 @import "@rome-os/app-web-sdk/styles";
 
 /* App-specific rules go below. Paint only with the registered tokens
-   (`bg-card`, `text-muted-foreground`, `rounded-lg`, …) — never raw shades
+   (`bg-app-canvas`, `text-muted-foreground`, `rounded-lg`, …) — never raw shades
    (`bg-gray-100`) or scrims (`bg-black/40`). To override a host token (e.g. pin
    a corner radius), re-declare it in a `:root` block here. */

@@ -93,25 +93,25 @@ export async function appendScopedStyles(
 }
 
 // The app inherits the host's design language for free: Rome's semantic tokens
-// (--background, --primary, …) are inherited custom properties that pierce the
+// (--app-canvas, --primary, …) are inherited custom properties that pierce the
 // shadow boundary, and the shell toggles `.dark` on <html> (an ancestor of this
 // mount), so the inherited values already track the live theme. App bundles ship
-// no token *values* of their own (see packages/app-template), so there is
-// nothing to override the inherited host tokens — and an app that *does* want to
-// override re-declares them as :host{…}, which beats inheritance. Nothing to
-// inject here; the only theme wiring left is the inner-<body> .dark toggle below,
-// needed because selectors (unlike inherited properties) don't cross the shadow
+// no theme values of their own (see packages/app-template). The host adds only
+// the context alias from `background` to `app-canvas`; an app can still override
+// either value on :host. The inner-<body> .dark toggle below remains necessary
+// because selectors, unlike inherited properties, do not cross the shadow
 // boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
 export function prepareShadowMount(host: HTMLDivElement): HTMLElement {
   const shadowRoot = host.shadowRoot ?? host.attachShadow({ mode: "open" });
   shadowRoot.replaceChildren();
-  // Structural only — no token values. The host's semantic tokens (colors and
-  // the --font-sans/--font-mono stacks) are inherited custom properties that
-  // already pierce this shadow boundary (see above), so the font stacks live in
-  // exactly one place (the host globals) rather than being copied here.
+  // The host selects the app canvas here so existing app bundles that paint
+  // `background` move with the app-specific token without a rebuild. New apps
+  // can name `app-canvas` directly. Every other theme value keeps inheriting.
   const shellStyle = document.createElement("style");
   shellStyle.textContent = `
     :host {
+      --background: var(--app-canvas);
+      background-color: var(--app-canvas);
       display: block;
       min-height: inherit;
     }

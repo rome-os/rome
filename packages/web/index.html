@@ -120,7 +120,7 @@
           // lib/theme.ts). An entry written by an older build has an incompatible
           // shape, so a superseded key is ignored rather than replayed.
           // theme.test.ts fails if the two drift.
-          var css = localStorage.getItem("rome-theme-css-4");
+          var css = localStorage.getItem("rome-theme-css-5");
           if (css && css.length < 65536 && !/@import|url\(/i.test(css)) {
             var style = document.createElement("style");
             style.id = "rome-theme-tokens";

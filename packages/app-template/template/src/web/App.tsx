@@ -49,16 +49,17 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
   }, []);
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="flex items-center gap-3">
-        <Sparkles className="text-primary" />
-        <h1 className="text-3xl font-semibold tracking-tight">__APP_NAME__</h1>
-      </div>
-      <p className="mt-2 text-muted-foreground">
-        Starter UI for your new Rome app. Tailwind v4 and the Rome component kit are wired up —
-        replace this screen with something useful.
-      </p>
-      {/* Visitor-facing app (public link + Rome Cloud sign-in)? One line adds
+    <main className="min-h-full bg-app-canvas px-6 py-12">
+      <div className="mx-auto max-w-2xl">
+        <div className="flex items-center gap-3">
+          <Sparkles className="text-primary" />
+          <h1 className="text-3xl font-semibold tracking-tight">__APP_NAME__</h1>
+        </div>
+        <p className="mt-2 text-muted-foreground">
+          Starter UI for your new Rome app. Tailwind v4 and the Rome component kit are wired up —
+          replace this screen with something useful.
+        </p>
+        {/* Visitor-facing app (public link + Rome Cloud sign-in)? One line adds
           the whole identity control — the signed-in user's avatar icon, the
           owner icon, or a sign-in button — sized for the top-right corner of
           the header row above; the server-side counterpart is
@@ -68,55 +69,56 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
           <CallerBadge className="ml-auto" />
       */}
 
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle>App status</CardTitle>
-          <CardDescription>
-            Live read from <code>GET /api/apps/__APP_ID__/</code>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-6 grid gap-2 sm:max-w-xs">
-            <label className="text-sm font-medium" htmlFor="default-view">
-              Default view
-            </label>
-            <Select value={defaultView} onValueChange={setDefaultView}>
-              {/* Kit controls size to their content; widen from the call site. */}
-              <SelectTrigger id="default-view" className="w-full">
-                <SelectValue placeholder="Choose a view" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="overview">Overview</SelectItem>
-                <SelectItem value="activity">Activity</SelectItem>
-                <SelectItem value="settings">Settings</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {error ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-              {error}
+        <Card className="mt-8">
+          <CardHeader>
+            <CardTitle>App status</CardTitle>
+            <CardDescription>
+              Live read from <code>GET /api/apps/__APP_ID__/</code>.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-6 grid gap-2 sm:max-w-xs">
+              <label className="text-sm font-medium" htmlFor="default-view">
+                Default view
+              </label>
+              <Select value={defaultView} onValueChange={setDefaultView}>
+                {/* Kit controls size to their content; widen from the call site. */}
+                <SelectTrigger id="default-view" className="w-full">
+                  <SelectValue placeholder="Choose a view" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="overview">Overview</SelectItem>
+                  <SelectItem value="activity">Activity</SelectItem>
+                  <SelectItem value="settings">Settings</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          ) : status ? (
-            <pre className="overflow-x-auto rounded-md border bg-muted p-4 text-sm">
-              {JSON.stringify(status, null, 2)}
-            </pre>
-          ) : (
-            <p className="text-sm text-muted-foreground">Loading status…</p>
-          )}
-        </CardContent>
-        <CardFooter className="gap-2">
-          <Button onClick={() => void loadStatus()} disabled={refreshing}>
-            <RefreshCw className={refreshing ? "animate-spin" : undefined} />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </Button>
-          <Button variant="outline" asChild>
-            <a href="https://www.npmjs.com/package/@rome-os/ui" target="_blank" rel="noreferrer">
-              Component kit
-            </a>
-          </Button>
-        </CardFooter>
-      </Card>
+
+            {error ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                {error}
+              </div>
+            ) : status ? (
+              <pre className="overflow-x-auto rounded-md border bg-muted p-4 text-sm">
+                {JSON.stringify(status, null, 2)}
+              </pre>
+            ) : (
+              <p className="text-sm text-muted-foreground">Loading status…</p>
+            )}
+          </CardContent>
+          <CardFooter className="gap-2">
+            <Button onClick={() => void loadStatus()} disabled={refreshing}>
+              <RefreshCw className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="outline" asChild>
+              <a href="https://www.npmjs.com/package/@rome-os/ui" target="_blank" rel="noreferrer">
+                Component kit
+              </a>
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
     </main>
   );
 }

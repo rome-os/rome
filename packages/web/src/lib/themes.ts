@@ -252,6 +252,8 @@ const ember: ThemeDefinition = {
   palette: emberPalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-25)",
     foreground: "var(--neutral-900)",
 
     surface: "var(--neutral-25)",
@@ -320,6 +322,8 @@ const ember: ThemeDefinition = {
   },
   dark: {
     background: "var(--neutral-950)",
+    "chat-canvas": "var(--neutral-950)",
+    "app-canvas": "var(--neutral-950)",
     foreground: "var(--neutral-50)",
 
     surface: "var(--neutral-925)",
@@ -438,6 +442,8 @@ const ash: ThemeDefinition = {
   palette: ashPalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-25)",
     foreground: "var(--neutral-900)",
 
     surface: "var(--neutral-25)",
@@ -560,6 +566,8 @@ const slate: ThemeDefinition = {
   palette: slatePalette,
   light: {
     background: "var(--neutral-50)",
+    "chat-canvas": "var(--neutral-50)",
+    "app-canvas": "var(--neutral-0)",
     foreground: "var(--neutral-950)",
 
     surface: "var(--neutral-0)",
@@ -623,6 +631,8 @@ const slate: ThemeDefinition = {
   },
   dark: {
     background: "var(--neutral-950)",
+    "chat-canvas": "var(--neutral-950)",
+    "app-canvas": "var(--neutral-950)",
     foreground: "var(--neutral-50)",
 
     surface: "var(--neutral-900)",

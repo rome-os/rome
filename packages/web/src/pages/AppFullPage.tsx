@@ -80,7 +80,7 @@ export default function AppFullPage() {
 
   if (error) {
     return (
-      <main className="min-h-dvh bg-background pb-safe pt-safe">
+      <main className="min-h-dvh bg-app-canvas pb-safe pt-safe">
         <div className="p-8">
           <Alert variant="destructive" className="mx-auto max-w-xl rounded-16 p-6">
             <AlertTitle className="text-title">{t("full.failedTitle")}</AlertTitle>
@@ -95,7 +95,7 @@ export default function AppFullPage() {
 
   if (manifest.accessMode === "cloud-email" && manifest.callerAccessAllowed !== true) {
     return (
-      <main className="flex min-h-dvh items-center bg-background pb-safe pt-safe">
+      <main className="flex min-h-dvh items-center bg-app-canvas pb-safe pt-safe">
         <div className="w-full p-8">
           <AppAccessPanel
             appId={manifest.appId}
@@ -120,7 +120,7 @@ export default function AppFullPage() {
   };
 
   return (
-    <main className="min-h-dvh bg-background pb-safe pt-safe">
+    <main className="min-h-dvh bg-app-canvas pb-safe pt-safe">
       <RomeAppHost
         appId={manifest.appId}
         appName={manifest.appName}

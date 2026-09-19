@@ -17,7 +17,7 @@ Within layer 1, tokens are primitive or semantic.
 
 The scale is a fixed set of 68 names, `--neutral-*` plus five hue ramps. Every theme carries all of them with its own values, so Ember's `--neutral-100` is warm linen and Slate's is a cool grey. These are plain custom properties, deliberately not in `@theme`, so Tailwind emits no utilities for the palette steps. See [`ui/primitive-token/color-primitives.md`](ui/primitive-token/color-primitives.md).
 
-**Semantic** tokens are named by intent: `--background`, `--primary`, `--destructive`. Each source mapping points at a primitive step. The mapping is per theme, with a `light` and a `dark` half. That is what lets Ember map `--info` to its orange while Slate maps it to blue, without either primitive name lying.
+**Semantic** tokens are named by intent: `--chat-canvas`, `--app-canvas`, `--primary`, `--destructive`. Each source mapping points at a primitive step. The mapping is per theme, with a `light` and a `dark` half. That is what lets Ember map `--info` to its orange while Slate maps it to blue, without either primitive name lying.
 
 The flow runs palette value → semantic token → `bg-*`/`text-*` utility in a component.
 
@@ -75,7 +75,7 @@ The picker, the runtime CSS injection, and the no-flash bootstrap are all data-d
 
 ## Colors
 
-Use semantic tokens in components: `bg-background`, `text-foreground`, `bg-surface`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-destructive`, and `bg-success`/`bg-warning`/`bg-info`. The dialog and sheet scrim is `bg-overlay` (token `--overlay`), which bakes the alpha into the token. Use `bg-overlay` at full opacity rather than `bg-black/40`. The destructive and error token is `destructive`, not `danger`.
+Use semantic tokens in components: `bg-chat-canvas`, `bg-app-canvas`, `text-foreground`, `bg-surface`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-destructive`, and `bg-success`/`bg-warning`/`bg-info`. Use `bg-background` only on dashboard pages without a dedicated canvas role. The dialog and sheet scrim is `bg-overlay` (token `--overlay`), which bakes the alpha into the token. Use `bg-overlay` at full opacity rather than `bg-black/40`. The destructive and error token is `destructive`, not `danger`.
 
 **Highlights and decorative emphasis use `primary` with alpha, not `accent` and not `brand`.** shadcn's convention is that `--primary` is the single strong color. It does interactive duty (`bg-primary` on Buttons, Switch checked, Tab active) and identity duty through alpha modulation: `bg-primary/5` for a selected card background, `bg-primary/15` for a brand badge, `text-primary` for a folder icon, `ring-primary/30` for a selection ring. `accent` is reserved for shadcn's neutral hover and selected background, so third-party shadcn apps render correctly.
 

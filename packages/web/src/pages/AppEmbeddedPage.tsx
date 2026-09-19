@@ -159,7 +159,7 @@ export default function AppEmbeddedPage() {
   // renders through AppFullPage and never mounts it — that surface is
   // user-facing.
   return (
-    <div>
+    <div className="min-h-full bg-app-canvas">
       <RomeAppHost
         appId={manifest.appId}
         appName={manifest.appName}

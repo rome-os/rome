@@ -16,7 +16,7 @@ export const THEME_NAME_STORAGE_KEY = "rome-theme-name";
  *  that wrote it, so a deploy that changes what `buildThemeCss` emits could
  *  otherwise replay an incompatible payload until the bundle boots. Bump the
  *  suffix whenever the emitted shape changes, and add the old key below. */
-export const THEME_CSS_CACHE_KEY = "rome-theme-css-4";
+export const THEME_CSS_CACHE_KEY = "rome-theme-css-5";
 
 /** Cache keys written by earlier payload shapes. `applyThemeName` clears them on
  *  the next write, so a superseded entry does not sit in storage forever. */
@@ -24,6 +24,7 @@ export const SUPERSEDED_THEME_CSS_CACHE_KEYS = [
   "rome-theme-css",
   "rome-theme-css-2",
   "rome-theme-css-3",
+  "rome-theme-css-4",
 ];
 
 /** The product default theme — explicit, not "whichever is first in

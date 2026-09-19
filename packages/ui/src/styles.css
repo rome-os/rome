@@ -406,11 +406,15 @@
   /* Monospace family — code, tabular numbers, IDs. */
   --font-mono: var(--rome-font-mono);
 
-  /* ── Surface (figure-ground). `--background` is the page canvas (NOT white);
-     `--surface` is the raised card/panel that floats above it. ──────────────── */
+  /* ── Surface (figure-ground). Chat and app routes have separate canvases;
+     `--surface` is the raised card/panel that floats above them. ────────────── */
 
-  /* Page canvas — NOT white; raised surfaces float above it. */
+  /* Generic dashboard canvas and compatibility token. */
   --color-background: var(--background);
+  /* Conversation canvas behind a chat transcript and composer. */
+  --color-chat-canvas: var(--chat-canvas);
+  /* App canvas — a lighter reading plane for compact product UI. */
+  --color-app-canvas: var(--app-canvas);
   /* Default body text on the canvas. */
   --color-foreground: var(--foreground);
   /* Raised card/panel fill above the canvas (`card` aliases this). */

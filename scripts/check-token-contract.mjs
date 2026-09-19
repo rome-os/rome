@@ -141,9 +141,13 @@ async function compileAppCss(root) {
     .map((entry) => join(appsDir, entry.name, "src", "web"))
     .filter((directory) => existsSync(directory))
     .sort();
+  const templateSources = ["template", "workflow"]
+    .map((name) => join(root, "packages", "app-template", name, "src", "web"))
+    .filter((directory) => existsSync(directory));
   const css = [
     '@import "@rome-os/app-web-sdk/styles";',
     `@source "${join(root, "packages", "ui", "src")}";`,
+    ...templateSources.map((directory) => `@source "${directory}";`),
     ...appSources.map((directory) => `@source "${directory}";`),
   ].join("\n");
   writeFileSync(entry, css);

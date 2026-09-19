@@ -78,7 +78,7 @@ This section is intentionally principle-first. It does **not** dictate component
 
 Use the host's semantic tokens for color, surface, and radius — the vocabulary the kit's canon registers (`@rome-os/ui/styles.css`, imported by the SDK stylesheet). Do not paint the UI with raw Tailwind color scales.
 
-- ✅ `bg-background`, `text-foreground`, `bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, `text-primary-foreground`, `bg-accent`, `border-input`, `border-border`, `bg-destructive`, `text-destructive`, `ring-ring`.
+- ✅ `bg-app-canvas`, `text-foreground`, `bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, `text-primary-foreground`, `bg-accent`, `border-input`, `border-border`, `bg-destructive`, `text-destructive`, `ring-ring`.
 - ❌ `bg-emerald-700`, `text-slate-900`, `border-slate-200`, `bg-rose-50`, `text-emerald-800`, `bg-white/70`.
 
 Why this matters: tokens carry dark-mode pairs and propagate brand changes from a single source. The moment a component hardcodes `emerald-700`, dark mode breaks and the design system fractures.
@@ -104,7 +104,7 @@ The default Rome aesthetic is calm, neutral, and information-dense. Decoration m
 
 Principles:
 
-- **Surface flatly.** A page is `bg-background`; sections are `<Card>`s. Avoid gradients on page chrome, glassmorphism (`backdrop-blur` + translucent fills), and colored shadows. Reserve heavy visual treatment for genuinely modal contexts.
+- **Surface flatly.** An app page is `bg-app-canvas`. Put readable text, lists, and tables directly on it, using spacing and dividers for structure. Use `<Card>` only when a region has an independent boundary or interaction state. Never add a card only to make its text readable. Avoid gradients on page chrome, glassmorphism (`backdrop-blur` + translucent fills), and colored shadows. Reserve heavy visual treatment for genuinely modal contexts.
 - **Borders, not auras.** Separation should come from `border` and spacing first, shadow second.
 - **Radii stay quiet.** Inputs and buttons are small radii; cards a touch larger; modals slightly more again. Avoid pillow-soft `rounded-2xl`/`rounded-3xl` on every surface — when everything is rounded heavily, hierarchy disappears.
 - **Density over drama.** Prefer compact spacing, small icons inside text, and short copy. Heroes, oversize titles, and marketing pills do not belong in an internal tool.
@@ -124,6 +124,7 @@ A clean stylesheet is the strongest signal that the design system is intact.
 ### 5. Typography and copy
 
 - Page title is a single restrained heading; supporting text is muted and short.
+- Necessary 13–14px secondary text uses `text-muted-foreground`. Reserve `text-subtle-foreground` for nonessential chrome, and never reduce readable text further with an opacity utility.
 - Use sentence case. Avoid slogans, marketing prose, or jokey punchlines in product UI.
 - **No emoji in titles or nav labels.** The page title, `app.yaml` `web.navLabel`/`displayName`, and any heading are plain words — no leading 📋/✨/🚀 decoration. Emoji as iconography reads as consumer-app whimsy; a custom SVG icon is how an app gets its glyph.
 - **The app's name is Title Case words, never its `appId`.** `app.yaml` `name` / `web.displayName` / `web.navLabel` and the page title read as natural capitalized words — "Morning Brief", "Browser Automation", "Ticket Triage" — *not* the lowercase-hyphenated id (`morning-brief`). The `appId` is the machine identifier (it appears in paths, URLs, and the DB table prefix, so it stays lowercase-hyphenated); the display name is what the guardian sees, so capitalize it. Kebab-case in a heading or nav label is a bug.
