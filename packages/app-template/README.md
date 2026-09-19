@@ -44,7 +44,11 @@ When adding a feature here:
 
 - Keep it minimal and working — the template is the agent's first impression of "what a Rome app looks like."
 - Any code that references `@rome-os/app-runtime`, `@rome-os/app-web-sdk`, or `@rome-os/ui` must use the published scope (no internal `@rome/*` names) and a concrete semver range — a scaffolded app installs from npm, where `workspace:*` does not resolve.
-- Never vendor a component `@rome-os/ui` publishes. The template imports them (`@rome-os/ui/button`, `…/card`, `…/select`) so every scaffolded app takes kit fixes with `pnpm up @rome-os/ui`; a copy under `src/web/components/ui/` would freeze at scaffold time and strand external apps.
+- Never vendor a component `@rome-os/ui` publishes. The template imports the
+  shared page, form, list, control, and state primitives directly from their
+  package subpaths, so every scaffolded app takes kit fixes with
+  `pnpm up @rome-os/ui`; a copy under `src/web/components/ui/` would freeze at
+  scaffold time and strand external apps.
 - Don't add files the agent will likely delete on every new app. The agent prunes; we should not over-scaffold.
 - Keep runtime identity in `app.yaml`; richer store-page copy and media belong in `.rome_store/rome_store.yaml`. The publish flow uploads `.rome_store` as a Rome Cloud-only sidecar and excludes it from installable app bundles.
 - New apps publish their `src/` directory with the Store bundle by default. Set `includeSource: false` in `app.yaml` to keep source out of future versions.

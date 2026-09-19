@@ -17,11 +17,6 @@
  * onto `warning` and `success`.
  */
 export const BASELINE = {
-  "packages/app-template/template/src/web/App.tsx": {
-    "rounded-md": 2,
-    "text-3xl": 1,
-    "text-sm": 4,
-  },
   "packages/app-template/workflow/src/web/App.tsx": {
     "mb-1.5": 1,
     "pb-2.5": 1,
