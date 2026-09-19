@@ -22,7 +22,14 @@ rs.mock("@/pages/free/use-free-cells", () => ({
 afterEach(() => {
   cleanup();
   autoPlaceApp.mockClear();
+  rs.unstubAllGlobals();
 });
+
+// isInternalHref reads window.location.{origin,href}; pin them so "same origin"
+// is deterministic regardless of the jsdom default URL.
+function stubOrigin(origin: string) {
+  rs.stubGlobal("location", { ...window.location, origin, href: `${origin}/chat` });
+}
 
 function renderInWorkspace(
   ui: React.ReactElement,
@@ -54,7 +61,10 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBe("/projects/default/image-summary-39.png");
   });
 
-  it("opens the linked file from an absolute Rome projects URL", () => {
+  it("opens the linked file from an absolute same-origin projects URL", () => {
+    // The deep link points at the instance the user is already on
+    // (staging.romeos.cc), so it opens in-workspace rather than a new tab.
+    stubOrigin("https://staging.romeos.cc");
     const store = createWorkspaceStore();
     const bus = createWorkspaceEventBus();
     const opened: Array<{ paths: string[]; force?: boolean }> = [];
@@ -70,7 +80,70 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md");
   });
 
+  it("opens the file for a same-origin absolute URL on any host, not just *.romeos.cc", () => {
+    // The internal test is origin-based, so a self-hosted instance on its own
+    // domain follows its links in-workspace exactly like a cloud instance.
+    stubOrigin("https://rome.example.org");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: Array<{ paths: string[]; force?: boolean }> = [];
+    bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://rome.example.org/projects/conductor/docs/ui.md">docs</ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("docs"));
+
+    expect(opened).toEqual([{ paths: ["/projects/conductor/docs/ui.md"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md");
+  });
+
+  it("preserves query and hash on an absolute same-origin projects URL", () => {
+    // Parity with the relative branch, which never strips query/hash.
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: Array<{ paths: string[]; force?: boolean }> = [];
+    bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/projects/conductor/docs/ui.md?tab=1#top">
+        docs
+      </ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("docs"));
+
+    expect(opened).toEqual([{ paths: ["/projects/conductor/docs/ui.md?tab=1#top"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/conductor/docs/ui.md?tab=1#top");
+  });
+
+  it("does not follow a projects link to a different *.romeos.cc tenant", () => {
+    // Separate Rome instances live at https://<slug>.romeos.cc; a link to
+    // another tenant must stay external, never hijacked into this workspace.
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: unknown[] = [];
+    bus.on("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://other-tenant.romeos.cc/projects/conductor/docs/ui.md">
+        other tenant
+      </ChatLink>,
+      { store, bus },
+    );
+    const link = screen.getByText("other tenant") as HTMLAnchorElement;
+    fireEvent.click(link);
+
+    expect(opened).toEqual([]);
+    expect(link.target).toBe("_blank");
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
   it("leaves an absolute projects-shaped URL on another host external", () => {
+    stubOrigin("https://staging.romeos.cc");
     const store = createWorkspaceStore();
     const bus = createWorkspaceEventBus();
 
@@ -83,6 +156,31 @@ describe("ChatLink", () => {
 
     expect(link.target).toBe("_blank");
     expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
+  it("guards traversal on the raw absolute path before URL canonicalization", () => {
+    // new URL() collapses `%2E%2E` dot-segments before any guard runs, so the
+    // raw path must be validated directly. A relative href with the same
+    // segments is rejected and followed verbatim; the absolute form must match
+    // it, never synthesizing a canonicalized (e.g. traversed-out) target.
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const opened: Array<{ paths: string[]; force?: boolean }> = [];
+    bus.on<{ paths: string[]; force?: boolean }>("projects:opened", (p) => opened.push(p));
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/projects/a/%2E%2E/%2E%2E/secret.txt">
+        traversal
+      </ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("traversal"));
+
+    // The %2E%2E segments are preserved verbatim (not collapsed to /secret.txt
+    // or /projects/secret.txt), exactly as the relative branch would leave them.
+    expect(opened).toEqual([{ paths: ["/projects/a/%2E%2E/%2E%2E/secret.txt"], force: true }]);
+    expect(store.get("followTargetPath")).toBe("/projects/a/%2E%2E/%2E%2E/secret.txt");
   });
 
   it("decodes a percent-encoded /projects href into a logical path", () => {

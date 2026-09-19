@@ -2,6 +2,7 @@ import { useContext } from "react";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { decodeFileBrowserRoutePath } from "@/lib/file-browser-routing";
+import { isInternalHref } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
@@ -11,7 +12,7 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 // two link shapes the agent emits lives here, and everything else falls through
 // to the default react-router link.
 //
-//   /projects/<project>/<path> or a Rome-hosted absolute form
+//   /projects/<project>/<path> or an absolute same-origin form
 //                              → open the projects panel + select the file
 //                                (reuses the same follow signal ChatWidget
 //                                publishes when an agent links a file).
@@ -26,20 +27,40 @@ function isProjectsHref(href: string): boolean {
   return href === "/projects" || href.startsWith("/projects/");
 }
 
+// Return the raw path+query+hash of an href that addresses a `/projects` route
+// on THIS workspace, or null.
+//
+// Internal-ness is decided by the shared `isInternalHref`, which is scoped to
+// `window.location.origin`. That scoping is deliberate: separate Rome instances
+// live at `https://<slug>.romeos.cc`, so a link to a *different* tenant
+// (`https://other.romeos.cc/projects/…`) must stay external rather than being
+// hijacked into this instance's Projects panel — matching how `isInternalHref`
+// already routes every other server-authored link.
+//
+// We take the path off the RAW href string rather than reusing
+// `toInternalPath` (which returns `new URL(href).pathname`). `new URL()`
+// canonicalizes dot-segments — including percent-encoded `%2E%2E` — *before*
+// the traversal guard (`decodeProjectsHref`/`decodeFileBrowserRoutePath`) can
+// reject them, so `.../projects/a/%2E%2E/secret` would silently collapse to a
+// different path. Slicing the origin off the raw string keeps the guard looking
+// at the same un-canonicalized segments the relative branch validates, and lets
+// query/hash ride along for parity with that branch.
 function getProjectsRouteHref(href: string): string | null {
-  if (isProjectsHref(href)) return href;
+  if (!isInternalHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  return rawPath !== null && isProjectsHref(rawPath) ? rawPath : null;
+}
 
-  let url: URL;
-  try {
-    url = new URL(href);
-  } catch {
-    return null;
-  }
-
-  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-  const isCurrentOrigin = typeof window !== "undefined" && url.origin === window.location.origin;
-  const isRomeHosted = url.hostname === "romeos.cc" || url.hostname.endsWith(".romeos.cc");
-  return (isCurrentOrigin || isRomeHosted) && isProjectsHref(url.pathname) ? url.pathname : null;
+// The raw path+query+hash of an href `isInternalHref` accepted, without the
+// canonicalization `new URL().pathname` applies. A leading `/`, `#` or `?` href
+// is already just that path; an absolute same-origin URL has its scheme and
+// authority sliced off verbatim. A schemeless relative href like `foo/bar`
+// (which `isInternalHref` also accepts) is never a `/projects` route, so it
+// resolves to null here.
+function getInternalRawPath(href: string): string | null {
+  if (href.startsWith("/") || href.startsWith("#") || href.startsWith("?")) return href;
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href);
+  return authority ? href.slice(authority[0].length) || "/" : null;
 }
 
 // The markdown pipeline percent-encodes hrefs (micromark's normalizeUri), so a
