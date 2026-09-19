@@ -117,6 +117,7 @@ export function prepareShadowMount(
       background-color: var(--background);`
       : `
       --background: var(--chat-canvas);
+      --app-canvas: var(--chat-canvas);
       background-color: transparent;`;
   const shellStyle = document.createElement("style");
   shellStyle.textContent = `

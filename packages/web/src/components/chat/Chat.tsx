@@ -1592,7 +1592,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         />
       ))}
       <div
-        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas"
+        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

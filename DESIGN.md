@@ -8,6 +8,8 @@ colors:
   deep-ember: "#c2410c"
   ember-flare: "#e55a22"
   linen-canvas: "#f4f3ef"
+  chat-canvas: "#f4f3ef"
+  app-canvas: "#fdfcf9"
   warm-paper: "#fdfcf9"
   paper-white: "#ffffff"
   recessed-linen: "#efe9e1"
@@ -299,6 +301,7 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 - **Ember Flare** (`#e55a22`): The focus ring under Ember and the Ember `info` mark. A slightly hotter step than the accent so a focused control stands apart from a resting primary button.
 
 ### Neutral
+- **Linen Canvas** (`#f4f3ef`): The generic dashboard ground, used where no dedicated context canvas applies.
 - **Linen Chat Canvas** (`#f4f3ef`): The ground behind chat prose and its composer. Kept softly tinted for long-form reading.
 - **Warm App Canvas** (`#fdfcf9`): The brighter ground behind compact app UI. It may share a fill with a card, whose border then carries the boundary.
 - **Warm Paper** (`#fdfcf9`): A raised card, panel, or table row on the canvas. Dialogs and sheets use it too.

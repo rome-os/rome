@@ -352,7 +352,7 @@ export function ChatComponent({
 
   return (
     <div
-      className="relative flex h-full flex-col bg-chat-canvas"
+      className="relative flex h-full flex-col bg-chat-canvas [--background:var(--chat-canvas)]"
       onDragEnter={handleDraftDragEnter}
       onDragOver={handleDraftDragOver}
       onDragLeave={handleDraftDragLeave}

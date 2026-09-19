@@ -143,7 +143,8 @@ async function compileAppCss(root) {
     .sort();
   const templateSources = ["template", "workflow"]
     .map((name) => join(root, "packages", "app-template", name, "src", "web"))
-    .filter((directory) => existsSync(directory));
+    .filter((directory) => existsSync(directory))
+    .sort();
   const css = [
     '@import "@rome-os/app-web-sdk/styles";',
     `@source "${join(root, "packages", "ui", "src")}";`,

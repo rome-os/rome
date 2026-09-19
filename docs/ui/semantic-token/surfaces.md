@@ -49,6 +49,7 @@ Ash's dark half maps the same steps as Ember's, against its own palette. Every t
 - `--chat-canvas` deliberately equals `--background` today. The separate name pins context so chat and generic dashboard pages can diverge without another component migration. `[mech]`
 - The app canvas may resolve to white. Compact UI needs a brighter reading plane than chat prose. `[mech]`
 - A card may share the app canvas fill. Its border and grouping must carry the boundary when the fills collapse. `[mech]`
+- A control painted with `--background` may likewise share its enclosing card's fill inside an app. Its input border or control edge must remain sufficient without fill contrast. `[mech]`
 - The stack reverses between modes where its fills differ. In light a canvas is darker than a card, and a recessed region is darker still. In dark every distinct layer rises from the canvas. `[mech]`
 - Two pairs collapse in some themes. Slate light resolves `--surface` and `--surface-elevated` to the same white, and every dark half resolves `--surface-muted` and `--surface-elevated` to the same step. A layer that must read as floating carries a border or a shadow, never fill alone. `[mech]`
 - `--surface-hover` states a transient fill. A row at rest takes `--surface`. `[mech]`

@@ -28,6 +28,7 @@ describe("prepareShadowMount", () => {
     const shellCss = host.shadowRoot?.querySelector("style")?.textContent ?? "";
     expect(shellCss).not.toContain("--background: var(--app-canvas)");
     expect(shellCss).toContain("--background: var(--chat-canvas)");
+    expect(shellCss).toContain("--app-canvas: var(--chat-canvas)");
     expect(shellCss).toContain("background-color: transparent");
   });
 });

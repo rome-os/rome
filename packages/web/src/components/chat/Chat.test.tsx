@@ -198,6 +198,13 @@ afterEach(() => {
 });
 
 describe("Chat agent identity", () => {
+  it("binds generic canvas consumers to the chat canvas", () => {
+    const { container } = renderChat(<Chat sessionId="session-1" />);
+    const chatRoot = container.querySelector('[class~="bg-chat-canvas"]');
+
+    expect(chatRoot?.classList.contains("[--background:var(--chat-canvas)]")).toBe(true);
+  });
+
   it("shows the expand control only while the apps panel is collapsed", async () => {
     const user = userEvent.setup();
     const { rerender } = renderChat(<Chat sessionId="session-1" />);

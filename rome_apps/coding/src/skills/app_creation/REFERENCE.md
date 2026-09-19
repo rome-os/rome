@@ -926,7 +926,8 @@ See the community sample repo for full web app examples.
   `:host` when it injects the bundle into the shadow root
   (`packages/web/src/components/rome-app-host.tsx`), which is what makes an
   app-declared value beat the inherited host token.
-- The app root uses `bg-app-canvas`. The host maps `--background` onto
+- A full-page app root uses `bg-[var(--app-canvas)]`; an inline chat component
+  leaves its root canvas transparent. The host maps `--background` onto
   `--app-canvas` inside the app ShadowRoot so installed bundles that use
   `bg-background` receive the app canvas too.
 - **Read only the tokens your own bundle supplies.** The host promises one

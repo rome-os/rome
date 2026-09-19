@@ -115,6 +115,9 @@ describe("ChatComponent draft file drops", () => {
     const { container } = renderChatComponent();
 
     expect(container.firstElementChild?.classList.contains("bg-chat-canvas")).toBe(true);
+    expect(
+      container.firstElementChild?.classList.contains("[--background:var(--chat-canvas)]"),
+    ).toBe(true);
   });
 
   it("renders the send button as an icon-only control", () => {

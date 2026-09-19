@@ -147,7 +147,9 @@ const COLOR_SEMANTICS: Record<string, readonly string[]> = {
   "coral-ember": ["primary", "brand"],
   "deep-ember": ["primary-hover"], // "The `primary-hover` token under Ember"
   "ember-flare": ["ring", "info"], // "The focus ring under Ember and the Ember `info` mark"
-  "linen-canvas": ["background"], // "The page ground behind every region"
+  "linen-canvas": ["background"], // "The generic dashboard ground"
+  "chat-canvas": ["chat-canvas"], // "The ground behind chat prose and its composer"
+  "app-canvas": ["app-canvas"], // "The brighter ground behind compact app UI"
   "warm-paper": ["surface"], // "A raised card, panel, or table row"
   "paper-white": ["surface-elevated"], // "The highest layer, for popovers, menus, and toasts"
   // "A region recessed inside a card ... and the `muted` fill behind ghost-button hover"
