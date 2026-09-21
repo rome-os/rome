@@ -201,6 +201,80 @@ describe("Pi settings service", () => {
     });
   });
 
+  it("bounds the post-save status read", async () => {
+    const service = new PiSettingsService(
+      async () => ({
+        runtime: fakeRuntime({
+          checkAuth: async (_providerId, options) =>
+            await new Promise<undefined>((_resolve, reject) => {
+              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
+            }),
+        }),
+        dispose() {},
+      }),
+      1,
+    );
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).resolves.toMatchObject({
+      status: { catalogStatus: "discovery-failed", discoveryFailedProviders: ["kimi-coding"] },
+    });
+  });
+
+  it("does not let an earlier provider mutation replace a newer cached status", async () => {
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefresh = new Promise<void>((resolve) => {
+      releaseFirstRefresh = resolve;
+    });
+    let firstRefreshStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      firstRefreshStarted = resolve;
+    });
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      const first = created === 1;
+      const providerId = first ? "kimi-coding" : "moonshotai";
+      const modelId = first ? "first-model" : "second-model";
+      return {
+        runtime: fakeRuntime({
+          getProviders: () => [{ id: providerId, name: providerId }],
+          checkAuth: async () => ({ type: "api_key" }),
+          getAvailable: async () => [
+            {
+              id: modelId,
+              name: modelId,
+              provider: providerId,
+              api: "openai-completions",
+              input: ["text"],
+              reasoning: false,
+            },
+          ],
+          refresh: async () => {
+            if (first) {
+              firstRefreshStarted?.();
+              await firstRefresh;
+            }
+            return { errors: new Map() };
+          },
+        }),
+        dispose() {},
+      };
+    });
+
+    const firstSave = service.saveCredential({ providerId: "kimi-coding", token: "first-token" });
+    await firstStarted;
+    const secondSave = service.saveCredential({ providerId: "moonshotai", token: "second-token" });
+    await secondSave;
+    releaseFirstRefresh?.();
+    await firstSave;
+
+    await expect(service.status()).resolves.toMatchObject({
+      models: [expect.objectContaining({ qualifiedModelId: "moonshotai/second-model" })],
+    });
+  });
+
   it("recognizes Pi's exported synchronization error", async () => {
     const service = new PiSettingsService(async () => ({
       runtime: fakeRuntime({
@@ -227,16 +301,23 @@ describe("Pi settings service", () => {
     const replacementToken = randomBytes(32).toString("hex");
     const externalToken = randomBytes(32).toString("hex");
     const previousAnthropicToken = process.env.ANTHROPIC_API_KEY;
-    const factory = async () => ({
-      runtime: (await ModelRuntime.create({
-        authPath: join(agentDir, "auth.json"),
-        modelsPath: null,
-        modelsStorePath: join(agentDir, "models-cache.json"),
+    const factory = async () => {
+      const actual = await ModelRuntime.create({
+        ...piRuntimePaths(agentDir),
         allowModelNetwork: false,
         refreshOnCreate: false,
-      })) as PiModelRuntime,
-      dispose() {},
-    });
+      });
+      // Exercise the production-owned paths while keeping this persistence
+      // test hermetic: catalog refresh networking is covered separately.
+      const runtime = new Proxy(actual, {
+        get(target, property) {
+          if (property === "refresh") return async () => ({ errors: new Map() });
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as PiModelRuntime;
+      return { runtime, dispose() {} };
+    };
     try {
       const service = new PiSettingsService(factory);
       const result = await service.saveCredential({ providerId: "kimi-coding", token });

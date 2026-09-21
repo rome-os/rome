@@ -647,7 +647,19 @@ export async function buildTestDeps(
     agentTurnStreamRegistry,
     aiToolState,
     codexAccountService,
-    piSettings: new PiSettingsService(),
+    // Keep generic test dependencies isolated from Pi's user-owned files.
+    piSettings: new PiSettingsService(async () => ({
+      runtime: {
+        getProviders: () => [],
+        listCredentials: async () => [],
+        checkAuth: async () => undefined,
+        getAvailable: async () => [],
+        login: async () => ({}),
+        logout: async () => {},
+        refresh: async () => ({ errors: new Map() }),
+      },
+      dispose() {},
+    })),
     publicAccessState,
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),

@@ -188,9 +188,16 @@ export class PiSettingsService {
     private readonly statusTimeoutMs = STATUS_TIMEOUT_MS,
   ) {}
 
-  private invalidateCache(): void {
+  private invalidateCache(): number {
     this.cacheGeneration += 1;
     this.cached = null;
+    return this.cacheGeneration;
+  }
+
+  private cacheStatus(generation: number, value: PiSettingsStatus): void {
+    if (this.cacheGeneration === generation) {
+      this.cached = { value, expiresAt: Date.now() + CACHE_MS };
+    }
   }
 
   private async withProviderMutation<T>(providerId: string, fn: () => Promise<T>): Promise<T> {
@@ -296,6 +303,16 @@ export class PiSettingsService {
     };
   }
 
+  private async readStatusWithTimeout(runtime: PiModelRuntime): Promise<PiSettingsStatus> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
+    try {
+      return await this.readStatus(runtime, controller.signal);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   status(options: { bypassCache?: boolean } = {}): Promise<PiSettingsStatus> {
     if (!options.bypassCache && this.cached && this.cached.expiresAt > Date.now()) {
       return Promise.resolve(this.cached.value);
@@ -308,9 +325,7 @@ export class PiSettingsService {
     const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
     const promise = this.useRuntime((runtime) => this.readStatus(runtime, controller.signal))
       .then((value) => {
-        if (this.cacheGeneration === generation) {
-          this.cached = { value, expiresAt: Date.now() + CACHE_MS };
-        }
+        this.cacheStatus(generation, value);
         return value;
       })
       .finally(() => clearTimeout(timeout));
@@ -343,7 +358,7 @@ export class PiSettingsService {
   }): Promise<PiCredentialMutationResult> {
     assertProvider(input.providerId);
     const token = validatePiToken(input.token);
-    this.invalidateCache();
+    const cacheGeneration = this.invalidateCache();
     let synchronized = true;
     let status: PiSettingsStatus | undefined;
     await this.useRuntime(async (runtime) => {
@@ -395,7 +410,7 @@ export class PiSettingsService {
       } finally {
         clearTimeout(timeout);
       }
-      status = await this.readStatus(runtime);
+      status = await this.readStatusWithTimeout(runtime);
       if (catalogFailed) {
         status = {
           ...status,
@@ -407,7 +422,7 @@ export class PiSettingsService {
       }
     });
     if (!status) throw new Error("Pi credential status was unavailable after save.");
-    this.cached = { value: status, expiresAt: Date.now() + CACHE_MS };
+    this.cacheStatus(cacheGeneration, status);
     return {
       credentialPersisted: true,
       synchronizationSucceeded: synchronized,
@@ -456,7 +471,7 @@ export class PiSettingsService {
         clearTimeout(timeout);
       }
     });
-    this.invalidateCache();
+    const cacheGeneration = this.invalidateCache();
     const status = await this.status({ bypassCache: true });
     if (!refreshFailed) return status;
     const failed = [...new Set([...status.discoveryFailedProviders, providerId])];
@@ -465,7 +480,7 @@ export class PiSettingsService {
       catalogStatus: "discovery-failed",
       discoveryFailedProviders: failed,
     };
-    this.cached = { value: result, expiresAt: Date.now() + CACHE_MS };
+    this.cacheStatus(cacheGeneration, result);
     return result;
   }
 }

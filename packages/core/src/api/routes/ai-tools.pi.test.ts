@@ -13,6 +13,17 @@ const emptyStatus = {
 };
 
 describe("Pi AI tools routes", () => {
+  it("keeps generic test dependencies isolated from Pi user files", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      const app = new Hono().route("/", aiToolsRoutes(deps));
+      expect((await app.request("/ai-tools/pi")).status).toBe(200);
+    } finally {
+      testDb.close();
+    }
+  });
+
   it("does not probe Pi from generic status and only probes the explicit flow", async () => {
     const testDb = createTestDb();
     try {
