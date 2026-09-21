@@ -131,6 +131,25 @@ it("opens a pinned app in a new tab, since a plain click already opens it here",
   expect(item.getAttribute("target")).toBe("_blank");
 });
 
+it("keeps a plain Open on a touch device, where the mobile app's WebView has no tabs to open", async () => {
+  // Same query `useCoarsePointer` asks; every other query keeps jsdom's answer
+  // of "no match", so nothing else about the layout changes.
+  rs.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(hover: none) and (pointer: coarse)",
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  renderSidebar(false);
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
+});
+
 it("keeps a plain Open in the Mac app, where a new tab lands in a browser with no Rome session", async () => {
   window.rome = {};
   renderSidebar(false);

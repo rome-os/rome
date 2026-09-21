@@ -48,6 +48,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { APP_STORE_BROWSE_URL } from "@/lib/app-store-url";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
@@ -237,6 +238,17 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   const [storeOpen, setStoreOpen] = useState(false);
   const invalidateSettings = useInvalidateSettings();
   const invalidateApps = useInvalidateApps();
+  // The Mac app has no tabs, and its shell hands every new-window request to
+  // the system browser — which holds no Rome session, so the user lands in
+  // Safari at a sign-in page. Anything here that would open a tab stays in the
+  // window instead.
+  const inDesktopApp = isElectronShell();
+  // The mobile app's WebView has no tabs either: it turns a same-origin
+  // `target="_blank"` into a reload of the page it is on. The dashboard cannot
+  // tell that WebView from a phone's browser, so a new tab is offered only to
+  // a pointer that can right-click for one.
+  const coarsePointer = useCoarsePointer();
+  const canOpenNewTab = !inDesktopApp && !coarsePointer;
   // The list query only revalidates on mount and window focus, but the shell
   // stays mounted while the agent builds an app in the chat beside it. Listen
   // to the catalog stream so that app reaches the sidebar as it installs.
@@ -313,20 +325,19 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
           {/* A plain click on the icon already opens the app in place, so the
-              menu's open is the one a click cannot do: a new tab. The Mac app
-              has no tabs — its shell hands a new window to the system browser,
-              which holds no Rome session — so there it stays a plain open. */}
+              menu's open is the one a click cannot do: a new tab — wherever
+              there are tabs. */}
           <ContextMenuItem asChild>
-            {isElectronShell() ? (
+            {canOpenNewTab ? (
+              <a href={app.href} target="_blank" rel="noopener noreferrer">
+                <ExternalLink aria-hidden />
+                {tApps("installed.openNewTabTitle")}
+              </a>
+            ) : (
               <Link to={app.href}>
                 <AppWindow aria-hidden />
                 {tApps("installed.openButton")}
               </Link>
-            ) : (
-              <a href={app.href} target="_blank" rel="noreferrer">
-                <ExternalLink aria-hidden />
-                {tApps("installed.openNewTabTitle")}
-              </a>
             )}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
@@ -403,11 +414,8 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   };
 
   // The App Store lives on Rome Cloud. A browser opens it in a new tab, which
-  // is what a tab is for. The Mac app has no tabs, and its shell hands every
-  // new-window request to the system browser — so there the same anchor lands
-  // the user in Safari, outside their Rome session. Only the desktop swaps to
-  // the embedded sheet; the browser keeps the anchor.
-  const inDesktopApp = isElectronShell();
+  // is what a tab is for; the Mac app (see `inDesktopApp`) swaps to the embedded
+  // sheet instead.
   // Held here rather than at either call site: the rail and the wide sidebar
   // return separately, and both need it.
   const storeSheet = inDesktopApp ? (
