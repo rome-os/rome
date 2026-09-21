@@ -75,6 +75,10 @@ function makeServer(
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
     talkRouter?: { list: ReturnType<typeof rs.fn> };
+    originMessaging?: {
+      capture: ReturnType<typeof rs.fn>;
+      send: ReturnType<typeof rs.fn>;
+    };
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -106,6 +110,10 @@ function makeServer(
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
     talkRouter: overrides.talkRouter,
+    originMessaging: overrides.originMessaging ?? {
+      capture: rs.fn(),
+      send: rs.fn(),
+    },
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -119,6 +127,53 @@ function makeServer(
 }
 
 describe("WorkerRpcServer param validation", () => {
+  it("forwards only the strict exact-origin capture contract", async () => {
+    const capture = rs.fn(async () => ({
+      status: "captured",
+      origin: "or1_opaque",
+      expiresAt: "2026-10-19T00:00:00.000Z",
+    }));
+    const { server } = makeServer({ originMessaging: { capture, send: rs.fn() } });
+    const route = {
+      connectionId: "connection:discord",
+      service: "discord",
+      conversationId: "dm:guardian",
+    };
+
+    await expect(
+      server.dispatchInProcess("origin.capture", { appId: "conductor", route }),
+    ).resolves.toMatchObject({ status: "captured" });
+    expect(capture).toHaveBeenCalledWith("conductor", route);
+    await expect(
+      server.dispatchInProcess("origin.capture", {
+        appId: "conductor",
+        route,
+        alternateConversationId: "attacker-target",
+      }),
+    ).rejects.toThrow(/invalid params/);
+  });
+
+  it("forwards only opaque origin send input and rejects alternate targets", async () => {
+    const send = rs.fn(async () => ({
+      status: "accepted",
+      deduplicated: false,
+      receipt: { messageId: "m-1" },
+    }));
+    const { server } = makeServer({ originMessaging: { capture: rs.fn(), send } });
+    const input = { origin: "or1_opaque", text: "Action needed.", idempotencyKey: "asked:7" };
+
+    await expect(
+      server.dispatchInProcess("origin.send", { appId: "conductor", input }),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(send).toHaveBeenCalledWith("conductor", input);
+    await expect(
+      server.dispatchInProcess("origin.send", {
+        appId: "conductor",
+        input: { ...input, connectionId: "connection:other" },
+      }),
+    ).rejects.toThrow(/invalid params/);
+  });
+
   it("forwards a pinned Store source to create without an install call", async () => {
     const install = rs.fn();
     const { server, services } = makeServer({ appManager: { setEnabled: rs.fn(), install } });

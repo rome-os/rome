@@ -874,3 +874,41 @@ export const connectionGrants = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.custody, table.name] })],
 );
+
+/**
+ * Opaque exact-origin capabilities captured by first-party apps. Provider
+ * coordinates stay in Rome's database; apps receive only the random reference
+ * whose hash is the primary key here.
+ */
+export const originRoutes = sqliteTable(
+  "origin_routes",
+  {
+    refHash: text("ref_hash").primaryKey(),
+    appId: text("app_id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    service: text("service").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    status: text("status", { enum: ["active", "revoked"] }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_origin_routes_expiry").on(table.expiresAt)],
+);
+
+/** One terminal outcome per app, captured origin, and app-supplied idempotency key. */
+export const originSendAttempts = sqliteTable(
+  "origin_send_attempts",
+  {
+    appId: text("app_id").notNull(),
+    refHash: text("ref_hash").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    outcome: text("outcome", { mode: "json" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appId, table.refHash, table.idempotencyKey] }),
+    index("idx_origin_send_attempts_updated_at").on(table.updatedAt),
+  ],
+);

@@ -19,6 +19,7 @@ import {
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
+import type { ActionExecutionStore } from "../actions/context.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentMessage, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
@@ -292,6 +293,8 @@ export interface SendTurnOptions {
   attachmentsCount?: number;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  /** Core-only exact origin for action tool calls in this turn. */
+  originRoute?: ActionExecutionStore["originRoute"];
   /** Durable Rome session id when it differs from the runtime AgentSession id. */
   romeSessionId?: string;
   /** Durable Rome session kind used by Rome-owned navigation. */
@@ -667,6 +670,7 @@ interface TurnExecRefs {
   getTurnId: () => string | undefined;
   getThreadContext: () => ThreadContext | undefined;
   getSharedContext: () => Record<string, unknown> | undefined;
+  getOriginRoute: () => ActionExecutionStore["originRoute"];
   /**
    * Whether this owner's tool results reach a surface that mounts interactive
    * UI. The live webchat session's drain loop does; a forked turn's stream has
@@ -707,6 +711,8 @@ interface ForkTurnContext {
   model: string;
   /** Thread metadata for the fork's action executions (see ForkedAgentTurnInput). */
   threadContext?: ThreadContext;
+  /** Snapshot of the active source turn only; never retained by the session. */
+  originRoute?: ActionExecutionStore["originRoute"];
   /**
    * Interleave an out-of-band message into the forked turn's stream.
    */
@@ -960,6 +966,7 @@ async function openSession(
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
+    getOriginRoute: () => impl.currentTurnOriginRouteRef,
     // Action results that hand back UI (pending_interaction, handoff,
     // place_widget) read this, not the facade flag on ModelSessionParams. A
     // detached session must degrade both, or the agent still parks on a
@@ -987,6 +994,7 @@ async function openSession(
           {
             initiator: `agent:${key.agentName}`,
             channelContext: refs.getThreadContext(),
+            originRoute: refs.getOriginRoute(),
             sharedContext: refs.getSharedContext(),
             sessionId: refs.sessionId,
             agentName: key.agentName,
@@ -1263,6 +1271,7 @@ async function openSession(
             workingDir,
             threadContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
+            originRoute: refs.getOriginRoute(),
           },
         );
         try {
@@ -1435,6 +1444,7 @@ async function openSession(
       getTurnId: () => fork.forkTurnId,
       getThreadContext: () => fork.threadContext ?? init.threadContext,
       getSharedContext: () => init.sharedContext,
+      getOriginRoute: () => fork.originRoute,
       // Nothing drains a fork stream into webchat, so interactive action
       // results (pending_interaction / handoff / place_widget) must take the
       // prose fallbacks — otherwise the tool_result claims a card was shown
@@ -1675,6 +1685,7 @@ interface TurnSink {
   lifecycleAttachmentsCount?: number;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
+  originRoute?: ActionExecutionStore["originRoute"];
   romeSessionId: string;
   romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
@@ -1924,6 +1935,13 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
     return this.currentSink?.sharedContext ?? this.sharedContext;
+  }
+
+  get currentTurnOriginRouteRef(): ActionExecutionStore["originRoute"] {
+    // Exact origins are turn-scoped. Never retain one on the reusable agent
+    // session: a later Board or unrelated channel turn may resume the same
+    // provider session without carrying inbound Talk authority.
+    return this.currentSink?.originRoute;
   }
 
   get currentTurnRomeSessionIdRef(): string {
@@ -2626,6 +2644,9 @@ class AgentSessionImpl implements AgentSession {
     }
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
+    // Capture authority at invocation. Waiting for the mutex must not pick up
+    // an unrelated later turn, and an idle session has no origin to inherit.
+    const originRoute = this.currentTurnOriginRouteRef;
     const mode: ForkRunMode = input.mode ?? "isolated";
     // Forked turns bracket their stream like regular turns; the ids are
     // minted here because no sendTurn is involved. No per-turn session_init
@@ -2716,6 +2737,7 @@ class AgentSessionImpl implements AgentSession {
             forkTurnId: turnId,
             model: forkModel?.model ?? sourceModelSession.model,
             threadContext: input.threadContext,
+            originRoute,
             emit: (msg) => outbound.push(msg),
             continuable: !!input.persistThreadKey,
           });
@@ -2923,6 +2945,7 @@ class AgentSessionImpl implements AgentSession {
       lifecycleAttachmentsCount: options?.attachmentsCount,
       threadContext: options?.threadContext,
       sharedContext: options?.sharedContext,
+      originRoute: options?.originRoute,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
       romeSessionType:
         options?.romeSessionType ??

@@ -87,6 +87,9 @@ import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
+import { OriginMessengerProxy } from "./actions/service-proxies.js";
+import { OriginMessagingService } from "./origin-messaging/service.js";
+import { TalkExactOriginTransport } from "./origin-messaging/transport.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import { AnthropicProvider } from "./core/anthropic-provider.js";
 import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
@@ -458,6 +461,20 @@ async function main() {
     installed: firstPartyBoot.installed,
     reinstalled: firstPartyBoot.reinstalled,
   });
+  const originMessaging = new OriginMessagingService(
+    db,
+    new TalkExactOriginTransport(talkRouter),
+    (appId) => {
+      const app = appCatalog.get(appId);
+      return (
+        app?.firstParty === true &&
+        app.enabled === true &&
+        app.state === "installed" &&
+        "manifest" in app
+      );
+    },
+  );
+  const originMessengerFactory = (appId: string) => new OriginMessengerProxy(appId);
   appsLog.info("artifact legacy bindings loaded", {
     agents: Object.keys(artifactIdentity.legacyBindings.agent).length,
     actions: Object.keys(artifactIdentity.legacyBindings.action).length,
@@ -577,6 +594,7 @@ async function main() {
     routinesRepo,
     repositories: appRuntimeRepositories,
     favorService,
+    originMessengerFactory,
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
@@ -849,6 +867,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      originMessengerFactory,
       hostExecution,
     },
   );
@@ -860,6 +879,7 @@ async function main() {
       routinesRepo,
       repositories: appRuntimeRepositories,
       favorService,
+      originMessengerFactory,
       hostExecution,
     }),
   );
@@ -1181,6 +1201,7 @@ async function main() {
     },
     backendTurnRunner,
     notify: notifyClient,
+    originMessaging,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();

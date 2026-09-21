@@ -18,6 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
+import { actionExecutionContext } from "../actions/context.js";
 
 const log = createLogger("rpc-agent-runner");
 
@@ -78,6 +79,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
       sessionId: params.sessionId,
       hookInvocationContext: getCurrentHookInvocationContext(),
       actionContext: getCurrentActionContext(),
+      originRoute: actionExecutionContext.getStore()?.originRoute,
     };
 
     let response: RunTurnResponse;

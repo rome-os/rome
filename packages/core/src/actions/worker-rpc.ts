@@ -27,6 +27,7 @@ import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
 import { createLogger } from "../logger.js";
+import type { OriginMessagingService } from "../origin-messaging/service.js";
 
 const log = createLogger("worker-rpc");
 
@@ -65,6 +66,30 @@ const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 // internal wire contract surfaces as an error rather than being silently
 // stripped — a typo'd param must not degrade to the default alert unnoticed.
 const NotifySendParams = z.object({ body: z.string().optional() }).strict();
+const OriginCaptureParams = z
+  .object({
+    appId: AppIdSchema,
+    route: z
+      .object({
+        connectionId: z.string().min(1),
+        service: z.string().min(1),
+        conversationId: z.string().min(1),
+      })
+      .strict(),
+  })
+  .strict();
+const OriginSendParams = z
+  .object({
+    appId: AppIdSchema,
+    input: z
+      .object({
+        origin: z.string(),
+        text: z.string(),
+        idempotencyKey: z.string(),
+      })
+      .strict(),
+  })
+  .strict();
 
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
 const AgentHasAgentParams = z.object({ name: z.string().min(1) });
@@ -210,6 +235,7 @@ export interface WorkerRpcServices {
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
+  originMessaging: OriginMessagingService;
 }
 
 export class WorkerRpcServer {
@@ -330,6 +356,14 @@ export class WorkerRpcServer {
         // so an absent body is `send(undefined)`, not `send({})`.
         const { body } = parseParams("notify.send", NotifySendParams, params);
         return await this.services.notify.send(body !== undefined ? { body } : undefined);
+      }
+      case "origin.capture": {
+        const { appId, route } = parseParams("origin.capture", OriginCaptureParams, params);
+        return await this.services.originMessaging.capture(appId, route);
+      }
+      case "origin.send": {
+        const { appId, input } = parseParams("origin.send", OriginSendParams, params);
+        return await this.services.originMessaging.send(appId, input);
       }
       default:
         throw new Error(`Unknown WorkerRPC method: ${method}`);

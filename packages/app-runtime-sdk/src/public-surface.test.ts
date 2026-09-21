@@ -1,5 +1,17 @@
 import { describe, expect, it } from "@rstest/core";
 import * as sdk from "./index.js";
+import type { OriginMessageReceipt, OriginReference, OriginMessenger } from "./index.js";
+
+// @ts-expect-error Origin references expose no raw connection coordinate.
+type _OriginReferenceHasNoConnectionId = OriginReference["connectionId"];
+// @ts-expect-error Origin receipts expose no raw conversation coordinate.
+type _OriginReceiptHasNoConversationId = OriginMessageReceipt["conversationId"];
+
+type _OriginSendInput = Parameters<OriginMessenger["send"]>[0];
+// @ts-expect-error Callers cannot choose an alternate destination.
+type _OriginSendHasNoConversationId = _OriginSendInput["conversationId"];
+// @ts-expect-error Callers cannot choose a connection.
+type _OriginSendHasNoConnectionId = _OriginSendInput["connectionId"];
 
 // The published SDK carries zero IPC vocabulary, so an app cannot
 // take a dependency on process topology. If a transport primitive ever leaks

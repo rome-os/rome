@@ -436,6 +436,60 @@ describe("ActionEngine", () => {
       });
     }, 30_000);
 
+    it("derives an exact origin only for the matching inbound Talk initiator", async () => {
+      const seen: unknown[] = [];
+      await setup({
+        actions: [
+          buildAction("ctx_origin", {
+            execute: async () => {
+              seen.push(actionExecutionContext.getStore()?.originRoute);
+              return { status: "ok" };
+            },
+          }),
+        ],
+      });
+      const channelContext = {
+        connectionId: "connection:discord",
+        channel: "discord",
+        threadId: "dm:guardian",
+      };
+
+      await rome.actionEngine.run(
+        "ctx_origin",
+        {},
+        {
+          initiator: "connection:connection:discord",
+          channelContext,
+        },
+      );
+      await rome.actionEngine.run(
+        "ctx_origin",
+        {},
+        {
+          initiator: "agent:main",
+          channelContext,
+        },
+      );
+      await rome.actionEngine.run(
+        "ctx_origin",
+        {},
+        {
+          initiator: "connection:other",
+          channelContext,
+        },
+      );
+
+      expect(seen).toEqual([
+        {
+          connectionId: "connection:discord",
+          service: "discord",
+          conversationId: "dm:guardian",
+        },
+        undefined,
+        undefined,
+      ]);
+    }, 30_000);
+
     it("preserves the current hook invocation context through direct actions", async () => {
       let capturedContext: unknown;
       await setup({

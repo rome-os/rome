@@ -24,6 +24,13 @@ export interface ActionExecutionStore {
   callerAppId?: string;
   engine?: ActionEngine;
   channelContext?: ThreadContext;
+  /** Trusted, provider-neutral coordinates derived only from a root inbound
+   * Talk invocation. Never exposed through CurrentActionContext. */
+  originRoute?: {
+    connectionId: string;
+    service: string;
+    conversationId: string;
+  };
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
   turnId?: string;

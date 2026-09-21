@@ -1,11 +1,107 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { BackendTurnRunnerProxy, NotifyServiceProxy, TalkRouterProxy } from "./service-proxies.js";
+import {
+  BackendTurnRunnerProxy,
+  NotifyServiceProxy,
+  OriginMessengerProxy,
+  TalkRouterProxy,
+} from "./service-proxies.js";
 import {
   setWorkerRpcInProcessDispatcher,
   WorkerRpcDisconnectError,
   WorkerRpcSendError,
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
+import { actionExecutionContext } from "./context.js";
+
+describe("OriginMessengerProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  it("captures only from the trusted internal inbound route context", async () => {
+    process.send = undefined;
+    const dispatcher = rs.fn(async (_method: string, _params: unknown) => ({
+      status: "captured",
+      origin: "or1_opaque",
+      expiresAt: "2026-10-19T00:00:00.000Z",
+    }));
+    setWorkerRpcInProcessDispatcher(dispatcher);
+    const messenger = new OriginMessengerProxy("conductor");
+
+    await expect(messenger.capture()).resolves.toEqual({
+      status: "unavailable",
+      reason: "not_inbound_talk_context",
+    });
+    expect(dispatcher).not.toHaveBeenCalled();
+
+    const route = {
+      connectionId: "connection:discord",
+      service: "discord",
+      conversationId: "dm:guardian",
+    };
+    const result = await actionExecutionContext.run(
+      {
+        executionId: "execution-1",
+        rootExecutionId: "execution-1",
+        initiator: "connection:discord",
+        originRoute: route,
+      },
+      () => messenger.capture(),
+    );
+
+    expect(result).toMatchObject({ status: "captured", origin: "or1_opaque" });
+    expect(dispatcher).toHaveBeenCalledWith("origin.capture", {
+      appId: "conductor",
+      route,
+    });
+  });
+
+  it("sends only an opaque origin, text, and idempotency key across the app seam", async () => {
+    process.send = undefined;
+    let seen: unknown;
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      expect(method).toBe("origin.send");
+      seen = params;
+      return { status: "accepted", deduplicated: false, receipt: { messageId: "m-1" } };
+    });
+
+    await expect(
+      new OriginMessengerProxy("conductor").send({
+        origin: "or1_opaque" as never,
+        text: "Action needed.",
+        idempotencyKey: "asked:7",
+      }),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(seen).toEqual({
+      appId: "conductor",
+      input: {
+        origin: "or1_opaque",
+        text: "Action needed.",
+        idempotencyKey: "asked:7",
+      },
+    });
+    expect(JSON.stringify(seen)).not.toContain("connectionId");
+    expect(JSON.stringify(seen)).not.toContain("conversationId");
+  });
+
+  it("maps every process-seam send failure to indeterminate instead of throwing", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => {
+      throw new Error("unexpected main-process failure");
+    });
+
+    await expect(
+      new OriginMessengerProxy("conductor").send({
+        origin: "or1_opaque" as never,
+        text: "Action needed.",
+        idempotencyKey: "asked:8",
+      }),
+    ).resolves.toEqual({ status: "indeterminate", deduplicated: false });
+  });
+});
 
 describe("TalkRouterProxy", () => {
   const originalSend = process.send;

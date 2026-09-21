@@ -52,11 +52,15 @@ import type {
   TalkRouter,
   InboundMessage,
   MessageReceipt,
+  OriginCaptureOutcome,
+  OriginMessenger,
+  OriginSendOutcome,
   OutgoingMessage,
   ListConversationSettingsInput,
   ResetConversationSettingsInput,
   UpdateConversationSettingsInput,
 } from "@rome-os/app-runtime";
+import { actionExecutionContext } from "./context.js";
 
 /** apps.* operations install/pack on the main process — minutes, not seconds. */
 const APP_INSTALL_RPC_TIMEOUT_MS = 3 * 60 * 1000;
@@ -70,6 +74,42 @@ const BACKEND_TURN_RPC_TIMEOUT_MS = 30 * 60 * 1000;
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
  * WorkerRpcClient's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+const ORIGIN_SEND_RPC_TIMEOUT_MS = 150 * 1000;
+
+/** App-bound exact-origin capability. Raw routes come only from Core's ALS. */
+export class OriginMessengerProxy implements OriginMessenger {
+  constructor(private readonly appId: string) {}
+
+  async capture(): Promise<OriginCaptureOutcome> {
+    const route = actionExecutionContext.getStore()?.originRoute;
+    if (!route) {
+      return { status: "unavailable", reason: "not_inbound_talk_context" };
+    }
+    try {
+      return await getWorkerRpc().call<OriginCaptureOutcome>(
+        "origin.capture",
+        { appId: this.appId, route },
+        { timeoutMs: SHORT_RPC_TIMEOUT_MS },
+      );
+    } catch {
+      return { status: "unavailable", reason: "route_unavailable" };
+    }
+  }
+
+  async send(input: Parameters<OriginMessenger["send"]>[0]): Promise<OriginSendOutcome> {
+    try {
+      return await getWorkerRpc().call<OriginSendOutcome>(
+        "origin.send",
+        { appId: this.appId, input },
+        { timeoutMs: ORIGIN_SEND_RPC_TIMEOUT_MS },
+      );
+    } catch {
+      // Once a send crosses the process seam, any failure is observationally
+      // uncertain to the app. Never throw or automatically retry it.
+      return { status: "indeterminate", deduplicated: false };
+    }
+  }
+}
 
 /**
  * Worker-side stand-in for the main-process `RoutineEngine`. Implements the

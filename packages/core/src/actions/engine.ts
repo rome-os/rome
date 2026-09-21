@@ -22,7 +22,7 @@ import type {
 } from "../db/repositories/action-executions.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { actionExecutionContext } from "./context.js";
+import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import {
   replayContext,
   ReplayDivergenceError,
@@ -131,6 +131,9 @@ export interface ActionRunContext {
    * agent / user / system-initiated calls. */
   callerAppId?: string;
   channelContext?: ThreadContext;
+  /** Core-internal exact inbound route. It crosses action-worker IPC but is
+   * never projected into the public app action context. */
+  originRoute?: ActionExecutionStore["originRoute"];
   sharedContext?: Record<string, unknown>;
   hookInvocationContext?: HookInvocationContext;
   replayJournal?: JournalEntry[];
@@ -446,6 +449,7 @@ export class ActionEngine {
         actor,
         callerAppId: runContext?.callerAppId,
         channelContext: runContext?.channelContext,
+        originRoute: runContext?.originRoute ?? actionExecutionContext.getStore()?.originRoute,
         sharedContext: runContext?.sharedContext,
         hookInvocationContext: runContext?.hookInvocationContext,
         sessionId: runContext?.sessionId,
@@ -503,6 +507,20 @@ export class ActionEngine {
     const parentStore = actionExecutionContext.getStore();
     const parentId = context?.parentExecutionId ?? parentStore?.executionId;
     const initiator = context?.initiator ?? parentStore?.initiator ?? "unknown";
+    const channelContext = context?.channelContext ?? parentStore?.channelContext;
+    const derivedOriginRoute =
+      context?.originRoute ??
+      parentStore?.originRoute ??
+      (channelContext?.connectionId && initiator === `connection:${channelContext.connectionId}`
+        ? {
+            connectionId: channelContext.connectionId,
+            service: channelContext.channel,
+            conversationId: channelContext.threadId,
+          }
+        : undefined);
+    if (derivedOriginRoute && context?.originRoute !== derivedOriginRoute) {
+      context = { ...(context ?? {}), channelContext, originRoute: derivedOriginRoute };
+    }
     const isReplay = !!context?.replayJournal;
     // Explicit wins, then the enclosing execution's actor, then the ambient
     // request actor — so every root run during an authenticated HTTP/WS
@@ -774,6 +792,7 @@ export class ActionEngine {
       // accountable for every hop underneath it.
       actor: parentStore?.actor ?? context?.actor,
       channelContext: context?.channelContext ?? parentStore?.channelContext,
+      originRoute: context?.originRoute ?? parentStore?.originRoute,
       sharedContext: mergeSharedContext(parentStore?.sharedContext, context?.sharedContext),
       sessionId: context?.sessionId ?? parentStore?.sessionId,
       turnId: context?.turnId ?? parentStore?.turnId,
@@ -972,6 +991,7 @@ export class ActionEngine {
       parentExecutionId: invocation.parentId,
       parentActionName: invocation.context?.parentActionName,
       channelContext: invocation.context?.channelContext,
+      originRoute: invocation.context?.originRoute,
       sharedContext: invocation.context?.sharedContext,
       sessionId: invocation.context?.sessionId,
       turnId: invocation.context?.turnId,

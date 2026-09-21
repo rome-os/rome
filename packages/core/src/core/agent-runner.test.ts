@@ -522,6 +522,9 @@ describe("AgentRunner", () => {
       sourceProviderThreadId?: string;
       onFork?: (params: ModelSessionForkParams) => void;
       appCatalog?: Pick<AppCatalog, "get">;
+      sourceOriginRoute?: NonNullable<
+        import("../actions/context.js").ActionExecutionStore["originRoute"]
+      >;
     } = {},
   ): Promise<AgentMessage[]> {
     const agentName = opts.agentName ?? "test-main";
@@ -534,9 +537,19 @@ describe("AgentRunner", () => {
       keepAliveAcrossTurns: true,
       appCatalog: opts.appCatalog,
     });
-    const first = await collectMessages(
-      runner.run({ agentName, prompt: "Hi", channelThreadKey: "webchat:fork-1" }),
-    );
+    const runSource = () =>
+      collectMessages(runner.run({ agentName, prompt: "Hi", channelThreadKey: "webchat:fork-1" }));
+    const first = opts.sourceOriginRoute
+      ? await actionExecutionContext.run(
+          {
+            executionId: "source-inbound",
+            rootExecutionId: "source-inbound",
+            initiator: `connection:${opts.sourceOriginRoute.connectionId}`,
+            originRoute: opts.sourceOriginRoute,
+          },
+          runSource,
+        )
+      : await runSource();
     const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
     return collectMessages(
       runner.runForked({
@@ -1150,6 +1163,32 @@ describe("AgentRunner", () => {
       expect(observed).toHaveLength(1);
       expect(observed[0].sessionId).toBe(forkStart.sessionId);
       expect(observed[0].channelUserId).toBe("guardian-fork");
+    });
+
+    it("does not let an exact fork inherit a completed source turn's origin", async () => {
+      const observedOrigins: unknown[] = [];
+      registerDemoAction(async () => {
+        observedOrigins.push(actionExecutionContext.getStore()?.originRoute);
+        return { status: "ok" };
+      });
+      const priorOrigin = {
+        connectionId: "connection:discord",
+        service: "discord",
+        conversationId: "dm:guardian",
+      };
+
+      await runForkAgainstLiveSession(
+        (openParams) =>
+          forkSessionStub({
+            events: (async function* (): AsyncIterable<AgentMessage> {
+              await openParams.executeAction("demo_action", {});
+              yield { type: "result", content: "acted" };
+            })(),
+          }),
+        { fork: { mode: "exact" }, sourceOriginRoute: priorOrigin },
+      );
+
+      expect(observedOrigins).toEqual([undefined]);
     });
 
     it("exact forks project subagents as first-class lifecycle events", async () => {
@@ -4426,20 +4465,33 @@ describe("AgentRunner", () => {
 
       const runner = createRunner(provider);
 
-      await collectMessages(
-        runner.run({
-          agentName: "test-all-actions",
-          prompt: "Use action",
-          channelThreadKey: "sentinel:telegram:thread-1",
-          threadContext: {
-            channel: "telegram",
-            threadId: "thread-1",
-            channelUserId: "user-1",
-            threadName: "Dev Chat",
-            threadType: "group",
-            projectName: "alpha",
-          },
-        }),
+      const originRoute = {
+        connectionId: "connection:telegram",
+        service: "telegram",
+        conversationId: "thread-1",
+      };
+      const runParams = {
+        agentName: "test-all-actions",
+        prompt: "Use action",
+        channelThreadKey: "sentinel:telegram:thread-1",
+        threadContext: {
+          channel: "telegram",
+          connectionId: "connection:telegram",
+          threadId: "thread-1",
+          channelUserId: "user-1",
+          threadName: "Dev Chat",
+          threadType: "group" as const,
+          projectName: "alpha",
+        },
+      };
+      await actionExecutionContext.run(
+        {
+          executionId: "inbound-action",
+          rootExecutionId: "inbound-action",
+          initiator: "connection:telegram",
+          originRoute,
+        },
+        () => collectMessages(runner.run(runParams)),
       );
 
       expect(actionRun).toHaveBeenCalledWith(
@@ -4448,15 +4500,70 @@ describe("AgentRunner", () => {
         expect.objectContaining({
           channelContext: {
             channel: "telegram",
+            connectionId: "connection:telegram",
             threadId: "thread-1",
             channelUserId: "user-1",
             threadName: "Dev Chat",
             threadType: "group",
             projectName: "alpha",
           },
+          originRoute,
           channelThreadKey: "sentinel:telegram:thread-1",
         }),
       );
+    });
+
+    it("clears origin authority when a reusable session starts a non-inbound turn", async () => {
+      const observedOrigins: unknown[] = [];
+      actionRegistry.register({
+        config: {
+          name: "send_message",
+          type: "system",
+          description: "Send a message",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "write",
+        },
+        inputSchema: { properties: {} },
+        execute: async () => {
+          observedOrigins.push(actionExecutionContext.getStore()?.originRoute);
+          return { status: "ok", data: { ok: true } };
+        },
+      });
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-action",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (params) {
+          await params.executeAction("send_message", {});
+          yield { type: "result", content: "Done" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, { keepAliveAcrossTurns: true });
+      const originRoute = {
+        connectionId: "connection:discord",
+        service: "discord",
+        conversationId: "dm:guardian",
+      };
+      const params = {
+        agentName: "test-all-actions",
+        prompt: "Use action",
+        channelThreadKey: "discord:origin-turn-scope",
+      };
+
+      await actionExecutionContext.run(
+        {
+          executionId: "inbound-action",
+          rootExecutionId: "inbound-action",
+          initiator: "connection:discord",
+          originRoute,
+        },
+        () => collectMessages(runner.run(params)),
+      );
+      await collectMessages(runner.run({ ...params, prompt: "Board follow-up" }));
+
+      expect(observedOrigins).toEqual([originRoute, undefined]);
     });
 
     it("passes an action catalog from the registry to the model provider", async () => {
