@@ -102,7 +102,7 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     else win.showInactive();
   };
 
-  const createWindow = (): void => {
+  const createWindow = (revealOnce = false): void => {
     if (win && !win.isDestroyed()) return;
 
     const saved = parsePillPosition(readSetting(PILL_POSITION_KEY));
@@ -149,7 +149,13 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
     created.on("closed", () => {
       if (win === created) win = null;
     });
-    created.once("ready-to-show", syncVisibility);
+    created.once("ready-to-show", () => {
+      // Ticked in the tray while Rome is frontmost, the icon would be hidden the
+      // moment it exists, and the tick would look like it did nothing. Show it
+      // this once; the next time Rome becomes active hides it as usual.
+      if (revealOnce && !created.isDestroyed() && !isQuitting()) created.showInactive();
+      else syncVisibility();
+    });
 
     void created.loadFile(PILL_HTML);
   };
@@ -188,7 +194,7 @@ export function setupFloatingPill(options: FloatingPillOptions): FloatingPill {
   const setEnabled = (enabled: boolean): void => {
     writeSetting(PILL_ENABLED_KEY, enabled ? "true" : "false");
     if (enabled) {
-      createWindow();
+      createWindow(true);
       void refreshName();
     } else if (win && !win.isDestroyed()) {
       win.destroy();
