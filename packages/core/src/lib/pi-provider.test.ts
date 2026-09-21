@@ -481,6 +481,7 @@ describe("Pi settings service", () => {
           ];
         },
       }),
+      isStoredCredentialLiteral: async (providerId) => providerId === "kimi-coding" && stored,
       dispose() {},
     }));
 
@@ -491,6 +492,71 @@ describe("Pi settings service", () => {
       status: { models: [expect.objectContaining({ providerId: "kimi-coding" })] },
     });
     expect(availableCalls).toBe(1);
+  });
+
+  it("re-inspects shared Pi auth before later stored-credential discovery", async () => {
+    let stored = false;
+    let literal = true;
+    let availableCalls = 0;
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () =>
+          stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+        login: async () => {
+          stored = true;
+        },
+        getAvailable: async () => {
+          availableCalls += 1;
+          return [];
+        },
+      }),
+      isStoredCredentialLiteral: async (providerId) =>
+        providerId === "kimi-coding" && stored && literal,
+      dispose() {},
+    }));
+
+    await service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" });
+    const callsAfterSave = availableCalls;
+    literal = false; // Simulate a concurrent Pi CLI edit to a !command/$template credential.
+
+    await expect(service.status({ bypassCache: true })).resolves.toMatchObject({
+      providers: [expect.objectContaining({ id: "kimi-coding", credentialSource: "stored" })],
+    });
+    expect(availableCalls).toBe(callsAfterSave);
+  });
+
+  it("returns refreshed models from the runtime that refreshed them", async () => {
+    const service = new PiSettingsService(async () => {
+      let refreshed = false;
+      return {
+        runtime: fakeRuntime({
+          listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+          refresh: async () => {
+            refreshed = true;
+            return { errors: new Map() };
+          },
+          getAvailable: async () =>
+            refreshed
+              ? [
+                  {
+                    id: "kimi-k2",
+                    name: "Kimi K2",
+                    provider: "kimi-coding",
+                    api: "openai-completions",
+                    input: ["text"],
+                    reasoning: true,
+                  },
+                ]
+              : [],
+        }),
+        isStoredCredentialLiteral: async () => true,
+        dispose() {},
+      };
+    });
+
+    await expect(service.refreshProvider("kimi-coding")).resolves.toMatchObject({
+      models: [expect.objectContaining({ qualifiedModelId: "kimi-coding/kimi-k2" })],
+    });
   });
 
   it("does not resolve pre-existing stored credentials while reading status", async () => {
