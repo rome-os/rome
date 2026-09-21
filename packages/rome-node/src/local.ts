@@ -33,7 +33,7 @@ export interface CallerCredential {
   token: string;
 }
 
-export async function readCallerCredential(): Promise<CallerCredential> {
+export async function readOptionalCallerCredential(): Promise<CallerCredential | null> {
   const value = await readPrivateJson(callerCredentialPath());
   if (
     !isRecord(value) ||
@@ -41,8 +41,15 @@ export async function readCallerCredential(): Promise<CallerCredential> {
     typeof value.token !== "string" ||
     !/^romedev_[A-Za-z0-9_-]{43}$/.test(value.token)
   )
+    return null;
+  return { cloudUrl: cloudOrigin(value.cloudUrl), token: value.token };
+}
+
+export async function readCallerCredential(): Promise<CallerCredential> {
+  const credential = await readOptionalCallerCredential();
+  if (!credential)
     throw new Error(
       "Configure a communication token with rome-node auth --cloud <origin> using stdin first.",
     );
-  return { cloudUrl: cloudOrigin(value.cloudUrl), token: value.token };
+  return credential;
 }

@@ -11,17 +11,33 @@ afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
 });
 
-async function fixture() {
+async function fixture(
+  options: { exchangeStatuses?: number[]; validationFailures?: number; issuedToken?: string } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
   cleanup.push(() => rm(root, { force: true, recursive: true }));
   const token = `romedev_${"a".repeat(43)}`;
+  const instanceToken = "romeinst_test";
   let lists = 0;
+  let exchanges = 0;
+  let configs = 0;
   const cloud = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/instance/gateway-credential") {
+      exchanges++;
+      const status = options.exchangeStatuses?.shift() ?? 200;
+      if (req.method !== "POST" || req.headers.authorization !== `Bearer ${instanceToken}`)
+        res.writeHead(401).end("{}");
+      else if (status !== 200) res.writeHead(status).end(JSON.stringify({ error: instanceToken }));
+      else res.end(JSON.stringify({ deviceToken: options.issuedToken ?? token }));
+      return;
+    }
     if (req.headers.authorization !== `Bearer ${token}`) {
       res.writeHead(401).end(JSON.stringify({ error: "invalid_device_session" }));
     } else if (req.url === "/v1/gateway/config") {
-      res.end(JSON.stringify({ gatewayUrl: "wss://gateway.example/connect" }));
+      configs++;
+      if (configs <= (options.validationFailures ?? 0)) res.writeHead(503).end("{}");
+      else res.end(JSON.stringify({ gatewayUrl: "wss://gateway.example/connect" }));
     } else if (req.url === "/api/account/devices") {
       lists++;
       res.end(JSON.stringify({ items: [{ id: "target" }] }));
@@ -36,10 +52,11 @@ async function fixture() {
   function cli(
     args: string[],
     input?: string,
+    env: NodeJS.ProcessEnv = {},
   ): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [path, ...args], {
-        env: { ...process.env, ROME_NODE_CONFIG_DIR: root },
+        env: { ...process.env, ROME_NODE_CONFIG_DIR: root, ...env },
         stdio: "pipe",
         windowsHide: true,
       });
@@ -64,10 +81,118 @@ async function fixture() {
     });
   }
   cleanup.push(() => cli(["daemon", "stop"]));
-  return { root, token, cloudUrl, cli, lists: () => lists };
+  return {
+    root,
+    token,
+    instanceToken,
+    cloudUrl,
+    cli,
+    lists: () => lists,
+    exchanges: () => exchanges,
+    configs: () => configs,
+  };
 }
 
 describe("standalone CLI daemon processes", () => {
+  it("authorizes a server from its environment, saves only the communication token, and reuses it", async () => {
+    const f = await fixture();
+    const args = ["auth", "--server", "--cloud", f.cloudUrl];
+    const result = await f.cli(args, undefined, { ROME_INSTANCE_TOKEN: f.instanceToken });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ configured: true });
+    expect(result.stdout + result.stderr).not.toContain(f.instanceToken);
+    expect(result.stdout + result.stderr).not.toContain(f.token);
+    const stored = await readFile(join(f.root, "caller.json"), "utf8");
+    expect(JSON.parse(stored)).toEqual({ cloudUrl: f.cloudUrl, token: f.token });
+    expect(stored).not.toContain(f.instanceToken);
+    expect(JSON.parse((await f.cli(["daemon", "status"])).stdout)).toEqual({ running: false });
+    const started = await f.cli(["daemon", "start"]);
+    expect((await f.cli(args)).code).toBe(0);
+    expect((await f.cli(["daemon", "status"])).stdout).toBe(started.stdout);
+    expect(f.exchanges()).toBe(1);
+    expect(f.configs()).toBe(1);
+  });
+
+  it("requires an instance token for initial server authorization", async () => {
+    const f = await fixture();
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("ROME_INSTANCE_TOKEN");
+    expect(f.exchanges()).toBe(0);
+  });
+
+  it("retries temporary failures and retains the minted token across validation retries", async () => {
+    const f = await fixture({ exchangeStatuses: [503, 200], validationFailures: 1 });
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl], undefined, {
+      ROME_INSTANCE_TOKEN: f.instanceToken,
+    });
+    expect(result.code).toBe(0);
+    expect(f.exchanges()).toBe(2);
+    expect(f.configs()).toBe(2);
+    expect(result.stderr).not.toContain(f.instanceToken);
+  }, 20000);
+
+  it("stops after three unsuccessful exchange attempts without saving credentials", async () => {
+    const f = await fixture({ exchangeStatuses: [503, 429, 503] });
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl], undefined, {
+      ROME_INSTANCE_TOKEN: f.instanceToken,
+    });
+    expect(result.code).toBe(1);
+    expect(f.exchanges()).toBe(3);
+    expect(JSON.parse((await f.cli(["auth", "status"])).stdout)).toEqual({ configured: false });
+  }, 20000);
+
+  it.each([
+    401, 403, 404,
+  ])("does not retry terminal exchange failures (%s) or print their bodies", async (status) => {
+    const f = await fixture({ exchangeStatuses: [status] });
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl], undefined, {
+      ROME_INSTANCE_TOKEN: f.instanceToken,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`HTTP ${status}`);
+    expect(result.stderr).not.toContain(f.instanceToken);
+    expect(f.exchanges()).toBe(1);
+  });
+
+  it("rejects an invalid credential response without saving or printing it", async () => {
+    const f = await fixture({ issuedToken: "romeinst_secret_response" });
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl], undefined, {
+      ROME_INSTANCE_TOKEN: f.instanceToken,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).not.toContain("romeinst_secret_response");
+    expect(f.exchanges()).toBe(1);
+    expect(f.configs()).toBe(0);
+    expect(JSON.parse((await f.cli(["auth", "status"])).stdout)).toEqual({ configured: false });
+  });
+
+  it("preserves caller credentials for a different Cloud origin", async () => {
+    const f = await fixture();
+    const saved = { cloudUrl: "https://other.example", token: f.token };
+    await writePrivateJson(join(f.root, "caller.json"), saved);
+    const result = await f.cli(["auth", "--server", "--cloud", f.cloudUrl], undefined, {
+      ROME_INSTANCE_TOKEN: f.instanceToken,
+    });
+    expect(result.code).toBe(1);
+    expect(f.exchanges()).toBe(0);
+    expect(JSON.parse(await readFile(join(f.root, "caller.json"), "utf8"))).toEqual(saved);
+  });
+
+  it("reports local auth without revealing tokens, contacting Cloud, or starting a daemon", async () => {
+    const f = await fixture();
+    expect(JSON.parse((await f.cli(["auth", "status"])).stdout)).toEqual({ configured: false });
+    await writePrivateJson(join(f.root, "caller.json"), { cloudUrl: f.cloudUrl, token: f.token });
+    const status = await f.cli(["auth", "status"]);
+    expect(status.code).toBe(0);
+    expect(JSON.parse(status.stdout)).toEqual({ configured: true, cloudUrl: f.cloudUrl });
+    expect(status.stdout + status.stderr).not.toContain(f.token);
+    expect(JSON.parse((await f.cli(["daemon", "status"])).stdout)).toEqual({ running: false });
+    expect(f.lists()).toBe(0);
+    await writePrivateJson(join(f.root, "caller.json"), { token: "invalid" });
+    expect(JSON.parse((await f.cli(["auth", "status"])).stdout)).toEqual({ configured: false });
+  });
+
   it("requires caller configuration without starting Rome Core", async () => {
     const f = await fixture();
     expect(JSON.parse((await f.cli(["daemon", "status"])).stdout)).toEqual({ running: false });

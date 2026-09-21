@@ -367,6 +367,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
           return c.redirect(errorRedirect("malformed"));
         }
         await persistInstanceToken(deps.settingsRepo, instanceToken as string);
+        void deps.provisionNodeCaller?.();
         log.info("cloud login enrolled instance", { accountId });
       }
 

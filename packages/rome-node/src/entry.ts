@@ -1,9 +1,9 @@
 import { parseArgs } from "node:util";
 import { connectComputer, defaultDeviceName } from "./connect.js";
 import { isRecord, parseResponse } from "./actions.js";
-import { callerCredentialPath } from "./local.js";
-import { writePrivateJson } from "./storage.js";
-import { cloudOrigin, gatewayConfig } from "./cloud.js";
+import { readOptionalCallerCredential } from "./local.js";
+import { cloudOrigin } from "./cloud.js";
+import { authorizeServer, configureCaller } from "./auth.js";
 import { callDaemon, daemonStatus, serveDaemon, startDaemon, stopDaemon } from "./daemon.js";
 import { validId } from "./protocol.js";
 import { commandHelp } from "./help.js";
@@ -17,6 +17,7 @@ async function main(): Promise<void> {
       cloud: { type: "string" },
       name: { type: "string" },
       args: { type: "string" },
+      server: { type: "boolean" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -26,7 +27,22 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (values.server && !(positionals[0] === "auth" && positionals.length === 1))
+    throw new Error("--server is only supported by rome-node auth.");
+  if (positionals[0] === "auth" && positionals[1] === "status" && positionals.length === 2) {
+    const credential = await readOptionalCallerCredential();
+    process.stdout.write(
+      `${JSON.stringify(credential ? { configured: true, cloudUrl: credential.cloudUrl } : { configured: false })}\n`,
+    );
+    return;
+  }
   if (positionals[0] === "auth" && positionals.length === 1) {
+    const cloudUrl = cloudOrigin(values.cloud ?? "https://romeos.cc");
+    if (values.server) {
+      await authorizeServer(cloudUrl, process.env.ROME_INSTANCE_TOKEN);
+      process.stdout.write(`${JSON.stringify({ configured: true })}\n`);
+      return;
+    }
     if (process.stdin.isTTY)
       throw new Error("Pass the communication token through stdin, not command arguments.");
     if (await daemonStatus())
@@ -40,10 +56,7 @@ async function main(): Promise<void> {
       chunks.push(buffer);
     }
     const token = Buffer.concat(chunks).toString("utf8").trim();
-    if (!/^romedev_[A-Za-z0-9_-]{43}$/.test(token)) throw new Error("Invalid communication token.");
-    const cloudUrl = cloudOrigin(values.cloud ?? "https://romeos.cc");
-    await gatewayConfig(cloudUrl, token);
-    await writePrivateJson(callerCredentialPath(), { cloudUrl, token });
+    await configureCaller(cloudUrl, token);
     process.stdout.write(`${JSON.stringify({ configured: true })}\n`);
     return;
   }

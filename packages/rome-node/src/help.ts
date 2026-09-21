@@ -6,7 +6,8 @@ Usage:
 
 Commands:
   connect          Keep this computer online as a remote executor.
-  auth             Configure the caller's communication token through stdin.
+  auth             Configure caller authorization through stdin or server mode.
+  auth status      Report local caller configuration without revealing the token.
   device           List authorized devices (they may be offline).
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
@@ -38,22 +39,39 @@ Options:
 Example:
   rome-node connect --name "My computer"
 `,
-  auth: `Usage: rome-node auth [--cloud <origin>] < token-file
+  auth: `Usage:
+  rome-node auth [--cloud <origin>] < token-file
+  rome-node auth --server [--cloud <origin>]
 
 Read an issued communication token (romedev_...) from stdin, validate it with
-Cloud, and save it privately for device commands. An Instance Token must first
-be exchanged through Cloud. This command does not perform that exchange.
+Cloud, and save it privately for device commands.
 Stop a running caller daemon before changing credentials.
+
+With --server, reuse existing caller credentials for this Cloud origin. If missing,
+read ROME_INSTANCE_TOKEN from the environment, exchange it with Cloud, and save
+only the communication token. This does not start a daemon or read Rome's database.
+Transient Cloud failures get up to three attempts with delays of one and five seconds.
+An issued token is reused across validation retries. Existing credentials for
+another Cloud origin are preserved and require manual configuration.
 
 Options:
   --cloud <origin>  Cloud origin (default: https://romeos.cc).
+  --server          Authorize using ROME_INSTANCE_TOKEN from the environment.
 
 Example:
   rome-node daemon stop
   rome-node auth --cloud https://romeos.cc < /path/to/private-token-file
+  rome-node auth --server --cloud https://romeos.cc
 
 Output: {"configured":true}
-Pass tokens through stdin. Never put them in command arguments or print them.
+Pass communication tokens through stdin. Never put tokens in command arguments or print them.
+`,
+  "auth status": `Usage: rome-node auth status
+
+Report local caller configuration without contacting Cloud or starting the daemon.
+Output: {"configured":true,"cloudUrl":"https://romeos.cc"} or {"configured":false}.
+This checks the local credential format, not its validity at Cloud.
+The token is never printed.
 `,
   device: `Usage:
   rome-node device

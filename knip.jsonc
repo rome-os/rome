@@ -67,6 +67,8 @@
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
     },
     "packages/core": {
+      // Installed separately in the runtime image and invoked as a CLI.
+      "ignoreBinaries": ["rome-node"],
       "entry": [
         // The action engine spawns these by resolved path, so no import
         // reaches them. See packages/core/src/actions/engine.ts.

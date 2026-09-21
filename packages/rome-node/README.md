@@ -22,7 +22,17 @@ Open the printed authorization URL in a browser on that computer and approve it.
 The browser callback uses a temporary loopback listener. A remote browser needs
 a tunnel to that listener. Ctrl+C disconnects and preserves the credential.
 
-On the caller, configure a previously issued communication token through stdin:
+Rome instances prepare caller authorization automatically at startup and after
+Cloud enrollment. In a server environment that supplies `ROME_INSTANCE_TOKEN`, run:
+
+```sh
+rome-node auth --server --cloud https://romeos.cc
+```
+
+This exchanges the Instance Token with Cloud and stores only the communication
+token. Existing caller credentials are reused. The CLI does not read Rome's database.
+
+For manual caller configuration, pass an issued communication token through stdin:
 
 ```sh
 rome-node auth --cloud https://romeos.cc < /path/to/private-token-file

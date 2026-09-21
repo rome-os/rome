@@ -122,6 +122,7 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;

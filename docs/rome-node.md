@@ -2,25 +2,55 @@
 
 [`@rome-os/node`](../packages/rome-node/README.md) provides the `rome-node` command,
 a background caller daemon, and a reusable Gateway client. The command works
-without Rome Core. Core tells agents how to use the CLI through its prompt.
+without Rome Core. Core tells agents how to use the CLI through its prompt and
+prepares caller credentials after the instance binds to Cloud.
 The production image and local development stack install the CLI explicitly.
 Core does not declare it as a package dependency.
 
 ## Authorization and transport
 
-Provision a communication token before using device commands. Until automated
-instance provisioning is integrated, exchange the Instance Token through Cloud
-manually and pass the returned `deviceToken` to the CLI through stdin:
+After startup and either browser enrollment flow, Rome invokes
+`rome-node auth --server --cloud <origin>`. Rome supplies its current Instance
+Token through the child process environment as `ROME_INSTANCE_TOKEN`.
+The parent environment and agent environment are unchanged.
+
+The CLI checks its local caller credentials. If credentials are missing, it
+exchanges the Instance Token through Cloud and saves the returned communication
+token. It does not persist the Instance Token or send it to Gateway.
+Core does not call the exchange endpoint or parse CLI credential state.
+
+Existing caller credentials for the configured Cloud origin are reused without
+a network check or a new token. A different Cloud origin requires manual
+configuration. Provisioning does not start the daemon or block startup or login.
+Transient failures get up to three attempts, with delays of one and five seconds.
+An issued token is reused across validation retries. After retries fail, the CLI
+exits with an error. Rome logs the failure and invokes the CLI again on the next
+startup or enrollment.
+
+When the server environment already supplies `ROME_INSTANCE_TOKEN`, run:
+
+```sh
+rome-node auth --server --cloud https://romeos.cc
+```
+
+For manual configuration, exchange the Instance Token through Cloud and pass
+the returned `deviceToken` to the CLI through stdin:
 
 ```sh
 rome-node auth --cloud https://romeos.cc < /path/to/private-token-file
+rome-node auth status
 ```
 
 The CLI validates the communication token with Cloud and saves it in `caller.json`
 inside its private configuration directory. The token has no expiration. It
 contains no account or instance claims. Cloud stores its hash in the existing
 device-session table. Issuing another token leaves previous tokens valid.
-The CLI does not read Rome's database or require its Instance Token.
+The CLI does not read Rome's database. Only server authorization needs an
+Instance Token. Device commands use the stored communication token.
+`auth status` reports whether local credentials exist and their Cloud origin.
+It does not print the token or check its validity with Cloud. Preserve the CLI
+configuration directory across container replacements and use the same directory
+for Rome startup and agent commands.
 
 The first device command starts a background CLI daemon. Concurrent commands use
 that daemon's connection and receive independently matched responses. Listing
@@ -128,9 +158,9 @@ remains available for other devices.
 
 ## Deployment and verification
 
-Provision the caller token before using device commands. The existing Cloud
-device endpoints and Gateway protocol handle communication. Automatic instance
-provisioning is separate from the CLI runtime. Configure the npm Trusted Publisher for `@rome-os/node` before
+Instance startup and enrollment prepare the caller token through the installed
+CLI. The existing Cloud device endpoints and Gateway protocol handle communication.
+Configure the npm Trusted Publisher for `@rome-os/node` before
 its first package release. Building an archive does not publish it.
 
 The [platform workflow](../.github/workflows/rome-node.yml) runs the package on
