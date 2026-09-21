@@ -33,6 +33,8 @@ export const PI_PROTOTYPE_ONE_TOKEN_PROVIDERS = [
   ["zai", "ZAI Global"],
   ["zai-coding-cn", "ZAI China"],
   ["kimi-coding", "Kimi For Coding"],
+  ["moonshotai", "Moonshot AI (global Kimi Platform)"],
+  ["moonshotai-cn", "Moonshot AI China (Kimi Platform)"],
   ["meta", "Meta"],
   ["minimax", "MiniMax"],
   ["minimax-cn", "MiniMax China"],

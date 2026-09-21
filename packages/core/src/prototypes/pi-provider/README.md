@@ -44,6 +44,12 @@ and remove affect only the selected Pi credential, and external credentials are
 left alone. `$ENV`, `!command`, OAuth, custom, and multi-field provider setup is
 excluded from this prototype.
 
+Kimi credentials are platform-specific. Select **Kimi For Coding** only for a
+key created by the Kimi Code subscription console. Select **Moonshot AI
+(global Kimi Platform)** or **Moonshot AI China (Kimi Platform)** for a
+pay-as-you-go Kimi Platform key from the matching global or China endpoint;
+those keys are not interchangeable.
+
 After discovery, start a normal chat, open the standard model menu in the
 composer, choose a `Pi prototype · provider / model` entry, and send a message.
 The exact `pi-prototype:<qualified-id>` selection travels through the normal

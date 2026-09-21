@@ -40,6 +40,14 @@ describe("Pi credential configuration prototype", () => {
       const runtime = await createPiModelRuntime({ agentDir, refreshOnCreate: false });
       const providers = listInstalledOneTokenProviders(runtime);
       expect(providers).toContainEqual({ id: "anthropic", name: "Anthropic" });
+      expect(providers).toContainEqual({
+        id: "kimi-coding",
+        name: "Kimi For Coding",
+      });
+      expect(providers).toContainEqual({
+        id: "moonshotai-cn",
+        name: "Moonshot AI China (Kimi Platform)",
+      });
       expect(providers.some((provider) => provider.id === "cloudflare-ai-gateway")).toBe(false);
       expect(providers.some((provider) => provider.id === "openai-codex")).toBe(false);
     } finally {
