@@ -7,6 +7,7 @@ import { DEFAULT_SQLITE_PATH } from "./db/index.js";
  * `rs.stubEnv()` calls within each test are the only source of config.
  */
 const CONFIG_ENV_KEYS = [
+  "ROME_IM_API_TRACE",
   "PANTHEON_SLUG",
   "ANTHROPIC_API_KEY",
   "DATABASE_TYPE",
@@ -37,6 +38,15 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
+  it("validates IM API tracing configuration", () => {
+    expect(loadConfig().imApiTrace).toEqual(["off"]);
+    rs.stubEnv("ROME_IM_API_TRACE", "true");
+    expect(loadConfig().imApiTrace).toEqual(["all"]);
+    rs.stubEnv("ROME_IM_API_TRACE", "lark,discord");
+    expect(loadConfig().imApiTrace).toEqual(["lark", "discord"]);
+    rs.stubEnv("ROME_IM_API_TRACE", "typo");
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
   it("disables personal WeChat by default", () => {
     expect(loadConfig().wechatUserEnabled).toBe(false);
   });

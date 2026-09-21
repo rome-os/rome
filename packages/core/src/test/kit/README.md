@@ -54,6 +54,8 @@ Adapter units (testing the adapter itself, below the harness): inject through th
 
 ## Notes
 
+For real SDK HTTP/WebSocket tests, use the [IM API fixtures](im/README.md). Run `pnpm test:im` from the repository root. They cover Discord, Lark/Feishu, Telegram and WeChat with stateful local API peers and scripted failures.
+
 - `engine:` mirrors the daemon's ActionEngine wiring variations: `tracer` for real `action:*` spans, `onApprovalCreated` for the approval-card callback, `processRole: "main"` for tests that exercise the fork orchestration itself (stub `executeInSubprocess` — the fork is the edge), and `clock` to inject a time source.
 - Clocks, by mechanism: `ActionEngine` and `RoutineEngine` take the production `Clock` seam (`src/lib/clock.ts`) — inject a `FakeClock` and drive it with `advance("30s")`; durations, row timestamps, and retry/cancel timers become deterministic, and global timers stay real. `installTestClock()` globally fakes timers via Rstest for code that still reads ambient time (croner schedules, ad-hoc `setTimeout`). Don't mix the two in one test — `FakeClock.advance()` settles fired work via `setImmediate`, which global fake timers stall.
 - The default agent is `main` with `actions: ["*"]`. Pass `agents:` (e.g. via `buildAgentConfig`) to test allow-list gating or multi-agent setups.

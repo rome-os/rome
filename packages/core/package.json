@@ -14,6 +14,7 @@
     "test:watch": "../../scripts/test-env.sh rstest --watch",
     "test:unit": "../../scripts/test-env.sh rstest --exclude '**/*.integration.test.ts' --exclude '**/*.e2e.test.ts'",
     "test:integration": "../../scripts/test-env.sh rstest integration.test",
+    "test:im": "../../scripts/test-env.sh rstest src/test/kit/im",
     "test:e2e": "../../scripts/test-env.sh rstest e2e.test",
     "test:coverage": "../../scripts/test-env.sh rstest --coverage --pool.maxWorkers=8",
     "test:ci": "../../scripts/test-env.sh env RSTEST_JUNIT=1 rstest --coverage --pool.maxWorkers=8",

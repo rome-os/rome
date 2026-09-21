@@ -1,0 +1,130 @@
+{
+  "recordedOn": "2026-09-18",
+  "platform": "feishu",
+  "sdk": "1.68.0",
+  "operations": ["create", "get", "update", "get", "reply"],
+  "responses": [
+    {
+      "code": 0,
+      "data": {
+        "body": {
+          "content": "{\"text\":\"Rome fixture capture: preview 中文\"}"
+        },
+        "chat_id": "oc_fixture_chat",
+        "create_time": "1700000000000",
+        "deleted": false,
+        "message_id": "om_1",
+        "msg_type": "text",
+        "sender": {
+          "id": "cli_0123456789abcdef",
+          "id_type": "app_id",
+          "sender_type": "app",
+          "tenant_key": "fixture-tenant"
+        },
+        "update_time": "1700000000000",
+        "updated": false
+      },
+      "msg": "success"
+    },
+    {
+      "code": 0,
+      "data": {
+        "items": [
+          {
+            "body": {
+              "content": "{\"text\":\"Rome fixture capture: preview 中文\"}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_1",
+            "message_position": "1",
+            "msg_type": "text",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "update_time": "1700000000000",
+            "updated": false
+          }
+        ]
+      },
+      "msg": "success"
+    },
+    {
+      "code": 0,
+      "data": {
+        "body": {
+          "content": "{\"text\":\"Rome fixture capture: final 中文\"}"
+        },
+        "chat_id": "oc_fixture_chat",
+        "create_time": "1700000000000",
+        "deleted": false,
+        "message_id": "om_1",
+        "msg_type": "text",
+        "sender": {
+          "id": "cli_0123456789abcdef",
+          "id_type": "app_id",
+          "sender_type": "app",
+          "tenant_key": "fixture-tenant"
+        },
+        "update_time": "1700000000000",
+        "updated": true
+      },
+      "msg": "success"
+    },
+    {
+      "code": 0,
+      "data": {
+        "items": [
+          {
+            "body": {
+              "content": "{\"text\":\"Rome fixture capture: final 中文\"}"
+            },
+            "chat_id": "oc_fixture_chat",
+            "create_time": "1700000000000",
+            "deleted": false,
+            "message_id": "om_1",
+            "message_position": "1",
+            "msg_type": "text",
+            "sender": {
+              "id": "cli_0123456789abcdef",
+              "id_type": "app_id",
+              "sender_type": "app",
+              "tenant_key": "fixture-tenant"
+            },
+            "update_time": "1700000000000",
+            "updated": true
+          }
+        ]
+      },
+      "msg": "success"
+    },
+    {
+      "code": 0,
+      "data": {
+        "body": {
+          "content": "{\"text\":\"Rome fixture capture: reply\"}"
+        },
+        "chat_id": "oc_fixture_chat",
+        "create_time": "1700000000000",
+        "deleted": false,
+        "message_id": "om_2",
+        "msg_type": "text",
+        "parent_id": "om_1",
+        "root_id": "om_1",
+        "sender": {
+          "id": "cli_0123456789abcdef",
+          "id_type": "app_id",
+          "sender_type": "app",
+          "tenant_key": "fixture-tenant"
+        },
+        "update_time": "1700000000000",
+        "updated": false
+      },
+      "msg": "success"
+    }
+  ]
+}

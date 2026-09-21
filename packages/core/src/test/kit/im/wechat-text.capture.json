@@ -1,0 +1,95 @@
+{
+  "recordedOn": "2026-09-18",
+  "platform": "wechat",
+  "client": "Rome ilink adapter",
+  "exchanges": [
+    {
+      "path": "/ilink/bot/sendmessage",
+      "body": {
+        "msg": {
+          "from_user_id": "",
+          "to_user_id": "fixture-user@im.wechat",
+          "client_id": "rome-wechat:fixture-1",
+          "message_type": 2,
+          "message_state": 2,
+          "item_list": [
+            {
+              "type": 1,
+              "text_item": {
+                "text": "Rome fixture capture: WeChat 中文"
+              }
+            }
+          ],
+          "context_token": "fixture-context"
+        },
+        "base_info": {
+          "channel_version": "2.4.3",
+          "bot_agent": "Rome/0.1.1"
+        }
+      },
+      "status": 200,
+      "response": {
+        "message_id": 123456789
+      }
+    },
+    {
+      "path": "/ilink/bot/sendmessage",
+      "body": {
+        "msg": {
+          "from_user_id": "",
+          "to_user_id": "fixture-user@im.wechat",
+          "client_id": "rome-wechat:fixture-2",
+          "message_type": 2,
+          "message_state": 2,
+          "item_list": [
+            {
+              "type": 1,
+              "text_item": {
+                "text": "Rome fixture capture: invalid context"
+              }
+            }
+          ],
+          "context_token": "fixture-invalid-context"
+        },
+        "base_info": {
+          "channel_version": "2.4.3",
+          "bot_agent": "Rome/0.1.1"
+        }
+      },
+      "status": 200,
+      "response": {
+        "message_id": 123456790
+      }
+    },
+    {
+      "path": "/ilink/bot/sendmessage",
+      "body": {
+        "msg": {
+          "from_user_id": "",
+          "to_user_id": "fixture-invalid-user",
+          "client_id": "rome-wechat:fixture-3",
+          "message_type": 2,
+          "message_state": 2,
+          "item_list": [
+            {
+              "type": 1,
+              "text_item": {
+                "text": "Rome fixture capture: invalid recipient"
+              }
+            }
+          ],
+          "context_token": "fixture-context"
+        },
+        "base_info": {
+          "channel_version": "2.4.3",
+          "bot_agent": "Rome/0.1.1"
+        }
+      },
+      "status": 200,
+      "response": {
+        "ret": -3,
+        "errmsg": "invalid arguments"
+      }
+    }
+  ]
+}
