@@ -26,10 +26,10 @@ describe("parseAgentName", () => {
 });
 
 describe("isPillEnabled", () => {
-  it("is on until someone turns it off", () => {
-    expect(isPillEnabled(null)).toBe(true);
-    expect(isPillEnabled("true")).toBe(true);
+  it("is off until someone turns it on", () => {
+    expect(isPillEnabled(null)).toBe(false);
     expect(isPillEnabled("false")).toBe(false);
+    expect(isPillEnabled("true")).toBe(true);
   });
 });
 

@@ -30,9 +30,10 @@ export function parseAgentName(settings: unknown): string | null {
   return name.length > 0 ? name : null;
 }
 
-// Same convention as the auto-update switch: only an explicit "false" is off.
+// Opt-in: a permanent object on the desktop is the user's call, so the icon is
+// off until they turn it on from the tray. Only an explicit "true" is on.
 export function isPillEnabled(raw: string | null): boolean {
-  return raw !== "false";
+  return raw === "true";
 }
 
 // Far beyond any arrangement of displays, and far below what the window APIs

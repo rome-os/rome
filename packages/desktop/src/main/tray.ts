@@ -127,7 +127,8 @@ export function setupTray(options: SetupTrayOptions): Tray {
         label: "Settings…",
         click: openSettings,
       },
-      // The pill's own menu can hide it; this is the way back.
+      // The floating icon is off until it is ticked here, and this is the way
+      // back after its own menu has hidden it.
       ...(floatingPill
         ? [
             {
