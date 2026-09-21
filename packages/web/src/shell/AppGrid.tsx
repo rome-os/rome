@@ -243,10 +243,14 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   // Safari at a sign-in page. Anything here that would open a tab stays in the
   // window instead.
   const inDesktopApp = isElectronShell();
-  // The mobile app's WebView has no tabs either: it turns a same-origin
-  // `target="_blank"` into a reload of the page it is on. The dashboard cannot
-  // tell that WebView from a phone's browser, so a new tab is offered only to
-  // a pointer that can right-click for one.
+  // The mobile app's WebView has no tabs either. It answers a same-origin
+  // `target="_blank"` by navigating itself to the target, so the app does open
+  // — but after a full document load instead of a route change, and under a
+  // label that promised a tab. That WebView sets no marker the dashboard could
+  // read, which leaves the pointer as the nearest signal: a new tab is offered
+  // only to a pointer that can right-click for one. Phone and tablet browsers
+  // lose the item with it; asking the shell directly, as `isElectronShell`
+  // does, needs the mobile app to identify itself first.
   const coarsePointer = useCoarsePointer();
   const canOpenNewTab = !inDesktopApp && !coarsePointer;
   // The list query only revalidates on mount and window focus, but the shell
