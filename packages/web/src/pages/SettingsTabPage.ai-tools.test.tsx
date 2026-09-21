@@ -204,6 +204,102 @@ describe("AI Tools destructive actions", () => {
   });
 });
 
+describe("Pi credential prototype", () => {
+  it("saves through the prototype endpoint, clears the password, and separates status", async () => {
+    let savedBody: Record<string, unknown> | null = null;
+    const initialPi = {
+      enabled: true,
+      prototype: true,
+      loggedIn: false,
+      modelCount: 0,
+      models: [],
+      providers: [
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+      ],
+      configurationValid: true,
+      catalogStatus: "no-models",
+      liveValidity: "not-verified",
+      discoveryFailedProviders: [],
+      guidance: "No Rome-compatible Pi models are available.",
+    };
+    const savedPi = {
+      ...initialPi,
+      loggedIn: true,
+      modelCount: 1,
+      catalogStatus: "models-available",
+      models: [
+        {
+          selectionId: "pi-prototype:anthropic/claude-test",
+          upstreamProvider: "anthropic",
+          modelId: "claude-test",
+        },
+      ],
+      providers: [
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          configured: true,
+          credentialSource: "stored",
+          storedCredentialType: "api_key",
+          modelCount: 1,
+        },
+      ],
+    };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({
+          claude: { loggedIn: false },
+          codex: { loggedIn: false },
+          piPrototype: initialPi,
+        });
+      }
+      if (url === "/api/ai-tools/anthropic-compatible-providers") {
+        return ok({ providers: [], configured: null });
+      }
+      if (url === "/api/ai-tools/pi-prototype/credential" && init?.method === "PUT") {
+        savedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return ok({
+          credentialPersisted: true,
+          synchronizationSucceeded: true,
+          status: savedPi,
+        });
+      }
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel showUsage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Configure" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Configure Pi Coding Agent" });
+    expect(within(dialog).getByText("Credential persistence")).toBeTruthy();
+    expect(within(dialog).getByText("Catalog discovery")).toBeTruthy();
+    expect(within(dialog).getByText("Live validity")).toBeTruthy();
+    const token = within(dialog).getByLabelText("API token") as HTMLInputElement;
+    expect(token.type).toBe("password");
+    await user.type(token, "opaque-test-token");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+
+    await waitFor(() => expect(savedBody).not.toBeNull());
+    expect(savedBody).toEqual({
+      providerId: "anthropic",
+      token: "opaque-test-token",
+      confirmReplace: false,
+    });
+    expect(token.value).toBe("");
+    expect(dialog.textContent).not.toContain("opaque-test-token");
+    expect(within(dialog).getByText("Stored by Pi (API token)")).toBeTruthy();
+    expect(within(dialog).getByText("Not verified until an ordinary model turn")).toBeTruthy();
+  });
+});
+
 describe("AI Tools provider presentation", () => {
   it("supports the onboarding visibility and connection-state contract", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {

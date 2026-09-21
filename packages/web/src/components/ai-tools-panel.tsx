@@ -94,6 +94,33 @@ interface AIToolUsageStatus {
 
 type AIToolStatusMap = Record<string, AIToolStatus>;
 
+interface PiPrototypeStatus extends AIToolStatus {
+  enabled: true;
+  prototype: true;
+  modelCount: number;
+  guidance: string;
+  configurationValid: boolean;
+  catalogStatus: "models-available" | "no-models" | "discovery-failed";
+  liveValidity: "not-verified";
+  discoveryFailedProviders: string[];
+  providers: PiPrototypeProviderStatus[];
+  models: Array<{
+    selectionId: string;
+    upstreamProvider: string;
+    modelId: string;
+  }>;
+}
+
+interface PiPrototypeProviderStatus {
+  id: string;
+  name: string;
+  configured: boolean;
+  credentialSource: "stored" | "environment" | "none";
+  storedCredentialType?: "api_key" | "oauth";
+  externalSource?: string;
+  modelCount: number;
+}
+
 export type { AnthropicCompatibleProviderSummary };
 
 export interface AnthropicCompatibleConfiguredSummary {
@@ -218,8 +245,11 @@ export function hasConnectedAiProvider(
   status: Partial<Record<string, { loggedIn?: boolean } | null>>,
   hiddenProviders: readonly AiToolProviderId[] = [],
 ): boolean {
-  return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
-    (provider) => status[provider.statusKey]?.loggedIn === true,
+  return (
+    status.piPrototype?.loggedIn === true ||
+    AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
+      (provider) => status[provider.statusKey]?.loggedIn === true,
+    )
   );
 }
 
@@ -472,6 +502,14 @@ export function AiToolsPanel({
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [removeAnthropicProviderOpen, setRemoveAnthropicProviderOpen] = useState(false);
   const [toolStatus, setToolStatus] = useState<AIToolStatusMap>({});
+  const [piPrototype, setPiPrototype] = useState<PiPrototypeStatus | null>(null);
+  const [piDialogOpen, setPiDialogOpen] = useState(false);
+  const [selectedPiProvider, setSelectedPiProvider] = useState("");
+  const [piApiToken, setPiApiToken] = useState("");
+  const [piPending, setPiPending] = useState(false);
+  const [piMessage, setPiMessage] = useState("");
+  const [replacePiCredentialOpen, setReplacePiCredentialOpen] = useState(false);
+  const [removePiCredentialOpen, setRemovePiCredentialOpen] = useState(false);
   const [anthropicProviders, setAnthropicProviders] = useState<
     AnthropicCompatibleProviderSummary[]
   >([]);
@@ -512,11 +550,23 @@ export function AiToolsPanel({
         claude?: AIToolStatus;
         codex?: AIToolStatus;
         anthropicCompatible?: AnthropicCompatibleConfiguredSummary | null;
+        piPrototype?: PiPrototypeStatus;
       };
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.piPrototype ? { piPrototype: data.piPrototype } : {}),
       });
+      setPiPrototype(data.piPrototype ?? null);
+      if (data.piPrototype) {
+        setSelectedPiProvider(
+          (current) =>
+            current ||
+            data.piPrototype?.providers.find((provider) => provider.configured)?.id ||
+            data.piPrototype?.providers[0]?.id ||
+            "",
+        );
+      }
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -652,17 +702,160 @@ export function AiToolsPanel({
       const data = (await res.json().catch(() => ({}))) as {
         claude?: AIToolStatus;
         codex?: AIToolStatus;
+        piPrototype?: PiPrototypeStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.piPrototype ? { piPrototype: data.piPrototype } : {}),
       });
+      if (data.piPrototype) setPiPrototype(data.piPrototype);
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {
       setRefreshPending(false);
+    }
+  }
+
+  function publishPiStatus(status: PiPrototypeStatus) {
+    setPiPrototype(status);
+    setToolStatus((current) => ({ ...current, piPrototype: status }));
+    window.dispatchEvent(new Event("rome:pi-prototype-models-changed"));
+  }
+
+  function openPiDialog() {
+    setPiMessage("");
+    setPiApiToken("");
+    setSelectedPiProvider(
+      (current) =>
+        current ||
+        piPrototype?.providers.find((provider) => provider.configured)?.id ||
+        piPrototype?.providers[0]?.id ||
+        "",
+    );
+    setPiDialogOpen(true);
+  }
+
+  function closePiDialog() {
+    setPiDialogOpen(false);
+    setPiApiToken("");
+    setPiMessage("");
+  }
+
+  async function savePiCredential(confirmReplace: boolean) {
+    setPiPending(true);
+    setPiMessage("");
+    try {
+      const response = await fetch("/api/ai-tools/pi-prototype/credential", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId: selectedPiProvider,
+          token: piApiToken,
+          confirmReplace,
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        status?: PiPrototypeStatus;
+        credentialPersisted?: boolean;
+        synchronizationSucceeded?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !data.status) {
+        throw new Error(data.error || "Pi could not store this credential.");
+      }
+      publishPiStatus(data.status);
+      setPiApiToken("");
+      setReplacePiCredentialOpen(false);
+      setPiMessage(
+        data.synchronizationSucceeded
+          ? data.status.providers.find((provider) => provider.id === selectedPiProvider)?.modelCount
+            ? "Token saved. Models were discovered; live validity is not verified until a real turn."
+            : "Token saved, but no Rome-compatible model was found. You can refresh, replace, or remove it."
+          : "Token saved, but Pi could not synchronize discovery. Retry Refresh without entering it again.",
+      );
+    } catch (error) {
+      setReplacePiCredentialOpen(false);
+      setPiMessage(error instanceof Error ? error.message : "Pi credential save failed.");
+    } finally {
+      setPiPending(false);
+    }
+  }
+
+  function requestPiCredentialSave() {
+    const selected = piPrototype?.providers.find((provider) => provider.id === selectedPiProvider);
+    if (selected?.credentialSource === "stored") {
+      setReplacePiCredentialOpen(true);
+    } else {
+      void savePiCredential(false);
+    }
+  }
+
+  async function removePiCredential() {
+    setPiPending(true);
+    setPiMessage("");
+    try {
+      const response = await fetch(
+        `/api/ai-tools/pi-prototype/credential/${encodeURIComponent(selectedPiProvider)}`,
+        { method: "DELETE" },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        status?: PiPrototypeStatus;
+        credentialRemoved?: boolean;
+        synchronizationSucceeded?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !data.status) {
+        throw new Error(data.error || "Pi could not remove the stored credential.");
+      }
+      publishPiStatus(data.status);
+      setRemovePiCredentialOpen(false);
+      const selected = data.status.providers.find((provider) => provider.id === selectedPiProvider);
+      setPiMessage(
+        selected?.credentialSource === "environment"
+          ? "Stored credential removed. Pi still sees an external environment credential, which Rome did not change."
+          : data.synchronizationSucceeded
+            ? "Stored credential removed."
+            : "Stored credential removed, but Pi discovery synchronization failed. Retry Refresh.",
+      );
+    } catch (error) {
+      setRemovePiCredentialOpen(false);
+      setPiMessage(error instanceof Error ? error.message : "Pi credential removal failed.");
+    } finally {
+      setPiPending(false);
+    }
+  }
+
+  async function refreshPiProvider() {
+    if (!selectedPiProvider) return;
+    setPiPending(true);
+    setPiMessage("");
+    try {
+      const response = await fetch(
+        `/api/ai-tools/pi-prototype/refresh/${encodeURIComponent(selectedPiProvider)}`,
+        { method: "POST" },
+      );
+      const data = (await response.json().catch(() => ({}))) as PiPrototypeStatus & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error || "Pi model discovery failed.");
+      publishPiStatus(data);
+      const selected = data.providers.find((provider) => provider.id === selectedPiProvider);
+      setPiMessage(
+        selected?.modelCount
+          ? `Discovery found ${selected.modelCount} model${selected.modelCount === 1 ? "" : "s"}. Live token validity is not verified.`
+          : "Discovery completed, but no Rome-compatible model was found for this provider.",
+      );
+    } catch (error) {
+      setPiMessage(
+        error instanceof Error
+          ? error.message
+          : "Pi discovery failed. The stored credential was not changed.",
+      );
+    } finally {
+      setPiPending(false);
     }
   }
 
@@ -775,6 +968,9 @@ export function AiToolsPanel({
   const selectedProvider = anthropicProviders.find(
     (provider) => provider.id === selectedAnthropicProvider,
   );
+  const selectedPiProviderStatus = piPrototype?.providers.find(
+    (provider) => provider.id === selectedPiProvider,
+  );
   const visibleProviders = AI_TOOL_PROVIDERS.filter(
     (provider) => !hiddenProviders.includes(provider.statusKey),
   );
@@ -824,6 +1020,53 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+          {piPrototype && (
+            <div className="px-4 py-3">
+              <div className="flex items-start gap-2">
+                <div
+                  className="grid size-6 shrink-0 place-items-center rounded-6 bg-warning/15 text-aux font-semibold text-warning-fg"
+                  aria-hidden="true"
+                >
+                  P
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-ui text-foreground">Pi Coding Agent</p>
+                    <span className="rounded-full border border-warning/40 px-2 py-0.5 text-aux text-warning-fg">
+                      Prototype
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 text-aux ${
+                        piPrototype.loggedIn ? "text-success-fg" : "text-muted-foreground"
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          piPrototype.loggedIn ? "bg-success" : "bg-muted-foreground/50"
+                        }`}
+                      />
+                      {piPrototype.loggedIn
+                        ? `${piPrototype.modelCount} catalogued model${piPrototype.modelCount === 1 ? "" : "s"}`
+                        : "No available models"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-aux text-muted-foreground">{piPrototype.guidance}</p>
+                  <p className="mt-1 text-aux text-muted-foreground">
+                    Opt-in prototype: Rome does not launch Pi CLI or expose Pi tools/history.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={AI_TOOL_ACTION_BUTTON_CLASS}
+                  onClick={openPiDialog}
+                >
+                  Configure
+                </Button>
+              </div>
+            </div>
+          )}
           {visibleProviders.map((provider) => {
             const status = toolStatus[provider.statusKey];
             const isLoggedIn = status?.loggedIn === true;
@@ -1064,6 +1307,156 @@ export function AiToolsPanel({
             );
           })}
         </div>
+
+        <Dialog
+          open={piDialogOpen}
+          onClose={closePiDialog}
+          ariaLabel="Configure Pi Coding Agent prototype"
+          size="lg"
+        >
+          <DialogHeader onClose={closePiDialog} closeLabel={t("common.cancel")}>
+            <div className="flex items-center gap-2">
+              <DialogTitle>Configure Pi Coding Agent</DialogTitle>
+              <span className="rounded-full border border-warning/40 px-2 py-0.5 text-aux text-warning-fg">
+                Prototype
+              </span>
+            </div>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <DialogDescription>
+              Choose a reviewed one-token Pi provider. The token is written directly to Pi&apos;s
+              credential store on this host and can affect other Pi uses; Rome does not keep a
+              second copy.
+            </DialogDescription>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+              <Field>
+                <FieldLabel htmlFor={`${uid}-pi-provider`}>Pi provider</FieldLabel>
+                <Select
+                  value={selectedPiProvider}
+                  onValueChange={(provider) => {
+                    setSelectedPiProvider(provider);
+                    setPiApiToken("");
+                    setPiMessage("");
+                  }}
+                >
+                  <SelectTrigger id={`${uid}-pi-provider`} className="w-full">
+                    <SelectValue placeholder="Choose provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(piPrototype?.providers ?? []).map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-pi-api-token`}>API token</FieldLabel>
+                <Input
+                  id={`${uid}-pi-api-token`}
+                  type="password"
+                  autoComplete="off"
+                  value={piApiToken}
+                  onChange={(event) => {
+                    setPiApiToken(event.target.value);
+                    setPiMessage("");
+                  }}
+                  placeholder={
+                    selectedPiProviderStatus?.credentialSource === "stored"
+                      ? "Enter a new token to replace the stored credential"
+                      : "Paste the literal API token"
+                  }
+                  className="w-full"
+                />
+              </Field>
+            </div>
+
+            {selectedPiProviderStatus && (
+              <div className="space-y-2 rounded-8 border border-border bg-muted/20 p-3 text-aux">
+                <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
+                  <span className="text-muted-foreground">Credential persistence</span>
+                  <span className="text-foreground">
+                    {selectedPiProviderStatus.credentialSource === "stored"
+                      ? `Stored by Pi (${selectedPiProviderStatus.storedCredentialType === "oauth" ? "OAuth" : "API token"})`
+                      : selectedPiProviderStatus.credentialSource === "environment"
+                        ? `External / environment${selectedPiProviderStatus.externalSource ? ` (${selectedPiProviderStatus.externalSource})` : ""}`
+                        : "No credential detected"}
+                  </span>
+                  <span className="text-muted-foreground">Catalog discovery</span>
+                  <span className="text-foreground">
+                    {selectedPiProviderStatus.modelCount > 0
+                      ? `${selectedPiProviderStatus.modelCount} qualified model${selectedPiProviderStatus.modelCount === 1 ? "" : "s"}`
+                      : piPrototype?.discoveryFailedProviders.includes(selectedPiProvider)
+                        ? "Discovery failed — retry without re-entering a saved token"
+                        : "No Rome-compatible models found"}
+                  </span>
+                  <span className="text-muted-foreground">Live validity</span>
+                  <span className="text-foreground">Not verified until an ordinary model turn</span>
+                </div>
+                {selectedPiProviderStatus.credentialSource === "environment" && (
+                  <p className="text-muted-foreground">
+                    A token saved here will take precedence. Rome cannot remove or change the
+                    external source.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {selectedPiProviderStatus && selectedPiProviderStatus.modelCount > 0 && (
+              <div className="max-h-32 overflow-auto rounded-8 border border-border p-3">
+                <p className="mb-1 text-aux text-muted-foreground">Qualified models</p>
+                <ul className="space-y-1 font-mono text-aux text-foreground">
+                  {piPrototype?.models
+                    .filter((model) => model.upstreamProvider === selectedPiProvider)
+                    .map((model) => (
+                      <li key={model.selectionId}>
+                        {model.upstreamProvider} / {model.modelId}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
+
+            <p className="text-aux text-muted-foreground">
+              Paste a literal value only. Pi $ENV and !command credential expressions, OAuth,
+              multi-field cloud providers, and custom providers are intentionally excluded.
+            </p>
+            {piMessage && (
+              <p role="status" className="text-ui text-foreground">
+                {piMessage}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            {selectedPiProviderStatus?.credentialSource === "stored" && (
+              <Button
+                variant="outline"
+                className="mr-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
+                disabled={piPending}
+                onClick={() => setRemovePiCredentialOpen(true)}
+              >
+                Remove stored credential
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              disabled={piPending || !selectedPiProvider}
+              onClick={() => void refreshPiProvider()}
+            >
+              {piPending ? <Spinner size="sm" aria-hidden /> : <RefreshCw className="size-4" />}
+              Refresh discovery
+            </Button>
+            <Button
+              disabled={piPending || !selectedPiProvider || !piApiToken.trim()}
+              onClick={requestPiCredentialSave}
+            >
+              {selectedPiProviderStatus?.credentialSource === "stored"
+                ? "Replace token"
+                : "Save token"}
+            </Button>
+          </DialogFooter>
+        </Dialog>
 
         <Dialog
           open={anthropicProviderDialogOpen}
@@ -1363,6 +1756,27 @@ export function AiToolsPanel({
             onCancel={() => setRemoveAnthropicProviderOpen(false)}
           />
         )}
+
+        <RomeConfirmDialog
+          open={replacePiCredentialOpen}
+          title={`Replace ${selectedPiProviderStatus?.name ?? "Pi"} credential?`}
+          description="This replaces the provider-wide credential in Pi's store on this host and can affect other Pi uses."
+          confirmLabel="Replace token"
+          confirmDisabled={piPending}
+          onConfirm={() => void savePiCredential(true)}
+          onCancel={() => setReplacePiCredentialOpen(false)}
+        />
+
+        <RomeConfirmDialog
+          open={removePiCredentialOpen}
+          title={`Remove ${selectedPiProviderStatus?.name ?? "Pi"} stored credential?`}
+          description="This removes only this provider's Pi-stored credential. An external or environment credential may remain effective, and other providers are unchanged."
+          confirmLabel="Remove stored credential"
+          destructive
+          confirmDisabled={piPending}
+          onConfirm={() => void removePiCredential()}
+          onCancel={() => setRemovePiCredentialOpen(false)}
+        />
       </PanelSection>
     </PanelMeasure>
   );

@@ -7,7 +7,7 @@ import {
   type AIToolStateValue,
   type ProviderState,
 } from "./ai-tool-state.js";
-import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
+import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("model-resolver");
@@ -199,15 +199,16 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(model, state.codex);
+        if (provider.id === "openai") requireModelAccess(model, state.codex);
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
-        const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
+        const selection = resolveWebchatLargeModelSelection(request.selectionId);
+        if (!selection) throw new Error(`Unknown model selection: ${request.selectionId}`);
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(selection.model, state.codex);
+        if (provider.id === "openai") requireModelAccess(selection.model, state.codex);
         return { modelProvider: provider, model: selection.model };
       }
 

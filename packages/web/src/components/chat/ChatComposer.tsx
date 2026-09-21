@@ -250,7 +250,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const { data: peopleData } = usePeople();
   const invalidateSettings = useInvalidateSettings();
   const people = peopleData ?? [];
-  const modelSelectorEnabled = settings?.enableModelSelector === true;
+  const [piPrototypeEnabled, setPiPrototypeEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/ai-tools/pi-prototype", { cache: "no-store" })
+      .then((response) => {
+        if (active) setPiPrototypeEnabled(response.ok);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  const modelSelectorEnabled = settings?.enableModelSelector === true || piPrototypeEnabled;
   const impersonationEnabled = settings?.enableImpersonation === true;
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   // Persisted preferences are seeded from settings on first load, then owned
@@ -262,7 +274,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   useEffect(() => {
     if (!settings || seededFromSettingsRef.current) return;
     const stored = settings.webchatLargeModel;
-    if (typeof stored === "string" && LARGE_MODEL_OPTIONS.some((option) => option.id === stored)) {
+    if (
+      typeof stored === "string" &&
+      (LARGE_MODEL_OPTIONS.some((option) => option.id === stored) ||
+        stored.startsWith("pi-prototype:"))
+    ) {
       setLargeModelSelection(stored);
     }
     if (isReasoningEffort(settings.webchatReasoningEffort)) {

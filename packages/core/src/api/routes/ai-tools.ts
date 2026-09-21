@@ -20,6 +20,7 @@ import {
 } from "../../lib/anthropic-compatible-providers.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
+import { PI_PROTOTYPE_MODEL_SELECTION_PREFIX } from "../../core/model-selector.js";
 
 // Re-exported for existing consumers (and the ai-tools route tests) that import
 // the usage parser from this module.
@@ -30,6 +31,67 @@ export {
 } from "../../lib/provider-usage.js";
 
 const log = createLogger("api:ai-tools");
+
+async function readPiPrototypeStatus() {
+  if (process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") return null;
+  try {
+    const { createPiModelRuntime } = await import(
+      "../../prototypes/pi-provider/pi-sdk-prototype.js"
+    );
+    const { readPiPrototypeConfiguration } = await import(
+      "../../prototypes/pi-provider/pi-credential-prototype.js"
+    );
+    return serializePiPrototypeStatus(
+      await readPiPrototypeConfiguration(await createPiModelRuntime({ refreshOnCreate: false })),
+    );
+  } catch {
+    return {
+      enabled: true,
+      prototype: true,
+      loggedIn: false,
+      modelCount: 0,
+      models: [],
+      configurationValid: false,
+      guidance: "Pi discovery failed. Open Configure to inspect or retry the prototype setup.",
+      eligibilityCaveat:
+        "Pi credentials and SDK error details are intentionally not returned to the browser.",
+      providers: [],
+      catalogStatus: "discovery-failed" as const,
+      liveValidity: "not-verified" as const,
+      discoveryFailedProviders: [],
+    };
+  }
+}
+
+function serializePiPrototypeStatus<TModel extends { qualifiedModelId: string }>(configuration: {
+  providers: unknown[];
+  models: TModel[];
+  configurationValid: boolean;
+  catalogStatus: "models-available" | "no-models" | "discovery-failed";
+  liveValidity: "not-verified";
+  discoveryFailedProviders: string[];
+}) {
+  return {
+    enabled: true,
+    prototype: true,
+    loggedIn: configuration.models.length > 0,
+    modelCount: configuration.models.length,
+    models: configuration.models.map((model) => ({
+      ...model,
+      selectionId: `${PI_PROTOTYPE_MODEL_SELECTION_PREFIX}${model.qualifiedModelId}`,
+    })),
+    providers: configuration.providers,
+    configurationValid: configuration.configurationValid,
+    catalogStatus: configuration.catalogStatus,
+    liveValidity: configuration.liveValidity,
+    discoveryFailedProviders: configuration.discoveryFailedProviders,
+    guidance: configuration.models.length
+      ? "Models are catalogued, but the token has not been live-verified. Select a qualified Pi model to attempt a turn."
+      : "No Rome-compatible Pi models are available. Configure a reviewed one-token provider or refresh discovery.",
+    eligibilityCaveat:
+      "Pi reports authenticated models, but its SDK model metadata has no general tool-capability flag.",
+  };
+}
 
 // Log out of Claude by running `claude auth logout` (non-interactive, so no PTY
 // terminal — mirrors getClaudeStatus's execFile usage).
@@ -46,9 +108,10 @@ export function aiToolsRoutes(
 ): Hono {
   const app = new Hono();
 
-  app.get("/ai-tools/status", (c) => {
+  app.get("/ai-tools/status", async (c) => {
     const state = deps.aiToolState.get();
     const login = deps.codexAccountService.getLoginState();
+    const piPrototype = await readPiPrototypeStatus();
     return c.json({
       claude: state.claude,
       codex: state.codex,
@@ -64,7 +127,112 @@ export function aiToolsRoutes(
         lastError: login.lastError,
       },
       anthropicCompatible: state.claude.anthropicCompatible ?? null,
+      ...(piPrototype ? { piPrototype } : {}),
     });
+  });
+
+  app.get("/ai-tools/pi-prototype", async (c) => {
+    const status = await readPiPrototypeStatus();
+    return status ? c.json(status) : c.json({ error: "Pi provider prototype is disabled" }, 404);
+  });
+
+  app.put("/ai-tools/pi-prototype/credential", async (c) => {
+    if (process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") {
+      return c.json({ error: "Pi provider prototype is disabled" }, 404);
+    }
+    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+    const providerId = body?.providerId;
+    const { validatePiPrototypeToken, savePiPrototypeCredential } = await import(
+      "../../prototypes/pi-provider/pi-credential-prototype.js"
+    );
+    const validated = validatePiPrototypeToken(body?.token);
+    if (!validated.ok) return c.json({ error: validated.error }, 400);
+    if (typeof providerId !== "string") {
+      return c.json({ error: "Choose a supported Pi provider." }, 400);
+    }
+    try {
+      const result = await savePiPrototypeCredential(
+        providerId,
+        validated.token,
+        body?.confirmReplace === true,
+      );
+      return c.json({
+        ok: true,
+        credentialPersisted: result.credentialPersisted,
+        synchronizationSucceeded: result.synchronizationSucceeded,
+        status: serializePiPrototypeStatus(result.status),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.startsWith("Unsupported Pi provider")) {
+        return c.json({ error: "Choose a supported Pi provider." }, 400);
+      }
+      if (message.startsWith("Confirm replacement")) {
+        return c.json({ error: message }, 409);
+      }
+      return c.json(
+        {
+          error:
+            "Pi could not store this credential. Retry without reusing the token if the status changed.",
+        },
+        500,
+      );
+    }
+  });
+
+  app.delete("/ai-tools/pi-prototype/credential/:providerId", async (c) => {
+    if (process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") {
+      return c.json({ error: "Pi provider prototype is disabled" }, 404);
+    }
+    try {
+      const { removePiPrototypeCredential } = await import(
+        "../../prototypes/pi-provider/pi-credential-prototype.js"
+      );
+      const result = await removePiPrototypeCredential(c.req.param("providerId"));
+      return c.json({
+        ok: true,
+        credentialRemoved: result.credentialRemoved,
+        synchronizationSucceeded: result.synchronizationSucceeded,
+        status: serializePiPrototypeStatus(result.status),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Unsupported Pi provider")) {
+        return c.json({ error: "Choose a supported Pi provider." }, 400);
+      }
+      return c.json(
+        { error: "Pi could not remove the stored credential. Retry after refreshing status." },
+        500,
+      );
+    }
+  });
+
+  app.post("/ai-tools/pi-prototype/refresh/:providerId", async (c) => {
+    if (process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") {
+      return c.json({ error: "Pi provider prototype is disabled" }, 404);
+    }
+    try {
+      const { createPiModelRuntime } = await import(
+        "../../prototypes/pi-provider/pi-sdk-prototype.js"
+      );
+      const { listInstalledOneTokenProviders, readPiPrototypeConfiguration } = await import(
+        "../../prototypes/pi-provider/pi-credential-prototype.js"
+      );
+      const runtime = await createPiModelRuntime({ refreshOnCreate: false });
+      const providerId = c.req.param("providerId");
+      if (!listInstalledOneTokenProviders(runtime).some((provider) => provider.id === providerId)) {
+        return c.json({ error: "Choose a supported Pi provider." }, 400);
+      }
+      return c.json(
+        serializePiPrototypeStatus(
+          await readPiPrototypeConfiguration(runtime, { refreshProvider: providerId }),
+        ),
+      );
+    } catch {
+      return c.json(
+        { error: "Pi model discovery failed. The stored credential was not changed." },
+        500,
+      );
+    }
   });
 
   app.get("/ai-tools/usage", (c) => {
@@ -82,7 +250,9 @@ export function aiToolsRoutes(
       const providerParam = c.req.query("provider");
       const provider =
         providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
-      return c.json(await deps.aiToolState.refresh(provider));
+      const state = await deps.aiToolState.refresh(provider);
+      const piPrototype = await readPiPrototypeStatus();
+      return c.json({ ...state, ...(piPrototype ? { piPrototype } : {}) });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);
     }

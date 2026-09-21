@@ -13,6 +13,7 @@
   "exclude": [
     "node_modules",
     "dist",
+    "src/prototypes/**",
     "src/**/*.test.ts",
     "src/**/*.integration.test.ts",
     "src/**/*.e2e.test.ts"

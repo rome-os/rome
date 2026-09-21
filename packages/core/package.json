@@ -17,6 +17,8 @@
     "test:e2e": "../../scripts/test-env.sh rstest e2e.test",
     "test:coverage": "../../scripts/test-env.sh rstest --coverage --pool.maxWorkers=8",
     "test:ci": "../../scripts/test-env.sh env RSTEST_JUNIT=1 rstest --coverage --pool.maxWorkers=8",
+    "prototype:pi": "tsx src/prototypes/pi-provider/cli.ts",
+    "prototype:pi:ui": "tsx src/prototypes/pi-provider/ui-server.ts",
     "db:generate:system": "drizzle-kit generate --config drizzle.system.config.ts",
     "db:generate:app": "drizzle-kit generate --config drizzle.authoring.config.ts",
     "db:migrate": "if [ \"${ROME_DOCKER_APP_CODE_MODE:-source}\" = \"compiled\" ]; then node dist/db/migrate.js; else tsx src/db/migrate.ts; fi",
@@ -105,7 +107,9 @@
     "zod-from-json-schema": "^0.5.2"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@types/jsdom": "^28.0.3",
-    "@types/turndown": "^5.0.6"
+    "@types/turndown": "^5.0.6",
+    "typebox": "1.3.27"
   }
 }

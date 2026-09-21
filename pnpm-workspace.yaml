@@ -35,6 +35,8 @@ allowBuilds:
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
+  # @google/genai's published preinstall is a no-op; Pi consumes its prebuilt dist.
+  "@google/genai": false
   bufferutil: false
   core-js: false
   electron-winstaller: false
