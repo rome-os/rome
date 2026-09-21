@@ -77,6 +77,13 @@ export class PiSettingsError extends Error {
   }
 }
 
+class PiSettingsTimeoutError extends Error {
+  constructor() {
+    super("Pi settings operation timed out.");
+    this.name = "PiSettingsTimeoutError";
+  }
+}
+
 export function validatePiToken(value: unknown): string {
   if (typeof value !== "string") {
     throw new PiSettingsError("invalid-token", "Enter a valid literal API token.");
@@ -109,6 +116,10 @@ function isCredentialSynchronizationError(error: unknown): boolean {
   // stable name, while importing it here could mask the original login/logout
   // failure if module loading itself failed.
   return error instanceof Error && error.name === "CredentialSynchronizationError";
+}
+
+function isPiSettingsTimeoutError(error: unknown): error is PiSettingsTimeoutError {
+  return error instanceof PiSettingsTimeoutError;
 }
 
 export function piRuntimePaths(agentDir: string) {
@@ -289,7 +300,7 @@ export class PiSettingsService {
     const timedOut = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         controller.abort();
-        if (rejectOnTimeout) reject(new Error("Pi settings operation timed out."));
+        if (rejectOnTimeout) reject(new PiSettingsTimeoutError());
       }, this.statusTimeoutMs);
     });
     try {
@@ -354,6 +365,7 @@ export class PiSettingsService {
     const token = validatePiToken(input.token);
     this.invalidateCache();
     let synchronized = true;
+    let timedOutAfterLogin: PiSettingsTimeoutError | undefined;
     let status: PiSettingsStatus | undefined;
     await this.useRuntime(async (runtime) => {
       if (!runtime.getProviders().some((provider) => provider.id === input.providerId)) {
@@ -389,6 +401,18 @@ export class PiSettingsService {
       } catch (error) {
         if (isCredentialSynchronizationError(error)) {
           synchronized = false;
+        } else if (isPiSettingsTimeoutError(error)) {
+          // Pi can commit auth.json before completing its local catalog sync.
+          // Reconcile the store before presenting a timeout as a failed save.
+          const credentials = await this.withTimeout(
+            (signal) => runtime.listCredentials({ signal }),
+            true,
+          );
+          if (!credentials.some((credential) => credential.providerId === input.providerId)) {
+            throw error;
+          }
+          timedOutAfterLogin = error;
+          synchronized = false;
         } else {
           throw error;
         }
@@ -421,6 +445,13 @@ export class PiSettingsService {
       }
     });
     if (!status) throw new Error("Pi credential status was unavailable after save.");
+    if (
+      timedOutAfterLogin &&
+      status.providers.find((provider) => provider.id === input.providerId)?.credentialSource !==
+        "stored"
+    ) {
+      throw timedOutAfterLogin;
+    }
     this.cacheStatus(this.invalidateCache(), status);
     return {
       credentialPersisted: true,

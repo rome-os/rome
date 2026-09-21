@@ -366,6 +366,34 @@ describe("Pi settings service", () => {
     ).rejects.toBeDefined();
   });
 
+  it("reports a committed credential when login times out during synchronization", async () => {
+    let stored = false;
+    const service = new PiSettingsService(
+      async () => ({
+        runtime: fakeRuntime({
+          listCredentials: async () =>
+            stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+          login: async () =>
+            await new Promise<never>(() => {
+              stored = true;
+            }),
+        }),
+        dispose() {},
+      }),
+      1,
+    );
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).resolves.toMatchObject({
+      credentialPersisted: true,
+      synchronizationSucceeded: false,
+      status: {
+        providers: [expect.objectContaining({ id: "kimi-coding", credentialSource: "stored" })],
+      },
+    });
+  });
+
   it("releases the shared mutation queue when an SDK call ignores its abort signal", async () => {
     let created = 0;
     const service = new PiSettingsService(async () => {
