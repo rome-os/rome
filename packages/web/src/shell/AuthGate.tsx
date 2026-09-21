@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { getRoutedAppId, resolveAuthRouting } from "../lib/auth-routing";
 import { BACKEND_RETRY_INTERVAL_MS, hasSession, useAuthState } from "../lib/auth-state";
 import { reportDetectedTimezoneOnce } from "../lib/guardian-timezone";
+import { startUserActivityReporting } from "../lib/user-activity";
 import { BackendUnreachableScreen } from "../components/backend-unreachable";
 
 interface PublicAppProbe {
@@ -30,6 +31,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const ready = state.bootstrap?.phase === "ready";
   useEffect(() => {
     if (ready) void reportDetectedTimezoneOnce();
+  }, [ready]);
+
+  useEffect(() => {
+    if (ready) return startUserActivityReporting();
   }, [ready]);
 
   useEffect(() => {
