@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -19,10 +19,22 @@ export async function writePrivateJson(path: string, value: unknown): Promise<vo
   await mkdir(dir, { recursive: true, mode: 0o700 });
   if (process.platform === "win32") {
     const run = promisify(execFile);
-    const { stdout } = await run("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
+    // Git Bash can put its incompatible whoami.exe ahead of Windows system tools on PATH.
+    const systemDirectory = join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+    const { stdout } = await run(join(systemDirectory, "whoami.exe"), [
+      "/user",
+      "/fo",
+      "csv",
+      "/nh",
+    ]);
     const sid = stdout.match(/S-1-\d+(?:-\d+)+/)?.[0];
     if (!sid) throw new Error("Could not determine the Windows account identity.");
-    await run("icacls.exe", [dir, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`]);
+    await run(join(systemDirectory, "icacls.exe"), [
+      dir,
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:(OI)(CI)F`,
+    ]);
   } else await chmod(dir, 0o700);
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
