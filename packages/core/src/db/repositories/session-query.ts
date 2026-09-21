@@ -88,6 +88,13 @@ export interface RawSessionStats {
   unknown: number;
 }
 
+export interface RawSessionModelIdentity {
+  sessionId: string;
+  provider: string | null;
+  name: string | null;
+  lastUsedAt: Date;
+}
+
 export interface SessionPageStorageQuery {
   scope: SessionQueryStorageScope;
   search?: string;
@@ -352,6 +359,46 @@ export class SessionQueryRepository {
       total: totalRows[0]?.count ?? 0,
       facets: { types: typeRows, sourceChannels: sourceRows },
     };
+  }
+
+  async querySessionModels(
+    scope: SessionQueryStorageScope,
+    sessionIds: string[],
+  ): Promise<RawSessionModelIdentity[]> {
+    if (sessionIds.length === 0) return [];
+    // A provider without a model name is still unattributable. Normalize it so
+    // all incomplete terminal accounting contributes one Unknown model entry.
+    const identityProvider = sql<
+      string | null
+    >`case when ${modelName} is null then null else ${modelProvider} end`;
+    const rows = await this.db
+      .select({
+        sessionId: romeAgentMessages.sessionId,
+        provider: identityProvider,
+        name: modelName,
+        lastUsedAt: sql<number>`max(${romeAgentMessages.createdAt})`.mapWith(Number),
+      })
+      .from(romeAgentMessages)
+      .leftJoin(
+        terminalTraceBlocks,
+        and(eq(terminalTraceBlocks.messageId, romeAgentMessages.id), terminalBlockCondition),
+      )
+      .leftJoin(
+        turnEndTraceBlocks,
+        and(eq(turnEndTraceBlocks.messageId, romeAgentMessages.id), turnEndBlockCondition),
+      )
+      .where(and(inArray(romeAgentMessages.sessionId, sessionIds), ...runPredicates(scope)))
+      .groupBy(romeAgentMessages.sessionId, identityProvider, modelName)
+      // Unknown is evidence, but not a concrete model. Keep it after known
+      // identities so a compact row can still name the latest actual model.
+      .orderBy(asc(sql`${modelName} is null`), desc(sql`max(${romeAgentMessages.createdAt})`));
+
+    return rows.map((row) => ({
+      sessionId: row.sessionId,
+      provider: row.provider,
+      name: row.name,
+      lastUsedAt: new Date(row.lastUsedAt * 1_000),
+    }));
   }
 
   async queryRunAggregates(scope: SessionQueryStorageScope): Promise<RawSessionRunAggregate[]> {

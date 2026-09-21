@@ -390,6 +390,24 @@ describe("SessionQueryService", () => {
       outputTokens: 10,
       status: "completed",
     });
+    await webchat.appendTraceBlocks({
+      messageId: "mixed-unknown",
+      sessionId: "mixed-model-session",
+      turnId: "mixed-unknown-turn",
+      startSeq: 0,
+      blocks: [
+        {
+          type: "turn_end",
+          turnId: "mixed-unknown-turn",
+          status: "completed",
+          durationMs: 1_000,
+        },
+      ],
+    });
+    await testDb.db
+      .update(romeAgentMessages)
+      .set({ createdAt: new Date("2026-07-15T10:30:00.000Z") })
+      .where(eq(romeAgentMessages.id, "mixed-unknown"));
 
     const result = await service.querySessions({
       scope: {
@@ -405,12 +423,20 @@ describe("SessionQueryService", () => {
     expect(result.sessions).toEqual([
       expect.objectContaining({
         id: "mixed-model-session",
+        models: [{ kind: "known", provider: "openai", name: "gpt-5.4" }],
         stats: expect.objectContaining({
           runCount: 1,
           usage: expect.objectContaining({ totalTokens: 15 }),
           outcomes: { completed: 1, interrupted: 0, error: 0, unknown: 0 },
         }),
       }),
+    ]);
+
+    const detail = await service.getSession("mixed-model-session");
+    expect(detail?.models).toEqual([
+      { kind: "known", provider: "anthropic", name: "claude-sonnet-4.5" },
+      { kind: "known", provider: "openai", name: "gpt-5.4" },
+      { kind: "unknown" },
     ]);
   });
 

@@ -78,6 +78,7 @@ import type {
   SessionsSort,
 } from "@rome/api-types/sessions";
 import { SessionsOverview, type SessionOverviewGroupDimension } from "./SessionsOverview";
+import { SessionModelList, SessionModelSummary } from "./SessionModelDisplay";
 import {
   costCoverage,
   formatCompactNumber,
@@ -415,6 +416,13 @@ function SessionsIndexPage({
             </div>
           </div>
         ),
+      },
+      {
+        id: "model",
+        header: "Model",
+        className: "w-44 max-w-44",
+        headerClassName: "w-44",
+        cell: (session) => <SessionModelSummary models={session.models} />,
       },
       {
         id: "runs",
@@ -926,6 +934,12 @@ function SessionsIndexPage({
                           {SESSION_TYPE_LABELS[session.type]}
                         </Badge>
                       </div>
+                      <div className="mt-4 border-t border-border-subtle pt-3">
+                        <div className="text-aux text-muted-foreground">Model</div>
+                        <div className="mt-1">
+                          <SessionModelSummary models={session.models} />
+                        </div>
+                      </div>
                       <div className="mt-4 grid grid-cols-3 gap-3 text-aux">
                         <div>
                           <div className="text-muted-foreground">Runs</div>
@@ -1245,6 +1259,10 @@ function SessionDetailsSheet({
               </div>
             ))}
           </dl>
+        </section>
+        <section>
+          <h3 className="text-section uppercase text-muted-foreground">Models used</h3>
+          <SessionModelList models={session.models} />
         </section>
         <section>
           <h3 className="text-section uppercase text-muted-foreground">Usage</h3>

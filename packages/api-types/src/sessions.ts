@@ -91,6 +91,11 @@ export interface RomeSessionStats {
   outcomes: RunOutcomeSummary;
 }
 
+/** A concrete model identity observed in terminal accounting for a session run. */
+export type SessionModelIdentity =
+  | { kind: "known"; provider: string | null; name: string }
+  | { kind: "unknown" };
+
 export interface RomeSessionExplorerRecord {
   id: string;
   name: string;
@@ -118,6 +123,8 @@ export interface RomeSessionExplorerRecord {
   messageCount: number;
   owner: RomeSessionOwner;
   stats: RomeSessionStats;
+  /** Distinct identities in most-recently-used order for this query's run scope. */
+  models: SessionModelIdentity[];
 }
 
 export interface RomeSessionsPageResult {

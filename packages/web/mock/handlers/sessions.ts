@@ -106,6 +106,7 @@ const record = (seed: SessionSeed): RomeSessionExplorerRecord => ({
   parentTurnId: null,
   createdAt: seed.activityAt,
   messageCount: 0,
+  models: seed.stats.runCount > 0 ? [{ kind: "unknown" }] : [],
   ...seed,
 });
 
@@ -135,6 +136,7 @@ const fromSeededChat = (
     createdAt: chat.createdAt,
     activityAt: chat.activityAt,
     messageCount: chat.messageCount,
+    models: runCount > 0 ? [{ kind: "known", provider: "openai", name: "gpt-5.6-sol" }] : [],
     stats: {
       runCount,
       usage: usage(
@@ -170,6 +172,10 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     createdAt: ago(3 * HOUR),
     activityAt: ago(28 * 60 * 1000),
     messageCount: 14,
+    models: [
+      { kind: "known", provider: "openai", name: "gpt-5.6-sol" },
+      { kind: "known", provider: "anthropic", name: "claude-sonnet-5" },
+    ],
     stats: {
       runCount: 6,
       usage: usage(21_400, 4_120, 68_000, 5_200, 0.19, 6),
@@ -189,10 +195,29 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     createdAt: ago(2 * DAY),
     activityAt: ago(5 * HOUR),
     messageCount: 9,
+    models: [{ kind: "unknown" }],
     stats: {
       runCount: 4,
       usage: usage(12_900, 2_640, 41_000, 3_100, 0.11, 4),
       outcomes: outcomes(3, 0, 1),
+    },
+  }),
+  record({
+    id: "ses-awaiting-first-run",
+    displayTitle: "New supplier research",
+    type: "webchat",
+    agentName: "main",
+    owner: CORE_OWNER,
+    sourceChannel: "webchat",
+    sourceThreadType: "private",
+    createdAt: ago(10 * 60 * 1000),
+    activityAt: ago(10 * 60 * 1000),
+    messageCount: 0,
+    models: [],
+    stats: {
+      runCount: 0,
+      usage: usage(0, 0, 0, 0, null, 0),
+      outcomes: outcomes(0),
     },
   }),
   record({
@@ -487,9 +512,8 @@ const facet = (values: (string | null)[]): { value: string | null; count: number
  * These are a different namespace from the `/api/chat/sessions/*` routes the
  * chat surface uses, and answering one does not answer the other.
  *
- * `scope.runs` is ignored. Its model and outcome filters only ever arrive from a
- * drill-in on the `/sessions` overview, whose metrics endpoint mock mode does
- * not answer, and a fixture record carries no per-run model to filter on.
+ * Model scope is applied to both membership and the returned identity set. That
+ * keeps the prototype's drill-in behavior aligned with the real scoped query.
  */
 export function sessionQueryHandlers(
   chats: ChatSession[],
@@ -536,6 +560,7 @@ export function sessionQueryHandlers(
       const to = scope.time.kind === "absolute" ? Date.parse(scope.time.to) : Date.now();
       const search = body.search?.trim().toLowerCase() ?? "";
       const sessionScope = scope.sessions;
+      const modelScope = scope.runs?.models;
 
       const matched = inventory.filter((session) => {
         const at = Date.parse(session.activityAt);
@@ -564,6 +589,20 @@ export function sessionQueryHandlers(
           return false;
         if (search && !searchFields(session).some((field) => field?.toLowerCase().includes(search)))
           return false;
+        if (
+          modelScope &&
+          !modelScope.some((filter) =>
+            session.models.some((model) => {
+              if (filter.kind === "unknown") return model.kind === "unknown";
+              return (
+                model.kind === "known" &&
+                model.name === filter.name &&
+                (!filter.provider || model.provider === filter.provider)
+              );
+            }),
+          )
+        )
+          return false;
         return true;
       });
 
@@ -579,7 +618,20 @@ export function sessionQueryHandlers(
 
       const offset = Math.max(0, body.page?.offset ?? 0);
       const limit = Math.min(Math.max(1, body.page?.limit ?? 50), 200);
-      const page = sorted.slice(offset, offset + limit);
+      const page = sorted.slice(offset, offset + limit).map((session) => ({
+        ...session,
+        models: modelScope
+          ? session.models.filter((model) =>
+              modelScope.some((filter) =>
+                filter.kind === "unknown"
+                  ? model.kind === "unknown"
+                  : model.kind === "known" &&
+                    model.name === filter.name &&
+                    (!filter.provider || model.provider === filter.provider),
+              ),
+            )
+          : session.models,
+      }));
       const result: RomeSessionsPageResult = {
         sessions: page,
         total: sorted.length,

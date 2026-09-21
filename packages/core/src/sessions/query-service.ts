@@ -19,10 +19,12 @@ import type {
   SessionQueryRequest,
   SessionQueryScope,
   SessionsMetric,
+  SessionModelIdentity,
 } from "@rome/api-types/sessions";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type {
   RawSessionRunAggregate,
+  RawSessionModelIdentity,
   RawSessionStats,
   SessionQueryRepository,
   SessionQueryStorageScope,
@@ -171,6 +173,14 @@ function storageStats(stats: RawSessionStats): RomeSessionStats {
       unknown: stats.unknown,
     },
   };
+}
+
+function sessionModels(rows: RawSessionModelIdentity[]): SessionModelIdentity[] {
+  return rows.map((row) =>
+    row.name
+      ? { kind: "known" as const, provider: row.provider, name: row.name }
+      : { kind: "unknown" as const },
+  );
 }
 
 function metricValue(accumulator: MetricsAccumulator, metric: SessionsMetric): number {
@@ -403,6 +413,7 @@ export class SessionQueryService {
     session: SessionRow,
     messageCount: number,
     stats: RomeSessionStats,
+    models: SessionModelIdentity[],
   ): RomeSessionExplorerRecord {
     const owner = this.resolveOwner(session.agentName);
     return {
@@ -432,6 +443,7 @@ export class SessionQueryService {
       messageCount,
       owner,
       stats,
+      models,
     };
   }
 
@@ -449,8 +461,23 @@ export class SessionQueryService {
       offset,
       limit,
     });
+    const modelRows = await this.options.repository.querySessionModels(
+      this.storageScope(request.scope),
+      result.rows.map((row) => row.id),
+    );
+    const modelsBySession = new Map<string, RawSessionModelIdentity[]>();
+    for (const model of modelRows) {
+      const existing = modelsBySession.get(model.sessionId) ?? [];
+      existing.push(model);
+      modelsBySession.set(model.sessionId, existing);
+    }
     const sessions = result.rows.map((row) =>
-      this.toRecord(row, row.messageCount, storageStats(row.stats)),
+      this.toRecord(
+        row,
+        row.messageCount,
+        storageStats(row.stats),
+        sessionModels(modelsBySession.get(row.id) ?? []),
+      ),
     );
     return {
       sessions,
@@ -747,6 +774,9 @@ export class SessionQueryService {
       sessions: { ids: [id] },
     };
     const runs = await this.options.repository.queryRunAggregates(this.storageScope(allScope));
+    const models = await this.options.repository.querySessionModels(this.storageScope(allScope), [
+      id,
+    ]);
     const accumulator = emptyAccumulator();
     for (const run of runs) appendAggregate(accumulator, run);
     const lineageEntry = (session: SessionRow) => {
@@ -761,7 +791,12 @@ export class SessionQueryService {
       };
     };
     return {
-      ...this.toRecord(rows.session, rows.messageCount, accumulatorStats(accumulator)),
+      ...this.toRecord(
+        rows.session,
+        rows.messageCount,
+        accumulatorStats(accumulator),
+        sessionModels(models),
+      ),
       lineage: {
         parent: rows.parent ? lineageEntry(rows.parent) : null,
         children: rows.children.map(lineageEntry),

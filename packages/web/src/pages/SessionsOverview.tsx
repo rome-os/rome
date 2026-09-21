@@ -27,6 +27,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import { cn } from "@/lib/utils";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import { SessionsTrendChart } from "./SessionsTrendChart";
+import { SessionModelSummary } from "./SessionModelDisplay";
 import { costCoverage, formatCompactNumber, formatCost, formatOutcome } from "./sessions-format";
 
 const METRIC_LABELS: Record<SessionsMetric, string> = {
@@ -151,7 +152,7 @@ function RecentSessions({
           <button
             key={session.id}
             type="button"
-            className="flex h-[3.25rem] w-full items-center gap-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            className="flex min-h-[3.25rem] w-full items-center gap-3 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             onClick={() => onOpen(session)}
             aria-label={`Open ${session.displayTitle}`}
           >
@@ -168,6 +169,12 @@ function RecentSessions({
               <span className="block truncate text-aux text-muted-foreground">
                 {session.owner.label} · {artifactLocalName(session.agentName ?? "main")}
               </span>
+              <span className="mt-1 block sm:hidden">
+                <SessionModelSummary models={session.models} inline />
+              </span>
+            </span>
+            <span className="hidden min-w-36 max-w-52 sm:block">
+              <SessionModelSummary models={session.models} />
             </span>
             <span className="shrink-0 text-right text-aux text-muted-foreground">
               <Timestamp value={session.activityAt ?? session.createdAt} className="block" />

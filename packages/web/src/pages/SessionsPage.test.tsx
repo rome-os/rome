@@ -101,6 +101,7 @@ const FORK_SESSION = {
   activityAt: "2026-07-12T00:00:00.000Z",
   messageCount: 1,
   owner: { type: "core", id: "core", label: "Rome", iconUrl: null },
+  models: [{ kind: "known", provider: "openai", name: "gpt-5.6-sol" }],
   stats: {
     runCount: 1,
     usage: {
@@ -523,7 +524,8 @@ describe("SessionsPage explorer", () => {
     expect(document.querySelector('svg[aria-label="ChatGPT"]')).toBeTruthy();
     expect(document.querySelector('svg[viewBox="0 0 51 48"]')).toBeTruthy();
     expect(document.querySelector('[data-slot="avatar"]')?.className).toContain("rounded-8");
-    expect(screen.queryByText("openai")).toBeNull();
+    expect(screen.getByText("gpt-5.6-sol")).toBeTruthy();
+    expect(screen.getByText("openai")).toBeTruthy();
     expect(screen.queryByText("Error rate")).toBeNull();
     expect(screen.queryByText("Average duration")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View all" }));
