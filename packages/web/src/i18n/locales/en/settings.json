@@ -14,7 +14,8 @@
     "Trust": "Trust",
     "Channels": "Channels",
     "AI Tools": "AI Tools",
-    "Advanced": "Advanced"
+    "Advanced": "Advanced",
+    "Devices": "Devices"
   },
   "appearance": {
     "title": "Appearance",
@@ -789,5 +790,45 @@
     "artLabel": "Advanced easter egg",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "Devices",
+    "description": "Devices linked to your Rome account. Connection checks refresh every 15 seconds.",
+    "refresh": "Refresh",
+    "loading": "Checking device connections…",
+    "loadFailed": "Failed to load devices",
+    "connectionLabel": "Rome connection",
+    "connectedCount_one": "{{count}} connected device",
+    "connectedCount_other": "{{count}} connected devices",
+    "connectedAtLeast_one": "At least {{count}} connected device",
+    "connectedAtLeast_other": "At least {{count}} connected devices",
+    "totalCount_one": "{{count}} authorized device",
+    "totalCount_other": "{{count}} authorized devices",
+    "unknownCount_one": "The connection status of {{count}} device could not be confirmed.",
+    "unknownCount_other": "The connection status of {{count}} devices could not be confirmed.",
+    "checkedAt": "Last checked at {{time}}.",
+    "empty": "No devices are authorized. Run rome-node connect on a computer and approve access to connect it.",
+    "connection": {
+      "online": "Connected",
+      "stopped": "Not connected",
+      "connecting": "Connecting",
+      "retrying": "Reconnecting",
+      "revoked": "Access revoked",
+      "superseded": "Connection replaced",
+      "not_configured": "Not configured",
+      "unavailable": "Unavailable",
+      "incompatible": "Restart required"
+    },
+    "help": {
+      "unavailable": "Device status is unavailable. Try refreshing.",
+      "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
+      "incompatible": "Restart the device service with rome-node daemon stop and rome-node daemon start."
+    },
+    "status": {
+      "connected": "Connected",
+      "not_connected": "Not connected",
+      "unknown": "Unknown",
+      "revoked": "Access revoked"
+    }
   }
 }

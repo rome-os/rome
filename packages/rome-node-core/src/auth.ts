@@ -1,8 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./actions.js";
 import { CloudError, cloudOrigin, gatewayConfig } from "./cloud.js";
-import { daemonStatus } from "./daemon.js";
-import { callerCredentialPath, readOptionalCallerCredential } from "./local.js";
+import { daemonStatus } from "./daemon-client.js";
+import {
+  callerCredentialPath,
+  readOptionalCallerCredential,
+  CallerConfigurationError,
+  type NodeConfig,
+} from "./local.js";
 import { writePrivateJson } from "./storage.js";
 
 const communicationToken = /^romedev_[A-Za-z0-9_-]{43}$/;
@@ -16,12 +21,19 @@ class ServerAuthError extends Error {
   }
 }
 
-export async function configureCaller(origin: string, token: string): Promise<void> {
+export async function configureCaller(
+  origin: string,
+  token: string,
+  config: NodeConfig,
+): Promise<void> {
   if (!communicationToken.test(token)) throw new Error("Invalid communication token.");
-  if (await daemonStatus())
-    throw new Error("Stop the CLI daemon before changing credentials: rome-node daemon stop");
+  if (await daemonStatus(config))
+    throw new CallerConfigurationError(
+      "daemon_running",
+      "Stop the caller daemon before changing credentials.",
+    );
   await gatewayConfig(origin, token);
-  await writePrivateJson(callerCredentialPath(), { cloudUrl: origin, token });
+  await writePrivateJson(callerCredentialPath(config), { cloudUrl: origin, token });
 }
 
 async function exchangeInstanceToken(origin: string, token: string): Promise<string> {
@@ -55,9 +67,11 @@ async function exchangeInstanceToken(origin: string, token: string): Promise<str
 export async function authorizeServer(
   origin: string,
   instanceToken: string | undefined,
+  config: NodeConfig,
+  onRetry?: () => void,
 ): Promise<void> {
   const cloudUrl = cloudOrigin(origin);
-  const existing = await readOptionalCallerCredential();
+  const existing = await readOptionalCallerCredential(config);
   if (existing) {
     if (existing.cloudUrl !== cloudUrl)
       throw new Error(
@@ -67,9 +81,15 @@ export async function authorizeServer(
   }
   const token = instanceToken?.trim();
   if (!token || !/^romeinst_[A-Za-z0-9_-]+$/.test(token))
-    throw new Error("Server authorization requires ROME_INSTANCE_TOKEN in the environment.");
-  if (await daemonStatus())
-    throw new Error("Stop the CLI daemon before configuring credentials: rome-node daemon stop");
+    throw new CallerConfigurationError(
+      "instance_token_required",
+      "Server authorization requires an Instance Token.",
+    );
+  if (await daemonStatus(config))
+    throw new CallerConfigurationError(
+      "daemon_running",
+      "Stop the caller daemon before configuring credentials.",
+    );
 
   let deviceToken: string | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -78,16 +98,14 @@ export async function authorizeServer(
       // Reuse a minted token when validation fails transiently. Another POST
       // would leave an additional permanent credential at Cloud.
       deviceToken ??= await exchangeInstanceToken(cloudUrl, token);
-      await configureCaller(cloudUrl, deviceToken);
+      await configureCaller(cloudUrl, deviceToken, config);
       return;
     } catch (error) {
       const retryable =
         (error instanceof ServerAuthError && error.retryable) ||
         (error instanceof CloudError && error.code === "cloud_unavailable");
       if (!retryable || attempt === 2) throw error;
-      process.stderr.write(
-        "Rome Cloud is temporarily unavailable. Retrying server authorization.\n",
-      );
+      onRetry?.();
     }
   }
 }

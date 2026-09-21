@@ -23,7 +23,8 @@
     "./favors": "./src/favors.ts",
     "./message": "./src/message.ts",
     "./people": "./src/people.ts",
-    "./persons": "./src/persons.ts"
+    "./persons": "./src/persons.ts",
+    "./devices": "./src/devices.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

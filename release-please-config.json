@@ -23,8 +23,11 @@
     "packages/web-content": {
       "package-name": "@rome-os/rome-web-components"
     },
-    "packages/rome-node": {
+    "packages/rome-node-cli": {
       "package-name": "@rome-os/node"
+    },
+    "packages/rome-node-core": {
+      "package-name": "@rome-os/node-core"
     }
   }
 }

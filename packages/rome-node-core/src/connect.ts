@@ -1,25 +1,36 @@
 import { hostname } from "node:os";
-import { join } from "node:path";
-import { rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./actions.js";
 import { cloudOrigin, cloudRequest, CloudError, gatewayConfig } from "./cloud.js";
 import { connectGateway } from "./client.js";
 import { createNodeSocket } from "./socket.js";
-import { loginDevice, type DeviceSession } from "./login.js";
-import { readPrivateJson, writePrivateJson } from "./storage.js";
+import type { DeviceSession } from "./login.js";
+import type { CredentialStore } from "./storage.js";
 import { createExecutor } from "./executor.js";
 import { validId } from "./protocol.js";
-import { configRoot } from "./local.js";
 
-export async function connectComputer(
-  origin: string,
-  name: string,
-  signal: AbortSignal,
-): Promise<void> {
-  const cloudUrl = cloudOrigin(origin);
-  const path = join(configRoot(), "credential.json");
-  const stored = await readPrivateJson(path);
+export type HostCredential = DeviceSession & { name: string };
+export type HostEvent =
+  | { type: "authorization_required" }
+  | { type: "retrying" }
+  | { type: "device"; name: string; deviceId: string }
+  | { type: "connection"; status: import("./client.js").ConnectionStatus };
+
+export interface HostOptions {
+  cloudUrl: string;
+  name: string;
+  signal: AbortSignal;
+  credentials: CredentialStore<HostCredential>;
+  authorize(cloudUrl: string, name: string, signal: AbortSignal): Promise<DeviceSession>;
+  onEvent?(event: HostEvent): void;
+}
+
+/** Runs until aborted or authorization ends. The caller owns interaction and credential storage. */
+export async function connectHost(options: HostOptions): Promise<void> {
+  const { name, signal, credentials } = options;
+  if (signal.aborted) return;
+  const cloudUrl = cloudOrigin(options.cloudUrl);
+  const stored = await credentials.load();
   let session: (DeviceSession & { name: string }) | null =
     isRecord(stored) &&
     stored.cloudUrl === cloudUrl &&
@@ -33,22 +44,20 @@ export async function connectComputer(
   let attempt = 0;
   while (!signal.aborted) {
     if (!session) {
-      process.stderr.write(
-        "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
-      );
-      session = { ...(await loginDevice(cloudUrl, name, signal)), name };
-      await writePrivateJson(path, session);
+      options.onEvent?.({ type: "authorization_required" });
+      session = { ...(await options.authorize(cloudUrl, name, signal)), name };
+      await credentials.save(session);
     }
     try {
       gatewayUrl = await gatewayConfig(cloudUrl, session.token);
       break;
     } catch (error) {
       if (error instanceof CloudError && error.code === "invalid_device_session") {
-        await rm(path, { force: true });
+        await credentials.clear();
         session = null;
         continue;
       }
-      process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
+      options.onEvent?.({ type: "retrying" });
       await delay(Math.min(60_000, 1000 * 2 ** Math.min(attempt++, 6)), undefined, {
         signal,
       }).catch(() => {});
@@ -64,17 +73,20 @@ export async function connectComputer(
     );
     if (isRecord(device) && typeof device.device_name === "string") {
       session.name = device.device_name;
-      await writePrivateJson(path, session);
+      await credentials.save(session);
     }
   }
   if (signal.aborted) return;
   const active = session;
-  process.stderr.write(`Device: ${active.name}\nDevice ID: ${active.deviceId}\n`);
+  options.onEvent?.({ type: "device", name: active.name, deviceId: active.deviceId });
   await new Promise<void>((resolve, reject) => {
     const executor = createExecutor(active.name, (message) => connection.send(message), [
       active.token,
     ]);
+    let finished = false;
     const finish = (error?: Error) => {
+      if (finished) return;
+      finished = true;
       signal.removeEventListener("abort", abort);
       executor.disconnect();
       connection.stop();
@@ -98,14 +110,14 @@ export async function connectComputer(
         if ("from" in message) void executor.receive(message);
       },
       onStatus: (status) => {
-        process.stderr.write(`Connection: ${status}\n`);
+        options.onEvent?.({ type: "connection", status });
         if (status !== "online" && status !== "connecting") executor.disconnect();
         if (status === "revoked" || status === "superseded") {
           queueMicrotask(() =>
             finish(
               new Error(
                 status === "revoked"
-                  ? "Authorization revoked. Run rome-node connect again to authorize."
+                  ? "Authorization revoked. Explicit authorization is required."
                   : "Another connection replaced this device. This process has stopped.",
               ),
             ),

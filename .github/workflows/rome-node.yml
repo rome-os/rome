@@ -3,13 +3,15 @@ name: Rome Node platforms
 on:
   pull_request:
     paths:
-      - packages/rome-node/**
+      - packages/rome-node-cli/**
+      - packages/rome-node-core/**
       - pnpm-lock.yaml
       - .github/workflows/rome-node.yml
   push:
     branches: [main]
     paths:
-      - packages/rome-node/**
+      - packages/rome-node-cli/**
+      - packages/rome-node-core/**
       - pnpm-lock.yaml
       - .github/workflows/rome-node.yml
   workflow_dispatch:
@@ -31,14 +33,18 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: 24
-      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node...
       - run: pnpm --filter @rome-os/node build
+      - run: pnpm --filter @rome-os/node-core exec rstest
       - run: pnpm --filter @rome-os/node exec rstest
-      - run: node packages/rome-node/bin/rome-node.js --help
+      - run: node packages/rome-node-cli/bin/rome-node.js --help
       - name: Install the standalone archive
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/rome-node-package"
+          pnpm --filter @rome-os/node-core pack --pack-destination "$RUNNER_TEMP/rome-node-package"
           pnpm --filter @rome-os/node pack --pack-destination "$RUNNER_TEMP/rome-node-package"
+          npm install --prefix "$RUNNER_TEMP/rome-node-core-install" "$RUNNER_TEMP"/rome-node-package/rome-os-node-core-*.tgz
+          node packages/rome-node-cli/scripts/package-smoke.mjs "$RUNNER_TEMP/rome-node-core-install"
           npm install --prefix "$RUNNER_TEMP/rome-node-install" "$RUNNER_TEMP"/rome-node-package/*.tgz
           node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" --help

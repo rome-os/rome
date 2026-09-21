@@ -8,8 +8,9 @@ Build an installation archive from this repository:
 
 ```sh
 pnpm --filter @rome-os/node build
+pnpm --filter @rome-os/node-core pack --pack-destination /tmp
 pnpm --filter @rome-os/node pack --pack-destination /tmp
-npm install -g /tmp/rome-os-node-0.1.0.tgz
+npm install -g /tmp/rome-os-node-core-0.1.0.tgz /tmp/rome-os-node-0.1.0.tgz
 ```
 
 On the target computer:
@@ -59,14 +60,21 @@ Gateway connection. `rome-node daemon status` reports its PID, and
 daemon before changing credentials. `rome-node daemon serve` runs in the
 foreground for diagnosis. Set `ROME_NODE_CONFIG_DIR` to isolate configurations.
 
+`rome-node watch` subscribes to caller connection changes and prints one JSON
+event per line. It starts the daemon if needed and begins with a snapshot.
+After a connection loss it waits for the daemon and subscribes again; it does
+not restart a stopped daemon. Ctrl+C closes only the watcher. These events
+report the caller's Gateway connection, not remote device presence.
+
 Commands print JSON to stdout and diagnostics to stderr. Errors and nonzero
 remote exit codes produce a nonzero local exit status. Output is collected in memory
-and returned in full after program exit. The CLI leaves message and send-buffer
-limits to the WebSocket library and infrastructure. A lost response reports
+and returned in full after program exit. Action message limits follow the WebSocket library and infrastructure.
+The local daemon disconnects event observers that exceed its send-buffer limit. A lost response reports
 `unknown_outcome`. Never automatically retry an unknown outcome.
 An authorized device is
 not necessarily online. Use `describe` to query its current platform and actions.
 
-The package exports the Gateway client, socket adapter, and action response
-contract for other clients. See [the device architecture and operating guide](../../docs/rome-node.md)
+The CLI uses [`@rome-os/node-core`](../rome-node-core/README.md) for authorization,
+its shared caller daemon, and the computer host. The package also re-exports
+the Gateway client, socket adapter, and action response contract for compatibility. See [the device architecture and operating guide](../../docs/rome-node.md)
 for credential boundaries, file operations, output limits, and disconnection behavior.

@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { writePrivateJson } from "./storage.js";
+import WebSocket from "ws";
+import { writePrivateJson } from "@rome-os/node-core/storage";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -12,7 +13,12 @@ afterEach(async () => {
 });
 
 async function fixture(
-  options: { exchangeStatuses?: number[]; validationFailures?: number; issuedToken?: string } = {},
+  options: {
+    exchangeStatuses?: number[];
+    validationFailures?: number;
+    issuedToken?: string;
+    listFailure?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
   cleanup.push(() => rm(root, { force: true, recursive: true }));
@@ -40,6 +46,10 @@ async function fixture(
       else res.end(JSON.stringify({ gatewayUrl: "wss://gateway.example/connect" }));
     } else if (req.url === "/api/account/devices") {
       lists++;
+      if (options.listFailure) {
+        res.writeHead(503).end("{}");
+        return;
+      }
       res.end(JSON.stringify({ items: [{ id: "target" }] }));
     } else res.writeHead(404).end("{}");
   });
@@ -94,6 +104,17 @@ async function fixture(
 }
 
 describe("standalone CLI daemon processes", () => {
+  it("preserves structured stdout errors when device listing fails", async () => {
+    const f = await fixture({ listFailure: true });
+    await writePrivateJson(join(f.root, "caller.json"), { cloudUrl: f.cloudUrl, token: f.token });
+    const result = await f.cli(["device"]);
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      type: "response",
+      ok: false,
+      error: { code: "gateway_unavailable" },
+    });
+  });
   it("authorizes a server from its environment, saves only the communication token, and reuses it", async () => {
     const f = await fixture();
     const args = ["auth", "--server", "--cloud", f.cloudUrl];
@@ -244,26 +265,67 @@ describe("standalone CLI daemon processes", () => {
       const response = await fetch(`http://127.0.0.1:${state.port}${path}`, { method });
       expect(response.status).toBe(401);
     }
-    const invalid = await fetch(`http://127.0.0.1:${state.port}/run`, {
+    const retired = await fetch(`http://127.0.0.1:${state.port}/run`, {
       method: "POST",
       headers: { authorization: `Bearer ${state.token}` },
       body: "{}",
     });
-    expect(invalid.status).toBe(400);
-    const large = await fetch(`http://127.0.0.1:${state.port}/run`, {
-      method: "POST",
+    expect(retired.status).toBe(426);
+    for (const headers of [
+      {},
+      { authorization: `Bearer ${state.token}`, origin: "https://example.com" },
+    ]) {
+      const rejected = new WebSocket(`ws://127.0.0.1:${state.port}/rpc`, { headers });
+      const status = await new Promise<number>((resolve) => {
+        rejected.on("error", () => {});
+        rejected.on("unexpected-response", (_req, response) => {
+          resolve(response.statusCode!);
+          rejected.terminate();
+        });
+      });
+      expect(status).toBe(401);
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${state.port}/rpc`, {
       headers: { authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ extra: "x".repeat(2 * 1024 * 1024) }),
     });
-    expect(large.status).toBe(400);
-    await large.text();
-    const larger = await fetch(`http://127.0.0.1:${state.port}/run`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ extra: "x".repeat(33 * 1024 * 1024) }),
+    cleanup.push(async () => socket.terminate());
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
     });
-    expect(larger.status).toBe(400);
-    expect(await larger.json()).toMatchObject({ error: { code: "invalid_request" } });
+    const exchange = (request: unknown) =>
+      new Promise<unknown>((resolve) => {
+        socket.once("message", (data) => resolve(JSON.parse(data.toString())));
+        socket.send(typeof request === "string" ? request : JSON.stringify(request));
+      });
+    const request = (method: string, params = {}) =>
+      exchange({ jsonrpc: "2.0", id: "test", method, params });
+    expect(await request("daemon.status")).toMatchObject({ error: { code: -32001 } });
+    expect(await request("daemon.hello", { protocolVersion: 1 })).toMatchObject({
+      error: { code: -32002 },
+    });
+    expect(await request("daemon.hello", { protocolVersion: 2 })).toEqual({
+      jsonrpc: "2.0",
+      id: "test",
+      result: { pid: state.pid, protocolVersion: 2, connection: "stopped" },
+    });
+    expect(await request("devices.run")).toMatchObject({ error: { code: -32602 } });
+    expect(await request("events.subscribe", { topic: "unknown" })).toMatchObject({
+      error: { code: -32602 },
+    });
+    expect(await request("missing")).toMatchObject({ error: { code: -32601 } });
+    expect(await exchange("{")).toMatchObject({ id: null, error: { code: -32700 } });
+    expect(await exchange([])).toMatchObject({ id: null, error: { code: -32600 } });
+    expect(
+      await exchange([
+        { jsonrpc: "2.0", method: "daemon.status" },
+        { jsonrpc: "2.0", id: 7, method: "daemon.status" },
+        { jsonrpc: "2.0", id: 8, method: "missing" },
+      ]),
+    ).toMatchObject([
+      { id: 7, result: { pid: state.pid } },
+      { id: 8, error: { code: -32601 } },
+    ]);
     expect(f.lists()).toBe(0);
   });
 });

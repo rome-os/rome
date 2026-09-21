@@ -16,6 +16,7 @@ export interface DeviceConnectorOptions {
   credential: CallerCredential;
   connect?: typeof connectGateway;
   waitMs?: number;
+  onStatus?(status: ConnectionStatus): void;
 }
 
 export class DeviceConnector {
@@ -27,6 +28,10 @@ export class DeviceConnector {
   private ready = new Set<() => void>();
 
   constructor(private options: DeviceConnectorOptions) {}
+
+  getStatus(): ConnectionStatus {
+    return this.status;
+  }
 
   private async ensure(): Promise<void> {
     if (this.stopped || this.status === "superseded" || this.status === "revoked")
@@ -61,6 +66,7 @@ export class DeviceConnector {
       onMessage: (message) => this.receive(message),
       onStatus: (status) => {
         this.status = status;
+        this.options.onStatus?.(status);
         if (status !== "online") {
           for (const pending of this.pending.values())
             pending.finish(
@@ -95,7 +101,12 @@ export class DeviceConnector {
     if (response) pending.finish(response);
   }
 
-  async run(target: string, action: string, args: unknown): Promise<ActionResponse> {
+  async run(
+    target: string,
+    action: string,
+    args: unknown,
+    waitMs = this.options.waitMs ?? 60_000,
+  ): Promise<ActionResponse> {
     if (!validId(target) || !action || action.length > 128)
       return actionError("invalid_request", "A device ID and action are required.");
     try {
@@ -149,7 +160,7 @@ export class DeviceConnector {
               "The local wait limit was reached. The remote program was not canceled. Do not automatically retry.",
             ),
           ),
-        this.options.waitMs ?? 60_000,
+        waitMs,
       );
       this.pending.set(id, { target, finish });
       if (!this.connection?.send(envelope))
@@ -164,13 +175,12 @@ export class DeviceConnector {
 
   stop() {
     this.stopped = true;
-    this.connection?.stop();
+    this.status = "stopped";
+    if (this.connection) this.connection.stop();
+    else this.options.onStatus?.("stopped");
     for (const pending of this.pending.values())
       pending.finish(
-        actionError(
-          "unknown_outcome",
-          "The CLI daemon is shutting down. Execution may have occurred.",
-        ),
+        actionError("unknown_outcome", "The caller is shutting down. Execution may have occurred."),
       );
     for (const wake of this.ready) wake();
   }

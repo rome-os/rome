@@ -11,6 +11,7 @@ Commands:
   device           List authorized devices (they may be offline).
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
+  watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
 
 Agent workflow:
@@ -25,6 +26,19 @@ Set ROME_NODE_CONFIG_DIR to use a separate configuration directory.
 `;
 
 const commands: Record<string, string> = {
+  watch: `Usage: rome-node watch
+
+Subscribe to caller connection state as newline-delimited JSON.
+Starts the daemon if needed, but does not open its Gateway connection.
+Each connected event includes {transport:"connected",daemon:{pid,protocolVersion,connection}}.
+Local disconnection emits {transport:"disconnected",daemon:null,reason:"connection_lost"}.
+The daemon connection and its Gateway connection are separate states.
+
+Reconnection restores the subscription and emits a fresh snapshot, not missed history.
+A watcher does not restart an explicitly stopped daemon. Another command can start it.
+Ctrl+C exits the watcher without stopping the daemon or remote operations.
+These events do not indicate whether individual remote devices are online.
+`,
   connect: `Usage: rome-node connect [--cloud <origin>] [--name <name>]
 
 Run this on the computer that will execute programs.

@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { authorizeServer } from "@rome-os/node-core/auth";
+import { nodeConfigFromEnvironment } from "@rome-os/node-core/client";
 import { createLogger } from "../logger.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
@@ -9,33 +10,18 @@ const log = createLogger("rome-node-provisioning");
 export function createNodeCallerProvisioner(): () => Promise<void> {
   let pending: Promise<void> | undefined;
   return () => {
-    // Boot and enrollment can overlap. Share the child until it exits.
     if (pending) return pending;
     const token = getInstanceToken();
     const origin = getRomeCloudOrigin();
     if (!token || !origin) return Promise.resolve();
-    pending = new Promise<void>((resolve) => {
-      const child = execFile(
-        "rome-node",
-        ["auth", "--server", "--cloud", origin],
-        {
-          env: { ...process.env, ROME_INSTANCE_TOKEN: token },
-          timeout: 120_000,
-          killSignal: "SIGKILL",
-          maxBuffer: 4096,
-          windowsHide: true,
-        },
-        (error) => {
-          // Do not forward child output or exception text into Core logs.
-          if (error) log.warn("CLI caller authorization failed. Check rome-node auth --server.");
-          else log.info("CLI caller authorization ready");
-          resolve();
-        },
-      );
-      child.stdin?.end();
-    })
+    // Deferring setup also catches synchronous configuration failures without blocking startup.
+    pending = Promise.resolve()
+      .then(() => authorizeServer(origin, token, nodeConfigFromEnvironment(process.env)))
+      .then(() => {
+        log.info("Node caller authorization ready");
+      })
       .catch(() => {
-        log.warn("Could not run CLI caller authorization");
+        log.warn("Node caller authorization failed. Check rome-node auth --server.");
       })
       .finally(() => {
         pending = undefined;

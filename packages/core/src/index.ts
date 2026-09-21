@@ -1,3 +1,4 @@
+import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission } from "./channels/pairing.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -274,6 +275,7 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+  const nodeDevices = createNodeDevicesService();
   const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
@@ -1283,6 +1285,7 @@ async function main() {
   try {
     const apiDeps: ApiDeps = {
       provisionNodeCaller,
+      nodeDevices,
       talkRouter,
       conversationSettings,
       actionEngine,
@@ -1547,6 +1550,7 @@ async function main() {
     shuttingDown = true;
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
+    nodeDevices.close();
 
     if (internalApi) {
       try {

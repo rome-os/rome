@@ -13,6 +13,7 @@ export async function loginDevice(
   cloudUrl: string,
   name: string,
   signal: AbortSignal,
+  onAuthorizationRequired: (url: string) => void,
 ): Promise<DeviceSession> {
   const cloud = new URL(cloudOrigin(cloudUrl));
   const verifier = randomBytes(32).toString("base64url");
@@ -65,7 +66,9 @@ export async function loginDevice(
           .end("Device authorized. Return to Rome Node.");
         resolve({ cloudUrl: cloud.origin, token: body.access_token, deviceId: body.device_id });
       } catch {
-        response.writeHead(400).end("Device authorization failed. Run rome-node connect to retry.");
+        response
+          .writeHead(400)
+          .end("Device authorization failed. Return to the application to retry.");
         reject(new Error("Device authorization failed"));
       } finally {
         clearTimeout(timer);
@@ -105,7 +108,11 @@ export async function loginDevice(
         state,
         display_name: name,
       }).toString();
-      process.stderr.write(`Open this URL in your browser to authorize ${name}:\n${url}\n`);
+      try {
+        onAuthorizationRequired(url.toString());
+      } catch {
+        abort();
+      }
     });
   });
 }

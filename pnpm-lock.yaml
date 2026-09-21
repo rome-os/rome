@@ -292,6 +292,9 @@ importers:
       '@rome-os/libs':
         specifier: workspace:*
         version: link:../lib
+      '@rome-os/node-core':
+        specifier: workspace:^
+        version: link:../rome-node-core
       '@rome/api-types':
         specifier: workspace:*
         version: link:../api-types
@@ -617,7 +620,29 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
-  packages/rome-node:
+  packages/rome-node-cli:
+    dependencies:
+      '@rome-os/node-core':
+        specifier: workspace:^
+        version: link:../rome-node-core
+    devDependencies:
+      '@rstest/core':
+        specifier: ^0.11.11
+        version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
+      '@types/node':
+        specifier: 25.2.3
+        version: 25.2.3
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+
+  packages/rome-node-core:
     dependencies:
       ws:
         specifier: ^8.18.0

@@ -1,3 +1,4 @@
+import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -159,6 +160,7 @@ export function buildApp(
   api.route("/", conversationSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));

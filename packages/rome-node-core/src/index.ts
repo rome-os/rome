@@ -20,4 +20,3 @@ export {
   type ActionResponse,
   type ActionRequest,
 } from "./actions.js";
-export { createNodeSocket } from "./socket.js";

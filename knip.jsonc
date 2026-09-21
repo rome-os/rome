@@ -134,8 +134,21 @@
       "ignoreDependencies": ["expo-notifications"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
-    "packages/rome-node": {
-      "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts"]
+    "packages/rome-node-core": {
+      "entry": [
+        "src/**/*.test.ts",
+        "src/index.ts",
+        "src/daemon-entry.ts",
+        "bin/daemon.js",
+        "src/daemon-client.ts",
+        "src/host.ts",
+        "src/auth.ts",
+        "src/storage.ts",
+        "src/daemon.ts"
+      ]
+    },
+    "packages/rome-node-cli": {
+      "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
     "packages/app-web-sdk": {

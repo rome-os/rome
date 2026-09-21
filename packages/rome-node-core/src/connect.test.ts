@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { connectComputer } from "./connect.js";
+import { connectHost } from "./connect.js";
 import { CloudError } from "./cloud.js";
 import * as cloudModule from "./cloud.js" with { rstest: "importActual" };
 import type { GatewayClientOptions } from "./client.js";
@@ -12,15 +12,22 @@ const mocks = rs.hoisted(() => ({
   remove: rs.fn(),
   connect: rs.fn(),
 }));
-rs.mock("./storage.js", () => ({ readPrivateJson: mocks.read, writePrivateJson: mocks.write }));
-rs.mock("./login.js", () => ({ loginDevice: mocks.login }));
-rs.mock("node:fs/promises", () => ({ rm: mocks.remove }));
 rs.mock("./cloud.js", () => ({
   ...cloudModule,
   gatewayConfig: mocks.config,
   cloudRequest: async () => ({ items: [] }),
 }));
 rs.mock("./client.js", () => ({ connectGateway: mocks.connect }));
+
+function runHost(signal: AbortSignal) {
+  return connectHost({
+    cloudUrl: saved.cloudUrl,
+    name: "Test",
+    signal,
+    credentials: { load: mocks.read, save: mocks.write, clear: mocks.remove },
+    authorize: mocks.login,
+  });
+}
 
 const saved = {
   cloudUrl: "https://cloud.example",
@@ -47,9 +54,7 @@ afterEach(() => {
 
 describe("executor credential lifecycle", () => {
   it("reuses a valid stored identity without browser authorization", async () => {
-    await expect(
-      connectComputer(saved.cloudUrl, "Test", new AbortController().signal),
-    ).rejects.toThrow("replaced");
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     expect(mocks.login).not.toHaveBeenCalled();
     expect(mocks.remove).not.toHaveBeenCalled();
     expect(mocks.connect.mock.calls[0][0].deviceToken).toBe(saved.token);
@@ -59,17 +64,13 @@ describe("executor credential lifecycle", () => {
     { token: "malformed" },
   ])("authorizes missing or malformed credentials", async (stored) => {
     mocks.read.mockResolvedValue(stored);
-    await expect(
-      connectComputer(saved.cloudUrl, "Test", new AbortController().signal),
-    ).rejects.toThrow("replaced");
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     expect(mocks.login).toHaveBeenCalledTimes(1);
     expect(mocks.write).toHaveBeenCalledTimes(1);
   });
   it("reauthorizes only confirmed-invalid credentials on explicit startup", async () => {
     mocks.config.mockRejectedValueOnce(new CloudError("invalid_device_session"));
-    await expect(
-      connectComputer(saved.cloudUrl, "Test", new AbortController().signal),
-    ).rejects.toThrow("replaced");
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     expect(mocks.remove).toHaveBeenCalledTimes(1);
     expect(mocks.login).toHaveBeenCalledTimes(1);
   });
@@ -77,7 +78,7 @@ describe("executor credential lifecycle", () => {
     rs.useRealTimers();
     mocks.config.mockRejectedValue(new CloudError("cloud_unavailable"));
     const controller = new AbortController();
-    const running = connectComputer(saved.cloudUrl, "Test", controller.signal);
+    const running = runHost(controller.signal);
     await new Promise((resolve) => setTimeout(resolve, 1100));
     controller.abort();
     await running;
@@ -87,9 +88,7 @@ describe("executor credential lifecycle", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
   });
   it("stops on runtime invalidation and preserves temporary config errors", async () => {
-    await expect(
-      connectComputer(saved.cloudUrl, "Test", new AbortController().signal),
-    ).rejects.toThrow("replaced");
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
     const options: GatewayClientOptions = mocks.connect.mock.calls[0][0];
     mocks.config.mockRejectedValueOnce(new CloudError("cloud_unavailable"));
     await expect(options.beforeConnect!()).rejects.toThrow("unavailable");

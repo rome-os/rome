@@ -35,12 +35,12 @@ describe("browser authorization callback", () => {
     });
     rs.spyOn(process.stderr, "write").mockImplementation((value) => {
       printed += String(value);
-      const url = printed.split("\n").find((line) => line.startsWith("http://"));
-      if (url) open(new URL(url));
       return true;
     });
     const controller = new AbortController();
-    const login = loginDevice(origin, "Test computer", controller.signal);
+    const login = loginDevice(origin, "Test computer", controller.signal, (url) =>
+      open(new URL(url)),
+    );
     try {
       const auth = await authorization;
       const callback = new URL(auth.searchParams.get("redirect_uri")!);
@@ -61,7 +61,7 @@ describe("browser authorization callback", () => {
       expect(
         createHash("sha256").update(exchanged!.get("code_verifier")!).digest("base64url"),
       ).toBe(auth.searchParams.get("code_challenge"));
-      expect(printed).not.toContain(token);
+      expect(printed).toBe("");
     } finally {
       controller.abort();
     }

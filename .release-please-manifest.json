@@ -4,5 +4,6 @@
   "packages/ui": "0.3.2",
   "packages/lib": "0.0.2",
   "packages/web-content": "0.1.18",
-  "packages/rome-node": "0.1.0"
+  "packages/rome-node-cli": "0.1.0",
+  "packages/rome-node-core": "0.1.0"
 }

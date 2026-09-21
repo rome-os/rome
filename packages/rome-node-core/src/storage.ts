@@ -32,3 +32,17 @@ export async function writePrivateJson(path: string, value: unknown): Promise<vo
     await rm(temporary, { force: true });
   }
 }
+
+export interface CredentialStore<T> {
+  load(): Promise<unknown>;
+  save(value: T): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export function createFileCredentialStore<T>(path: string): CredentialStore<T> {
+  return {
+    load: () => readPrivateJson(path),
+    save: (value) => writePrivateJson(path, value),
+    clear: () => rm(path, { force: true }),
+  };
+}

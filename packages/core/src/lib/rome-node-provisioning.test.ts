@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
-const cp = rs.hoisted(() => ({ execFile: rs.fn() }));
-rs.mock("node:child_process", () => ({ execFile: cp.execFile }));
+const auth = rs.hoisted(() => ({ authorizeServer: rs.fn() }));
+rs.mock("@rome-os/node-core/auth", () => auth);
 
 import { createNodeCallerProvisioner } from "./rome-node-provisioning.js";
 import { setInstanceTokenInMemory } from "./instance-identity.js";
@@ -11,11 +11,13 @@ const token = "romeinst_current";
 let finish: (error: Error | null) => void;
 
 beforeEach(() => {
-  cp.execFile.mockReset();
-  cp.execFile.mockImplementation((_file, _args, _options, callback) => {
-    finish = callback;
-    return { stdin: { end: rs.fn() } };
-  });
+  auth.authorizeServer.mockReset();
+  auth.authorizeServer.mockImplementation(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        finish = (error) => (error ? reject(error) : resolve());
+      }),
+  );
   process.env.PANTHEON_BASE_ORIGIN = "https://rome-cloud.example";
   process.env.ROME_INSTANCE_TOKEN = "romeinst_stale_env";
   delete process.env.PANTHEON_DOMAIN;
@@ -26,40 +28,41 @@ afterEach(() => {
   setInstanceTokenInMemory(null);
 });
 
-describe("Rome Node startup command", () => {
-  it("passes the current token only to the child environment and shares overlapping calls", async () => {
+describe("Rome Node startup authorization", () => {
+  it("passes the current token to the API without changing the environment and shares overlapping calls", async () => {
     const ensure = createNodeCallerProvisioner();
     const first = ensure();
     const second = ensure();
-    expect(cp.execFile).toHaveBeenCalledTimes(1);
-    const [file, args, options] = cp.execFile.mock.calls[0];
-    expect(file).toBe("rome-node");
-    expect(args).toEqual(["auth", "--server", "--cloud", "https://rome-cloud.example"]);
-    expect(options.env.ROME_INSTANCE_TOKEN).toBe(token);
+    await Promise.resolve();
+    expect(auth.authorizeServer).toHaveBeenCalledTimes(1);
+    const [origin, credential] = auth.authorizeServer.mock.calls[0];
+    expect(origin).toBe("https://rome-cloud.example");
+    expect(credential).toBe(token);
     expect(process.env.ROME_INSTANCE_TOKEN).toBe("romeinst_stale_env");
-    expect(JSON.stringify(args)).not.toContain(token);
     finish(null);
     await Promise.all([first, second]);
   });
 
-  it("does not start a child without an enrolled instance and Cloud origin", async () => {
+  it("does not authorize without an enrolled instance and Cloud origin", async () => {
     const ensure = createNodeCallerProvisioner();
     setInstanceTokenInMemory(null);
     await ensure();
     setInstanceTokenInMemory(token);
     delete process.env.PANTHEON_BASE_ORIGIN;
     await ensure();
-    expect(cp.execFile).not.toHaveBeenCalled();
+    expect(auth.authorizeServer).not.toHaveBeenCalled();
   });
 
-  it("does not reject or retry CLI failures and can run again on the next lifecycle trigger", async () => {
+  it("does not reject or retry authorization failures and can run again on the next lifecycle trigger", async () => {
     const ensure = createNodeCallerProvisioner();
     const first = ensure();
-    finish(new Error("CLI failed"));
+    await Promise.resolve();
+    finish(new Error("Authorization failed"));
     await expect(first).resolves.toBeUndefined();
-    expect(cp.execFile).toHaveBeenCalledTimes(1);
+    expect(auth.authorizeServer).toHaveBeenCalledTimes(1);
     const next = ensure();
-    expect(cp.execFile).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+    expect(auth.authorizeServer).toHaveBeenCalledTimes(2);
     finish(null);
     await next;
   });
