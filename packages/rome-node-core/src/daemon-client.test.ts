@@ -115,7 +115,8 @@ describe("caller client boundaries", () => {
       ok: false,
       error: { code: "unknown_outcome" },
     });
-    await until(() => f.subscriptions() === 2);
+    await until(() => events.length === 3);
+    expect(f.subscriptions()).toBe(2);
     expect(events).toEqual([
       {
         transport: "connected",
@@ -201,7 +202,8 @@ describe("caller client boundaries", () => {
     await unsubscribe();
     const count = first.length;
     for (const socket of f.sockets.clients) socket.terminate();
-    await until(() => f.subscriptions() === 3);
+    await until(() => second.length === 3);
+    expect(f.subscriptions()).toBe(3);
     expect(first).toHaveLength(count);
     expect(second.at(-2)).toMatchObject({ transport: "disconnected", daemon: null });
     expect(second.at(-1)).toMatchObject({ transport: "connected" });
