@@ -120,7 +120,7 @@ export function validatePiToken(value: unknown): string {
     throw new PiSettingsError("invalid-token", "Enter a valid literal API token.");
   }
   const token = value.trim();
-  if (!token || token.startsWith("$") || token.startsWith("!")) {
+  if (!token || token.includes("$") || token.startsWith("!")) {
     throw new PiSettingsError(
       "invalid-token",
       "Enter a literal API token; indirections are not supported.",
@@ -181,7 +181,7 @@ export class PiSettingsService {
   private cached: { expiresAt: number; value: PiSettingsStatus } | null = null;
   private inFlight: { generation: number; promise: Promise<PiSettingsStatus> } | null = null;
   private cacheGeneration = 0;
-  private mutationTails = new Map<string, Promise<void>>();
+  private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly createRuntime: PiRuntimeFactory = defaultRuntimeFactory,
@@ -200,19 +200,17 @@ export class PiSettingsService {
     }
   }
 
-  private async withProviderMutation<T>(providerId: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.mutationTails.get(providerId) ?? Promise.resolve();
+  private async withCredentialMutation<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail;
     let release!: () => void;
-    const current = new Promise<void>((resolve) => {
+    this.mutationTail = new Promise<void>((resolve) => {
       release = resolve;
     });
-    this.mutationTails.set(providerId, current);
     await previous;
     try {
       return await fn();
     } finally {
       release();
-      if (this.mutationTails.get(providerId) === current) this.mutationTails.delete(providerId);
     }
   }
 
@@ -303,14 +301,18 @@ export class PiSettingsService {
     };
   }
 
-  private async readStatusWithTimeout(runtime: PiModelRuntime): Promise<PiSettingsStatus> {
+  private async withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
     try {
-      return await this.readStatus(runtime, controller.signal);
+      return await fn(controller.signal);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async readStatusWithTimeout(runtime: PiModelRuntime): Promise<PiSettingsStatus> {
+    return await this.withTimeout((signal) => this.readStatus(runtime, signal));
   }
 
   status(options: { bypassCache?: boolean } = {}): Promise<PiSettingsStatus> {
@@ -332,9 +334,14 @@ export class PiSettingsService {
     if (!options.bypassCache) {
       const inFlight = { generation, promise };
       this.inFlight = inFlight;
-      void promise.finally(() => {
-        if (this.inFlight === inFlight) this.inFlight = null;
-      });
+      void promise.then(
+        () => {
+          if (this.inFlight === inFlight) this.inFlight = null;
+        },
+        () => {
+          if (this.inFlight === inFlight) this.inFlight = null;
+        },
+      );
     }
     return promise;
   }
@@ -346,9 +353,7 @@ export class PiSettingsService {
   }): Promise<PiCredentialMutationResult> {
     assertProvider(input.providerId);
     validatePiToken(input.token);
-    return await this.withProviderMutation(input.providerId, () =>
-      this.saveCredentialUnlocked(input),
-    );
+    return await this.withCredentialMutation(() => this.saveCredentialUnlocked(input));
   }
 
   private async saveCredentialUnlocked(input: {
@@ -374,19 +379,22 @@ export class PiSettingsService {
       }
       let prompts = 0;
       try {
-        await runtime.login(input.providerId, "api_key", {
-          async prompt(prompt) {
-            prompts += 1;
-            if (prompts > 1 || prompt.type !== "secret") {
-              throw new PiSettingsError(
-                "unsupported-provider",
-                "This provider needs unsupported setup fields.",
-              );
-            }
-            return token;
-          },
-          notify() {},
-        });
+        await this.withTimeout((signal) =>
+          runtime.login(input.providerId, "api_key", {
+            signal,
+            async prompt(prompt) {
+              prompts += 1;
+              if (prompts > 1 || prompt.type !== "secret") {
+                throw new PiSettingsError(
+                  "unsupported-provider",
+                  "This provider needs unsupported setup fields.",
+                );
+              }
+              return token;
+            },
+            notify() {},
+          }),
+        );
       } catch (error) {
         if (await isCredentialSynchronizationError(error)) {
           synchronized = false;
@@ -432,9 +440,7 @@ export class PiSettingsService {
 
   async removeCredential(providerId: string): Promise<PiSettingsStatus> {
     assertProvider(providerId);
-    return await this.withProviderMutation(providerId, () =>
-      this.removeCredentialUnlocked(providerId),
-    );
+    return await this.withCredentialMutation(() => this.removeCredentialUnlocked(providerId));
   }
 
   private async removeCredentialUnlocked(providerId: string): Promise<PiSettingsStatus> {
@@ -454,6 +460,10 @@ export class PiSettingsService {
 
   async refreshProvider(providerId: string): Promise<PiSettingsStatus> {
     assertProvider(providerId);
+    return await this.withCredentialMutation(() => this.refreshProviderUnlocked(providerId));
+  }
+
+  private async refreshProviderUnlocked(providerId: string): Promise<PiSettingsStatus> {
     this.invalidateCache();
     let refreshFailed = false;
     await this.useRuntime(async (runtime) => {
@@ -483,10 +493,4 @@ export class PiSettingsService {
     this.cacheStatus(cacheGeneration, result);
     return result;
   }
-}
-
-let singleton: PiSettingsService | undefined;
-export function getPiSettingsService(): PiSettingsService {
-  singleton ??= new PiSettingsService();
-  return singleton;
 }

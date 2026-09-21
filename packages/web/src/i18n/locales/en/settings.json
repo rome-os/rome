@@ -644,7 +644,7 @@
       "removeConfirm": "Remove the stored token for this Pi provider?",
       "sources": {
         "stored": "Stored by Pi",
-        "environment": "External/environment (takes precedence)",
+        "environment": "External/environment (used when no token is stored)",
         "none": "Not configured"
       },
       "catalogStatuses": {

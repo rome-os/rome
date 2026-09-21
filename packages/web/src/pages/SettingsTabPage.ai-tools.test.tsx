@@ -602,4 +602,58 @@ describe("Pi provider settings", () => {
     expect(save?.init?.body).toContain('"providerId":"kimi-coding"');
     expect(document.body.textContent).not.toContain("temporary-test-token");
   });
+
+  it("confirms an unexpected replace conflict and clears a prior Pi notice on errors", async () => {
+    let saves = 0;
+    const piStatus = {
+      providers: [
+        {
+          id: "kimi-coding",
+          name: "Kimi For Coding",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+      ],
+      models: [],
+      catalogStatus: "no-models",
+      liveValidity: "not-verified",
+      discoveryFailedProviders: [],
+    };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status")
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      if (url === "/api/ai-tools/anthropic-compatible-providers") {
+        return ok({ providers: [], configured: null });
+      }
+      if (url === "/api/ai-tools/pi") return ok(piStatus);
+      if (url === "/api/ai-tools/pi/credential") {
+        saves += 1;
+        if (saves === 1) return { ok: false, status: 409 } as Response;
+        expect(JSON.parse(String(init?.body))).toMatchObject({ confirmReplace: true });
+        return ok({ credentialPersisted: true, synchronizationSucceeded: true, status: piStatus });
+      }
+      if (url === "/api/ai-tools/pi/refresh/kimi-coding") {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: "refresh failed" }),
+        } as Response;
+      }
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Configure" }));
+    await user.type(screen.getByLabelText("API token"), "temporary-test-token");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+    await user.click(await screen.findByRole("button", { name: "Replace token" }));
+    expect(await screen.findByText(/Token saved in Pi/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Refresh discovery" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByText(/Token saved in Pi/)).toBeNull();
+  });
 });

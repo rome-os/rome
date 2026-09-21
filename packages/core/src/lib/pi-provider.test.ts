@@ -29,7 +29,16 @@ function fakeRuntime(overrides: Partial<PiModelRuntime> = {}): PiModelRuntime {
 
 describe("Pi settings service", () => {
   it("rejects empty and indirection tokens without echoing them", () => {
-    for (const value of ["", "   ", "$TOKEN", "${TOKEN}", "!command", "a\nb", "x".repeat(8_193)]) {
+    for (const value of [
+      "",
+      "   ",
+      "$TOKEN",
+      "${TOKEN}",
+      "prefix$HOME",
+      "!command",
+      "a\nb",
+      "x".repeat(8_193),
+    ]) {
       try {
         validatePiToken(value);
         throw new Error("expected token validation to fail");
@@ -222,41 +231,29 @@ describe("Pi settings service", () => {
     });
   });
 
-  it("does not let an earlier provider mutation replace a newer cached status", async () => {
-    let releaseFirstRefresh: (() => void) | undefined;
-    const firstRefresh = new Promise<void>((resolve) => {
-      releaseFirstRefresh = resolve;
+  it("serializes different-provider mutations that share Pi auth storage", async () => {
+    let releaseFirstLogin: (() => void) | undefined;
+    const firstLogin = new Promise<void>((resolve) => {
+      releaseFirstLogin = resolve;
     });
-    let firstRefreshStarted: (() => void) | undefined;
+    let firstLoginStarted: (() => void) | undefined;
     const firstStarted = new Promise<void>((resolve) => {
-      firstRefreshStarted = resolve;
+      firstLoginStarted = resolve;
     });
     let created = 0;
     const service = new PiSettingsService(async () => {
       created += 1;
       const first = created === 1;
       const providerId = first ? "kimi-coding" : "moonshotai";
-      const modelId = first ? "first-model" : "second-model";
       return {
         runtime: fakeRuntime({
           getProviders: () => [{ id: providerId, name: providerId }],
-          checkAuth: async () => ({ type: "api_key" }),
-          getAvailable: async () => [
-            {
-              id: modelId,
-              name: modelId,
-              provider: providerId,
-              api: "openai-completions",
-              input: ["text"],
-              reasoning: false,
-            },
-          ],
-          refresh: async () => {
+          login: async () => {
             if (first) {
-              firstRefreshStarted?.();
-              await firstRefresh;
+              firstLoginStarted?.();
+              await firstLogin;
             }
-            return { errors: new Map() };
+            return {};
           },
         }),
         dispose() {},
@@ -266,13 +263,41 @@ describe("Pi settings service", () => {
     const firstSave = service.saveCredential({ providerId: "kimi-coding", token: "first-token" });
     await firstStarted;
     const secondSave = service.saveCredential({ providerId: "moonshotai", token: "second-token" });
-    await secondSave;
-    releaseFirstRefresh?.();
-    await firstSave;
+    await Promise.resolve();
+    expect(created).toBe(1);
 
-    await expect(service.status()).resolves.toMatchObject({
-      models: [expect.objectContaining({ qualifiedModelId: "moonshotai/second-model" })],
+    releaseFirstLogin?.();
+    await Promise.all([firstSave, secondSave]);
+    expect(created).toBe(2);
+  });
+
+  it("does not create an unhandled rejection when a status runtime fails", async () => {
+    const service = new PiSettingsService(async () => {
+      throw new Error("runtime creation failed");
     });
+
+    await expect(service.status()).rejects.toThrow("runtime creation failed");
+  });
+
+  it("bounds Pi login before it can hold the mutation queue indefinitely", async () => {
+    const service = new PiSettingsService(
+      async () => ({
+        runtime: fakeRuntime({
+          login: async (_providerId, _type, interaction) =>
+            await new Promise<never>((_resolve, reject) => {
+              interaction.signal?.addEventListener("abort", () =>
+                reject(interaction.signal?.reason),
+              );
+            }),
+        }),
+        dispose() {},
+      }),
+      1,
+    );
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).rejects.toBeDefined();
   });
 
   it("recognizes Pi's exported synchronization error", async () => {

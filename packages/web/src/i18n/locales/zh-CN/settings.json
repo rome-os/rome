@@ -644,7 +644,7 @@
       "removeConfirm": "移除此 Pi 提供商已保存的令牌？",
       "sources": {
         "stored": "由 Pi 保存",
-        "environment": "外部/环境变量（优先）",
+        "environment": "外部/环境变量（未保存令牌时使用）",
         "none": "未配置"
       },
       "catalogStatuses": {

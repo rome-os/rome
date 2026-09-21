@@ -544,6 +544,7 @@ export function AiToolsPanel({
     }
     setPiPending(true);
     setPiError(null);
+    setPiNotice(null);
     try {
       const response = await fetch("/api/ai-tools/pi/credential", {
         method: "PUT",
@@ -551,9 +552,13 @@ export function AiToolsPanel({
         body: JSON.stringify({
           providerId: piProviderId,
           token: piToken,
-          confirmReplace: replacing,
+          confirmReplace: replacing || replaceConfirmed,
         }),
       });
+      if (response.status === 409 && !replaceConfirmed) {
+        setPiConfirmAction("replace");
+        return;
+      }
       if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
       const result = (await response.json()) as PiCredentialMutationResult;
       setPiStatus(result.status);
@@ -571,6 +576,7 @@ export function AiToolsPanel({
   async function removePiCredential() {
     setPiPending(true);
     setPiError(null);
+    setPiNotice(null);
     try {
       const response = await fetch(
         `/api/ai-tools/pi/credential/${encodeURIComponent(piProviderId)}`,
@@ -593,6 +599,7 @@ export function AiToolsPanel({
   async function refreshPiProvider() {
     setPiPending(true);
     setPiError(null);
+    setPiNotice(null);
     try {
       const response = await fetch(`/api/ai-tools/pi/refresh/${encodeURIComponent(piProviderId)}`, {
         method: "POST",
