@@ -617,6 +617,47 @@
           "emptyEnv": "Add at least one environment variable."
         }
       }
+    },
+    "pi": {
+      "name": "Pi Coding Agent",
+      "inspectToConfigure": "Configure to inspect",
+      "configuredCount": "Configured providers: {{count}}",
+      "incrementNotice": "Credentials and model discovery only; chat integration is not included yet.",
+      "configure": "Configure",
+      "title": "Pi provider configuration",
+      "description": "Store a literal API token in Pi’s credential store and discover authenticated models. Rome never reads the token back.",
+      "provider": "Upstream provider",
+      "token": "API token",
+      "tokenPlaceholder": "Paste a literal token",
+      "persistence": "Credential persistence",
+      "externalSource": "External source",
+      "catalog": "Catalog discovery",
+      "liveValidity": "Live validity",
+      "notVerified": "Not verified (no billable request is made)",
+      "models": "Discovered qualified models",
+      "noModels": "No models discovered for this provider. Save credentials, then refresh.",
+      "loading": "Loading Pi settings",
+      "failed": "Pi settings operation failed.",
+      "refresh": "Refresh discovery",
+      "save": "Save token",
+      "replaceConfirm": "Replace the stored token for this Pi provider?",
+      "removeConfirm": "Remove the stored token for this Pi provider?",
+      "sources": {
+        "stored": "Stored by Pi",
+        "environment": "External/environment (takes precedence)",
+        "none": "Not configured"
+      },
+      "catalogStatuses": {
+        "models-available": "Models available",
+        "no-models": "No models",
+        "discovery-failed": "Discovery failed"
+      },
+      "saved": "Token saved in Pi. Catalog status is shown separately.",
+      "savedSyncFailed": "Token saved in Pi, but catalog synchronization failed. Refresh discovery without re-entering the token.",
+      "removed": "Stored Pi credential removed. External credentials, if any, remain.",
+      "replaceTitle": "Replace stored Pi credential?",
+      "removeTitle": "Remove stored Pi credential?",
+      "replace": "Replace token"
     }
   },
   "sentinelLog": {

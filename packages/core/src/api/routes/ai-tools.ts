@@ -20,6 +20,12 @@ import {
 } from "../../lib/anthropic-compatible-providers.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import {
+  getPiSettingsService,
+  PiSettingsError,
+  type PiSettingsService,
+} from "../../lib/pi-provider.js";
 
 // Re-exported for existing consumers (and the ai-tools route tests) that import
 // the usage parser from this module.
@@ -43,8 +49,21 @@ function logoutClaude(): Promise<{ ok: boolean; error?: string }> {
 
 export function aiToolsRoutes(
   deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService">,
+  services: { piSettings?: PiSettingsService } = {},
 ): Hono {
   const app = new Hono();
+  const piSettings = services.piSettings ?? getPiSettingsService();
+
+  const rejectCrossOrigin = (request: Request) => !isSameOriginMutationRequest(request);
+  const piError = (error: unknown) => {
+    if (error instanceof PiSettingsError) {
+      return {
+        message: error.message,
+        status: error.code === "replace-required" ? 409 : 400,
+      } as const;
+    }
+    return { message: "Pi settings operation failed. Try again.", status: 503 } as const;
+  };
 
   app.get("/ai-tools/status", (c) => {
     const state = deps.aiToolState.get();
@@ -70,6 +89,64 @@ export function aiToolsRoutes(
   app.get("/ai-tools/usage", (c) => {
     const state = deps.aiToolState.get();
     return c.json({ claude: state.claude.usage ?? null, codex: state.codex.usage ?? null });
+  });
+
+  // Pi is intentionally opt-in: neither generic status nor refresh invokes
+  // the SDK. Opening the Pi configuration flow is the first probe.
+  app.get("/ai-tools/pi", async (c) => {
+    try {
+      return c.json(await piSettings.status());
+    } catch (error) {
+      const safe = piError(error);
+      return c.json({ error: safe.message }, safe.status);
+    }
+  });
+
+  app.put("/ai-tools/pi/credential", async (c) => {
+    if (rejectCrossOrigin(c.req.raw))
+      return c.json({ error: "Same-origin request required." }, 403);
+    if (!c.req.header("content-type")?.toLowerCase().startsWith("application/json")) {
+      return c.json({ error: "Content-Type must be application/json." }, 415);
+    }
+    const body = await c.req.json<Record<string, unknown>>().catch(() => null);
+    if (!body) return c.json({ error: "Invalid JSON request." }, 400);
+    try {
+      return c.json(
+        await piSettings.saveCredential({
+          providerId: typeof body.providerId === "string" ? body.providerId : "",
+          token: body.token,
+          confirmReplace: body.confirmReplace === true,
+        }),
+      );
+    } catch (error) {
+      const safe = piError(error);
+      return c.json({ error: safe.message }, safe.status);
+    }
+  });
+
+  app.delete("/ai-tools/pi/credential/:providerId", async (c) => {
+    if (rejectCrossOrigin(c.req.raw))
+      return c.json({ error: "Same-origin request required." }, 403);
+    try {
+      return c.json({
+        ok: true,
+        status: await piSettings.removeCredential(c.req.param("providerId")),
+      });
+    } catch (error) {
+      const safe = piError(error);
+      return c.json({ error: safe.message }, safe.status);
+    }
+  });
+
+  app.post("/ai-tools/pi/refresh/:providerId", async (c) => {
+    if (rejectCrossOrigin(c.req.raw))
+      return c.json({ error: "Same-origin request required." }, 403);
+    try {
+      return c.json(await piSettings.refreshProvider(c.req.param("providerId")));
+    } catch (error) {
+      const safe = piError(error);
+      return c.json({ error: safe.message }, safe.status);
+    }
   });
 
   app.post("/ai-tools/refresh", async (c) => {

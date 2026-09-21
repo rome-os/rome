@@ -522,3 +522,83 @@ describe("AI Tools provider presentation", () => {
     expect(screen.getByRole("button", { name: "API Key" })).toBeTruthy();
   });
 });
+
+describe("Pi provider settings", () => {
+  it("probes only after Configure and clears the password after saving", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const piStatus = {
+      providers: [
+        {
+          id: "kimi-coding",
+          name: "Kimi For Coding",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+        {
+          id: "moonshotai",
+          name: "Moonshot AI (global Kimi Platform)",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+        {
+          id: "moonshotai-cn",
+          name: "Moonshot AI China (Kimi Platform)",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+      ],
+      models: [],
+      catalogStatus: "no-models",
+      liveValidity: "not-verified",
+      discoveryFailedProviders: [],
+    };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "/api/ai-tools/status")
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      if (url === "/api/ai-tools/anthropic-compatible-providers")
+        return ok({ providers: [], configured: null });
+      if (url === "/api/ai-tools/pi") return ok(piStatus);
+      if (url === "/api/ai-tools/pi/credential") {
+        return ok({
+          credentialPersisted: true,
+          synchronizationSucceeded: true,
+          status: {
+            ...piStatus,
+            providers: [
+              {
+                ...piStatus.providers[0],
+                configured: true,
+                credentialSource: "stored",
+                storedCredentialType: "api_key",
+              },
+              ...piStatus.providers.slice(1),
+            ],
+          },
+        });
+      }
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel />);
+    await screen.findByText("Pi Coding Agent");
+    expect(requests.some((request) => request.url === "/api/ai-tools/pi")).toBe(false);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Configure" }));
+    expect(await screen.findByText("Kimi For Coding")).toBeTruthy();
+
+    const input = screen.getByLabelText("API token") as HTMLInputElement;
+    await user.type(input, "temporary-test-token");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+    await waitFor(() => expect(input.value).toBe(""));
+    const save = requests.find((request) => request.url === "/api/ai-tools/pi/credential");
+    expect(save?.init?.method).toBe("PUT");
+    expect(save?.init?.body).toContain('"providerId":"kimi-coding"');
+    expect(document.body.textContent).not.toContain("temporary-test-token");
+  });
+});

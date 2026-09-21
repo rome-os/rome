@@ -51,6 +51,7 @@ import {
   type AnthropicCompatibleConfigurationId,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
+import type { PiCredentialMutationResult, PiSettingsStatus } from "@rome/api-types/pi-provider";
 
 const TerminalModal = lazy(() => import("@/components/terminal-modal"));
 const ChatGPTLoginModal = lazy(() =>
@@ -489,6 +490,121 @@ export function AiToolsPanel({
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [piDialogOpen, setPiDialogOpen] = useState(false);
+  const [piStatus, setPiStatus] = useState<PiSettingsStatus | null>(null);
+  const [piProviderId, setPiProviderId] = useState("");
+  const [piToken, setPiToken] = useState("");
+  const [piPending, setPiPending] = useState(false);
+  const [piError, setPiError] = useState<string | null>(null);
+  const [piNotice, setPiNotice] = useState<string | null>(null);
+  const [piConfirmAction, setPiConfirmAction] = useState<"replace" | "remove" | null>(null);
+
+  const fetchPiStatus = useCallback(async () => {
+    setPiPending(true);
+    setPiError(null);
+    setPiNotice(null);
+    try {
+      const response = await fetch("/api/ai-tools/pi");
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
+      const status = (await response.json()) as PiSettingsStatus;
+      setPiStatus(status);
+      setPiProviderId((current) =>
+        status.providers.some((provider) => provider.id === current)
+          ? current
+          : (status.providers.find((provider) => provider.configured)?.id ??
+            status.providers[0]?.id ??
+            ""),
+      );
+    } catch (error) {
+      setPiError(error instanceof Error ? error.message : t("aiTools.pi.failed"));
+    } finally {
+      setPiPending(false);
+    }
+  }, [t]);
+
+  function openPiDialog() {
+    setPiDialogOpen(true);
+    setPiError(null);
+    setPiNotice(null);
+    void fetchPiStatus();
+  }
+
+  function closePiDialog() {
+    setPiDialogOpen(false);
+    setPiToken("");
+    setPiError(null);
+  }
+
+  async function savePiCredential(replaceConfirmed = false) {
+    const selected = piStatus?.providers.find((provider) => provider.id === piProviderId);
+    const replacing = selected?.credentialSource === "stored";
+    if (replacing && !replaceConfirmed) {
+      setPiConfirmAction("replace");
+      return;
+    }
+    setPiPending(true);
+    setPiError(null);
+    try {
+      const response = await fetch("/api/ai-tools/pi/credential", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerId: piProviderId,
+          token: piToken,
+          confirmReplace: replacing,
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
+      const result = (await response.json()) as PiCredentialMutationResult;
+      setPiStatus(result.status);
+      setPiToken("");
+      setPiNotice(
+        result.synchronizationSucceeded ? t("aiTools.pi.saved") : t("aiTools.pi.savedSyncFailed"),
+      );
+    } catch (error) {
+      setPiError(error instanceof Error ? error.message : t("aiTools.pi.failed"));
+    } finally {
+      setPiPending(false);
+    }
+  }
+
+  async function removePiCredential() {
+    setPiPending(true);
+    setPiError(null);
+    try {
+      const response = await fetch(
+        `/api/ai-tools/pi/credential/${encodeURIComponent(piProviderId)}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
+      const result = (await response.json()) as { status: PiSettingsStatus };
+      setPiStatus(result.status);
+      setPiToken("");
+      setPiNotice(t("aiTools.pi.removed"));
+    } catch (error) {
+      setPiError(error instanceof Error ? error.message : t("aiTools.pi.failed"));
+    } finally {
+      setPiPending(false);
+    }
+  }
+
+  async function refreshPiProvider() {
+    setPiPending(true);
+    setPiError(null);
+    try {
+      const response = await fetch(`/api/ai-tools/pi/refresh/${encodeURIComponent(piProviderId)}`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
+      setPiStatus((await response.json()) as PiSettingsStatus);
+    } catch (error) {
+      setPiError(error instanceof Error ? error.message : t("aiTools.pi.failed"));
+    } finally {
+      setPiPending(false);
+    }
+  }
 
   const fetchAnthropicProviders = useCallback(async () => {
     const res = await fetch("/api/ai-tools/anthropic-compatible-providers");
@@ -1063,7 +1179,200 @@ export function AiToolsPanel({
               </div>
             );
           })}
+          <div className="px-4 py-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="flex size-7 shrink-0 items-center justify-center text-title"
+                aria-hidden
+              >
+                π
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-ui text-foreground">{t("aiTools.pi.name")}</p>
+                  <span className="text-aux text-muted-foreground">
+                    {piStatus
+                      ? t("aiTools.pi.configuredCount", {
+                          count: piStatus.providers.filter((provider) => provider.configured)
+                            .length,
+                        })
+                      : t("aiTools.pi.inspectToConfigure")}
+                  </span>
+                </div>
+                <p className="text-aux text-muted-foreground">{t("aiTools.pi.incrementNotice")}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={openPiDialog}>
+                {t("aiTools.pi.configure")}
+              </Button>
+            </div>
+          </div>
         </div>
+
+        <Dialog
+          open={piDialogOpen}
+          onClose={closePiDialog}
+          ariaLabel={t("aiTools.pi.title")}
+          size="lg"
+        >
+          <DialogHeader onClose={closePiDialog} closeLabel={t("common.cancel")}>
+            <DialogTitle>{t("aiTools.pi.title")}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <DialogDescription>{t("aiTools.pi.description")}</DialogDescription>
+            {piStatus && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-pi-provider`}>
+                      {t("aiTools.pi.provider")}
+                    </FieldLabel>
+                    <Select
+                      value={piProviderId}
+                      onValueChange={(value) => {
+                        setPiProviderId(value);
+                        setPiToken("");
+                      }}
+                    >
+                      <SelectTrigger id={`${uid}-pi-provider`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {piStatus.providers.map((provider) => (
+                          <SelectItem key={provider.id} value={provider.id}>
+                            {provider.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${uid}-pi-token`}>{t("aiTools.pi.token")}</FieldLabel>
+                    <Input
+                      id={`${uid}-pi-token`}
+                      type="password"
+                      autoComplete="off"
+                      value={piToken}
+                      onChange={(event) => setPiToken(event.target.value)}
+                      placeholder={t("aiTools.pi.tokenPlaceholder")}
+                    />
+                  </Field>
+                </div>
+                {(() => {
+                  const selected = piStatus.providers.find(
+                    (provider) => provider.id === piProviderId,
+                  );
+                  if (!selected) return null;
+                  return (
+                    <div className="rounded-8 border border-border p-3 text-aux">
+                      <p>
+                        {t("aiTools.pi.persistence")}:{" "}
+                        <span className="text-foreground">
+                          {t(`aiTools.pi.sources.${selected.credentialSource}` as const)}
+                        </span>
+                      </p>
+                      {selected.externalSource && (
+                        <p>
+                          {t("aiTools.pi.externalSource")}:{" "}
+                          <span className="font-mono text-foreground">
+                            {selected.externalSource}
+                          </span>
+                        </p>
+                      )}
+                      <p>
+                        {t("aiTools.pi.catalog")}:{" "}
+                        <span className="text-foreground">
+                          {t(`aiTools.pi.catalogStatuses.${piStatus.catalogStatus}` as const)}
+                        </span>
+                      </p>
+                      <p>
+                        {t("aiTools.pi.liveValidity")}:{" "}
+                        <span className="text-foreground">{t("aiTools.pi.notVerified")}</span>
+                      </p>
+                    </div>
+                  );
+                })()}
+                <div>
+                  <p className="mb-2 text-ui text-foreground">{t("aiTools.pi.models")}</p>
+                  {piStatus.models.filter((model) => model.providerId === piProviderId).length ? (
+                    <ul className="max-h-48 space-y-1 overflow-auto rounded-8 border border-border p-2 font-mono text-aux">
+                      {piStatus.models
+                        .filter((model) => model.providerId === piProviderId)
+                        .map((model) => (
+                          <li key={model.qualifiedModelId}>
+                            {model.qualifiedModelId} · {model.name}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : (
+                    <p className="text-aux text-muted-foreground">{t("aiTools.pi.noModels")}</p>
+                  )}
+                </div>
+              </>
+            )}
+            {piPending && <Spinner size="sm" label={t("aiTools.pi.loading")} />}
+            {piNotice && (
+              <p role="status" className="text-ui text-success-fg">
+                {piNotice}
+              </p>
+            )}
+            {piError && (
+              <p role="alert" className="text-ui text-destructive">
+                {piError}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            {piStatus?.providers.find((provider) => provider.id === piProviderId)
+              ?.credentialSource === "stored" && (
+              <Button
+                variant="outline"
+                onClick={() => setPiConfirmAction("remove")}
+                disabled={piPending}
+              >
+                {t("common.remove")}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => void refreshPiProvider()}
+              disabled={piPending || !piProviderId}
+            >
+              {t("aiTools.pi.refresh")}
+            </Button>
+            <Button
+              onClick={() => void savePiCredential()}
+              disabled={piPending || !piProviderId || !piToken.trim()}
+            >
+              {t("aiTools.pi.save")}
+            </Button>
+          </DialogFooter>
+        </Dialog>
+
+        <RomeConfirmDialog
+          open={piConfirmAction !== null}
+          title={
+            piConfirmAction === "replace"
+              ? t("aiTools.pi.replaceTitle")
+              : t("aiTools.pi.removeTitle")
+          }
+          description={
+            piConfirmAction === "replace"
+              ? t("aiTools.pi.replaceConfirm")
+              : t("aiTools.pi.removeConfirm")
+          }
+          confirmLabel={
+            piConfirmAction === "replace" ? t("aiTools.pi.replace") : t("common.remove")
+          }
+          destructive={piConfirmAction === "remove"}
+          confirmDisabled={piPending}
+          onConfirm={() => {
+            const action = piConfirmAction;
+            setPiConfirmAction(null);
+            if (action === "replace") void savePiCredential(true);
+            else if (action === "remove") void removePiCredential();
+          }}
+          onCancel={() => setPiConfirmAction(null)}
+        />
 
         <Dialog
           open={anthropicProviderDialogOpen}

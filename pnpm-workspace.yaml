@@ -35,6 +35,9 @@ allowBuilds:
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
+  # Pi consumes @google/genai's prebuilt distribution; its preinstall only
+  # prints a Node-version warning and must not run in Rome's install boundary.
+  "@google/genai": false
   bufferutil: false
   core-js: false
   electron-winstaller: false
