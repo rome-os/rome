@@ -35,6 +35,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
 import { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import { PiSettingsService } from "../lib/pi-provider.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
@@ -646,6 +647,7 @@ export async function buildTestDeps(
     agentTurnStreamRegistry,
     aiToolState,
     codexAccountService,
+    piSettings: new PiSettingsService(),
     publicAccessState,
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),

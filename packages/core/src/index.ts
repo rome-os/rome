@@ -18,6 +18,7 @@ import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin } from "./lib/rome-cloud-origin.js";
+import { PiSettingsService } from "./lib/pi-provider.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -1326,6 +1327,7 @@ async function main() {
       agentTurnStreamRegistry,
       aiToolState,
       codexAccountService,
+      piSettings: new PiSettingsService(),
       publicAccessState,
       dashboardAccessState,
       relayDrainer,

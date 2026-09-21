@@ -19,7 +19,7 @@ describe("Pi AI tools routes", () => {
       const deps = await buildTestDeps(testDb.db);
       const status = rs.fn(async () => emptyStatus);
       const service = { status } as unknown as PiSettingsService;
-      const app = new Hono().route("/", aiToolsRoutes(deps, { piSettings: service }));
+      const app = new Hono().route("/", aiToolsRoutes({ ...deps, piSettings: service }));
       expect((await app.request("/ai-tools/status")).status).toBe(200);
       expect(status).not.toHaveBeenCalled();
       expect((await app.request("/ai-tools/pi")).status).toBe(200);
@@ -39,7 +39,7 @@ describe("Pi AI tools routes", () => {
         status: emptyStatus,
       }));
       const service = { saveCredential } as unknown as PiSettingsService;
-      const app = new Hono().route("/", aiToolsRoutes(deps, { piSettings: service }));
+      const app = new Hono().route("/", aiToolsRoutes({ ...deps, piSettings: service }));
       const body = JSON.stringify({ providerId: "kimi-coding", token: "never-return-this" });
       expect((await app.request("/ai-tools/pi/credential", { method: "PUT", body })).status).toBe(
         403,
@@ -79,7 +79,7 @@ describe("Pi AI tools routes", () => {
           throw new Error("upstream included a secret");
         },
       } as unknown as PiSettingsService;
-      const app = new Hono().route("/", aiToolsRoutes(deps, { piSettings: service }));
+      const app = new Hono().route("/", aiToolsRoutes({ ...deps, piSettings: service }));
       const response = await app.request("/ai-tools/pi");
       expect(response.status).toBe(503);
       expect(await response.text()).not.toContain("upstream included a secret");

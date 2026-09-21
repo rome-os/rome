@@ -3,11 +3,12 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { CredentialSynchronizationError, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   PI_PROVIDER_ALLOWLIST,
   PiSettingsError,
   PiSettingsService,
+  piRuntimePaths,
   qualifyPiModel,
   validatePiToken,
   type PiModelRuntime,
@@ -38,6 +39,14 @@ describe("Pi settings service", () => {
       }
     }
     expect(validatePiToken("  opaque-token  ")).toBe("opaque-token");
+  });
+
+  it("uses a Rome-owned config path so Pi persists refreshed catalogs without loading models.json", () => {
+    expect(piRuntimePaths("/tmp/pi-agent")).toEqual({
+      authPath: "/tmp/pi-agent/auth.json",
+      modelsPath: "/tmp/pi-agent/rome-models.json",
+      modelsStorePath: "/tmp/pi-agent/models-cache.json",
+    });
   });
 
   it("keeps Kimi For Coding and both Moonshot credential slots distinct", () => {
@@ -93,6 +102,93 @@ describe("Pi settings service", () => {
     expect(first.providers.some((provider) => provider.id === "custom-provider")).toBe(false);
     await service.status();
     expect(created).toBe(1);
+  });
+
+  it("does not reuse a pre-mutation status read after credential removal", async () => {
+    let resolveInitialAuth: (() => void) | undefined;
+    const initialAuth = new Promise<void>((resolve) => {
+      resolveInitialAuth = resolve;
+    });
+    let initialProbeStarted: (() => void) | undefined;
+    const probeStarted = new Promise<void>((resolve) => {
+      initialProbeStarted = resolve;
+    });
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      if (created === 1) {
+        return {
+          runtime: fakeRuntime({
+            listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+            checkAuth: async () => {
+              initialProbeStarted?.();
+              await initialAuth;
+              return undefined;
+            },
+          }),
+          dispose() {},
+        };
+      }
+      if (created === 2) {
+        return {
+          runtime: fakeRuntime({
+            listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+          }),
+          dispose() {},
+        };
+      }
+      return { runtime: fakeRuntime(), dispose() {} };
+    });
+
+    const staleRead = service.status();
+    await probeStarted;
+    const removed = service.removeCredential("kimi-coding");
+    resolveInitialAuth?.();
+    await staleRead;
+    expect(
+      (await removed).providers.find((provider) => provider.id === "kimi-coding")?.credentialSource,
+    ).toBe("none");
+    expect(created).toBe(3);
+  });
+
+  it("bounds status probes and releases the shared request after an abort", async () => {
+    const service = new PiSettingsService(
+      async () => ({
+        runtime: fakeRuntime({
+          checkAuth: async (_providerId, options) =>
+            await new Promise<undefined>((_resolve, reject) => {
+              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
+            }),
+        }),
+        dispose() {},
+      }),
+      1,
+    );
+
+    await expect(service.status()).resolves.toMatchObject({
+      catalogStatus: "discovery-failed",
+      discoveryFailedProviders: ["kimi-coding"],
+    });
+  });
+
+  it("recognizes Pi's exported synchronization error", async () => {
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        login: async () => {
+          throw new CredentialSynchronizationError("kimi-coding", "login", undefined, {
+            cause: new Error("catalog sync failed"),
+          });
+        },
+      }),
+      dispose() {},
+    }));
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).resolves.toMatchObject({
+      credentialPersisted: true,
+      synchronizationSucceeded: false,
+    });
   });
 
   it("uses Pi-owned storage with 0600 permissions and never returns a token", async () => {

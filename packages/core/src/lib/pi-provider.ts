@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { createLogger } from "../logger.js";
 import type {
   PiCredentialMutationResult,
   PiDiscoveredModel,
@@ -6,6 +7,7 @@ import type {
   PiSettingsStatus,
 } from "@rome/api-types/pi-provider";
 
+// User-visible labels are reviewed with the one-token allowlist rather than inherited from Pi.
 export const PI_PROVIDER_ALLOWLIST = [
   ["anthropic", "Anthropic"],
   ["ant-ling", "Ant Ling"],
@@ -46,6 +48,8 @@ export const PI_PROVIDER_ALLOWLIST = [
 const ALLOWED = new Map<string, string>(PI_PROVIDER_ALLOWLIST);
 const EXTERNAL_SOURCE = /^[A-Z][A-Z0-9_]*$/;
 const CACHE_MS = 8_000;
+const STATUS_TIMEOUT_MS = 15_000;
+const log = createLogger("pi-settings");
 
 interface RuntimeModel {
   id: string;
@@ -58,7 +62,9 @@ interface RuntimeModel {
 
 export interface PiModelRuntime {
   getProviders(): readonly { id: string; name: string }[];
-  listCredentials(): Promise<readonly { providerId: string; type: "api_key" | "oauth" }[]>;
+  listCredentials(options?: {
+    signal?: AbortSignal;
+  }): Promise<readonly { providerId: string; type: "api_key" | "oauth" }[]>;
   checkAuth(
     providerId: string,
     options?: { signal?: AbortSignal },
@@ -133,17 +139,25 @@ export function qualifyPiModel(providerId: string, modelId: string): string {
   return `${encodeURIComponent(providerId)}/${encodeURIComponent(modelId)}`;
 }
 
-function isCredentialSynchronizationError(error: unknown): error is Error {
-  return error instanceof Error && error.constructor.name === "CredentialSynchronizationError";
+async function isCredentialSynchronizationError(error: unknown): Promise<boolean> {
+  const { CredentialSynchronizationError } = await import("@earendil-works/pi-coding-agent");
+  return error instanceof CredentialSynchronizationError;
+}
+
+export function piRuntimePaths(agentDir: string) {
+  return {
+    authPath: join(agentDir, "auth.json"),
+    // This Rome-owned, intentionally absent config path avoids loading Pi's
+    // user models.json while enabling Pi's persistent catalog store.
+    modelsPath: join(agentDir, "rome-models.json"),
+    modelsStorePath: join(agentDir, "models-cache.json"),
+  };
 }
 
 async function defaultRuntimeFactory(): Promise<RuntimeHandle> {
   const sdk = await import("@earendil-works/pi-coding-agent");
-  const agentDir = sdk.getAgentDir();
   const runtime = await sdk.ModelRuntime.create({
-    authPath: join(agentDir, "auth.json"),
-    modelsPath: null,
-    modelsStorePath: join(agentDir, "models-cache.json"),
+    ...piRuntimePaths(sdk.getAgentDir()),
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -165,9 +179,18 @@ async function defaultRuntimeFactory(): Promise<RuntimeHandle> {
 
 export class PiSettingsService {
   private cached: { expiresAt: number; value: PiSettingsStatus } | null = null;
-  private inFlight: Promise<PiSettingsStatus> | null = null;
+  private inFlight: { generation: number; promise: Promise<PiSettingsStatus> } | null = null;
+  private cacheGeneration = 0;
 
-  constructor(private readonly createRuntime: PiRuntimeFactory = defaultRuntimeFactory) {}
+  constructor(
+    private readonly createRuntime: PiRuntimeFactory = defaultRuntimeFactory,
+    private readonly statusTimeoutMs = STATUS_TIMEOUT_MS,
+  ) {}
+
+  private invalidateCache(): void {
+    this.cacheGeneration += 1;
+    this.cached = null;
+  }
 
   private async useRuntime<T>(fn: (runtime: PiModelRuntime) => Promise<T>): Promise<T> {
     const handle = await this.createRuntime();
@@ -178,9 +201,12 @@ export class PiSettingsService {
     }
   }
 
-  private async readStatus(runtime: PiModelRuntime): Promise<PiSettingsStatus> {
+  private async readStatus(
+    runtime: PiModelRuntime,
+    signal?: AbortSignal,
+  ): Promise<PiSettingsStatus> {
     const [credentials, providerEntries] = await Promise.all([
-      runtime.listCredentials(),
+      runtime.listCredentials({ signal }),
       Promise.resolve(runtime.getProviders()),
     ]);
     const stored = new Map(credentials.map((item) => [item.providerId, item.type]));
@@ -193,8 +219,12 @@ export class PiSettingsService {
       if (!known.has(id)) continue;
       let auth: Awaited<ReturnType<PiModelRuntime["checkAuth"]>>;
       try {
-        auth = await runtime.checkAuth(id);
-      } catch {
+        auth = await runtime.checkAuth(id, { signal });
+      } catch (error) {
+        log.debug("Pi authentication probe failed", {
+          providerId: id,
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
         failed.push(id);
       }
       const storedType = stored.get(id);
@@ -202,8 +232,12 @@ export class PiSettingsService {
       let available: readonly RuntimeModel[] = [];
       if (source !== "none") {
         try {
-          available = await runtime.getAvailable(id);
-        } catch {
+          available = await runtime.getAvailable(id, { signal });
+        } catch (error) {
+          log.debug("Pi model availability probe failed", {
+            providerId: id,
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
           if (!failed.includes(id)) failed.push(id);
         }
       }
@@ -249,16 +283,28 @@ export class PiSettingsService {
     if (!options.bypassCache && this.cached && this.cached.expiresAt > Date.now()) {
       return Promise.resolve(this.cached.value);
     }
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.useRuntime((runtime) => this.readStatus(runtime))
+    const generation = this.cacheGeneration;
+    if (!options.bypassCache && this.inFlight?.generation === generation) {
+      return this.inFlight.promise;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
+    const promise = this.useRuntime((runtime) => this.readStatus(runtime, controller.signal))
       .then((value) => {
-        this.cached = { value, expiresAt: Date.now() + CACHE_MS };
+        if (this.cacheGeneration === generation) {
+          this.cached = { value, expiresAt: Date.now() + CACHE_MS };
+        }
         return value;
       })
-      .finally(() => {
-        this.inFlight = null;
+      .finally(() => clearTimeout(timeout));
+    if (!options.bypassCache) {
+      const inFlight = { generation, promise };
+      this.inFlight = inFlight;
+      void promise.finally(() => {
+        if (this.inFlight === inFlight) this.inFlight = null;
       });
-    return this.inFlight;
+    }
+    return promise;
   }
 
   async saveCredential(input: {
@@ -268,6 +314,7 @@ export class PiSettingsService {
   }): Promise<PiCredentialMutationResult> {
     assertProvider(input.providerId);
     const token = validatePiToken(input.token);
+    this.invalidateCache();
     let synchronized = true;
     let status: PiSettingsStatus | undefined;
     await this.useRuntime(async (runtime) => {
@@ -297,7 +344,7 @@ export class PiSettingsService {
           notify() {},
         });
       } catch (error) {
-        if (isCredentialSynchronizationError(error)) {
+        if (await isCredentialSynchronizationError(error)) {
           synchronized = false;
         } else {
           throw error;
@@ -341,21 +388,23 @@ export class PiSettingsService {
 
   async removeCredential(providerId: string): Promise<PiSettingsStatus> {
     assertProvider(providerId);
+    this.invalidateCache();
     await this.useRuntime(async (runtime) => {
       const stored = await runtime.listCredentials();
       if (!stored.some((item) => item.providerId === providerId)) return;
       try {
         await runtime.logout(providerId);
       } catch (error) {
-        if (!isCredentialSynchronizationError(error)) throw error;
+        if (!(await isCredentialSynchronizationError(error))) throw error;
       }
     });
-    this.cached = null;
+    this.invalidateCache();
     return this.status({ bypassCache: true });
   }
 
   async refreshProvider(providerId: string): Promise<PiSettingsStatus> {
     assertProvider(providerId);
+    this.invalidateCache();
     let refreshFailed = false;
     await this.useRuntime(async (runtime) => {
       const controller = new AbortController();
@@ -372,7 +421,7 @@ export class PiSettingsService {
         clearTimeout(timeout);
       }
     });
-    this.cached = null;
+    this.invalidateCache();
     const status = await this.status({ bypassCache: true });
     if (!refreshFailed) return status;
     const failed = [...new Set([...status.discoveryFailedProviders, providerId])];

@@ -21,11 +21,7 @@ import {
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import {
-  getPiSettingsService,
-  PiSettingsError,
-  type PiSettingsService,
-} from "../../lib/pi-provider.js";
+import { PiSettingsError } from "../../lib/pi-provider.js";
 
 // Re-exported for existing consumers (and the ai-tools route tests) that import
 // the usage parser from this module.
@@ -48,14 +44,18 @@ function logoutClaude(): Promise<{ ok: boolean; error?: string }> {
 }
 
 export function aiToolsRoutes(
-  deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService">,
-  services: { piSettings?: PiSettingsService } = {},
+  deps: Pick<ApiDeps, "settingsRepo" | "aiToolState" | "codexAccountService" | "piSettings">,
 ): Hono {
   const app = new Hono();
-  const piSettings = services.piSettings ?? getPiSettingsService();
+  const { piSettings } = deps;
 
   const rejectCrossOrigin = (request: Request) => !isSameOriginMutationRequest(request);
-  const piError = (error: unknown) => {
+  const piError = (error: unknown, operation: string) => {
+    log.warn("Pi settings operation failed", {
+      operation,
+      errorCode: error instanceof PiSettingsError ? error.code : "unexpected",
+      errorType: error instanceof Error ? error.name : typeof error,
+    });
     if (error instanceof PiSettingsError) {
       return {
         message: error.message,
@@ -97,7 +97,7 @@ export function aiToolsRoutes(
     try {
       return c.json(await piSettings.status());
     } catch (error) {
-      const safe = piError(error);
+      const safe = piError(error, "status");
       return c.json({ error: safe.message }, safe.status);
     }
   });
@@ -119,7 +119,7 @@ export function aiToolsRoutes(
         }),
       );
     } catch (error) {
-      const safe = piError(error);
+      const safe = piError(error, "save credential");
       return c.json({ error: safe.message }, safe.status);
     }
   });
@@ -133,7 +133,7 @@ export function aiToolsRoutes(
         status: await piSettings.removeCredential(c.req.param("providerId")),
       });
     } catch (error) {
-      const safe = piError(error);
+      const safe = piError(error, "remove credential");
       return c.json({ error: safe.message }, safe.status);
     }
   });
@@ -144,7 +144,7 @@ export function aiToolsRoutes(
     try {
       return c.json(await piSettings.refreshProvider(c.req.param("providerId")));
     } catch (error) {
-      const safe = piError(error);
+      const safe = piError(error, "refresh provider");
       return c.json({ error: safe.message }, safe.status);
     }
   });
