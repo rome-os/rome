@@ -1,5 +1,13 @@
 import { setupWorker } from "msw/browser";
 import { handlers } from "./handlers";
+import "./embedded-tour.css";
+
+if (
+  window.parent !== window &&
+  ["chat", "build", "apps"].includes(new URLSearchParams(window.location.search).get("tour") ?? "")
+) {
+  document.documentElement.dataset.embeddedTour = "true";
+}
 
 // Register the interception worker before the app boots, so the AuthGate's
 // very first /api/health + /api/bootstrap probes are already answered by

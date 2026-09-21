@@ -1,0 +1,4 @@
+html[data-embedded-tour="true"],
+html[data-embedded-tour="true"] body {
+  overscroll-behavior-y: auto;
+}
