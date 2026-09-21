@@ -181,6 +181,7 @@ export class PiSettingsService {
   private cached: { expiresAt: number; value: PiSettingsStatus } | null = null;
   private inFlight: { generation: number; promise: Promise<PiSettingsStatus> } | null = null;
   private cacheGeneration = 0;
+  private mutationTails = new Map<string, Promise<void>>();
 
   constructor(
     private readonly createRuntime: PiRuntimeFactory = defaultRuntimeFactory,
@@ -190,6 +191,22 @@ export class PiSettingsService {
   private invalidateCache(): void {
     this.cacheGeneration += 1;
     this.cached = null;
+  }
+
+  private async withProviderMutation<T>(providerId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTails.get(providerId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.mutationTails.set(providerId, current);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.mutationTails.get(providerId) === current) this.mutationTails.delete(providerId);
+    }
   }
 
   private async useRuntime<T>(fn: (runtime: PiModelRuntime) => Promise<T>): Promise<T> {
@@ -313,6 +330,18 @@ export class PiSettingsService {
     confirmReplace?: boolean;
   }): Promise<PiCredentialMutationResult> {
     assertProvider(input.providerId);
+    validatePiToken(input.token);
+    return await this.withProviderMutation(input.providerId, () =>
+      this.saveCredentialUnlocked(input),
+    );
+  }
+
+  private async saveCredentialUnlocked(input: {
+    providerId: string;
+    token: unknown;
+    confirmReplace?: boolean;
+  }): Promise<PiCredentialMutationResult> {
+    assertProvider(input.providerId);
     const token = validatePiToken(input.token);
     this.invalidateCache();
     let synchronized = true;
@@ -388,6 +417,12 @@ export class PiSettingsService {
 
   async removeCredential(providerId: string): Promise<PiSettingsStatus> {
     assertProvider(providerId);
+    return await this.withProviderMutation(providerId, () =>
+      this.removeCredentialUnlocked(providerId),
+    );
+  }
+
+  private async removeCredentialUnlocked(providerId: string): Promise<PiSettingsStatus> {
     this.invalidateCache();
     await this.useRuntime(async (runtime) => {
       const stored = await runtime.listCredentials();

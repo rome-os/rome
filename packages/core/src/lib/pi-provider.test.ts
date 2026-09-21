@@ -151,6 +151,36 @@ describe("Pi settings service", () => {
     expect(created).toBe(3);
   });
 
+  it("requires replacement confirmation when concurrent saves target the same provider", async () => {
+    let stored = false;
+    let releaseInitialReads: (() => void) | undefined;
+    const initialReads = new Promise<void>((resolve) => {
+      releaseInitialReads = resolve;
+    });
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () => {
+          const snapshot = stored;
+          if (!snapshot) await initialReads;
+          return snapshot ? [{ providerId: "kimi-coding", type: "api_key" }] : [];
+        },
+        login: async () => {
+          stored = true;
+          return {};
+        },
+      }),
+      dispose() {},
+    }));
+
+    const first = service.saveCredential({ providerId: "kimi-coding", token: "first-token" });
+    await Promise.resolve();
+    const second = service.saveCredential({ providerId: "kimi-coding", token: "second-token" });
+    releaseInitialReads?.();
+
+    await expect(first).resolves.toMatchObject({ credentialPersisted: true });
+    await expect(second).rejects.toMatchObject({ code: "replace-required" });
+  });
+
   it("bounds status probes and releases the shared request after an abort", async () => {
     const service = new PiSettingsService(
       async () => ({

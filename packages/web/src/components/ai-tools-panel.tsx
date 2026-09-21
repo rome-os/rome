@@ -1262,6 +1262,12 @@ export function AiToolsPanel({
                     (provider) => provider.id === piProviderId,
                   );
                   if (!selected) return null;
+                  const catalogStatus: PiSettingsStatus["catalogStatus"] =
+                    piStatus.discoveryFailedProviders.includes(selected.id)
+                      ? "discovery-failed"
+                      : selected.modelCount
+                        ? "models-available"
+                        : "no-models";
                   return (
                     <div className="rounded-8 border border-border p-3 text-aux">
                       <p>
@@ -1281,7 +1287,7 @@ export function AiToolsPanel({
                       <p>
                         {t("aiTools.pi.catalog")}:{" "}
                         <span className="text-foreground">
-                          {t(`aiTools.pi.catalogStatuses.${piStatus.catalogStatus}` as const)}
+                          {t(`aiTools.pi.catalogStatuses.${catalogStatus}` as const)}
                         </span>
                       </p>
                       <p>

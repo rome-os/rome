@@ -551,9 +551,9 @@ describe("Pi provider settings", () => {
         },
       ],
       models: [],
-      catalogStatus: "no-models",
+      catalogStatus: "discovery-failed",
       liveValidity: "not-verified",
-      discoveryFailedProviders: [],
+      discoveryFailedProviders: ["moonshotai"],
     };
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
@@ -591,6 +591,7 @@ describe("Pi provider settings", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Configure" }));
     expect(await screen.findByText("Kimi For Coding")).toBeTruthy();
+    expect(screen.getByText("No models")).toBeTruthy();
 
     const input = screen.getByLabelText("API token") as HTMLInputElement;
     await user.type(input, "temporary-test-token");
