@@ -73,7 +73,7 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 
 Each client has one full-duplex WebSocket. Responses match request IDs within
 that connection. Independent clients can use the same IDs. Events and concurrent
-responses share the socket; neither requires polling or a separate event stream.
+responses share the socket. Neither requires polling or a separate event stream.
 
 Subscription registers the listener and sends an `events.connection` notification
 with `{ pid, protocolVersion, connection }` before acknowledging the request.
@@ -91,7 +91,7 @@ Protocol mismatch stops reconnection and requires an explicit daemon restart.
 
 Ping/pong detects dead connections. A slow observer exceeding 1 MiB of queued
 outgoing data is disconnected when the next event is sent, without blocking other
-clients. Unsubscribe removes the local listener; disconnecting a client never
+clients. Unsubscribe removes the local listener. Disconnecting a client never
 stops the shared daemon. `rome-node watch` writes newline-delimited JSON and
 exits on Ctrl+C.
 

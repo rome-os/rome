@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { isRecord } from "./actions.js";
@@ -71,29 +71,41 @@ export async function ensureDaemon(config: NodeConfig, signal?: AbortSignal) {
   if (current) return current;
   await readCallerCredential(config);
   signal?.throwIfAborted();
-  const child = spawn(
-    process.execPath,
-    [fileURLToPath(new URL("../bin/daemon.js", import.meta.url))],
-    {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: {
-        ...process.env,
-        ROME_NODE_CONFIG_DIR: config.directory,
-        ROME_NODE_DAEMON_PORT: String(config.port),
-      },
-    },
-  );
+  let child: ChildProcess | undefined;
   let failed = false;
-  child.on("error", () => {
-    failed = true;
-  });
-  child.unref();
+  let nextLaunch = 0;
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline && !failed) {
     const current = await findDaemon(config, signal);
     if (current) return current;
+    signal?.throwIfAborted();
+    // A stopping daemon can reject discovery before its listener is released.
+    // Retry only exited launchers, and only before any device request is submitted.
+    if (!child && Date.now() >= nextLaunch && Date.now() < deadline) {
+      const launched = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("../bin/daemon.js", import.meta.url))],
+        {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+          env: {
+            ...process.env,
+            ROME_NODE_CONFIG_DIR: config.directory,
+            ROME_NODE_DAEMON_PORT: String(config.port),
+          },
+        },
+      );
+      child = launched;
+      nextLaunch = Date.now() + 250;
+      launched.once("error", () => {
+        failed = true;
+      });
+      launched.once("exit", () => {
+        if (child === launched) child = undefined;
+      });
+      launched.unref();
+    }
     await delay(50, undefined, { signal });
   }
   throw new Error(

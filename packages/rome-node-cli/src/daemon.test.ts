@@ -229,7 +229,7 @@ describe("standalone CLI daemon processes", () => {
     expect(auth.stdout).not.toContain(f.token);
     const results = await Promise.all(Array.from({ length: 10 }, () => f.cli(["device"])));
     for (const result of results) {
-      expect(result.code).toBe(0);
+      expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({ items: [{ id: "target" }] });
     }
     expect(f.lists()).toBe(10);
@@ -241,12 +241,13 @@ describe("standalone CLI daemon processes", () => {
     expect(changing.stderr).toContain("Stop the CLI daemon");
     expect((await f.cli(["daemon", "stop"])).code).toBe(0);
     expect(JSON.parse((await f.cli(["daemon", "status"])).stdout)).toEqual({ running: false });
-    expect((await f.cli(["device"])).code).toBe(0);
+    const afterStop = await f.cli(["device"]);
+    expect(afterStop.code, afterStop.stderr).toBe(0);
     const restarted = JSON.parse((await f.cli(["daemon", "status"])).stdout);
     expect(restarted.pid).not.toBe(pids[0]);
     process.kill(restarted.pid, "SIGKILL");
     const afterCrash = await f.cli(["device"]);
-    expect(afterCrash.code).toBe(0);
+    expect(afterCrash.code, afterCrash.stderr).toBe(0);
     expect(JSON.parse((await f.cli(["daemon", "status"])).stdout).pid).not.toBe(restarted.pid);
   }, 30000);
 
