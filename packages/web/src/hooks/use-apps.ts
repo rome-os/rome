@@ -32,13 +32,14 @@ export interface AppsListResult {
 // upgrade candidates (e.g. the app details page), so mounting them doesn't
 // kick off the expensive per-app Rome Cloud updates probe. Shares
 // LIST_QUERY_KEY with useApps, so the two stay one cache entry.
-export function useAppsList(): AppsListResult {
+export function useAppsList(options?: { enabled?: boolean }): AppsListResult {
   const { t } = useTranslation("apps");
   // staleTime: 0 keeps this page eager — every mount/focus revalidates against
   // the server, so revisiting after a background app transition or an out-of-band
   // change shows current truth rather than a cached snapshot.
   const list = useQuery({
     queryKey: LIST_QUERY_KEY,
+    enabled: options?.enabled,
     staleTime: 0,
     queryFn: ({ signal }) =>
       fetchJson<AppListResponse>("/api/apps", {

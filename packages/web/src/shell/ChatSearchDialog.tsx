@@ -1,11 +1,13 @@
 import { AlertCircle, Archive, Check, Folder, MessageSquare, SearchX, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
+import type { InstalledAppCard } from "@rome/api-types/apps";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Command,
+  CommandGroup,
   CommandInput,
   CommandItem,
   CommandList,
@@ -13,6 +15,9 @@ import {
 } from "@/components/ui/command";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
+import { TileIcon } from "@/components/app-tile-icon";
+import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
+import { getHostAppRoute } from "@/lib/auth-routing";
 import { listSessions, searchChatMessages } from "@/lib/chat-api";
 import type { ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -26,6 +31,11 @@ const CONTENT_SEARCH_DEBOUNCE_MS = 200;
 interface SearchEntry {
   session: ChatSession;
   match?: ChatSearchMessageMatch["message"];
+}
+
+interface AppSearchEntry {
+  app: InstalledAppCard;
+  href: string;
 }
 
 function currentPlatform(): string {
@@ -67,6 +77,21 @@ function activityTime(session: ChatSession): number {
 
 function normalizeSearchText(value: string): string {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").trim().toLocaleLowerCase();
+}
+
+function appHref(app: InstalledAppCard): string | null {
+  if (app.status !== "active" || app.phase !== "installed" || !app.isEnabled) return null;
+  return (app.hasFrontend && app.href ? app.href : null) ?? getHostAppRoute(app.id);
+}
+
+function rankApp(app: InstalledAppCard, normalizedQuery: string): number | null {
+  const name = normalizeSearchText(app.displayName);
+  const id = normalizeSearchText(app.id);
+  if (!name.includes(normalizedQuery) && !id.includes(normalizedQuery)) return null;
+  if (name === normalizedQuery) return 3;
+  if (name.startsWith(normalizedQuery)) return 2;
+  if (name.includes(normalizedQuery)) return 1;
+  return 0;
 }
 
 interface MatchRange {
@@ -168,6 +193,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [contentMatches, setContentMatches] = useState<ChatSearchMessageMatch[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
+  const { apps, error: appsError } = useAppsList({ enabled: open });
+  const invalidateApps = useInvalidateApps();
   const shortcut = chatSearchShortcutForPlatform();
   const currentSessionId = activeSessionFromPath(location.pathname);
 
@@ -234,6 +261,22 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   }, [open, trimmedQuery]);
 
   const normalizedQuery = normalizeSearchText(query);
+  const matchingApps = useMemo<AppSearchEntry[]>(() => {
+    if (!normalizedQuery || !apps) return [];
+    return apps
+      .map((app, originalIndex) => ({
+        app,
+        originalIndex,
+        href: appHref(app),
+        rank: rankApp(app, normalizedQuery),
+      }))
+      .filter(
+        (entry): entry is typeof entry & { href: string; rank: number } =>
+          entry.href !== null && entry.rank !== null,
+      )
+      .sort((a, b) => b.rank - a.rank || a.originalIndex - b.originalIndex)
+      .map(({ app, href }) => ({ app, href }));
+  }, [apps, normalizedQuery]);
   const matchingSessions = useMemo(() => {
     if (!sessions) return [];
     return sessions
@@ -295,22 +338,34 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     [location.search, navigate, onOpenChange],
   );
 
-  // Single source for what the body shows. The result count and the list rows
-  // are rendered in different places, so deciding this twice would let them
-  // disagree.
-  const viewState: "loading" | "error" | "no-sessions" | "searching" | "no-results" | "results" =
-    sessions === null && !loadError
-      ? "loading"
-      : loadError
-        ? "error"
-        : sessions && sessions.length === 0
-          ? "no-sessions"
-          : visibleEntries.length > 0
-            ? "results"
-            : contentLoading
-              ? "searching"
-              : "no-results";
-  const loading = viewState === "loading";
+  const openApp = useCallback(
+    (href: string) => {
+      onOpenChange(false);
+      navigate(href);
+    },
+    [navigate, onOpenChange],
+  );
+
+  const isSearching = normalizedQuery.length > 0;
+  const chatLoading = sessions === null && !loadError;
+  const appLoading = apps === null && !appsError;
+  const resultCount = visibleEntries.length + matchingApps.length;
+  const hasResults = resultCount > 0;
+  const sourcesLoading = chatLoading || appLoading || contentLoading;
+  const hasSourceError = loadError || Boolean(appsError);
+
+  // Blank input is the existing recent-chat view. Once a query exists, app
+  // and chat sources settle independently so one slow or failed source never
+  // hides selectable results from the other.
+  const blankViewState: "loading" | "error" | "no-sessions" | "results" = chatLoading
+    ? "loading"
+    : loadError
+      ? "error"
+      : sessions?.length === 0
+        ? "no-sessions"
+        : "results";
+  const showNoResults = isSearching && !hasResults && !sourcesLoading && !hasSourceError;
+  const showSearching = isSearching && !hasResults && sourcesLoading;
 
   return (
     <Dialog
@@ -340,7 +395,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         <CommandInput
           ref={inputRef}
           aria-label={t("recentChats.search")}
-          aria-busy={loading}
+          aria-busy={isSearching ? sourcesLoading : chatLoading}
           value={query}
           onValueChange={setQuery}
           placeholder={t("recentChats.searchPlaceholder")}
@@ -365,12 +420,12 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         </CommandInput>
 
         <div className="min-h-52">
-          {viewState === "loading" ? (
+          {!isSearching && blankViewState === "loading" ? (
             <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
               <Spinner label={t("recentChats.searchLoading")} />
               <span aria-hidden>{t("recentChats.searchLoading")}</span>
             </div>
-          ) : viewState === "error" ? (
+          ) : !isSearching && blankViewState === "error" ? (
             <div
               className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
               role="alert"
@@ -391,7 +446,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
                 {t("recentChats.searchRetry")}
               </Button>
             </div>
-          ) : viewState === "no-sessions" ? (
+          ) : !isSearching && blankViewState === "no-sessions" ? (
             <div
               className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
               role="status"
@@ -399,38 +454,73 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               <MessageSquare className="mb-3 size-6 text-muted-foreground" aria-hidden />
               <p className="text-ui text-muted-foreground">{t("recentChats.empty")}</p>
             </div>
-          ) : viewState !== "results" ? (
-            viewState === "searching" ? (
-              <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
-                <Spinner label={t("recentChats.searchingMessages")} />
-                <span aria-hidden>{t("recentChats.searchingMessages")}</span>
-              </div>
-            ) : (
-              <div
-                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
-                role="status"
-              >
-                <SearchX className="mb-3 size-6 text-muted-foreground" aria-hidden />
-                <p className="text-ui text-foreground">{t("recentChats.searchNoResults")}</p>
-                <p className="mt-1 text-aux text-muted-foreground">
-                  {t("recentChats.searchNoResultsDescription")}
-                </p>
-              </div>
-            )
-          ) : (
+          ) : showSearching ? (
+            <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
+              <Spinner label={t("recentChats.searchingResults")} />
+              <span aria-hidden>{t("recentChats.searchingResults")}</span>
+            </div>
+          ) : showNoResults ? (
+            <div
+              className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+              role="status"
+            >
+              <SearchX className="mb-3 size-6 text-muted-foreground" aria-hidden />
+              <p className="text-ui text-foreground">{t("recentChats.searchNoResults")}</p>
+              <p className="mt-1 text-aux text-muted-foreground">
+                {t("recentChats.searchNoResultsDescription")}
+              </p>
+            </div>
+          ) : hasResults || (!isSearching && blankViewState === "results") ? (
             <div
               className="flex items-center gap-2 px-4 pb-1 pt-3 text-aux text-muted-foreground"
-              role={contentLoading ? undefined : "status"}
-              aria-live={contentLoading ? undefined : "polite"}
+              role={sourcesLoading ? undefined : "status"}
+              aria-live={sourcesLoading ? undefined : "polite"}
             >
-              {normalizedQuery
-                ? t("recentChats.searchResultsCount", { count: visibleEntries.length })
+              {isSearching
+                ? t("recentChats.searchResultsCount", { count: resultCount })
                 : t("recentChats.searchRecent")}
-              {normalizedQuery && contentLoading ? (
-                <Spinner size="sm" label={t("recentChats.searchingMessages")} />
+              {isSearching && sourcesLoading ? (
+                <Spinner size="sm" label={t("recentChats.searchingResults")} />
               ) : null}
             </div>
-          )}
+          ) : null}
+
+          {isSearching && loadError ? (
+            <div
+              className="mx-4 my-2 flex items-center gap-3 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+              role="alert"
+            >
+              <AlertCircle className="size-4 shrink-0" aria-hidden />
+              <span className="flex-1">{t("recentChats.searchLoadError")}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+                onKeyDown={stopEnterPropagation}
+              >
+                {t("recentChats.searchRetry")}
+              </Button>
+            </div>
+          ) : null}
+          {isSearching && appsError ? (
+            <div
+              className="mx-4 my-2 flex items-center gap-3 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+              role="alert"
+            >
+              <AlertCircle className="size-4 shrink-0" aria-hidden />
+              <span className="flex-1">{t("recentChats.appLoadError")}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void invalidateApps.list()}
+                onKeyDown={stopEnterPropagation}
+              >
+                {t("recentChats.searchRetry")}
+              </Button>
+            </div>
+          ) : null}
 
           {/* Mounted in every state, matching the project picker: cmdk's input
               points aria-controls at this list unconditionally, so unmounting
@@ -438,75 +528,111 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               reference dangling. Empty here is the ordinary no-results shape. */}
           <CommandList
             label={t("recentChats.searchResultsLabel")}
-            className={`max-h-[55vh] sm:max-h-96 ${viewState === "results" ? "px-2 pb-2" : ""}`}
+            className={`max-h-[55vh] sm:max-h-96 ${hasResults || (!isSearching && blankViewState === "results") ? "px-2 pb-2" : ""}`}
           >
-            {viewState === "results" &&
-              visibleEntries.map((entry) => {
-                const session = entry.session;
-                const archived = Boolean(session.archivedAt);
-                const current = session.id === currentSessionId;
-                const project = session.projectPath || session.projectName;
-                const timestamp = formatMessageTimestamp(session.activityAt || session.createdAt);
-                return (
+            {isSearching && matchingApps.length > 0 ? (
+              <CommandGroup heading={t("recentChats.searchGroupApps")}>
+                {matchingApps.map(({ app, href }) => (
                   <CommandItem
-                    key={session.id}
-                    value={session.id}
-                    onSelect={() => openSession(session)}
+                    key={`app:${app.id}`}
+                    value={`app:${app.id}`}
+                    aria-label={app.displayName}
+                    onSelect={() => openApp(href)}
                     className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
                   >
-                    <span
-                      className={cn(
-                        "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
-                        "bg-surface-muted text-muted-foreground",
-                        "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
-                      )}
-                    >
-                      <MessageSquare className="size-4" aria-hidden />
+                    <span aria-hidden>
+                      <TileIcon
+                        size="md"
+                        kind="image"
+                        displayName={app.displayName}
+                        iconUrl={app.iconUrl}
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-ui text-foreground">
-                        <HighlightedText text={session.name} terms={queryTerms} />
+                        <HighlightedText text={app.displayName} terms={queryTerms} />
                       </span>
-                      {entry.match ? (
-                        <span className="mt-1 block truncate text-aux text-muted-foreground">
-                          <span className="text-foreground/80">
-                            {entry.match.role === "user"
-                              ? t("recentChats.searchMatchUser")
-                              : t("recentChats.searchMatchAssistant")}
-                            {": "}
-                          </span>
-                          <HighlightedText text={entry.match.snippet} terms={queryTerms} />
-                        </span>
-                      ) : null}
-                      <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
-                        <Folder className="size-3 shrink-0" aria-hidden />
-                        <span className="truncate">
-                          <HighlightedText text={project} terms={queryTerms} />
-                        </span>
+                      <span className="mt-1 block truncate text-aux text-muted-foreground">
+                        <HighlightedText text={app.id} terms={queryTerms} />
                       </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {archived ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
-                          <Archive className="size-3" aria-hidden />
-                          {t("recentChats.statusArchived")}
-                        </span>
-                      ) : null}
-                      {current ? (
-                        <span className="inline-flex items-center gap-1 text-aux text-foreground">
-                          <Check className="size-3" aria-hidden />
-                          {t("recentChats.searchCurrent")}
-                        </span>
-                      ) : null}
-                      {timestamp ? (
-                        <span className="text-aux tabular-nums text-muted-foreground">
-                          {timestamp}
-                        </span>
-                      ) : null}
                     </span>
                   </CommandItem>
-                );
-              })}
+                ))}
+              </CommandGroup>
+            ) : null}
+            {visibleEntries.length > 0 && (isSearching || blankViewState === "results") ? (
+              <CommandGroup
+                heading={isSearching ? t("recentChats.searchGroupChats") : undefined}
+                className={isSearching ? undefined : "p-0"}
+              >
+                {visibleEntries.map((entry) => {
+                  const session = entry.session;
+                  const archived = Boolean(session.archivedAt);
+                  const current = session.id === currentSessionId;
+                  const project = session.projectPath || session.projectName;
+                  const timestamp = formatMessageTimestamp(session.activityAt || session.createdAt);
+                  return (
+                    <CommandItem
+                      key={`chat:${session.id}`}
+                      value={`chat:${session.id}`}
+                      onSelect={() => openSession(session)}
+                      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+                    >
+                      <span
+                        className={cn(
+                          "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+                          "bg-surface-muted text-muted-foreground",
+                          "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+                        )}
+                      >
+                        <MessageSquare className="size-4" aria-hidden />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-ui text-foreground">
+                          <HighlightedText text={session.name} terms={queryTerms} />
+                        </span>
+                        {entry.match ? (
+                          <span className="mt-1 block truncate text-aux text-muted-foreground">
+                            <span className="text-foreground/80">
+                              {entry.match.role === "user"
+                                ? t("recentChats.searchMatchUser")
+                                : t("recentChats.searchMatchAssistant")}
+                              {": "}
+                            </span>
+                            <HighlightedText text={entry.match.snippet} terms={queryTerms} />
+                          </span>
+                        ) : null}
+                        <span className="mt-1 flex min-w-0 items-center gap-1 text-aux text-muted-foreground">
+                          <Folder className="size-3 shrink-0" aria-hidden />
+                          <span className="truncate">
+                            <HighlightedText text={project} terms={queryTerms} />
+                          </span>
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {archived ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 text-aux text-muted-foreground">
+                            <Archive className="size-3" aria-hidden />
+                            {t("recentChats.statusArchived")}
+                          </span>
+                        ) : null}
+                        {current ? (
+                          <span className="inline-flex items-center gap-1 text-aux text-foreground">
+                            <Check className="size-3" aria-hidden />
+                            {t("recentChats.searchCurrent")}
+                          </span>
+                        ) : null}
+                        {timestamp ? (
+                          <span className="text-aux tabular-nums text-muted-foreground">
+                            {timestamp}
+                          </span>
+                        ) : null}
+                      </span>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            ) : null}
           </CommandList>
         </div>
       </Command>
