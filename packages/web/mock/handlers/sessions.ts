@@ -253,6 +253,7 @@ const backgroundSessions: RomeSessionExplorerRecord[] = [
     createdAt: ago(6 * HOUR),
     activityAt: ago(6 * HOUR),
     messageCount: 3,
+    models: [{ kind: "known", provider: "openai", name: "gpt-5.6-sol" }],
     stats: {
       runCount: 1,
       usage: usage(8_800, 1_900, 26_000, 2_400, 0.06, 1),
