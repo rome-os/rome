@@ -35,14 +35,21 @@ pnpm --filter @rome/core start
 ```
 
 Open <http://127.0.0.1:4318/>. In **Settings → AI Tools**, the visibly labelled
-**Pi Coding Agent · Prototype** row reports authenticated discovery or gives an
-actionable no-model state. Start a normal chat, open the standard model menu in
-the composer, choose a `Pi prototype · provider / model` entry, and send a
-message. The exact `pi-prototype:<qualified-id>` selection travels through the
-normal session request and resolves only to the opt-in Pi adapter.
+**Pi Coding Agent · Prototype** row opens a native Rome configuration dialog.
+Choose one of the reviewed one-token providers, paste a literal API token, and
+save it directly into Pi's credential store. The dialog never reads the token
+back; it independently reports stored/environment credential source, catalog
+discovery, and the deliberately **not live-verified** validity state. Replace
+and remove affect only the selected Pi credential, and external credentials are
+left alone. `$ENV`, `!command`, OAuth, custom, and multi-field provider setup is
+excluded from this prototype.
 
-Authentication stays Pi-owned: configure Pi outside Rome in your own terminal,
-then reload/refresh Rome. The UI never displays a credential or launches Pi.
+After discovery, start a normal chat, open the standard model menu in the
+composer, choose a `Pi prototype · provider / model` entry, and send a message.
+The exact `pi-prototype:<qualified-id>` selection travels through the normal
+session request and resolves only to the opt-in Pi adapter. The model menu
+updates after save/remove/refresh without changing Auto or the current choice;
+a selected Pi model that later disappears remains labelled unavailable.
 
 ### Standalone SDK inspection page
 
@@ -158,8 +165,9 @@ Pi's shell or file tools. The final accounting identifies the provider as
   deprecated `@mariozechner` namespace to `@earendil-works`; this spike pins
   `@earendil-works/pi-coding-agent` 0.86.1. Its dependency graph includes
   provider SDKs that will increase install size and supply-chain surface.
-- The opt-in slice wires only discovery/status, exact model selection, resolver,
-  and a basic streamed text turn into the existing Rome UI. It does not support
+- The opt-in slice wires guarded one-token credential management,
+  discovery/status, exact model selection, resolver, and a basic streamed text
+  turn into the existing Rome UI. It does not support
   approvals, Rome actions/skills/subagents, images, structured output, retries,
   reliable cancellation, or production tests. The only Pi tool is the harmless
   prototype `rome_probe`; no shell, PTY, file tool, extension, or Pi history is

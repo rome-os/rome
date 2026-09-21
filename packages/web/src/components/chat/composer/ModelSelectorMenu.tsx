@@ -55,45 +55,56 @@ export function ModelSelectorMenu({
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/ai-tools/pi-prototype", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) return [];
-        const data = (await response.json()) as {
-          models?: Array<{
-            selectionId?: string;
-            upstreamProvider?: string;
-            modelId?: string;
-          }>;
-        };
-        return (data.models ?? []).flatMap((model) =>
-          model.selectionId && model.upstreamProvider && model.modelId
-            ? [
-                {
-                  id: model.selectionId,
-                  label: `Pi prototype · ${model.upstreamProvider} / ${model.modelId}`,
-                },
-              ]
-            : [],
-        );
-      })
-      .then((models) => {
-        if (active) setPiModels(models);
-      })
-      .catch(() => undefined);
+    const refreshPiModels = () => {
+      void fetch("/api/ai-tools/pi-prototype", { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) return [];
+          const data = (await response.json()) as {
+            models?: Array<{
+              selectionId?: string;
+              upstreamProvider?: string;
+              modelId?: string;
+            }>;
+          };
+          return (data.models ?? []).flatMap((model) =>
+            model.selectionId && model.upstreamProvider && model.modelId
+              ? [
+                  {
+                    id: model.selectionId,
+                    label: `Pi prototype · ${model.upstreamProvider} / ${model.modelId}`,
+                  },
+                ]
+              : [],
+          );
+        })
+        .then((models) => {
+          if (active) setPiModels(models);
+        })
+        .catch(() => undefined);
+    };
+    refreshPiModels();
+    window.addEventListener("rome:pi-prototype-models-changed", refreshPiModels);
     return () => {
       active = false;
+      window.removeEventListener("rome:pi-prototype-models-changed", refreshPiModels);
     };
   }, []);
 
   // Resolve labels once so the trigger, the filter, and the rows all read the
   // exact same text — a single source for "what the model is called".
-  const options = useMemo(
-    () => [
+  const options = useMemo(() => {
+    const available = [
       ...LARGE_MODEL_OPTIONS.map((option) => ({ id: option.id, label: t(option.labelKey) })),
       ...piModels,
-    ],
-    [t, piModels],
-  );
+    ];
+    if (value.startsWith("pi-prototype:") && !available.some((option) => option.id === value)) {
+      available.push({
+        id: value,
+        label: `Pi prototype · unavailable · ${value.slice("pi-prototype:".length)}`,
+      });
+    }
+    return available;
+  }, [t, piModels, value]);
 
   // `auto` is a value like any other, so the trigger always has something to
   // name. The label IS the state — nothing has to encode "non-default" on top.

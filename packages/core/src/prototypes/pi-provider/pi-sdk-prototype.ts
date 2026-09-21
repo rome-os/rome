@@ -37,6 +37,7 @@ export interface PiModelDiscovery {
 export interface PiRuntimePaths {
   agentDir?: string;
   allowModelNetwork?: boolean;
+  refreshOnCreate?: boolean;
 }
 
 /**
@@ -85,6 +86,7 @@ export async function createPiModelRuntime(paths: PiRuntimePaths = {}): Promise<
     modelsPath: join(agentDir, "models.json"),
     modelsStorePath: join(agentDir, "models-store.json"),
     allowModelNetwork: paths.allowModelNetwork ?? false,
+    refreshOnCreate: paths.refreshOnCreate ?? true,
   });
 }
 
