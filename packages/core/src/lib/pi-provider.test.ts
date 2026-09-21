@@ -160,6 +160,69 @@ describe("Pi settings service", () => {
     expect(created).toBe(3);
   });
 
+  it("does not cache a status read that began while a credential save was in progress", async () => {
+    let stored = false;
+    let releaseLogin: (() => void) | undefined;
+    const loginCanFinish = new Promise<void>((resolve) => {
+      releaseLogin = resolve;
+    });
+    let loginStarted: (() => void) | undefined;
+    const loginHasStarted = new Promise<void>((resolve) => {
+      loginStarted = resolve;
+    });
+    let staleProbeStarted: (() => void) | undefined;
+    const staleProbe = new Promise<void>((resolve) => {
+      staleProbeStarted = resolve;
+    });
+    let releaseStaleProbe: (() => void) | undefined;
+    const staleProbeCanFinish = new Promise<void>((resolve) => {
+      releaseStaleProbe = resolve;
+    });
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      if (created === 1) {
+        return {
+          runtime: fakeRuntime({
+            listCredentials: async () =>
+              stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+            login: async () => {
+              loginStarted?.();
+              await loginCanFinish;
+              stored = true;
+            },
+          }),
+          dispose() {},
+        };
+      }
+      return {
+        runtime: fakeRuntime({
+          listCredentials: async () => [],
+          checkAuth: async () => {
+            staleProbeStarted?.();
+            await staleProbeCanFinish;
+            return undefined;
+          },
+        }),
+        dispose() {},
+      };
+    });
+
+    const save = service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" });
+    await loginHasStarted;
+    const staleRead = service.status();
+    await staleProbe;
+    releaseLogin?.();
+    await save;
+    releaseStaleProbe?.();
+    await staleRead;
+
+    expect(
+      (await service.status()).providers.find((provider) => provider.id === "kimi-coding")
+        ?.credentialSource,
+    ).toBe("stored");
+  });
+
   it("requires replacement confirmation when concurrent saves target the same provider", async () => {
     let stored = false;
     let releaseInitialReads: (() => void) | undefined;
@@ -298,6 +361,28 @@ describe("Pi settings service", () => {
     await expect(
       service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
     ).rejects.toBeDefined();
+  });
+
+  it("releases the shared mutation queue when an SDK call ignores its abort signal", async () => {
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      if (created === 1) {
+        return {
+          runtime: fakeRuntime({ listCredentials: async () => await new Promise<never>(() => {}) }),
+          dispose() {},
+        };
+      }
+      return { runtime: fakeRuntime(), dispose() {} };
+    }, 1);
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).rejects.toThrow("timed out");
+    await expect(service.removeCredential("kimi-coding")).resolves.toMatchObject({
+      providers: [expect.objectContaining({ id: "kimi-coding", credentialSource: "none" })],
+    });
+    expect(created).toBe(3);
   });
 
   it("recognizes Pi's exported synchronization error", async () => {

@@ -14,6 +14,9 @@ describe("Pi settings mock handlers", () => {
     expect(
       initial.providers.find((provider: { id: string }) => provider.id === "kimi-coding"),
     ).toMatchObject({ configured: false, credentialSource: "none" });
+    expect(
+      initial.providers.find((provider: { id: string }) => provider.id === "moonshotai-cn"),
+    ).toMatchObject({ configured: false, credentialSource: "none" });
 
     const saved = await (
       await fetch("/api/ai-tools/pi/credential", {

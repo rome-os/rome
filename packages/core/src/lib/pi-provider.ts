@@ -6,44 +6,10 @@ import type {
   PiProviderStatus,
   PiSettingsStatus,
 } from "@rome/api-types/pi-provider";
+import { PI_PROVIDER_CATALOG } from "@rome/api-types/pi-provider";
 
 // User-visible labels are reviewed with the one-token allowlist rather than inherited from Pi.
-export const PI_PROVIDER_ALLOWLIST = [
-  ["anthropic", "Anthropic"],
-  ["ant-ling", "Ant Ling"],
-  ["openai", "OpenAI"],
-  ["deepseek", "DeepSeek"],
-  ["nvidia", "NVIDIA NIM"],
-  ["google", "Google Gemini"],
-  ["mistral", "Mistral"],
-  ["groq", "Groq"],
-  ["cerebras", "Cerebras"],
-  ["xai", "xAI"],
-  ["openrouter", "OpenRouter"],
-  ["vercel-ai-gateway", "Vercel AI Gateway"],
-  ["radius", "Radius"],
-  ["huggingface", "Hugging Face"],
-  ["fireworks", "Fireworks"],
-  ["together", "Together AI"],
-  ["baseten", "Baseten"],
-  ["opencode", "OpenCode Zen"],
-  ["opencode-go", "OpenCode Go"],
-  ["zai", "ZAI Global"],
-  ["zai-coding-cn", "ZAI China"],
-  ["kimi-coding", "Kimi For Coding"],
-  ["moonshotai", "Moonshot AI (global Kimi Platform)"],
-  ["moonshotai-cn", "Moonshot AI China (Kimi Platform)"],
-  ["meta", "Meta"],
-  ["minimax", "MiniMax"],
-  ["minimax-cn", "MiniMax China"],
-  ["qwen-token-plan", "Qwen Token Plan (existing catalog)"],
-  ["qwen-token-plan-individual", "Qwen Token Plan (Individual)"],
-  ["qwen-token-plan-cn", "Qwen Token Plan (China)"],
-  ["xiaomi", "Xiaomi MiMo"],
-  ["xiaomi-token-plan-cn", "Xiaomi MiMo Token Plan (China)"],
-  ["xiaomi-token-plan-ams", "Xiaomi MiMo Token Plan (Amsterdam)"],
-  ["xiaomi-token-plan-sgp", "Xiaomi MiMo Token Plan (Singapore)"],
-] as const;
+export const PI_PROVIDER_ALLOWLIST = PI_PROVIDER_CATALOG;
 
 const ALLOWED = new Map<string, string>(PI_PROVIDER_ALLOWLIST);
 const EXTERNAL_SOURCE = /^[A-Z][A-Z0-9_]*$/;
@@ -139,9 +105,11 @@ export function qualifyPiModel(providerId: string, modelId: string): string {
   return `${encodeURIComponent(providerId)}/${encodeURIComponent(modelId)}`;
 }
 
-async function isCredentialSynchronizationError(error: unknown): Promise<boolean> {
-  const { CredentialSynchronizationError } = await import("@earendil-works/pi-coding-agent");
-  return error instanceof CredentialSynchronizationError;
+function isCredentialSynchronizationError(error: unknown): boolean {
+  // Keep the SDK import lazy even on an error path. Pi's exported error has a
+  // stable name, while importing it here could mask the original login/logout
+  // failure if module loading itself failed.
+  return error instanceof Error && error.name === "CredentialSynchronizationError";
 }
 
 export function piRuntimePaths(agentDir: string) {
@@ -215,11 +183,23 @@ export class PiSettingsService {
   }
 
   private async useRuntime<T>(fn: (runtime: PiModelRuntime) => Promise<T>): Promise<T> {
-    const handle = await this.createRuntime();
+    const pendingHandle = this.createRuntime();
+    let handle: RuntimeHandle;
+    try {
+      handle = await this.withTimeout(async () => await pendingHandle, true);
+    } catch (error) {
+      // A factory cannot accept AbortSignal. If it finishes after our deadline,
+      // still dispose its runtime without holding a credential mutation hostage.
+      void pendingHandle.then(
+        (lateHandle) => Promise.resolve(lateHandle.dispose()).catch(() => {}),
+        () => {},
+      );
+      throw error;
+    }
     try {
       return await fn(handle.runtime);
     } finally {
-      await handle.dispose();
+      await this.withTimeout(async () => await handle.dispose(), true);
     }
   }
 
@@ -301,13 +281,23 @@ export class PiSettingsService {
     };
   }
 
-  private async withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async withTimeout<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    rejectOnTimeout = false,
+  ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        if (rejectOnTimeout) reject(new Error("Pi settings operation timed out."));
+      }, this.statusTimeoutMs);
+    });
     try {
-      return await fn(controller.signal);
+      const operation = Promise.resolve().then(() => fn(controller.signal));
+      return await (rejectOnTimeout ? Promise.race([operation, timedOut]) : operation);
     } finally {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
     }
   }
 
@@ -363,7 +353,7 @@ export class PiSettingsService {
   }): Promise<PiCredentialMutationResult> {
     assertProvider(input.providerId);
     const token = validatePiToken(input.token);
-    const cacheGeneration = this.invalidateCache();
+    this.invalidateCache();
     let synchronized = true;
     let status: PiSettingsStatus | undefined;
     await this.useRuntime(async (runtime) => {
@@ -373,50 +363,52 @@ export class PiSettingsService {
           "This provider is not available in the installed Pi SDK.",
         );
       }
-      const stored = await runtime.listCredentials();
+      const stored = await this.withTimeout((signal) => runtime.listCredentials({ signal }), true);
       if (stored.some((item) => item.providerId === input.providerId) && !input.confirmReplace) {
         throw new PiSettingsError("replace-required", "Confirm replacing the stored credential.");
       }
       let prompts = 0;
       try {
-        await this.withTimeout((signal) =>
-          runtime.login(input.providerId, "api_key", {
-            signal,
-            async prompt(prompt) {
-              prompts += 1;
-              if (prompts > 1 || prompt.type !== "secret") {
-                throw new PiSettingsError(
-                  "unsupported-provider",
-                  "This provider needs unsupported setup fields.",
-                );
-              }
-              return token;
-            },
-            notify() {},
-          }),
+        await this.withTimeout(
+          (signal) =>
+            runtime.login(input.providerId, "api_key", {
+              signal,
+              async prompt(prompt) {
+                prompts += 1;
+                if (prompts > 1 || prompt.type !== "secret") {
+                  throw new PiSettingsError(
+                    "unsupported-provider",
+                    "This provider needs unsupported setup fields.",
+                  );
+                }
+                return token;
+              },
+              notify() {},
+            }),
+          true,
         );
       } catch (error) {
-        if (await isCredentialSynchronizationError(error)) {
+        if (isCredentialSynchronizationError(error)) {
           synchronized = false;
         } else {
           throw error;
         }
       }
       let catalogFailed = false;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15_000);
       try {
-        const refreshed = await runtime.refresh({
-          allowNetwork: true,
-          providers: [input.providerId],
-          signal: controller.signal,
-          force: true,
-        });
+        const refreshed = await this.withTimeout(
+          (signal) =>
+            runtime.refresh({
+              allowNetwork: true,
+              providers: [input.providerId],
+              signal,
+              force: true,
+            }),
+          true,
+        );
         catalogFailed = refreshed.aborted === true || refreshed.errors.has(input.providerId);
       } catch {
         catalogFailed = true;
-      } finally {
-        clearTimeout(timeout);
       }
       status = await this.readStatusWithTimeout(runtime);
       if (catalogFailed) {
@@ -430,7 +422,7 @@ export class PiSettingsService {
       }
     });
     if (!status) throw new Error("Pi credential status was unavailable after save.");
-    this.cacheStatus(cacheGeneration, status);
+    this.cacheStatus(this.invalidateCache(), status);
     return {
       credentialPersisted: true,
       synchronizationSucceeded: synchronized,
@@ -446,12 +438,12 @@ export class PiSettingsService {
   private async removeCredentialUnlocked(providerId: string): Promise<PiSettingsStatus> {
     this.invalidateCache();
     await this.useRuntime(async (runtime) => {
-      const stored = await runtime.listCredentials();
+      const stored = await this.withTimeout((signal) => runtime.listCredentials({ signal }), true);
       if (!stored.some((item) => item.providerId === providerId)) return;
       try {
-        await runtime.logout(providerId);
+        await this.withTimeout((signal) => runtime.logout(providerId, { signal }), true);
       } catch (error) {
-        if (!(await isCredentialSynchronizationError(error))) throw error;
+        if (!isCredentialSynchronizationError(error)) throw error;
       }
     });
     this.invalidateCache();
@@ -467,19 +459,17 @@ export class PiSettingsService {
     this.invalidateCache();
     let refreshFailed = false;
     await this.useRuntime(async (runtime) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15_000);
-      try {
-        const result = await runtime.refresh({
-          allowNetwork: true,
-          providers: [providerId],
-          signal: controller.signal,
-          force: true,
-        });
-        refreshFailed = result.aborted === true || result.errors.has(providerId);
-      } finally {
-        clearTimeout(timeout);
-      }
+      const result = await this.withTimeout(
+        (signal) =>
+          runtime.refresh({
+            allowNetwork: true,
+            providers: [providerId],
+            signal,
+            force: true,
+          }),
+        true,
+      );
+      refreshFailed = result.aborted === true || result.errors.has(providerId);
     });
     const cacheGeneration = this.invalidateCache();
     const status = await this.status({ bypassCache: true });

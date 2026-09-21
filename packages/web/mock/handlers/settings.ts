@@ -3,6 +3,7 @@ import {
   listAnthropicCompatibleProviderSummaries,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
+import { PI_PROVIDER_CATALOG } from "@rome/api-types/pi-provider";
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import type {
@@ -82,22 +83,13 @@ let configuredAnthropic: AnthropicCompatibleConfiguredSummary | null = null;
 // The Pi settings fixture follows the production boundary: it exposes only
 // redacted presence/catalog state, keeps each provider independent, and never
 // retains a submitted token.
-let piProviders: PiProviderStatus[] = [
-  {
-    id: "kimi-coding",
-    name: "Kimi For Coding",
-    configured: false,
-    credentialSource: "none",
-    modelCount: 0,
-  },
-  {
-    id: "moonshotai",
-    name: "Moonshot AI (global Kimi Platform)",
-    configured: false,
-    credentialSource: "none",
-    modelCount: 0,
-  },
-];
+let piProviders: PiProviderStatus[] = PI_PROVIDER_CATALOG.map(([id, name]) => ({
+  id,
+  name,
+  configured: false,
+  credentialSource: "none",
+  modelCount: 0,
+}));
 let piModels: PiDiscoveredModel[] = [];
 
 function piStatus(): PiSettingsStatus {
