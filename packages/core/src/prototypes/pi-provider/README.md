@@ -17,6 +17,36 @@ production build excludes `src/prototypes/**` from emitted `dist` artifacts.
 
 ## Try it
 
+### UI-facing vertical slice
+
+Start the isolated local UI prototype:
+
+```sh
+pnpm --filter @rome/core prototype:pi:ui
+```
+
+Open <http://127.0.0.1:4317/prototype/pi-provider>. The page is visibly marked
+**PROTOTYPE · LOCAL ONLY** and is not registered in Rome's production routes,
+provider resolver, or model selector.
+
+- **Demo mode** is the default. Refresh discovery, choose either qualified
+  model, enter a message, and press **Send**. Discovery goes through Pi's SDK
+  using a temporary declarative catalog; the conversation response is a
+  deterministic local stream and does not claim that a real provider ran.
+- **Local Pi** reads the guardian's existing Pi-owned configuration. Configure
+  Pi in the guardian's own terminal, select **Local Pi**, refresh, choose one
+  discovered qualified model, and send a message to attempt a genuine SDK
+  turn. The page never offers login or launches Pi CLI.
+- Set `ROME_PI_PROTOTYPE_PORT` before the command to use another loopback port.
+
+The local server binds only to `127.0.0.1`. Its browser API returns safe model
+metadata and generic live-discovery/turn failures rather than raw SDK errors.
+The live session retains the original spike's single `rome_probe` tool and
+in-memory isolation; it exposes no shell, PTY, file tools, Pi extensions, or Pi
+history.
+
+### Command-line SDK seam
+
 From the repository root, run the deterministic offline demonstration:
 
 ```sh
@@ -102,7 +132,9 @@ Pi's shell or file tools. The final accounting identifies the provider as
   provider SDKs that will increase install size and supply-chain surface.
 - This spike does not wire AI Tools status, the model selector, provider
   resolution, session pins, approvals, MCP servers, subagents, images, structured
-  output, retries, or production tests.
+  output, retries, or production tests. The standalone UI page deliberately
+  proves only local browser-to-prototype-backend discovery, exact selection,
+  streaming, and one ephemeral turn; it is not a production dashboard route.
 
 ## Recommended production breakdown
 

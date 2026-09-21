@@ -18,6 +18,7 @@
     "test:coverage": "../../scripts/test-env.sh rstest --coverage --pool.maxWorkers=8",
     "test:ci": "../../scripts/test-env.sh env RSTEST_JUNIT=1 rstest --coverage --pool.maxWorkers=8",
     "prototype:pi": "tsx src/prototypes/pi-provider/cli.ts",
+    "prototype:pi:ui": "tsx src/prototypes/pi-provider/ui-server.ts",
     "db:generate:system": "drizzle-kit generate --config drizzle.system.config.ts",
     "db:generate:app": "drizzle-kit generate --config drizzle.authoring.config.ts",
     "db:migrate": "if [ \"${ROME_DOCKER_APP_CODE_MODE:-source}\" = \"compiled\" ]; then node dist/db/migrate.js; else tsx src/db/migrate.ts; fi",
