@@ -20,6 +20,7 @@ import {
 } from "../../lib/anthropic-compatible-providers.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
+import { PI_PROTOTYPE_MODEL_SELECTION_PREFIX } from "../../core/model-selector.js";
 
 // Re-exported for existing consumers (and the ai-tools route tests) that import
 // the usage parser from this module.
@@ -30,6 +31,44 @@ export {
 } from "../../lib/provider-usage.js";
 
 const log = createLogger("api:ai-tools");
+
+async function readPiPrototypeStatus() {
+  if (process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") return null;
+  try {
+    const { createPiModelRuntime, discoverPiModels } = await import(
+      "../../prototypes/pi-provider/pi-sdk-prototype.js"
+    );
+    const discovery = await discoverPiModels(await createPiModelRuntime());
+    return {
+      enabled: true,
+      prototype: true,
+      loggedIn: discovery.models.length > 0,
+      modelCount: discovery.models.length,
+      models: discovery.models.map((model) => ({
+        ...model,
+        selectionId: `${PI_PROTOTYPE_MODEL_SELECTION_PREFIX}${model.qualifiedModelId}`,
+      })),
+      configurationValid: discovery.configurationValid,
+      guidance: discovery.models.length
+        ? "Select a qualified Pi model from Rome's normal chat model menu."
+        : "No authenticated Pi models were found. Configure Pi in your own terminal, then refresh Rome.",
+      eligibilityCaveat: discovery.eligibilityCaveat,
+    };
+  } catch {
+    return {
+      enabled: true,
+      prototype: true,
+      loggedIn: false,
+      modelCount: 0,
+      models: [],
+      configurationValid: false,
+      guidance:
+        "Pi discovery failed. Verify Pi configuration in your own terminal, then refresh Rome.",
+      eligibilityCaveat:
+        "Pi credentials and SDK error details are intentionally not returned to the browser.",
+    };
+  }
+}
 
 // Log out of Claude by running `claude auth logout` (non-interactive, so no PTY
 // terminal — mirrors getClaudeStatus's execFile usage).
@@ -46,9 +85,10 @@ export function aiToolsRoutes(
 ): Hono {
   const app = new Hono();
 
-  app.get("/ai-tools/status", (c) => {
+  app.get("/ai-tools/status", async (c) => {
     const state = deps.aiToolState.get();
     const login = deps.codexAccountService.getLoginState();
+    const piPrototype = await readPiPrototypeStatus();
     return c.json({
       claude: state.claude,
       codex: state.codex,
@@ -64,7 +104,13 @@ export function aiToolsRoutes(
         lastError: login.lastError,
       },
       anthropicCompatible: state.claude.anthropicCompatible ?? null,
+      ...(piPrototype ? { piPrototype } : {}),
     });
+  });
+
+  app.get("/ai-tools/pi-prototype", async (c) => {
+    const status = await readPiPrototypeStatus();
+    return status ? c.json(status) : c.json({ error: "Pi provider prototype is disabled" }, 404);
   });
 
   app.get("/ai-tools/usage", (c) => {
@@ -82,7 +128,9 @@ export function aiToolsRoutes(
       const providerParam = c.req.query("provider");
       const provider =
         providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
-      return c.json(await deps.aiToolState.refresh(provider));
+      const state = await deps.aiToolState.refresh(provider);
+      const piPrototype = await readPiPrototypeStatus();
+      return c.json({ ...state, ...(piPrototype ? { piPrototype } : {}) });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);
     }

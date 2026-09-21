@@ -63,4 +63,22 @@ describe("webchat model selector", () => {
     );
     expect(resolveWebchatLargeModelSelection("bogus")).toBeNull();
   });
+
+  it("resolves a qualified Pi identity only while the prototype flag is enabled", () => {
+    const previous = process.env.ROME_PI_PROVIDER_PROTOTYPE;
+    try {
+      delete process.env.ROME_PI_PROVIDER_PROTOTYPE;
+      expect(resolveWebchatLargeModelSelection("pi-prototype:custom/model%2Fid")).toBeNull();
+
+      process.env.ROME_PI_PROVIDER_PROTOTYPE = "1";
+      expect(resolveWebchatLargeModelSelection("pi-prototype:custom/model%2Fid")).toEqual({
+        id: "pi-prototype:custom/model%2Fid",
+        providerId: "pi",
+        model: "custom/model%2Fid",
+      });
+    } finally {
+      if (previous === undefined) delete process.env.ROME_PI_PROVIDER_PROTOTYPE;
+      else process.env.ROME_PI_PROVIDER_PROTOTYPE = previous;
+    }
+  });
 });

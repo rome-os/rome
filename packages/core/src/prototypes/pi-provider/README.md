@@ -1,6 +1,6 @@
 # Pi provider SDK prototype
 
-This is an inspectable spike, not a registered Rome provider. It tests the two
+This is an inspectable, opt-in spike, not a production provider. It tests the
 riskiest seams in the Pi provider proposal:
 
 1. Pi's supported SDK can discover the models authenticated by Pi, including
@@ -8,6 +8,9 @@ riskiest seams in the Pi provider proposal:
 2. A Pi `AgentSession` can be created with Rome's prompt and only Rome-owned
    custom tools, while Pi streaming/tool events are translated to Rome's
    provider-neutral `AgentMessage` shapes.
+3. Behind `ROME_PI_PROVIDER_PROTOTYPE=1`, the real Rome settings/connect panel,
+   normal model selector, conversation request, provider resolver, and chat
+   transcript can carry one exact qualified Pi model through an ordinary turn.
 
 The prototype never starts the Pi CLI, a PTY, or a terminal. The live-run path
 uses an in-memory Pi session and disables Pi extensions, skills, prompt
@@ -17,7 +20,31 @@ production build excludes `src/prototypes/**` from emitted `dist` artifacts.
 
 ## Try it
 
-### UI-facing vertical slice
+### Actual Rome UI vertical slice
+
+Build the dashboard, then run an isolated Rome profile on a loopback port:
+
+```sh
+pnpm build:apps # once per clean checkout
+pnpm --filter rome-web build
+ROME_PI_PROVIDER_PROTOTYPE=1 \
+ROME_PROFILE=pi-provider-prototype \
+INTERNAL_API_PORT=4318 \
+INTERNAL_API_WEB_ROOT="$PWD/packages/web/dist" \
+pnpm --filter @rome/core start
+```
+
+Open <http://127.0.0.1:4318/>. In **Settings → AI Tools**, the visibly labelled
+**Pi Coding Agent · Prototype** row reports authenticated discovery or gives an
+actionable no-model state. Start a normal chat, open the standard model menu in
+the composer, choose a `Pi prototype · provider / model` entry, and send a
+message. The exact `pi-prototype:<qualified-id>` selection travels through the
+normal session request and resolves only to the opt-in Pi adapter.
+
+Authentication stays Pi-owned: configure Pi outside Rome in your own terminal,
+then reload/refresh Rome. The UI never displays a credential or launches Pi.
+
+### Standalone SDK inspection page
 
 Start the isolated local UI prototype:
 
@@ -26,8 +53,8 @@ pnpm --filter @rome/core prototype:pi:ui
 ```
 
 Open <http://127.0.0.1:4317/prototype/pi-provider>. The page is visibly marked
-**PROTOTYPE · LOCAL ONLY** and is not registered in Rome's production routes,
-provider resolver, or model selector.
+**PROTOTYPE · LOCAL ONLY**. It remains useful for inspecting the SDK seam by
+itself; it is not evidence for the actual Rome UI route above.
 
 - **Demo mode** is the default. Refresh discovery, choose either qualified
   model, enter a message, and press **Send**. Discovery goes through Pi's SDK
@@ -106,10 +133,11 @@ Pi's shell or file tools. The final accounting identifies the provider as
 - **Auth availability is not a live access check.** A configured credential can
   still be revoked, out of quota, or denied for one model. Runtime failures must
   trigger a safe status refresh and Rome's structured error classification.
-- **Pi and Rome have different transcript ownership.** This spike uses
-  `SessionManager.inMemory()` and does not implement restart, resume, fork, or
-  conversion of Rome's durable transcript into Pi messages. Production must
-  make Rome authoritative and test prefix fidelity across eviction/restart.
+- **Pi and Rome have different transcript ownership.** The Rome UI slice stores
+  the exact selected provider/model through Rome's normal session machinery,
+  but each prototype adapter turn uses a fresh in-memory Pi session. It does
+  not reconstruct prior Rome messages, resume, or fork. Production must make
+  Rome authoritative and test prefix fidelity across eviction/restart.
 - **Streaming phase is lossy.** Pi text deltas do not identify commentary versus
   final-answer phase. This bridge streams deltas immediately and classifies the
   completed block from Pi's stop reason. Rome UI behavior needs explicit review.
@@ -130,11 +158,12 @@ Pi's shell or file tools. The final accounting identifies the provider as
   deprecated `@mariozechner` namespace to `@earendil-works`; this spike pins
   `@earendil-works/pi-coding-agent` 0.86.1. Its dependency graph includes
   provider SDKs that will increase install size and supply-chain surface.
-- This spike does not wire AI Tools status, the model selector, provider
-  resolution, session pins, approvals, MCP servers, subagents, images, structured
-  output, retries, or production tests. The standalone UI page deliberately
-  proves only local browser-to-prototype-backend discovery, exact selection,
-  streaming, and one ephemeral turn; it is not a production dashboard route.
+- The opt-in slice wires only discovery/status, exact model selection, resolver,
+  and a basic streamed text turn into the existing Rome UI. It does not support
+  approvals, Rome actions/skills/subagents, images, structured output, retries,
+  reliable cancellation, or production tests. The only Pi tool is the harmless
+  prototype `rome_probe`; no shell, PTY, file tool, extension, or Pi history is
+  exposed.
 
 ## Recommended production breakdown
 

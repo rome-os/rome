@@ -86,7 +86,7 @@ import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
-import { AgentRunner } from "./core/agent-runner.js";
+import { AgentRunner, type ModelProvider } from "./core/agent-runner.js";
 import { AnthropicProvider } from "./core/anthropic-provider.js";
 import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
 import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
@@ -562,9 +562,17 @@ async function main() {
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
   });
+  const modelProviders: ModelProvider[] = [anthropicProvider, codexProvider];
+  if (process.env.ROME_PI_PROVIDER_PROTOTYPE === "1") {
+    const { PiPrototypeModelProvider } = await import(
+      "./prototypes/pi-provider/pi-model-provider.js"
+    );
+    modelProviders.push(new PiPrototypeModelProvider());
+    log.warn("Pi provider prototype enabled; this integration is not production-ready");
+  }
   const modelResolver = createModelResolver({
     aiToolState,
-    providers: [anthropicProvider, codexProvider],
+    providers: modelProviders,
     settingsRepo,
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);

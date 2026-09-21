@@ -94,6 +94,14 @@ interface AIToolUsageStatus {
 
 type AIToolStatusMap = Record<string, AIToolStatus>;
 
+interface PiPrototypeStatus extends AIToolStatus {
+  enabled: true;
+  prototype: true;
+  modelCount: number;
+  guidance: string;
+  configurationValid: boolean;
+}
+
 export type { AnthropicCompatibleProviderSummary };
 
 export interface AnthropicCompatibleConfiguredSummary {
@@ -218,8 +226,11 @@ export function hasConnectedAiProvider(
   status: Partial<Record<string, { loggedIn?: boolean } | null>>,
   hiddenProviders: readonly AiToolProviderId[] = [],
 ): boolean {
-  return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
-    (provider) => status[provider.statusKey]?.loggedIn === true,
+  return (
+    status.piPrototype?.loggedIn === true ||
+    AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
+      (provider) => status[provider.statusKey]?.loggedIn === true,
+    )
   );
 }
 
@@ -472,6 +483,7 @@ export function AiToolsPanel({
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [removeAnthropicProviderOpen, setRemoveAnthropicProviderOpen] = useState(false);
   const [toolStatus, setToolStatus] = useState<AIToolStatusMap>({});
+  const [piPrototype, setPiPrototype] = useState<PiPrototypeStatus | null>(null);
   const [anthropicProviders, setAnthropicProviders] = useState<
     AnthropicCompatibleProviderSummary[]
   >([]);
@@ -512,11 +524,14 @@ export function AiToolsPanel({
         claude?: AIToolStatus;
         codex?: AIToolStatus;
         anthropicCompatible?: AnthropicCompatibleConfiguredSummary | null;
+        piPrototype?: PiPrototypeStatus;
       };
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.piPrototype ? { piPrototype: data.piPrototype } : {}),
       });
+      setPiPrototype(data.piPrototype ?? null);
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -652,13 +667,16 @@ export function AiToolsPanel({
       const data = (await res.json().catch(() => ({}))) as {
         claude?: AIToolStatus;
         codex?: AIToolStatus;
+        piPrototype?: PiPrototypeStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
       setToolStatus({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
+        ...(data.piPrototype ? { piPrototype: data.piPrototype } : {}),
       });
+      if (data.piPrototype) setPiPrototype(data.piPrototype);
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {
@@ -824,6 +842,44 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+          {piPrototype && (
+            <div className="px-4 py-3">
+              <div className="flex items-start gap-2">
+                <div
+                  className="grid size-6 shrink-0 place-items-center rounded-6 bg-warning/15 text-aux font-semibold text-warning-fg"
+                  aria-hidden="true"
+                >
+                  P
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-ui text-foreground">Pi Coding Agent</p>
+                    <span className="rounded-full border border-warning/40 px-2 py-0.5 text-aux text-warning-fg">
+                      Prototype
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 text-aux ${
+                        piPrototype.loggedIn ? "text-success-fg" : "text-muted-foreground"
+                      }`}
+                    >
+                      <span
+                        className={`size-1.5 rounded-full ${
+                          piPrototype.loggedIn ? "bg-success" : "bg-muted-foreground/50"
+                        }`}
+                      />
+                      {piPrototype.loggedIn
+                        ? `${piPrototype.modelCount} authenticated model${piPrototype.modelCount === 1 ? "" : "s"}`
+                        : "No authenticated models"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-aux text-muted-foreground">{piPrototype.guidance}</p>
+                  <p className="mt-1 text-aux text-muted-foreground">
+                    Opt-in prototype: Rome does not launch Pi CLI or expose Pi tools/history.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {visibleProviders.map((provider) => {
             const status = toolStatus[provider.statusKey];
             const isLoggedIn = status?.loggedIn === true;

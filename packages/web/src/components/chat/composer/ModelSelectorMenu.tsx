@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, MoreHorizontal, X } from "lucide-react";
 import {
@@ -50,13 +50,49 @@ export function ModelSelectorMenu({
   const { t } = useTranslation("chat");
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [piModels, setPiModels] = useState<Array<{ id: string; label: string }>>([]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/ai-tools/pi-prototype", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return [];
+        const data = (await response.json()) as {
+          models?: Array<{
+            selectionId?: string;
+            upstreamProvider?: string;
+            modelId?: string;
+          }>;
+        };
+        return (data.models ?? []).flatMap((model) =>
+          model.selectionId && model.upstreamProvider && model.modelId
+            ? [
+                {
+                  id: model.selectionId,
+                  label: `Pi prototype · ${model.upstreamProvider} / ${model.modelId}`,
+                },
+              ]
+            : [],
+        );
+      })
+      .then((models) => {
+        if (active) setPiModels(models);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Resolve labels once so the trigger, the filter, and the rows all read the
   // exact same text — a single source for "what the model is called".
   const options = useMemo(
-    () => LARGE_MODEL_OPTIONS.map((option) => ({ ...option, label: t(option.labelKey) })),
-    [t],
+    () => [
+      ...LARGE_MODEL_OPTIONS.map((option) => ({ id: option.id, label: t(option.labelKey) })),
+      ...piModels,
+    ],
+    [t, piModels],
   );
 
   // `auto` is a value like any other, so the trigger always has something to
@@ -89,9 +125,8 @@ export function ModelSelectorMenu({
     if (showAll) {
       return { rows: options, showAllRow: false };
     }
-    const common = options.filter(
-      (option) => COMMON_LARGE_MODEL_IDS.includes(option.id) || option.id === value,
-    );
+    const commonIds = new Set<string>(COMMON_LARGE_MODEL_IDS);
+    const common = options.filter((option) => commonIds.has(option.id) || option.id === value);
     return { rows: common, showAllRow: common.length < options.length };
   }, [options, trimmedQuery, showAll, value]);
 
