@@ -641,7 +641,7 @@
       "refresh": "刷新发现",
       "save": "保存令牌",
       "replaceConfirm": "替换此 Pi 提供商已保存的令牌？",
-      "removeConfirm": "移除此 Pi 提供商已保存的令牌？",
+      "removeConfirm": "移除此 Pi 提供商已保存的令牌？这也会从使用同一存储的其他 Pi 工具中移除它。",
       "sources": {
         "stored": "由 Pi 保存",
         "environment": "外部/环境变量（未保存令牌时使用）",

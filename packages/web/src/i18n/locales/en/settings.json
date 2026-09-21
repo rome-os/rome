@@ -641,7 +641,7 @@
       "refresh": "Refresh discovery",
       "save": "Save token",
       "replaceConfirm": "Replace the stored token for this Pi provider?",
-      "removeConfirm": "Remove the stored token for this Pi provider?",
+      "removeConfirm": "Remove the stored token for this Pi provider? This also removes it from other Pi tools using the shared store.",
       "sources": {
         "stored": "Stored by Pi",
         "environment": "External/environment (used when no token is stored)",

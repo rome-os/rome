@@ -53,6 +53,7 @@ describe("AiToolsCard", () => {
 
     const skip = await screen.findByRole("button", { name: "Skip for now" });
     expect(screen.getByText("Connect Claude or ChatGPT")).toBeTruthy();
+    expect(screen.queryByText("Pi Coding Agent")).toBeNull();
     expect(onSubmit).not.toHaveBeenCalled();
 
     await userEvent.setup().click(skip);

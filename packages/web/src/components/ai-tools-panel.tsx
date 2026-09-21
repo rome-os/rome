@@ -245,6 +245,7 @@ interface AiToolsPanelProps {
   hiddenProviders?: readonly AiToolProviderId[];
   showUsage?: boolean;
   showHeader?: boolean;
+  showPiSettings?: boolean;
   onConnectedChange?: (connected: boolean) => void;
 }
 
@@ -460,6 +461,7 @@ export function AiToolsPanel({
   hiddenProviders = [],
   showUsage = false,
   showHeader = true,
+  showPiSettings = true,
   onConnectedChange,
 }: AiToolsPanelProps) {
   const { t } = useTranslation("settings");
@@ -1186,37 +1188,41 @@ export function AiToolsPanel({
               </div>
             );
           })}
-          <div className="px-4 py-2">
-            <div className="flex items-center gap-2">
-              <span
-                className="flex size-7 shrink-0 items-center justify-center text-title"
-                aria-hidden
-              >
-                π
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-ui text-foreground">{t("aiTools.pi.name")}</p>
-                  <span className="text-aux text-muted-foreground">
-                    {piStatus
-                      ? t("aiTools.pi.configuredCount", {
-                          count: piStatus.providers.filter((provider) => provider.configured)
-                            .length,
-                        })
-                      : t("aiTools.pi.inspectToConfigure")}
-                  </span>
+          {showPiSettings && (
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex size-7 shrink-0 items-center justify-center text-title"
+                  aria-hidden
+                >
+                  π
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-ui text-foreground">{t("aiTools.pi.name")}</p>
+                    <span className="text-aux text-muted-foreground">
+                      {piStatus
+                        ? t("aiTools.pi.configuredCount", {
+                            count: piStatus.providers.filter((provider) => provider.configured)
+                              .length,
+                          })
+                        : t("aiTools.pi.inspectToConfigure")}
+                    </span>
+                  </div>
+                  <p className="text-aux text-muted-foreground">
+                    {t("aiTools.pi.incrementNotice")}
+                  </p>
                 </div>
-                <p className="text-aux text-muted-foreground">{t("aiTools.pi.incrementNotice")}</p>
+                <Button variant="outline" size="sm" onClick={openPiDialog}>
+                  {t("aiTools.pi.configure")}
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={openPiDialog}>
-                {t("aiTools.pi.configure")}
-              </Button>
             </div>
-          </div>
+          )}
         </div>
 
         <Dialog
-          open={piDialogOpen}
+          open={showPiSettings && piDialogOpen}
           onClose={closePiDialog}
           ariaLabel={t("aiTools.pi.title")}
           size="lg"
@@ -1362,7 +1368,7 @@ export function AiToolsPanel({
         </Dialog>
 
         <RomeConfirmDialog
-          open={piConfirmAction !== null}
+          open={showPiSettings && piConfirmAction !== null}
           title={
             piConfirmAction === "replace"
               ? t("aiTools.pi.replaceTitle")
