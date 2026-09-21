@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { chmod, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../logger.js";
 import type {
@@ -59,11 +59,13 @@ export interface PiModelRuntime {
 }
 
 type StoredCredentialLiteralCheck = (providerId: string) => Promise<boolean>;
+type AuthFilePermissionHardener = () => Promise<void>;
 
 interface RuntimeHandle {
   runtime: PiModelRuntime;
   dispose(): void | Promise<void>;
   isStoredCredentialLiteral?: StoredCredentialLiteralCheck;
+  hardenAuthFilePermissions?: AuthFilePermissionHardener;
 }
 
 export type PiRuntimeFactory = () => Promise<RuntimeHandle>;
@@ -140,6 +142,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export async function hardenPiAuthFilePermissions(authPath: string): Promise<void> {
+  try {
+    const metadata = await stat(authPath);
+    if (!metadata.isFile()) {
+      throw new Error("Pi credential storage is not a regular file.");
+    }
+    if ((metadata.mode & 0o077) !== 0) {
+      await chmod(authPath, 0o600);
+    }
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return;
+    throw error;
+  }
+}
+
+function isNodeError(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
 async function isLiteralStoredCredential(authPath: string, providerId: string): Promise<boolean> {
   try {
     const auth = JSON.parse(await readFile(authPath, "utf8")) as unknown;
@@ -170,6 +191,7 @@ async function defaultRuntimeFactory(): Promise<RuntimeHandle> {
     runtime,
     isStoredCredentialLiteral: (providerId) =>
       isLiteralStoredCredential(paths.authPath, providerId),
+    hardenAuthFilePermissions: () => hardenPiAuthFilePermissions(paths.authPath),
     async dispose() {
       // ModelRuntime 0.86.1 exposes no disposable resource. Keep the scoped
       // lifecycle explicit so a future SDK disposer is always honored.
@@ -228,6 +250,7 @@ export class PiSettingsService {
     fn: (
       runtime: PiModelRuntime,
       isStoredCredentialLiteral?: StoredCredentialLiteralCheck,
+      hardenAuthFilePermissions?: AuthFilePermissionHardener,
     ) => Promise<T>,
   ): Promise<T> {
     const pendingHandle = this.createRuntime();
@@ -244,9 +267,17 @@ export class PiSettingsService {
       throw error;
     }
     try {
-      return await fn(handle.runtime, handle.isStoredCredentialLiteral);
+      return await fn(
+        handle.runtime,
+        handle.isStoredCredentialLiteral,
+        handle.hardenAuthFilePermissions,
+      );
     } finally {
-      await this.withTimeout(async () => await handle.dispose(), true);
+      await this.withTimeout(async () => await handle.dispose(), true).catch((error) => {
+        log.debug("Pi runtime disposal failed", {
+          errorType: error instanceof Error ? error.name : typeof error,
+        });
+      });
     }
   }
 
@@ -363,8 +394,10 @@ export class PiSettingsService {
     literalStoredProviders?: ReadonlySet<string>,
     isStoredCredentialLiteral?: StoredCredentialLiteralCheck,
   ): Promise<PiSettingsStatus> {
-    return await this.withTimeout((signal) =>
-      this.readStatus(runtime, signal, literalStoredProviders, isStoredCredentialLiteral),
+    return await this.withTimeout(
+      (signal) =>
+        this.readStatus(runtime, signal, literalStoredProviders, isStoredCredentialLiteral),
+      true,
     );
   }
 
@@ -378,22 +411,17 @@ export class PiSettingsService {
     if (!options.bypassCache && this.inFlight?.generation === generation) {
       return this.inFlight.promise;
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
     const literalStoredProviders = options.literalStoredProviders ?? this.literalStoredProviders;
-    const promise = this.useRuntime((runtime, isStoredCredentialLiteral) =>
-      this.readStatus(
-        runtime,
-        controller.signal,
-        literalStoredProviders,
-        isStoredCredentialLiteral,
-      ),
-    )
-      .then((value) => {
-        this.cacheStatus(generation, value);
-        return value;
-      })
-      .finally(() => clearTimeout(timeout));
+    const promise = this.withTimeout(
+      (signal) =>
+        this.useRuntime((runtime, isStoredCredentialLiteral) =>
+          this.readStatus(runtime, signal, literalStoredProviders, isStoredCredentialLiteral),
+        ),
+      true,
+    ).then((value) => {
+      this.cacheStatus(generation, value);
+      return value;
+    });
     if (!options.bypassCache) {
       const inFlight = { generation, promise };
       this.inFlight = inFlight;
@@ -431,7 +459,7 @@ export class PiSettingsService {
     let timedOutAfterLogin: PiSettingsTimeoutError | undefined;
     let canDiscoverStoredCredential = false;
     let status: PiSettingsStatus | undefined;
-    await this.useRuntime(async (runtime, isStoredCredentialLiteral) => {
+    await this.useRuntime(async (runtime, isStoredCredentialLiteral, hardenAuthFilePermissions) => {
       if (!runtime.getProviders().some((provider) => provider.id === input.providerId)) {
         throw new PiSettingsError(
           "unsupported-provider",
@@ -442,6 +470,7 @@ export class PiSettingsService {
       if (stored.some((item) => item.providerId === input.providerId) && !input.confirmReplace) {
         throw new PiSettingsError("replace-required", "Confirm replacing the stored credential.");
       }
+      await hardenAuthFilePermissions?.();
       let prompts = 0;
       try {
         await this.withTimeout(

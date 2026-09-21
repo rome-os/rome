@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
@@ -8,6 +8,7 @@ import {
   PI_PROVIDER_ALLOWLIST,
   PiSettingsError,
   PiSettingsService,
+  hardenPiAuthFilePermissions,
   piRuntimePaths,
   qualifyPiModel,
   validatePiToken,
@@ -113,6 +114,28 @@ describe("Pi settings service", () => {
     expect(first.providers.some((provider) => provider.id === "custom-provider")).toBe(false);
     await service.status();
     expect(created).toBe(1);
+  });
+
+  it("does not let runtime disposal mask a status result or mutation error", async () => {
+    const successful = new PiSettingsService(async () => ({
+      runtime: fakeRuntime(),
+      dispose() {
+        throw new Error("dispose failed");
+      },
+    }));
+    await expect(successful.status()).resolves.toMatchObject({ catalogStatus: "no-models" });
+
+    const rejected = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+      }),
+      dispose() {
+        throw new Error("dispose failed");
+      },
+    }));
+    await expect(
+      rejected.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).rejects.toMatchObject({ code: "replace-required" });
   });
 
   it("does not reuse a pre-mutation status read after credential removal", async () => {
@@ -255,45 +278,44 @@ describe("Pi settings service", () => {
     await expect(second).rejects.toMatchObject({ code: "replace-required" });
   });
 
-  it("bounds status probes and releases the shared request after an abort", async () => {
-    const service = new PiSettingsService(
-      async () => ({
-        runtime: fakeRuntime({
-          checkAuth: async (_providerId, options) =>
-            await new Promise<undefined>((_resolve, reject) => {
-              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
-            }),
-        }),
+  it("rejects a non-cooperative status probe and clears the shared in-flight read", async () => {
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      return {
+        runtime:
+          created === 1
+            ? fakeRuntime({ checkAuth: async () => await new Promise<never>(() => {}) })
+            : fakeRuntime(),
         dispose() {},
-      }),
-      1,
-    );
+      };
+    }, 1);
 
-    await expect(service.status()).resolves.toMatchObject({
-      catalogStatus: "discovery-failed",
-      discoveryFailedProviders: ["kimi-coding"],
-    });
+    await expect(service.status()).rejects.toThrow("timed out");
+    await expect(service.status()).resolves.toMatchObject({ catalogStatus: "no-models" });
+    expect(created).toBe(2);
   });
 
-  it("bounds the post-save status read", async () => {
-    const service = new PiSettingsService(
-      async () => ({
-        runtime: fakeRuntime({
-          checkAuth: async (_providerId, options) =>
-            await new Promise<undefined>((_resolve, reject) => {
-              options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
-            }),
-        }),
+  it("rejects a non-cooperative post-save status read without wedging mutations", async () => {
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      return {
+        runtime:
+          created === 1
+            ? fakeRuntime({ checkAuth: async () => await new Promise<never>(() => {}) })
+            : fakeRuntime(),
         dispose() {},
-      }),
-      1,
-    );
+      };
+    }, 1);
 
     await expect(
       service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
-    ).resolves.toMatchObject({
-      status: { catalogStatus: "discovery-failed", discoveryFailedProviders: ["kimi-coding"] },
+    ).rejects.toThrow("timed out");
+    await expect(service.removeCredential("kimi-coding")).resolves.toMatchObject({
+      catalogStatus: "no-models",
     });
+    expect(created).toBe(3);
   });
 
   it("serializes different-provider mutations that share Pi auth storage", async () => {
@@ -556,6 +578,42 @@ describe("Pi settings service", () => {
         refreshOnCreate: false,
       });
       expect(runtime.getProviders().some((provider) => provider.id === "hostile")).toBe(false);
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("hardens the auth file before handing a token to Pi", async () => {
+    let stored = false;
+    let hardened = false;
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () =>
+          stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+        login: async () => {
+          expect(hardened).toBe(true);
+          stored = true;
+        },
+      }),
+      hardenAuthFilePermissions: async () => {
+        hardened = true;
+      },
+      dispose() {},
+    }));
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).resolves.toMatchObject({ credentialPersisted: true });
+  });
+
+  it("tightens an existing Pi auth file before a credential mutation", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-auth-mode-"));
+    const authPath = join(agentDir, "auth.json");
+    try {
+      await writeFile(authPath, "{}", { mode: 0o600 });
+      await chmod(authPath, 0o644);
+      await hardenPiAuthFilePermissions(authPath);
+      expect((await stat(authPath)).mode & 0o777).toBe(0o600);
     } finally {
       await rm(agentDir, { recursive: true, force: true });
     }
