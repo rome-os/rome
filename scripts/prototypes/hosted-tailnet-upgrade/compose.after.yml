@@ -1,0 +1,16 @@
+name: rome-tailnet-prototype
+
+services:
+  rome:
+    image: ${ROME_FIXTURE_IMAGE:-alpine:3.21}
+    command: ["sh", "-c", "mkdir -p /var/lib/tailscale && exec sleep infinity"]
+    volumes:
+      - type: volume
+        source: tailscale-state
+        target: /var/lib/tailscale
+        volume:
+          nocopy: true
+
+volumes:
+  tailscale-state:
+    name: ${ROME_TAILSCALE_VOLUME:?set ROME_TAILSCALE_VOLUME}

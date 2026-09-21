@@ -1,0 +1,6 @@
+name: rome-tailnet-prototype
+
+services:
+  rome:
+    image: ${ROME_FIXTURE_IMAGE:-alpine:3.21}
+    command: ["sh", "-c", "mkdir -p /var/lib/tailscale && exec sleep infinity"]
