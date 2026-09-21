@@ -78,15 +78,14 @@ export class PiSettingsError extends Error {
 }
 
 export function validatePiToken(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length > 8_192 ||
-    /[\u0000-\u001f\u007f-\u009f]/u.test(value)
-  ) {
+  if (typeof value !== "string") {
     throw new PiSettingsError("invalid-token", "Enter a valid literal API token.");
   }
   const token = value.trim();
-  if (!token || token.includes("$") || token.startsWith("!")) {
+  if (!token || token.length > 8_192 || /[\u0000-\u001f\u007f-\u009f]/u.test(token)) {
+    throw new PiSettingsError("invalid-token", "Enter a valid literal API token.");
+  }
+  if (token.includes("$") || token.startsWith("!")) {
     throw new PiSettingsError(
       "invalid-token",
       "Enter a literal API token; indirections are not supported.",

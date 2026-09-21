@@ -48,6 +48,9 @@ describe("Pi settings service", () => {
       }
     }
     expect(validatePiToken("  opaque-token  ")).toBe("opaque-token");
+    expect(validatePiToken("opaque-token\n")).toBe("opaque-token");
+    expect(validatePiToken("opaque-token\r\n")).toBe("opaque-token");
+    expect(validatePiToken(`${"x".repeat(8_192)}\n`)).toHaveLength(8_192);
   });
 
   it("uses a Rome-owned config path so Pi persists refreshed catalogs without loading models.json", () => {
