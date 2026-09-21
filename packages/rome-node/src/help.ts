@@ -131,8 +131,9 @@ Output:
 Check exec's exitCode even when ok is true. The local exit status is 1 for
 action failures, nonzero remote exit codes, or signal termination, otherwise 0.
 Local setup and argument errors print diagnostics to stderr and exit 1.
-Each output stream retains at most 48 KiB, with further truncation to fit a frame.
-Check truncated before treating output or file contents as complete.
+Output is collected in memory and returned in full after program exit.
+The CLI does not truncate output or impose message or send-buffer size limits.
+Transport limits still apply. Connection loss returns unknown_outcome.
 
 The caller waits up to 60 seconds for a response. unknown_outcome means execution
 may have started or completed. A local timeout does not cancel the remote program.

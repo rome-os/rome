@@ -5,7 +5,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { actionError, isRecord } from "./actions.js";
 import { DeviceConnector } from "./connector.js";
 import { configRoot, daemonPort, daemonStatePath, readCallerCredential } from "./local.js";
-import { MAX_MESSAGE_BYTES } from "./protocol.js";
 import { readPrivateJson, writePrivateJson } from "./storage.js";
 
 interface DaemonState {
@@ -113,12 +112,9 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 async function readBody(request: IncomingMessage): Promise<unknown> {
-  let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const buffer = Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_MESSAGE_BYTES) throw new Error("message_too_large");
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -168,24 +164,11 @@ export async function serveDaemon(): Promise<void> {
     } else if (req.method === "GET" && req.url === "/devices") {
       json(res, 200, await connector.list());
     } else if (req.method === "POST" && req.url === "/run") {
-      if (Number(req.headers["content-length"]) > MAX_MESSAGE_BYTES) {
-        json(res, 413, actionError("message_too_large", "The request exceeds 128 KiB."));
-        req.resume();
-        return;
-      }
       let body: unknown;
       try {
         body = await readBody(req);
-      } catch (error) {
-        const tooLarge = error instanceof Error && error.message === "message_too_large";
-        json(
-          res,
-          tooLarge ? 413 : 400,
-          actionError(
-            tooLarge ? "message_too_large" : "invalid_request",
-            "Invalid device request.",
-          ),
-        );
+      } catch {
+        json(res, 400, actionError("invalid_request", "Invalid device request."));
         return;
       }
       if (!isRecord(body) || typeof body.deviceId !== "string" || typeof body.action !== "string") {

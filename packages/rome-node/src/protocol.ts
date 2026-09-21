@@ -1,6 +1,5 @@
-export const MAX_MESSAGE_BYTES = 128 * 1024;
-// Client adapters expose the actual pending send buffer; this is not a lifetime quota.
-export const MAX_CLIENT_BUFFER_BYTES = 1024 * 1024;
+/** @deprecated Informational legacy export. The CLI does not enforce a message-size limit. */
+export const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 export const CLOSE = {
   revoked: 4001,
   superseded: 4002,

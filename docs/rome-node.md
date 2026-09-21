@@ -133,9 +133,13 @@ Examples for Windows:
 ```
 
 An exec result contains `exitCode`, `signal`, `stdout`, `stderr`, and
-`truncated: { stdout, stderr }`. Each stream retains at most 48 KiB.
-Escaped output is reduced further when needed to keep the complete JSON envelope
-within Gateway's 128 KiB limit. Truncation also applies to file reads.
+`truncated: { stdout: false, stderr: false }`. Output is collected in memory and
+returned in full after program exit. The CLI and Gateway do not impose message,
+output, or pending-send buffer limits. They use the WebSocket library defaults
+and platform limits. Cloudflare limits received WebSocket messages to 32 MiB,
+including the envelope. WebSocket fragmentation does not bypass this limit.
+A lost response returns `unknown_outcome` because execution may have occurred.
+Never automatically repeat an operation after an unknown outcome.
 At most eight programs run concurrently on one executor.
 
 ## Failure and shutdown

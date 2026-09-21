@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExecutor } from "./executor.js";
-import { MAX_MESSAGE_BYTES, type OutboundEnvelope } from "./protocol.js";
+import type { OutboundEnvelope } from "./protocol.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -84,7 +84,7 @@ describe("computer actions", () => {
       error: { code: "invalid_args" },
     });
   });
-  it("bounds escaped and multibyte output including the envelope", async () => {
+  it("returns complete escaped and multibyte output above the former limits", async () => {
     const reply = await execute("exec", {
       command: process.execPath,
       args: [
@@ -92,11 +92,28 @@ describe("computer actions", () => {
         "process.stdout.write('\\u0000'.repeat(200000));process.stderr.write('🙂'.repeat(200000))",
       ],
     });
-    expect(Buffer.byteLength(JSON.stringify(reply))).toBeLessThanOrEqual(MAX_MESSAGE_BYTES);
     expect(reply.payload).toMatchObject({
       ok: true,
-      result: { truncated: { stdout: true, stderr: true } },
+      result: {
+        stdout: "\u0000".repeat(200000),
+        stderr: "🙂".repeat(200000),
+        truncated: { stdout: false, stderr: false },
+      },
     });
+  });
+  it("collects output above 32 MiB without truncating or replacing the result", async () => {
+    const size = 33 * 1024 * 1024;
+    const reply = await execute("exec", {
+      command: process.execPath,
+      args: ["-e", `process.stdout.write('x'.repeat(${size}))`],
+    });
+    const payload = reply.payload as {
+      ok: boolean;
+      result: { stdout: string; truncated: unknown };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.result.stdout.length).toBe(size);
+    expect(payload.result.truncated).toEqual({ stdout: false, stderr: false });
   });
   it("terminates direct children and never sends their result after disconnect", async () => {
     const replies: OutboundEnvelope[] = [];

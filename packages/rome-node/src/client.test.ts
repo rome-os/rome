@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs as vi } from "@rstest/core";
 import { connectGateway, type ClientSocket } from "./client.js";
-import { CLOSE, MAX_CLIENT_BUFFER_BYTES, MAX_MESSAGE_BYTES } from "./protocol.js";
+import { CLOSE } from "./protocol.js";
 
 class Socket implements ClientSocket {
   readyState = 0;
@@ -105,15 +105,19 @@ describe("device connection helper", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(f.factory).toHaveBeenCalledTimes(3);
   });
-  it("caps UTF-8 message bytes and the platform's client-side output buffer", () => {
+  it("leaves message sizes and pending send buffers to the socket adapter", () => {
     const f = fixture();
     f.sockets[0].open();
-    expect(
-      f.client.send({ id: "large", to: "target", payload: "🙂".repeat(MAX_MESSAGE_BYTES / 2) }),
-    ).toBe(false);
-    f.sockets[0].bufferedAmount = MAX_CLIENT_BUFFER_BYTES;
-    expect(f.client.send({ id: "full", to: "target", payload: "hello" })).toBe(false);
-    expect(f.sockets[0].readyState).toBe(3);
+    f.sockets[0].bufferedAmount = 128 * 1024 * 1024;
+    const payload = "x".repeat(33 * 1024 * 1024);
+    expect(f.client.send({ id: "large", to: "target", payload })).toBe(true);
+    expect(f.sockets[0].sent[0].length).toBeGreaterThan(payload.length);
+    f.sockets[0].emit("message", {
+      data: JSON.stringify({ id: "large", from: "target", payload }),
+    });
+    expect(f.messages).toHaveBeenCalledOnce();
+    expect(f.messages.mock.calls[0][0].payload.length).toBe(payload.length);
+    expect(f.sockets[0].readyState).toBe(1);
     f.client.stop();
   });
   it("rejects URLs carrying credentials or plaintext transport", () => {

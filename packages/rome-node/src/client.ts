@@ -1,9 +1,6 @@
 import {
-  byteLength,
   CLOSE,
   gatewayMessage,
-  MAX_CLIENT_BUFFER_BYTES,
-  MAX_MESSAGE_BYTES,
   outboundEnvelope,
   type GatewayMessage,
   type OutboundEnvelope,
@@ -13,7 +10,6 @@ import {
 // cannot do that; do not fall back to a URL token or subprotocol credential.
 export interface ClientSocket {
   readyState: number;
-  bufferedAmount: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
   addEventListener(type: "open", listener: () => void): void;
@@ -115,13 +111,7 @@ export function connectGateway(options: GatewayClientOptions) {
       status("online");
     });
     current.addEventListener("message", ({ data }) => {
-      if (
-        stopped ||
-        socket !== current ||
-        typeof data !== "string" ||
-        byteLength(data) > MAX_MESSAGE_BYTES
-      )
-        return;
+      if (stopped || socket !== current || typeof data !== "string") return;
       let message;
       try {
         message = gatewayMessage(JSON.parse(data));
@@ -148,12 +138,6 @@ export function connectGateway(options: GatewayClientOptions) {
         // JSON serialization can remove payloads such as undefined/functions.
         if (!outboundEnvelope(JSON.parse(text))) return false;
       } catch {
-        return false;
-      }
-      const size = byteLength(text);
-      if (size > MAX_MESSAGE_BYTES) return false;
-      if (socket.bufferedAmount + size > MAX_CLIENT_BUFFER_BYTES) {
-        socket.close(CLOSE.outputLimit, "outbound buffer limit");
         return false;
       }
       try {

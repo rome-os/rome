@@ -250,12 +250,20 @@ describe("standalone CLI daemon processes", () => {
       body: "{}",
     });
     expect(invalid.status).toBe(400);
-    const oversized = await fetch(`http://127.0.0.1:${state.port}/run`, {
+    const large = await fetch(`http://127.0.0.1:${state.port}/run`, {
       method: "POST",
       headers: { authorization: `Bearer ${state.token}` },
-      body: "x".repeat(128 * 1024 + 1),
+      body: JSON.stringify({ extra: "x".repeat(2 * 1024 * 1024) }),
     });
-    expect(oversized.status).toBe(413);
+    expect(large.status).toBe(400);
+    await large.text();
+    const larger = await fetch(`http://127.0.0.1:${state.port}/run`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ extra: "x".repeat(33 * 1024 * 1024) }),
+    });
+    expect(larger.status).toBe(400);
+    expect(await larger.json()).toMatchObject({ error: { code: "invalid_request" } });
     expect(f.lists()).toBe(0);
   });
 });

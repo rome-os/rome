@@ -60,7 +60,11 @@ daemon before changing credentials. `rome-node daemon serve` runs in the
 foreground for diagnosis. Set `ROME_NODE_CONFIG_DIR` to isolate configurations.
 
 Commands print JSON to stdout and diagnostics to stderr. Errors and nonzero
-remote exit codes produce a nonzero local exit status. An authorized device is
+remote exit codes produce a nonzero local exit status. Output is collected in memory
+and returned in full after program exit. The CLI leaves message and send-buffer
+limits to the WebSocket library and infrastructure. A lost response reports
+`unknown_outcome`. Never automatically retry an unknown outcome.
+An authorized device is
 not necessarily online. Use `describe` to query its current platform and actions.
 
 The package exports the Gateway client, socket adapter, and action response

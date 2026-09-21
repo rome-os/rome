@@ -67,6 +67,17 @@ describe("CLI device connector", () => {
     expect(await Promise.all(promises)).toEqual(Array.from({ length: 10 }, () => payload));
   });
 
+  it("submits large requests without an application size limit", async () => {
+    const f = fixture();
+    const args = "x".repeat(33 * 1024 * 1024);
+    const pending = f.connector.run("target", "exec", args);
+    await rs.waitFor(() => expect(f.sent).toHaveLength(1));
+    expect((f.sent[0].payload as { args: string }).args.length).toBe(args.length);
+    const payload = { type: "response", ok: true, result: {} };
+    f.options().onMessage({ id: f.sent[0].id, from: "target", payload });
+    expect(await pending).toEqual(payload);
+  });
+
   it("reports interrupted outcomes without replay and stops after supersession", async () => {
     const f = fixture();
     const pending = f.connector.run("target", "exec", {});

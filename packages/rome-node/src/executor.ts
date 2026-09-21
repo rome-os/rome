@@ -1,12 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
-import {
-  byteLength,
-  MAX_MESSAGE_BYTES,
-  type InboundEnvelope,
-  type OutboundEnvelope,
-} from "./protocol.js";
+import type { InboundEnvelope, OutboundEnvelope } from "./protocol.js";
 
 export function createExecutor(
   name: string,
@@ -66,13 +61,10 @@ export function createExecutor(
           return;
         }
         children.add(child);
-        const output = { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
-        const truncated = { stdout: false, stderr: false };
+        const output: Record<"stdout" | "stderr", Buffer[]> = { stdout: [], stderr: [] };
         for (const stream of ["stdout", "stderr"] as const) {
           child[stream]?.on("data", (chunk: Buffer) => {
-            const remaining = 48 * 1024 - output[stream].length;
-            if (chunk.length > remaining) truncated[stream] = true;
-            output[stream] = Buffer.concat([output[stream], chunk.subarray(0, remaining)]);
+            output[stream].push(chunk);
           });
         }
         child.once("error", () => {
@@ -86,10 +78,10 @@ export function createExecutor(
         });
         child.once("close", (exitCode, signal) => {
           children.delete(child);
-          const redact = (value: Buffer) =>
+          const redact = (chunks: Buffer[]) =>
             secrets.reduce(
               (text, secret) => text.replaceAll(secret, "[redacted]"),
-              value.toString("utf8"),
+              Buffer.concat(chunks).toString("utf8"),
             );
           resolve({
             type: "response",
@@ -99,7 +91,7 @@ export function createExecutor(
               signal,
               stdout: redact(output.stdout),
               stderr: redact(output.stderr),
-              truncated,
+              truncated: { stdout: false, stderr: false },
             },
           });
         });
@@ -119,17 +111,6 @@ export function createExecutor(
         ? await handler(request.args).catch(() => actionError("exec_failed", "The action failed."))
         : actionError("unsupported_action", "The computer does not support this action.");
       const reply = { id: message.id, to: message.from, payload };
-      if (payload.ok && isRecord(payload.result) && isRecord(payload.result.truncated)) {
-        const result = payload.result;
-        while (byteLength(JSON.stringify(reply)) > MAX_MESSAGE_BYTES) {
-          for (const stream of ["stdout", "stderr"] as const) {
-            if (typeof result[stream] === "string" && result[stream].length > 0) {
-              result[stream] = result[stream].slice(0, Math.floor(result[stream].length * 0.75));
-              (result.truncated as Record<string, boolean>)[stream] = true;
-            }
-          }
-        }
-      }
       // A process from an earlier connection must never reply on its replacement.
       if (current === generation) send(reply);
     },

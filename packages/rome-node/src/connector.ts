@@ -8,7 +8,7 @@ import {
 } from "./actions.js";
 import { connectGateway, type ConnectionStatus } from "./client.js";
 import { cloudRequest, CloudError, gatewayConfig } from "./cloud.js";
-import { byteLength, MAX_MESSAGE_BYTES, validId, type GatewayMessage } from "./protocol.js";
+import { validId, type GatewayMessage } from "./protocol.js";
 import { createNodeSocket } from "./socket.js";
 import type { CallerCredential } from "./local.js";
 
@@ -131,8 +131,7 @@ export class DeviceConnector {
       payload: { type: "request", action, args } satisfies ActionRequest,
     };
     try {
-      if (byteLength(JSON.stringify(envelope)) > MAX_MESSAGE_BYTES)
-        return actionError("message_too_large", "The request exceeds 128 KiB.");
+      JSON.stringify(envelope);
     } catch {
       return actionError("invalid_request", "Action arguments must be JSON.");
     }
