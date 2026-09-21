@@ -138,6 +138,26 @@ export function compareDisplayNames(a: string, b: string): number {
 }
 
 /**
+ * Fold a display name to the key two names are the *same* human-readable name
+ * under: the identity fact behind an exact-name recommendation.
+ *
+ * The same three steps the orderings and {@link matchesQuery} already agree on
+ * — NFC, so a composed "José" and a decomposed one fold together; trimmed, so
+ * leading or trailing whitespace is not part of the name; case-folded, so "Ada"
+ * and "ada" are one name. Nothing here parses or compares an {@link Address}:
+ * this is only the human-readable name, the one common identity fact both a
+ * person and an account expose, and equality of two folded keys is the whole
+ * of what "the same name" means.
+ *
+ * A name that folds to the empty string (blank, or only whitespace) is not a
+ * name to match on — callers treat an empty key as "no name" rather than
+ * matching every other empty one.
+ */
+export function normalizeDisplayName(raw: string): string {
+  return raw.normalize("NFC").trim().toLowerCase();
+}
+
+/**
  * Whether a search box's text is anywhere in what a row can be found by.
  *
  * The rule rather than the haystack: each surface knows which of its own

@@ -183,11 +183,24 @@ function CreateProfileForm({
 
 function LinkForm({
   people,
+  recommendations,
+  busy,
   error,
   onSubmit,
   onCancel,
 }: {
   people: LinkTarget[];
+  /**
+   * The people whose name is this account's, exactly — offered first as
+   * one-click links. Every one of them is also in `people`, so the picker
+   * below can still reach any of them; these only save the search. Empty when
+   * nothing matches, and then the form is the picker it always was.
+   */
+  recommendations: LinkTarget[];
+  /** A link the parent is already running (a recommended one, or a transfer),
+   *  which the quick-link buttons outside the form's own submit state read to
+   *  hold still. */
+  busy: boolean;
   error: string | null;
   onSubmit: (personId: string) => Promise<void>;
   onCancel: () => void;
@@ -210,6 +223,33 @@ function LinkForm({
       }}
       className="mb-2 space-y-3 rounded-8 border border-border-subtle bg-surface-muted/60 p-3"
     >
+      {recommendations.length > 0 && (
+        // The exact-name matches, above the picker and never in place of it.
+        // Each is a link the guardian can take in one click, but Rome takes
+        // none on its own — the button is the explicit link action, the same
+        // write the picker's own submit makes. Several names that fold the same
+        // are all here, none of them chosen.
+        <div className="space-y-1">
+          <p className="text-aux text-muted-foreground">
+            {t("linkForm.recommendedLabel", { count: recommendations.length })}
+          </p>
+          <div className="flex flex-col gap-1">
+            {recommendations.map((person) => (
+              <Button
+                key={person.id}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="justify-start"
+                disabled={busy}
+                onClick={() => void onSubmit(person.id)}
+              >
+                {person.displayName} · {t(levelLabelKey(normalizeBondLevel(person.bondLevel)))}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       <form.Field name="selectedId">
         {(field) => (
           <Field>
@@ -280,11 +320,19 @@ function entryRow(variant: PeopleView) {
 export function UnknownEntry({
   row,
   people,
+  recommendations,
   variant,
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
   people: LinkTarget[];
+  /**
+   * The eligible people whose name is this account's, exactly. Offered as the
+   * link action's named target and as one-click links inside the form, never
+   * as a decision Rome makes for the guardian. Empty when nothing matches, and
+   * then the link action is the plain one it always was.
+   */
+  recommendations: LinkTarget[];
   /** Which view this row is in — see {@link entryRow}. */
   variant: PeopleView;
 }) {
@@ -301,6 +349,18 @@ export function UnknownEntry({
   );
   const account = row.accounts[0];
   const name = row.displayName || account?.channelUserId || "";
+
+  // The link action names its recommendation when there is one: a single exact
+  // match names that person, several name their count, and none leaves the
+  // plain "Link". Every one opens the same form and the same full picker — the
+  // label only says whether an exact name-match was already found to start
+  // from, never that Rome has chosen or linked anyone.
+  const linkLabel =
+    recommendations.length === 1
+      ? t("actions.linkTo", { name: recommendations[0]?.displayName ?? "" })
+      : recommendations.length > 1
+        ? t("actions.linkSuggested", { count: recommendations.length })
+        : null;
 
   /** Opening, switching or cancelling a form drops the previous failure. */
   function openAction(next: "create" | "link" | null) {
@@ -389,7 +449,7 @@ export function UnknownEntry({
         onClick={() => openAction("link")}
         disabled={acting}
       >
-        {t("actions.link")}
+        {linkLabel ?? t("actions.link")}
       </Button>
       <Button
         type="button"
@@ -426,7 +486,7 @@ export function UnknownEntry({
           {t("placeMenu.create")}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => openAction("link")}>
-          {t("placeMenu.link")}
+          {linkLabel ?? t("placeMenu.link")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* Deliberately the same words as the confirm dialog's button: the item
@@ -461,6 +521,8 @@ export function UnknownEntry({
       {action === "link" && (
         <LinkForm
           people={people}
+          recommendations={recommendations}
+          busy={acting}
           error={error}
           onSubmit={(personId) => handleLink(personId)}
           onCancel={() => openAction(null)}

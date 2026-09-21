@@ -7,6 +7,7 @@ import {
   formatWhatsAppPhone,
   matchesQuery,
   normalizeBondLevel,
+  normalizeDisplayName,
   type AccountCounts,
   type AccountDynamic,
   type BondLadderLevel,
@@ -239,6 +240,65 @@ export function peopleRows(
  *  that is the one row the page's uniform treatment does not apply to. */
 export function isRowFixed(row: PeopleRow): boolean {
   return row.level === "guardian";
+}
+
+/**
+ * The eligible link targets, bucketed by the folded name they share, so a
+ * recommendation is one map lookup rather than a scan.
+ *
+ * Built once per roster read and reused across every unplaced row: the page
+ * renders this on every keystroke and every 30s poll, and folding each of a
+ * paged-200 batch of Unknown rows against an unbounded people list on every one
+ * of those renders is the cost this index removes. Each key is
+ * {@link normalizeDisplayName} of a target's display name; targets keep their
+ * arrival order within a bucket, so {@link recommendedLinkTargets} ranks none.
+ * A target with no usable name (blank, or only whitespace) is left out — it is
+ * no one's exact-name match, including another nameless row's.
+ */
+export type LinkTargetIndex = ReadonlyMap<string, LinkTarget[]>;
+
+export function buildLinkTargetIndex(targets: readonly LinkTarget[]): LinkTargetIndex {
+  const index = new Map<string, LinkTarget[]>();
+  for (const target of targets) {
+    const key = normalizeDisplayName(target.displayName);
+    if (key === "") continue;
+    const bucket = index.get(key);
+    if (bucket) bucket.push(target);
+    else index.set(key, [target]);
+  }
+  return index;
+}
+
+/**
+ * The people to *recommend* linking an unlinked account to: every eligible
+ * target whose display name is the account's, exactly, once both are folded to
+ * the name they share ({@link normalizeDisplayName} — NFC, trimmed,
+ * case-insensitive), looked up in {@link buildLinkTargetIndex}'s index.
+ *
+ * A recommendation is a hint, never a decision, so this only reads:
+ *
+ * - It offers a target only for an Unknown account — a row that is an account
+ *   the guardian has not placed. A person's own row has nothing to link, and a
+ *   dismissed (Stranger) account stays out of discovery until it is restored,
+ *   so neither is ever a source here.
+ * - The `index` is built from the picker's own eligible people, the guardian
+ *   excluded and linked accounts folded into the person that holds them — so a
+ *   recommended target is always one the manual Link flow could already reach,
+ *   never a new one this invents.
+ * - It returns *every* exact match and ranks none: two people who share a name
+ *   are both offered, and choosing between them stays the guardian's.
+ * - An account with no usable name (blank, or only whitespace) matches nobody,
+ *   rather than matching every other nameless row.
+ *
+ * It is a pure read of what the two People reads returned, so a later read
+ * recomputes it: a linked account is no longer Unknown and drops out, a renamed
+ * or merged person stops matching, and nothing is remembered between reads.
+ */
+export function recommendedLinkTargets(row: PeopleRow, index: LinkTargetIndex): LinkTarget[] {
+  if (row.kind !== "account" || row.level !== "unknown") return [];
+  const key = normalizeDisplayName(row.displayName);
+  if (key === "") return [];
+  return index.get(key) ?? [];
 }
 
 /** The identifier a row is recognized by when its name is not enough: a phone
