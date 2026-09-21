@@ -9,6 +9,21 @@ function renderMd(md: string, props: { compact?: boolean; className?: string } =
 }
 
 describe("Markdown", () => {
+  it("passes a host URL transform through without changing the image renderer", () => {
+    render(
+      <Markdown urlTransform={(url, key) => (key === "src" ? `/assets${url}` : url)}>
+        {"![Preview](/preview.png)\n\n[Open file](/preview.png)"}
+      </Markdown>,
+    );
+
+    expect(screen.getByRole("img", { name: "Preview" }).getAttribute("src")).toBe(
+      "/assets/preview.png",
+    );
+    expect(screen.getByRole("link", { name: "Open file" }).getAttribute("href")).toBe(
+      "/preview.png",
+    );
+  });
+
   it("tags the root with rome-markdown, the hook hosts style prose through", () => {
     const { container } = renderMd("hello");
     const root = container.querySelector(".rome-markdown");
