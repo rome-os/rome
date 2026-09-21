@@ -1467,7 +1467,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     requested: unknown,
   ): Promise<WebchatLargeModelSelection | null> => {
     const enabled = await deps.settingsRepo.get<boolean>(ENABLE_MODEL_SELECTOR_SETTING_KEY);
-    if (enabled !== true) {
+    if (enabled !== true && process.env.ROME_PI_PROVIDER_PROTOTYPE !== "1") {
       return null;
     }
     const stored =
