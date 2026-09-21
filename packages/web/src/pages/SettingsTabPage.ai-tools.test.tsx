@@ -603,6 +603,48 @@ describe("Pi provider settings", () => {
     expect(document.body.textContent).not.toContain("temporary-test-token");
   });
 
+  it("closes a pending Pi replacement confirmation with its dialog", async () => {
+    const requests: string[] = [];
+    const piStatus = {
+      providers: [
+        {
+          id: "kimi-coding",
+          name: "Kimi For Coding",
+          configured: true,
+          credentialSource: "stored",
+          storedCredentialType: "api_key",
+          modelCount: 0,
+        },
+      ],
+      models: [],
+      catalogStatus: "no-models",
+      liveValidity: "not-verified",
+      discoveryFailedProviders: [],
+    };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === "/api/ai-tools/status")
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      if (url === "/api/ai-tools/anthropic-compatible-providers")
+        return ok({ providers: [], configured: null });
+      if (url === "/api/ai-tools/pi") return ok(piStatus);
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Configure" }));
+    await user.type(screen.getByLabelText("API token"), "temporary-test-token");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+    expect(await screen.findByRole("button", { name: "Replace token" })).toBeTruthy();
+
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    await user.click(cancelButtons[0]!);
+    expect(screen.queryByRole("button", { name: "Replace token" })).toBeNull();
+    expect(requests).not.toContain("/api/ai-tools/pi/credential");
+  });
+
   it("confirms an unexpected replace conflict and clears a prior Pi notice on errors", async () => {
     let saves = 0;
     const piStatus = {

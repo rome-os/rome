@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../logger.js";
 import type {
@@ -57,9 +58,12 @@ export interface PiModelRuntime {
   }): Promise<{ errors: ReadonlyMap<string, unknown>; aborted?: boolean }>;
 }
 
+type StoredCredentialLiteralCheck = (providerId: string) => Promise<boolean>;
+
 interface RuntimeHandle {
   runtime: PiModelRuntime;
   dispose(): void | Promise<void>;
+  isStoredCredentialLiteral?: StoredCredentialLiteralCheck;
 }
 
 export type PiRuntimeFactory = () => Promise<RuntimeHandle>;
@@ -125,22 +129,47 @@ function isPiSettingsTimeoutError(error: unknown): error is PiSettingsTimeoutErr
 export function piRuntimePaths(agentDir: string) {
   return {
     authPath: join(agentDir, "auth.json"),
-    // This Rome-owned, intentionally absent config path avoids loading Pi's
-    // user models.json while enabling Pi's persistent catalog store.
-    modelsPath: join(agentDir, "rome-models.json"),
-    modelsStorePath: join(agentDir, "models-cache.json"),
+    // Do not load a model config: Pi composes any existing modelsPath into its
+    // provider registry. Discovery is intentionally limited to the reviewed
+    // built-in catalog, and its short-lived Rome cache is sufficient here.
+    modelsPath: null,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function isLiteralStoredCredential(authPath: string, providerId: string): Promise<boolean> {
+  try {
+    const auth = JSON.parse(await readFile(authPath, "utf8")) as unknown;
+    if (!isRecord(auth)) return false;
+    const credential = auth[providerId];
+    if (!isRecord(credential)) return false;
+    if (credential.type === "oauth") return true;
+    if (credential.type !== "api_key" || typeof credential.key !== "string") return false;
+    // Pi resolves `$` anywhere and a leading `!` as a command. Do not let its
+    // auth probe interpret either expression from the shared Pi auth file.
+    return !credential.key.includes("$") && !credential.key.startsWith("!");
+  } catch {
+    // An unreadable or concurrently-written auth file is metadata-only until
+    // Pi can safely report it on a later request.
+    return false;
+  }
 }
 
 async function defaultRuntimeFactory(): Promise<RuntimeHandle> {
   const sdk = await import("@earendil-works/pi-coding-agent");
+  const paths = piRuntimePaths(sdk.getAgentDir());
   const runtime = await sdk.ModelRuntime.create({
-    ...piRuntimePaths(sdk.getAgentDir()),
+    ...paths,
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
   return {
     runtime,
+    isStoredCredentialLiteral: (providerId) =>
+      isLiteralStoredCredential(paths.authPath, providerId),
     async dispose() {
       // ModelRuntime 0.86.1 exposes no disposable resource. Keep the scoped
       // lifecycle explicit so a future SDK disposer is always honored.
@@ -160,6 +189,9 @@ export class PiSettingsService {
   private inFlight: { generation: number; promise: Promise<PiSettingsStatus> } | null = null;
   private cacheGeneration = 0;
   private mutationTail: Promise<void> = Promise.resolve();
+  // A just-saved literal is trusted for this service lifetime without a second
+  // auth-file inspection; other stored credentials must pass that inspection.
+  private readonly literalStoredProviders = new Set<string>();
 
   constructor(
     private readonly createRuntime: PiRuntimeFactory = defaultRuntimeFactory,
@@ -192,7 +224,12 @@ export class PiSettingsService {
     }
   }
 
-  private async useRuntime<T>(fn: (runtime: PiModelRuntime) => Promise<T>): Promise<T> {
+  private async useRuntime<T>(
+    fn: (
+      runtime: PiModelRuntime,
+      isStoredCredentialLiteral?: StoredCredentialLiteralCheck,
+    ) => Promise<T>,
+  ): Promise<T> {
     const pendingHandle = this.createRuntime();
     let handle: RuntimeHandle;
     try {
@@ -207,7 +244,7 @@ export class PiSettingsService {
       throw error;
     }
     try {
-      return await fn(handle.runtime);
+      return await fn(handle.runtime, handle.isStoredCredentialLiteral);
     } finally {
       await this.withTimeout(async () => await handle.dispose(), true);
     }
@@ -216,6 +253,8 @@ export class PiSettingsService {
   private async readStatus(
     runtime: PiModelRuntime,
     signal?: AbortSignal,
+    literalStoredProviders: ReadonlySet<string> = new Set(),
+    isStoredCredentialLiteral?: StoredCredentialLiteralCheck,
   ): Promise<PiSettingsStatus> {
     const [credentials, providerEntries] = await Promise.all([
       runtime.listCredentials({ signal }),
@@ -229,20 +268,28 @@ export class PiSettingsService {
 
     for (const [id, reviewedName] of PI_PROVIDER_ALLOWLIST) {
       if (!known.has(id)) continue;
-      let auth: Awaited<ReturnType<PiModelRuntime["checkAuth"]>>;
-      try {
-        auth = await runtime.checkAuth(id, { signal });
-      } catch (error) {
-        log.debug("Pi authentication probe failed", {
-          providerId: id,
-          errorType: error instanceof Error ? error.name : typeof error,
-        });
-        failed.push(id);
-      }
       const storedType = stored.get(id);
+      const literalStoredCredential =
+        storedType !== undefined &&
+        (literalStoredProviders.has(id) || (await isStoredCredentialLiteral?.(id)) === true);
+      let auth: Awaited<ReturnType<PiModelRuntime["checkAuth"]>>;
+      // Pi resolves stored !command and $template API keys while probing auth.
+      // Status only resolves an inspected literal; dynamic existing Pi auth is
+      // surfaced as redacted metadata without evaluating its expression.
+      if (!storedType) {
+        try {
+          auth = await runtime.checkAuth(id, { signal });
+        } catch (error) {
+          log.debug("Pi authentication probe failed", {
+            providerId: id,
+            errorType: error instanceof Error ? error.name : typeof error,
+          });
+          failed.push(id);
+        }
+      }
       const source = storedType ? "stored" : auth ? "environment" : "none";
       let available: readonly RuntimeModel[] = [];
-      if (source !== "none") {
+      if (source === "environment" || literalStoredCredential) {
         try {
           available = await runtime.getAvailable(id, { signal });
         } catch (error) {
@@ -311,11 +358,19 @@ export class PiSettingsService {
     }
   }
 
-  private async readStatusWithTimeout(runtime: PiModelRuntime): Promise<PiSettingsStatus> {
-    return await this.withTimeout((signal) => this.readStatus(runtime, signal));
+  private async readStatusWithTimeout(
+    runtime: PiModelRuntime,
+    literalStoredProviders?: ReadonlySet<string>,
+    isStoredCredentialLiteral?: StoredCredentialLiteralCheck,
+  ): Promise<PiSettingsStatus> {
+    return await this.withTimeout((signal) =>
+      this.readStatus(runtime, signal, literalStoredProviders, isStoredCredentialLiteral),
+    );
   }
 
-  status(options: { bypassCache?: boolean } = {}): Promise<PiSettingsStatus> {
+  status(
+    options: { bypassCache?: boolean; literalStoredProviders?: ReadonlySet<string> } = {},
+  ): Promise<PiSettingsStatus> {
     if (!options.bypassCache && this.cached && this.cached.expiresAt > Date.now()) {
       return Promise.resolve(this.cached.value);
     }
@@ -325,7 +380,15 @@ export class PiSettingsService {
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.statusTimeoutMs);
-    const promise = this.useRuntime((runtime) => this.readStatus(runtime, controller.signal))
+    const literalStoredProviders = options.literalStoredProviders ?? this.literalStoredProviders;
+    const promise = this.useRuntime((runtime, isStoredCredentialLiteral) =>
+      this.readStatus(
+        runtime,
+        controller.signal,
+        literalStoredProviders,
+        isStoredCredentialLiteral,
+      ),
+    )
       .then((value) => {
         this.cacheStatus(generation, value);
         return value;
@@ -366,8 +429,9 @@ export class PiSettingsService {
     this.invalidateCache();
     let synchronized = true;
     let timedOutAfterLogin: PiSettingsTimeoutError | undefined;
+    let canDiscoverStoredCredential = false;
     let status: PiSettingsStatus | undefined;
-    await this.useRuntime(async (runtime) => {
+    await this.useRuntime(async (runtime, isStoredCredentialLiteral) => {
       if (!runtime.getProviders().some((provider) => provider.id === input.providerId)) {
         throw new PiSettingsError(
           "unsupported-provider",
@@ -398,6 +462,7 @@ export class PiSettingsService {
             }),
           true,
         );
+        canDiscoverStoredCredential = true;
       } catch (error) {
         if (isCredentialSynchronizationError(error)) {
           synchronized = false;
@@ -418,22 +483,28 @@ export class PiSettingsService {
         }
       }
       let catalogFailed = false;
-      try {
-        const refreshed = await this.withTimeout(
-          (signal) =>
-            runtime.refresh({
-              allowNetwork: true,
-              providers: [input.providerId],
-              signal,
-              force: true,
-            }),
-          true,
-        );
-        catalogFailed = refreshed.aborted === true || refreshed.errors.has(input.providerId);
-      } catch {
-        catalogFailed = true;
+      if (canDiscoverStoredCredential) {
+        try {
+          const refreshed = await this.withTimeout(
+            (signal) =>
+              runtime.refresh({
+                allowNetwork: true,
+                providers: [input.providerId],
+                signal,
+                force: true,
+              }),
+            true,
+          );
+          catalogFailed = refreshed.aborted === true || refreshed.errors.has(input.providerId);
+        } catch {
+          catalogFailed = true;
+        }
       }
-      status = await this.readStatusWithTimeout(runtime);
+      status = await this.readStatusWithTimeout(
+        runtime,
+        canDiscoverStoredCredential ? new Set([input.providerId]) : undefined,
+        isStoredCredentialLiteral,
+      );
       if (catalogFailed) {
         status = {
           ...status,
@@ -452,9 +523,15 @@ export class PiSettingsService {
     ) {
       throw timedOutAfterLogin;
     }
+    const credentialPersisted =
+      status.providers.find((provider) => provider.id === input.providerId)?.credentialSource ===
+      "stored";
+    if (credentialPersisted && canDiscoverStoredCredential) {
+      this.literalStoredProviders.add(input.providerId);
+    }
     this.cacheStatus(this.invalidateCache(), status);
     return {
-      credentialPersisted: true,
+      credentialPersisted,
       synchronizationSucceeded: synchronized,
       status,
     };
@@ -476,6 +553,7 @@ export class PiSettingsService {
         if (!isCredentialSynchronizationError(error)) throw error;
       }
     });
+    this.literalStoredProviders.delete(providerId);
     this.invalidateCache();
     return this.status({ bypassCache: true });
   }
@@ -488,7 +566,17 @@ export class PiSettingsService {
   private async refreshProviderUnlocked(providerId: string): Promise<PiSettingsStatus> {
     this.invalidateCache();
     let refreshFailed = false;
-    await this.useRuntime(async (runtime) => {
+    await this.useRuntime(async (runtime, isStoredCredentialLiteral) => {
+      const stored = await this.withTimeout((signal) => runtime.listCredentials({ signal }), true);
+      const hasStoredCredential = stored.some((credential) => credential.providerId === providerId);
+      const literalStoredCredential =
+        this.literalStoredProviders.has(providerId) ||
+        (await isStoredCredentialLiteral?.(providerId)) === true;
+      // Never let an explicit refresh resolve a pre-existing Pi !command or
+      // $template credential. Literal Pi credentials remain refreshable.
+      if (hasStoredCredential && !literalStoredCredential) {
+        return;
+      }
       const result = await this.withTimeout(
         (signal) =>
           runtime.refresh({
@@ -502,7 +590,10 @@ export class PiSettingsService {
       refreshFailed = result.aborted === true || result.errors.has(providerId);
     });
     const cacheGeneration = this.invalidateCache();
-    const status = await this.status({ bypassCache: true });
+    const status = await this.status({
+      bypassCache: true,
+      literalStoredProviders: this.literalStoredProviders,
+    });
     if (!refreshFailed) return status;
     const failed = [...new Set([...status.discoveryFailedProviders, providerId])];
     const result: PiSettingsStatus = {

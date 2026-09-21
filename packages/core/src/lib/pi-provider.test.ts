@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
@@ -53,11 +53,10 @@ describe("Pi settings service", () => {
     expect(validatePiToken(`${"x".repeat(8_192)}\n`)).toHaveLength(8_192);
   });
 
-  it("uses a Rome-owned config path so Pi persists refreshed catalogs without loading models.json", () => {
+  it("explicitly disables Pi model configuration", () => {
     expect(piRuntimePaths("/tmp/pi-agent")).toEqual({
       authPath: "/tmp/pi-agent/auth.json",
-      modelsPath: "/tmp/pi-agent/rome-models.json",
-      modelsStorePath: "/tmp/pi-agent/models-cache.json",
+      modelsPath: null,
     });
   });
 
@@ -131,7 +130,7 @@ describe("Pi settings service", () => {
       if (created === 1) {
         return {
           runtime: fakeRuntime({
-            listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+            listCredentials: async () => [],
             checkAuth: async () => {
               initialProbeStarted?.();
               await initialAuth;
@@ -431,9 +430,135 @@ describe("Pi settings service", () => {
     await expect(
       service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
     ).resolves.toMatchObject({
-      credentialPersisted: true,
+      credentialPersisted: false,
       synchronizationSucceeded: false,
     });
+  });
+
+  it("discovers a literal credential saved by this service", async () => {
+    let stored = false;
+    let availableCalls = 0;
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () =>
+          stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+        login: async () => {
+          stored = true;
+        },
+        getAvailable: async () => {
+          availableCalls += 1;
+          return [
+            {
+              id: "kimi-k2",
+              name: "Kimi K2",
+              provider: "kimi-coding",
+              api: "openai-completions",
+              input: ["text"],
+              reasoning: true,
+            },
+          ];
+        },
+      }),
+      dispose() {},
+    }));
+
+    await expect(
+      service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
+    ).resolves.toMatchObject({
+      credentialPersisted: true,
+      status: { models: [expect.objectContaining({ providerId: "kimi-coding" })] },
+    });
+    expect(availableCalls).toBe(1);
+  });
+
+  it("does not resolve pre-existing stored credentials while reading status", async () => {
+    let checkAuthCalls = 0;
+    let availableCalls = 0;
+    const service = new PiSettingsService(async () => ({
+      runtime: fakeRuntime({
+        listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+        checkAuth: async () => {
+          checkAuthCalls += 1;
+          throw new Error("must not resolve stored auth");
+        },
+        getAvailable: async () => {
+          availableCalls += 1;
+          throw new Error("must not resolve stored auth");
+        },
+      }),
+      dispose() {},
+    }));
+
+    await expect(service.status()).resolves.toMatchObject({
+      providers: [
+        expect.objectContaining({
+          id: "kimi-coding",
+          credentialSource: "stored",
+          storedCredentialType: "api_key",
+          modelCount: 0,
+        }),
+      ],
+    });
+    expect(checkAuthCalls).toBe(0);
+    expect(availableCalls).toBe(0);
+  });
+
+  it("does not execute a command credential from Pi auth storage", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-command-"));
+    const marker = join(agentDir, "command-ran");
+    await writeFile(
+      join(agentDir, "auth.json"),
+      JSON.stringify({
+        "kimi-coding": { type: "api_key", key: `!touch ${marker}` },
+      }),
+      { mode: 0o600 },
+    );
+    const factory = async () => ({
+      runtime: (await ModelRuntime.create({
+        ...piRuntimePaths(agentDir),
+        allowModelNetwork: false,
+        refreshOnCreate: false,
+      })) as unknown as PiModelRuntime,
+      dispose() {},
+    });
+    try {
+      const service = new PiSettingsService(factory);
+      const status = await service.status();
+      expect(status.providers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "kimi-coding", credentialSource: "stored" }),
+        ]),
+      );
+      await expect(stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a hostile Rome-named model config", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-model-config-"));
+    await writeFile(
+      join(agentDir, "rome-models.json"),
+      JSON.stringify({
+        providers: {
+          hostile: {
+            baseUrl: "https://example.invalid/v1",
+            api: "openai-completions",
+            models: [{ id: "injected", name: "Injected", input: ["text"] }],
+          },
+        },
+      }),
+    );
+    try {
+      const runtime = await ModelRuntime.create({
+        ...piRuntimePaths(agentDir),
+        allowModelNetwork: false,
+        refreshOnCreate: false,
+      });
+      expect(runtime.getProviders().some((provider) => provider.id === "hostile")).toBe(false);
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
   });
 
   it("uses Pi-owned storage with 0600 permissions and never returns a token", async () => {

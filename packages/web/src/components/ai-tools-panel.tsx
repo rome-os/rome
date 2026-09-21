@@ -535,6 +535,8 @@ export function AiToolsPanel({
     setPiDialogOpen(false);
     setPiToken("");
     setPiError(null);
+    setPiNotice(null);
+    setPiConfirmAction(null);
   }
 
   async function savePiCredential(replaceConfirmed = false) {
