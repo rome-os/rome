@@ -7,7 +7,7 @@ it("uses the WebSocket library's receive limit instead of imposing 32 MiB", asyn
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
   const address = server.address();
-  if (typeof address === "string") throw new Error("Expected a TCP address");
+  if (address === null || typeof address === "string") throw new Error("Expected a TCP address");
   const size = 33 * 1024 * 1024;
   server.on("connection", (peer) => peer.send("x".repeat(size)));
   const socket = createNodeSocket(`ws://127.0.0.1:${address.port}`, "Bearer test");
