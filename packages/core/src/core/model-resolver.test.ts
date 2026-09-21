@@ -5,6 +5,7 @@ import { createModelResolver, ENABLE_FABLE_SETTING_KEY } from "./model-resolver.
 
 const codex = { id: "openai", displayName: "Codex" } as ModelProvider;
 const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
+const pi = { id: "pi", displayName: "Pi Coding Agent" } as ModelProvider;
 
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
@@ -17,7 +18,7 @@ function resolver(
   };
   return createModelResolver({
     aiToolState: { get: () => value, refresh: async () => value },
-    providers: [claude, codex],
+    providers: [claude, codex, pi],
     settingsRepo: {
       get: async <T = unknown>(key: string): Promise<T | null> =>
         (key === ENABLE_FABLE_SETTING_KEY ? (settings.enableFable ?? null) : null) as T | null,
@@ -26,6 +27,39 @@ function resolver(
 }
 
 describe("ModelResolver", () => {
+  it("runs only an exact currently available Pi model", async () => {
+    const r = resolver({
+      pi: {
+        loggedIn: true,
+        quotaExhausted: false,
+        models: [{ id: "openai/gpt", upstreamProvider: "openai", modelId: "gpt", name: "GPT" }],
+      },
+    });
+    await expect(
+      r.getModelProvider({ exact: { providerId: "pi", model: "openai/gpt" } }),
+    ).resolves.toEqual({ modelProvider: pi, model: "openai/gpt" });
+    await expect(
+      r.getModelProvider({ exact: { providerId: "pi", model: "openai/missing" } }),
+    ).rejects.toMatchObject({ code: "model_unavailable", provider: "pi" });
+    await expect(r.getModelProvider({ tier: "large", providerId: "pi" })).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "pi",
+    });
+  });
+
+  it("does not include Pi in automatic tier resolution", async () => {
+    await expect(
+      resolver({
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+        pi: {
+          loggedIn: true,
+          quotaExhausted: false,
+          models: [{ id: "openai/gpt", upstreamProvider: "openai", modelId: "gpt", name: "GPT" }],
+        },
+      }).getModelProvider({ tier: "large" }),
+    ).rejects.toMatchObject({ code: "no_model_provider_available" });
+  });
   it("maps Codex tiers through Sol, Terra, and Luna", async () => {
     await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,

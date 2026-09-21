@@ -180,7 +180,7 @@ export interface ErrorBlock extends TraceBlockBase {
     | "model_provider_unavailable"
     | "model_unavailable"
     | "no_model_provider_available";
-  provider?: "openai" | "anthropic";
+  provider?: "openai" | "anthropic" | "pi";
   reason?: "not_logged_in" | "quota_exhausted" | "model_access_denied" | "no_available_provider";
 }
 

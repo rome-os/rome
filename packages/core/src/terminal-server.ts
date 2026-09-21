@@ -19,9 +19,14 @@ export const TERMINAL_COMMAND_PRESETS: Record<string, TerminalCommandPreset> = {
   // from stdin. The login watcher accepts the first-run theme/login defaults,
   // then surfaces the OAuth URL to the native UI.
   "claude-login": { cmd: "claude", args: ["/login"] },
+  // Pi setup stays in the guardian's own terminal: Pi's interactive CLI exposes
+  // a `!`/`!!` shell escape, and this websocket is proxied without forward_auth
+  // (see caddyfile-generator `@wsUpgrade`), so spawning it here would be an
+  // unauthenticated RCE surface. Rome only observes Pi's usable models via
+  // discovery/refresh and never runs the Pi CLI itself. See pi-llm-provider spec D3.
   // Logout (Claude and Codex) is non-interactive and runs via an HTTP endpoint
   // (ai-tools.ts: `claude auth logout` / the app-server `account/logout` RPC),
-  // not a PTY — so login is the only terminal preset.
+  // not a PTY.
 };
 
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000;
@@ -150,22 +155,26 @@ export function attachTerminalServer(
     // Watch the login output to drive the flow natively: the watcher auto-selects
     // the first-run wizard's theme and Claude AI login by writing Enter back to
     // the PTY, and forwards the sign-in URL and code-rejected errors to the
-    // client. Runs for every preset — it only matches the Claude login output, so
-    // logout sessions stay silent. The raw `output` stream is always sent too, so
-    // a parser miss degrades to the terminal escape hatch rather than a stuck UI.
-    const loginWatcher = createClaudeLoginWatcher(
-      (event) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(event));
-        }
-      },
-      (data) => ptyProcess.write(data),
-    );
-    session.disposeLoginWatcher = () => loginWatcher.dispose();
+    // client. Scoped to `claude-login`: it writes Enter back on matching prompts,
+    // so it must never run against another tool's TUI (which could render text it
+    // false-matches). The raw `output` stream is always sent too, so a parser
+    // miss degrades to the terminal escape hatch rather than a stuck UI.
+    const loginWatcher =
+      preset === "claude-login"
+        ? createClaudeLoginWatcher(
+            (event) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(event));
+              }
+            },
+            (data) => ptyProcess.write(data),
+          )
+        : null;
+    session.disposeLoginWatcher = () => loginWatcher?.dispose();
 
     // PTY → WebSocket
     ptyProcess.onData((data: string) => {
-      loginWatcher.push(data);
+      loginWatcher?.push(data);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "output", data }));
       }

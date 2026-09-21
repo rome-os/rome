@@ -530,6 +530,9 @@
       },
       "grok": {
         "name": "Grok"
+      },
+      "pi": {
+        "name": "Pi (Pi Coding Agent)"
       }
     },
     "status": {
@@ -617,6 +620,12 @@
           "emptyEnv": "Add at least one environment variable."
         }
       }
+    },
+    "pi": {
+      "modelsAvailable_one": "{{count}} Pi model available",
+      "modelsAvailable_other": "{{count}} Pi models available",
+      "setupHint": "Run Pi in your terminal to sign in or configure models, then refresh.",
+      "manageHint": "Manage in your terminal"
     }
   },
   "sentinelLog": {

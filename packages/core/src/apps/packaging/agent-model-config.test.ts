@@ -134,3 +134,32 @@ describe("agent exact model configuration", () => {
     ).toContain("outputSchema");
   });
 });
+
+describe("Pi provider exact model configuration", () => {
+  it("preserves a qualified Pi model pin under provider pi", () => {
+    const modelId = "openai/gpt-5.6";
+    const config = AgentConfigSchema.parse({ ...base, provider: "pi", modelId });
+    expect(config).toMatchObject({ providerId: "pi", modelId });
+    expect(config).not.toHaveProperty("tier");
+    expect(config).not.toHaveProperty("provider");
+  });
+
+  it("preserves a percent-encoded qualified Pi model pin", () => {
+    const modelId = "custom%2Fproxy/vendor%2Fmodel";
+    const config = AgentConfigSchema.parse({ ...base, provider: "pi", modelId });
+    expect(config).toMatchObject({ providerId: "pi", modelId });
+  });
+
+  it("requires a modelId for Pi rather than a tier", () => {
+    expect(issuePaths({ provider: "pi" })).toContain("modelId");
+    expect(issuePaths({ provider: "pi", tier: "large" })).toContain("modelId");
+  });
+
+  it.each([
+    "bare-model",
+    "openai/",
+    "/gpt-5.6",
+  ])("rejects an unqualified Pi modelId %j", (modelId) => {
+    expect(issuePaths({ provider: "pi", modelId })).toContain("modelId");
+  });
+});

@@ -9,11 +9,15 @@ describe("TERMINAL_COMMAND_PRESETS", () => {
     });
   });
 
-  it("exposes only the login preset — logout (Claude + Codex) is non-PTY", () => {
+  it("exposes only the Claude login preset — no logout and no Pi preset", () => {
     // Logout runs via HTTP endpoints (`claude auth logout` / the app-server
-    // `account/logout` RPC), and Codex login uses the device-code flow. None of
-    // them is a PTY preset.
+    // `account/logout` RPC), and Codex login uses the device-code flow. Pi is
+    // deliberately absent: this websocket is unauthenticated (proxied without
+    // forward_auth), and Pi's interactive CLI has a `!`/`!!` shell escape, so
+    // spawning it here would be an RCE surface. Pi setup stays in the guardian's
+    // own terminal.
     expect(Object.keys(TERMINAL_COMMAND_PRESETS)).toEqual(["claude-login"]);
+    expect(TERMINAL_COMMAND_PRESETS["pi-login"]).toBeUndefined();
     expect(TERMINAL_COMMAND_PRESETS["claude-logout"]).toBeUndefined();
     expect(TERMINAL_COMMAND_PRESETS["codex-login"]).toBeUndefined();
   });

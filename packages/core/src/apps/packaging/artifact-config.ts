@@ -3,6 +3,24 @@ import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from "@rome-os/app-
 import { ArtifactLocalNameSchema } from "./artifact-name.js";
 import { compileOutputSchema, validatePortableOutputSchema } from "./output-schema-validator.js";
 
+// A Pi model pin is qualified as `<upstream-provider>/<model-id>`, both parts
+// percent-encoded so a custom id containing a slash cannot collide (mirrors
+// `qualifyPiModelId`/`parseQualifiedPiModelId` in core). Packaging may not
+// import core, so this validation is duplicated as a self-contained structural
+// check: a single separator with two non-empty, percent-decodable halves.
+function isQualifiedPiModelId(value: string): boolean {
+  const separator = value.indexOf("/");
+  if (separator <= 0 || separator === value.length - 1) return false;
+  try {
+    return Boolean(
+      decodeURIComponent(value.slice(0, separator)) &&
+        decodeURIComponent(value.slice(separator + 1)),
+    );
+  } catch {
+    return false;
+  }
+}
+
 const FavorRequirementSchema = z
   .object({
     amount: z.number().int().positive(),
@@ -70,7 +88,7 @@ const TIER_VALUES = ["large", "medium", "small"] as const;
 // Real model providers an agent may pin itself to. Deliberately excludes
 // "mock": pins ship in packed bundles, and a test-only provider must never be
 // publishable.
-const PROVIDER_VALUES = ["anthropic", "openai"] as const;
+const PROVIDER_VALUES = ["anthropic", "openai", "pi"] as const;
 
 // Legacy Anthropic-shaped values still accepted via `model:` for back-compat.
 // Mapped silently to the corresponding tier.
@@ -118,6 +136,20 @@ export const AgentConfigSchema = z
   })
   .strict()
   .superRefine((raw, ctx) => {
+    if (raw.provider === "pi" && !raw.modelId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["modelId"],
+        message: "Pi requires an exact qualified modelId",
+      });
+    }
+    if (raw.provider === "pi" && raw.modelId && !isQualifiedPiModelId(raw.modelId)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["modelId"],
+        message: "Pi modelId must be qualified as upstream-provider/model-id",
+      });
+    }
     if (raw.modelId !== undefined) {
       if (!raw.provider) {
         ctx.addIssue({

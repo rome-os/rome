@@ -4,7 +4,7 @@ import { Cpu, Link2Off } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
 
-export type AiToolBrandIconName = "chatgpt" | "claude" | "gemini" | "grok";
+export type AiToolBrandIconName = "chatgpt" | "claude" | "gemini" | "grok" | "pi";
 
 /**
  * Paired Rome + Codex brand lockup: the two badges with a link-slash between
@@ -37,6 +37,7 @@ const BADGE_CLASSES: Record<AiToolBrandIconName, string> = {
   claude: "border-[#ead8c7] bg-[#fbf4eb] text-[#d97757]",
   gemini: "border-border-strong bg-white text-[#4285f4]",
   grok: MONO_BADGE_CLASSES,
+  pi: MONO_BADGE_CLASSES,
 };
 
 export function AiToolIconBadge({
@@ -67,6 +68,7 @@ export function AiToolBrandIcon({
   if (icon === "chatgpt") return <ChatGPTIcon {...props} />;
   if (icon === "claude") return <ClaudeCodeIcon {...props} />;
   if (icon === "grok") return <GrokIcon {...props} />;
+  if (icon === "pi") return <Cpu {...props} />;
   return <GeminiIcon {...props} />;
 }
 

@@ -23,12 +23,21 @@ import {
 // rows never share a cmdk key.
 const SHOW_ALL_VALUE = "__show_all__";
 
+function decodeModelPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export interface ModelSelectorMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   value: string;
   onChange: (next: string) => void;
   disabled: boolean;
+  piModels?: Array<{ id: string; upstreamProvider: string; modelId: string; name: string }>;
 }
 
 /**
@@ -46,6 +55,7 @@ export function ModelSelectorMenu({
   value,
   onChange,
   disabled,
+  piModels = [],
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
   const [query, setQuery] = useState("");
@@ -54,10 +64,26 @@ export function ModelSelectorMenu({
 
   // Resolve labels once so the trigger, the filter, and the rows all read the
   // exact same text — a single source for "what the model is called".
-  const options = useMemo(
-    () => LARGE_MODEL_OPTIONS.map((option) => ({ ...option, label: t(option.labelKey) })),
-    [t],
-  );
+  const options = useMemo(() => {
+    const staticOptions = LARGE_MODEL_OPTIONS.map((option) => ({
+      id: option.id as string,
+      label: t(option.labelKey),
+    }));
+    const dynamicOptions = piModels.map((model) => ({
+      id: `pi:${model.id}`,
+      label: `Pi · ${model.upstreamProvider} / ${model.modelId}`,
+    }));
+    if (value.startsWith("pi:") && !dynamicOptions.some((option) => option.id === value)) {
+      const qualified = value.slice(3).split("/");
+      const provider = qualified[0] ? decodeModelPart(qualified[0]) : "Pi";
+      const model = qualified[1] ? decodeModelPart(qualified[1]) : value.slice(3);
+      dynamicOptions.push({
+        id: value,
+        label: `Pi · ${provider} / ${model} (${t("modelSelector.unavailable")})`,
+      });
+    }
+    return [...staticOptions, ...dynamicOptions];
+  }, [piModels, t, value]);
 
   // `auto` is a value like any other, so the trigger always has something to
   // name. The label IS the state — nothing has to encode "non-default" on top.
@@ -90,7 +116,9 @@ export function ModelSelectorMenu({
       return { rows: options, showAllRow: false };
     }
     const common = options.filter(
-      (option) => COMMON_LARGE_MODEL_IDS.includes(option.id) || option.id === value,
+      (option) =>
+        COMMON_LARGE_MODEL_IDS.includes(option.id as (typeof COMMON_LARGE_MODEL_IDS)[number]) ||
+        option.id === value,
     );
     return { rows: common, showAllRow: common.length < options.length };
   }, [options, trimmedQuery, showAll, value]);

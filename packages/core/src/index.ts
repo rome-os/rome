@@ -89,6 +89,8 @@ import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js"
 import { AgentRunner } from "./core/agent-runner.js";
 import { AnthropicProvider } from "./core/anthropic-provider.js";
 import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
+import { PiProvider } from "./core/pi-provider.js";
+import { PiRuntimeManager } from "./core/pi-runtime.js";
 import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
 import { SharedCodexAccountService } from "./core/codex/account-service.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
@@ -538,11 +540,13 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  const piRuntime = new PiRuntimeManager();
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
       codexStatus: () => codexAccountService.getStatus(),
       codexUsage: () => codexAccountService.getUsage(),
+      piStatus: () => piRuntime.refresh(),
     },
   });
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
@@ -562,9 +566,10 @@ async function main() {
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
   });
+  const piProvider = new PiProvider({ runtime: piRuntime });
   const modelResolver = createModelResolver({
     aiToolState,
-    providers: [anthropicProvider, codexProvider],
+    providers: [anthropicProvider, codexProvider, piProvider],
     settingsRepo,
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
@@ -584,7 +589,7 @@ async function main() {
     // replace that stronger runtime signal with a usage probe that may lag it.
     if (event.status === "error") return;
     const provider = event.output.accounting?.provider;
-    if (provider !== "openai" && provider !== "anthropic") return;
+    if (provider !== "openai" && provider !== "anthropic" && provider !== "pi") return;
     void aiToolState.refresh(provider).catch((err) => {
       log.warn("AI tool state refresh after turn failed", {
         provider,

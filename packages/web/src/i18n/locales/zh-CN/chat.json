@@ -270,7 +270,8 @@
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"
-    }
+    },
+    "unavailable": "不可用"
   },
   "reasoningEffort": {
     "label": "推理强度",

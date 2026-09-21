@@ -257,12 +257,18 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // locally so the picker reflects the user's in-session choice immediately
   // (the save round-trip + invalidation lands afterwards).
   const [largeModelSelection, setLargeModelSelection] = useState(DEFAULT_LARGE_MODEL_SELECTION);
+  const [piModels, setPiModels] = useState<
+    Array<{ id: string; upstreamProvider: string; modelId: string; name: string }>
+  >([]);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const seededFromSettingsRef = useRef(false);
   useEffect(() => {
     if (!settings || seededFromSettingsRef.current) return;
     const stored = settings.webchatLargeModel;
-    if (typeof stored === "string" && LARGE_MODEL_OPTIONS.some((option) => option.id === stored)) {
+    if (
+      typeof stored === "string" &&
+      (LARGE_MODEL_OPTIONS.some((option) => option.id === stored) || stored.startsWith("pi:"))
+    ) {
       setLargeModelSelection(stored);
     }
     if (isReasoningEffort(settings.webchatReasoningEffort)) {
@@ -270,6 +276,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
     seededFromSettingsRef.current = true;
   }, [settings]);
+  useEffect(() => {
+    if (!showModelSelector || !modelSelectorEnabled) return;
+    const controller = new AbortController();
+    void fetch("/api/ai-tools/status", { signal: controller.signal, credentials: "include" })
+      .then(async (response) => (await response.json()) as { pi?: { models?: typeof piModels } })
+      .then((status) => setPiModels(Array.isArray(status.pi?.models) ? status.pi.models : []))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [showModelSelector, modelSelectorEnabled]);
   const [selectedPersonId, setSelectedPersonId] = useState<string>("");
 
   const [impersonationMenuOpen, setImpersonationMenuOpen] = useState(false);
@@ -1173,6 +1188,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               value={largeModelSelection}
               onChange={(next) => void updateLargeModelSelection(next)}
               disabled={isComposerBusy}
+              piModels={piModels}
             />
           )}
           <ReasoningEffortMenu

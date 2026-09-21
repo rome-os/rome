@@ -21,7 +21,23 @@ describe("AIToolState", () => {
     expect(state.get()).toEqual({
       codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
       claude: { quotaExhausted: false },
+      pi: { quotaExhausted: false, models: [], loggedIn: false, unavailableReason: "runtime" },
     });
+  });
+
+  it("refreshes Pi's model catalog without credentials", async () => {
+    const state = createAIToolState({
+      probes: probes({
+        piStatus: async () => ({
+          loggedIn: true,
+          models: [{ id: "openai/gpt", upstreamProvider: "openai", modelId: "gpt", name: "GPT" }],
+        }),
+      }),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    await state.refresh("pi");
+    expect(state.get().pi).toMatchObject({ loggedIn: true, models: [{ id: "openai/gpt" }] });
   });
 
   it.each([
