@@ -494,3 +494,9 @@ export class PiSettingsService {
     return result;
   }
 }
+
+let singleton: PiSettingsService | undefined;
+export function getPiSettingsService(): PiSettingsService {
+  singleton ??= new PiSettingsService();
+  return singleton;
+}
