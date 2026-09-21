@@ -199,7 +199,7 @@ describe("Recent zone, expanded sidebar", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open", "Open in split view", "Pin to sidebar"]);
+    ).toEqual(["Open in new tab", "Open in split view", "Pin to sidebar"]);
   });
 
   it("keeps Edit mode's Add list complete and without a New badge", async () => {

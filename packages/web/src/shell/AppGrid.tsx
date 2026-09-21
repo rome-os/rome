@@ -11,6 +11,7 @@ import {
   AppWindow,
   Chrome as ChromeIcon,
   Ellipsis,
+  ExternalLink,
   FolderKanban,
   GripVertical,
   MessagesSquare,
@@ -311,11 +312,22 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
+          {/* A plain click on the icon already opens the app in place, so the
+              menu's open is the one a click cannot do: a new tab. The Mac app
+              has no tabs — its shell hands a new window to the system browser,
+              which holds no Rome session — so there it stays a plain open. */}
           <ContextMenuItem asChild>
-            <Link to={app.href}>
-              <AppWindow aria-hidden />
-              {tApps("installed.openButton")}
-            </Link>
+            {isElectronShell() ? (
+              <Link to={app.href}>
+                <AppWindow aria-hidden />
+                {tApps("installed.openButton")}
+              </Link>
+            ) : (
+              <a href={app.href} target="_blank" rel="noreferrer">
+                <ExternalLink aria-hidden />
+                {tApps("installed.openNewTabTitle")}
+              </a>
+            )}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
             <PanelRightOpen aria-hidden />

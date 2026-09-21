@@ -99,6 +99,7 @@
     "openLabelAria": "在完整视图中打开 {{name}}",
     "openFullTitle": "打开完整视图",
     "openSplitTitle": "在分屏视图中打开",
+    "openNewTabTitle": "在新标签页中打开",
     "openButton": "打开",
     "upgradeButton": "升级 → v{{version}}",
     "upgradeTitle": "将 {{name}} 升级到 v{{version}}",
