@@ -39,4 +39,9 @@ describe("Pi qualified model identities", () => {
     expect(() => qualifyPiModelId("", "model")).toThrow(InvalidPiModelIdentityError);
     expect(() => qualifyPiModelId("provider", "")).toThrow(InvalidPiModelIdentityError);
   });
+
+  it.each(["\ud800", "\udc00"])("rejects malformed UTF-16 components", (malformed) => {
+    expect(() => qualifyPiModelId(malformed, "model")).toThrow(InvalidPiModelIdentityError);
+    expect(() => qualifyPiModelId("provider", malformed)).toThrow(InvalidPiModelIdentityError);
+  });
 });

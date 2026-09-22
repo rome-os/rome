@@ -15,7 +15,11 @@ export class InvalidPiModelIdentityError extends Error {
 /** Encode both components so provider/model pairs remain reversible and collision-free. */
 export function qualifyPiModelId(upstreamProvider: string, modelId: string): string {
   if (!upstreamProvider || !modelId) throw new InvalidPiModelIdentityError();
-  return `${encodeURIComponent(upstreamProvider)}${QUALIFIED_MODEL_SEPARATOR}${encodeURIComponent(modelId)}`;
+  try {
+    return `${encodeURIComponent(upstreamProvider)}${QUALIFIED_MODEL_SEPARATOR}${encodeURIComponent(modelId)}`;
+  } catch {
+    throw new InvalidPiModelIdentityError();
+  }
 }
 
 /** Accept only the canonical representation emitted by {@link qualifyPiModelId}. */
