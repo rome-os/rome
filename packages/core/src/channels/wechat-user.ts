@@ -16,7 +16,7 @@ const log = createLogger("wechat-user");
  * scanning this exact binary, and a silently newer client would move it.
  */
 export const WECHAT_CLIENT_URL =
-  "https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb";
+  "https://packages.romeos.io/wechat-4.1.13.9-amd64.deb";
 const WECHAT_CLIENT_SHA256 = "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
 
 /**
