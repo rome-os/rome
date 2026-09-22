@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { createTestDb, buildTestDeps } from "../../test/helpers.js";
-import type { PiSettingsService } from "../../lib/pi-provider.js";
+import { PiSettingsError, type PiSettingsService } from "../../lib/pi-provider.js";
 import { aiToolsRoutes } from "./ai-tools.js";
 
 const emptyStatus = {
@@ -94,6 +94,29 @@ describe("Pi AI tools routes", () => {
       const response = await app.request("/ai-tools/pi");
       expect(response.status).toBe(503);
       expect(await response.text()).not.toContain("upstream included a secret");
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("returns a safe actionable error for known credential storage failures", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      const service = {
+        status: async () => {
+          throw new PiSettingsError(
+            "credential-storage",
+            "Pi credential storage must be a regular file.",
+          );
+        },
+      } as unknown as PiSettingsService;
+      const app = new Hono().route("/", aiToolsRoutes({ ...deps, piSettings: service }));
+      const response = await app.request("/ai-tools/pi");
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Pi credential storage must be a regular file.",
+      });
     } finally {
       testDb.close();
     }

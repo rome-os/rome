@@ -71,6 +71,7 @@ describe("Pi settings service", () => {
       "moonshotai-cn",
       "Moonshot AI China (Kimi Platform)",
     ]);
+    expect(PI_PROVIDER_ALLOWLIST).toContainEqual(["qwen-token-plan", "Qwen Token Plan"]);
     expect(qualifyPiModel("moonshotai-cn", "kimi/k2")).toBe("moonshotai-cn/kimi%2Fk2");
   });
 
@@ -693,7 +694,10 @@ describe("Pi settings service", () => {
     try {
       await writeFile(target, "{}", { mode: 0o600 });
       await symlink(target, authPath);
-      await expect(hardenPiAuthFilePermissions(authPath)).rejects.toThrow("not a regular file");
+      await expect(hardenPiAuthFilePermissions(authPath)).rejects.toMatchObject({
+        code: "credential-storage",
+        message: "Pi credential storage must be a regular file.",
+      });
     } finally {
       await rm(agentDir, { recursive: true, force: true });
     }

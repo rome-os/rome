@@ -30,7 +30,7 @@ export const PI_PROVIDER_CATALOG = [
   ["meta", "Meta"],
   ["minimax", "MiniMax"],
   ["minimax-cn", "MiniMax China"],
-  ["qwen-token-plan", "Qwen Token Plan (existing catalog)"],
+  ["qwen-token-plan", "Qwen Token Plan"],
   ["qwen-token-plan-individual", "Qwen Token Plan (Individual)"],
   ["qwen-token-plan-cn", "Qwen Token Plan (China)"],
   ["xiaomi", "Xiaomi MiMo"],

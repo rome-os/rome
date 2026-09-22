@@ -76,7 +76,8 @@ export class PiSettingsError extends Error {
       | "invalid-provider"
       | "invalid-token"
       | "replace-required"
-      | "unsupported-provider",
+      | "unsupported-provider"
+      | "credential-storage",
     message: string,
   ) {
     super(message);
@@ -146,7 +147,10 @@ export async function hardenPiAuthFilePermissions(authPath: string): Promise<voi
   try {
     const metadata = await lstat(authPath);
     if (!metadata.isFile()) {
-      throw new Error("Pi credential storage is not a regular file.");
+      throw new PiSettingsError(
+        "credential-storage",
+        "Pi credential storage must be a regular file.",
+      );
     }
     if ((metadata.mode & 0o077) !== 0) {
       await chmod(authPath, 0o600);
