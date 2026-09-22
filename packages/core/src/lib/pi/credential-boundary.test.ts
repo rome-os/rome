@@ -364,6 +364,23 @@ describe("Pi credential boundary", () => {
     expect(JSON.stringify(status)).not.toContain("raw catalog failure");
   });
 
+  it("does not refresh an environment-configured provider when credential listing fails", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.listCredentialsError = new Error("credential listing failed");
+    const { boundary } = createBoundary(runtime, {
+      environment: { ANTHROPIC_API_KEY: "ambient-token" },
+    });
+
+    const status = await boundary.refresh("anthropic");
+
+    expect(runtime.refreshCalls).toEqual([]);
+    expect(runtime.availableCalls).toEqual([]);
+    expect(status.catalog).toMatchObject({
+      kind: "discovery-failed",
+      failedProviders: ["anthropic"],
+    });
+  });
+
   it("distinguishes a committed credential from later synchronization failure", async () => {
     const runtime = new FakePiRuntime();
     runtime.loginError = new SynchronizationFailure("raw SDK detail");

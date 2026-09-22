@@ -46,6 +46,9 @@ export function inspectPiStoredCredential(
   if (!credential) return "missing";
   if (credential.type === "oauth") return "oauth";
   if (credential.key === undefined) return "unreadable";
+  // The one-token boundary cannot safely interpret provider-specific auxiliary
+  // settings. Refuse a multi-field stored credential rather than resolve it.
+  if (credential.env && Object.keys(credential.env).length > 0) return "unreadable";
   return hasCredentialReference(credential.key) ? "expression" : "literal";
 }
 

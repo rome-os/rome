@@ -480,6 +480,14 @@ export class PiCredentialBoundary {
       }
     }
 
+    // Without a credential snapshot we cannot prove that a configured provider
+    // lacks an expression. Never hand it to Pi, which may resolve that value.
+    if (credentialReadFailed) {
+      for (const provider of installed) {
+        if (states.get(provider.id)?.configured) failedProviders.add(provider.id);
+      }
+    }
+
     const requestedRefresh = (options.refreshProviderIds ?? []).filter((providerId) => {
       const state = states.get(providerId);
       return state?.configured && state.safeForRefresh && !failedProviders.has(providerId);
@@ -503,11 +511,6 @@ export class PiCredentialBoundary {
       }
     }
 
-    if (credentialReadFailed) {
-      for (const provider of installed) {
-        if (states.get(provider.id)?.configured) failedProviders.add(provider.id);
-      }
-    }
     const configured = new Set(
       [...states].filter(([, state]) => state.configured).map(([providerId]) => providerId),
     );
