@@ -32,8 +32,6 @@ allowBuilds:
   protobufjs: true
   sharp: true
   workerd: true
-  # Pi's indirect Google client ships a no-op preinstall script.
-  "@google/genai": false
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
