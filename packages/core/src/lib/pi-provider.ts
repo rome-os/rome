@@ -1,6 +1,7 @@
 import { chmod, lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../logger.js";
+import type { CreateModelRuntimeOptions } from "@earendil-works/pi-coding-agent";
 import type {
   PiCredentialMutationResult,
   PiDiscoveredModel,
@@ -27,6 +28,14 @@ interface RuntimeModel {
   reasoning: boolean;
 }
 
+type CredentialStore = NonNullable<CreateModelRuntimeOptions["credentials"]>;
+type Credential = NonNullable<Awaited<ReturnType<CredentialStore["read"]>>>;
+type CredentialInfo = Awaited<ReturnType<CredentialStore["list"]>>[number];
+type StoredCredentialAvailability = (
+  providerId: string,
+  options?: { signal?: AbortSignal },
+) => Promise<readonly RuntimeModel[]>;
+
 export interface PiModelRuntime {
   getProviders(): readonly { id: string; name: string }[];
   listCredentials(options?: {
@@ -40,6 +49,7 @@ export interface PiModelRuntime {
     providerId?: string,
     options?: { signal?: AbortSignal },
   ): Promise<readonly RuntimeModel[]>;
+  getAvailableForStoredCredential?: StoredCredentialAvailability;
   login(
     providerId: string,
     type: "api_key",
@@ -166,31 +176,85 @@ function isNodeError(error: unknown, code: string): boolean {
 }
 
 async function isLiteralStoredCredential(authPath: string, providerId: string): Promise<boolean> {
+  return (await readLiteralStoredCredential(authPath, providerId)) !== undefined;
+}
+
+async function readLiteralStoredCredential(
+  authPath: string,
+  providerId: string,
+): Promise<Credential | undefined> {
   try {
     const auth = JSON.parse(await readFile(authPath, "utf8")) as unknown;
-    if (!isRecord(auth)) return false;
+    if (!isRecord(auth)) return undefined;
     const credential = auth[providerId];
-    if (!isRecord(credential)) return false;
-    if (credential.type === "oauth") return true;
-    if (credential.type !== "api_key" || typeof credential.key !== "string") return false;
+    if (!isRecord(credential)) return undefined;
+    if (credential.type === "oauth") return credential as Credential;
+    if (credential.type !== "api_key" || typeof credential.key !== "string") return undefined;
     // Pi resolves `$` anywhere and a leading `!` as a command. Do not let its
     // auth probe interpret either expression from the shared Pi auth file.
-    return !credential.key.includes("$") && !credential.key.startsWith("!");
+    return !credential.key.includes("$") && !credential.key.startsWith("!")
+      ? (credential as Credential)
+      : undefined;
   } catch {
     // An unreadable or concurrently-written auth file is metadata-only until
     // Pi can safely report it on a later request.
-    return false;
+    return undefined;
   }
+}
+
+function credentialSnapshot(providerId: string, credential: Credential): CredentialStore {
+  let value: Credential | undefined = credential;
+  return {
+    async read(id) {
+      return id === providerId ? value : undefined;
+    },
+    async list(): Promise<readonly CredentialInfo[]> {
+      return value ? [{ providerId, type: value.type }] : [];
+    },
+    async modify(id, fn) {
+      if (id !== providerId) return undefined;
+      const next = await fn(value);
+      if (next !== undefined) value = next;
+      return value;
+    },
+    async delete(id) {
+      if (id === providerId) value = undefined;
+    },
+  };
 }
 
 async function defaultRuntimeFactory(): Promise<RuntimeHandle> {
   const sdk = await import("@earendil-works/pi-coding-agent");
   const paths = piRuntimePaths(sdk.getAgentDir());
-  const runtime = await sdk.ModelRuntime.create({
+  const runtime = (await sdk.ModelRuntime.create({
     ...paths,
     allowModelNetwork: false,
     refreshOnCreate: false,
-  });
+  })) as unknown as PiModelRuntime;
+  runtime.getAvailableForStoredCredential = async (providerId, options) => {
+    // Classification and Pi's resolving auth read must consume the same
+    // immutable credential snapshot. Re-read just before runtime creation so
+    // an external Pi edit cannot turn a previously literal key into !command.
+    const credential = await readLiteralStoredCredential(paths.authPath, providerId);
+    if (!credential) return [];
+    const snapshotRuntime = await sdk.ModelRuntime.create({
+      ...paths,
+      credentials: credentialSnapshot(providerId, credential),
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    try {
+      return await snapshotRuntime.getAvailable(providerId, options);
+    } finally {
+      const disposable = snapshotRuntime as unknown as {
+        dispose?: () => void | Promise<void>;
+        [Symbol.asyncDispose]?: () => Promise<void>;
+      };
+      const asyncDispose = disposable[Symbol.asyncDispose];
+      if (asyncDispose) await asyncDispose.call(disposable);
+      else await disposable.dispose?.call(disposable);
+    }
+  };
   return {
     runtime,
     isStoredCredentialLiteral: (providerId) =>
@@ -321,7 +385,10 @@ export class PiSettingsService {
       let available: readonly RuntimeModel[] = [];
       if (source === "environment" || literalStoredCredential) {
         try {
-          available = await runtime.getAvailable(id, { signal });
+          available = literalStoredCredential
+            ? await (runtime.getAvailableForStoredCredential?.(id, { signal }) ??
+                runtime.getAvailable(id, { signal }))
+            : await runtime.getAvailable(id, { signal });
         } catch (error) {
           log.debug("Pi model availability probe failed", {
             providerId: id,

@@ -592,6 +592,28 @@ describe("Pi settings service", () => {
     expect(availableCalls).toBe(0);
   });
 
+  it("uses an isolated credential snapshot after classifying a stored key", async () => {
+    let sharedRuntimeResolvedCredential = false;
+    const runtime = fakeRuntime({
+      listCredentials: async () => [{ providerId: "kimi-coding", type: "api_key" }],
+      getAvailable: async () => {
+        sharedRuntimeResolvedCredential = true;
+        return [];
+      },
+    });
+    runtime.getAvailableForStoredCredential = async () => [];
+    const service = new PiSettingsService(async () => ({
+      runtime,
+      isStoredCredentialLiteral: async () => true,
+      dispose() {},
+    }));
+
+    await expect(service.status()).resolves.toMatchObject({
+      providers: [expect.objectContaining({ id: "kimi-coding", credentialSource: "stored" })],
+    });
+    expect(sharedRuntimeResolvedCredential).toBe(false);
+  });
+
   it("does not execute a command credential from Pi auth storage", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-command-"));
     const marker = join(agentDir, "command-ran");
