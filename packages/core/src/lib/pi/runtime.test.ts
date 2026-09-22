@@ -65,6 +65,20 @@ describe("official Pi SDK credential adapter", () => {
     }
   });
 
+  it("fails closed for an API-key credential without a key", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-malformed-"));
+    const authPath = join(agentDir, "auth.json");
+    try {
+      await writeFile(authPath, JSON.stringify({ anthropic: { type: "api_key" } }), {
+        mode: 0o600,
+      });
+
+      expect(inspectPiStoredCredential("anthropic", authPath)).toBe("unreadable");
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+
   it("detects a stored command without executing it during status or refresh", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-expression-"));
     const marker = join(agentDir, "must-not-exist");

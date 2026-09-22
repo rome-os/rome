@@ -112,7 +112,7 @@ const REVIEWED_PROVIDERS = new Map<string, PiReviewedProvider>(
 );
 
 /** APIs reviewed as supporting Rome's text input and tool-call contract. */
-export const PI_ROME_TOOL_CAPABLE_APIS = new Set([
+export const PI_ROME_TOOL_CAPABLE_APIS = Object.freeze([
   "anthropic-messages",
   "google-generative-ai",
   "mistral-conversations",
@@ -120,6 +120,8 @@ export const PI_ROME_TOOL_CAPABLE_APIS = new Set([
   "openai-responses",
   "pi-messages",
 ]);
+
+const PI_ROME_TOOL_CAPABLE_API_SET = new Set<string>(PI_ROME_TOOL_CAPABLE_APIS);
 
 export interface PiModelDescriptor {
   qualifiedModelId: string;
@@ -145,7 +147,7 @@ export function listInstalledOneTokenProviders(runtime: PiCatalogRuntime): PiRev
 }
 
 export function isRomeCompatiblePiModel(model: PiSdkModel): boolean {
-  return PI_ROME_TOOL_CAPABLE_APIS.has(model.api) && model.input.includes("text");
+  return PI_ROME_TOOL_CAPABLE_API_SET.has(model.api) && model.input.includes("text");
 }
 
 export function listEligiblePiModels(

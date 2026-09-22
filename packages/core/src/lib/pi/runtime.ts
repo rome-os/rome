@@ -45,7 +45,7 @@ export function inspectPiStoredCredential(
   const credential = readStoredCredential(providerId, authPath);
   if (!credential) return "missing";
   if (credential.type === "oauth") return "oauth";
-  if (credential.key === undefined) return "literal";
+  if (credential.key === undefined) return "unreadable";
   return hasCredentialReference(credential.key) ? "expression" : "literal";
 }
 
@@ -67,7 +67,7 @@ export async function createPiCredentialBoundary(
     getModels: (providerId) => runtime.getModels(providerId),
     listCredentials: () => runtime.listCredentials(),
     getProviderAuthStatus: (providerId) => runtime.getProviderAuthStatus(providerId),
-    getAvailable: (providerId) => runtime.getAvailable(providerId),
+    getAvailable: (providerId, options) => runtime.getAvailable(providerId, options),
     login: (providerId, type, interaction) =>
       runtime.login(providerId, type, {
         prompt: (prompt) => interaction.prompt({ type: prompt.type }),

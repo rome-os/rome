@@ -42,8 +42,10 @@ class FakePiRuntime implements PiCredentialRuntime {
   readonly mutations: Array<{ operation: "save" | "remove"; providerId: string }> = [];
   readonly refreshCalls: string[][] = [];
   readonly availableCalls: string[] = [];
+  readonly availableSignals: AbortSignal[] = [];
   loginError?: Error;
   logoutError?: Error;
+  listCredentialsError?: Error;
   refreshResult: PiRefreshResult = { aborted: false, errors: new Map() };
   refreshError?: Error;
   submittedValue?: string;
@@ -62,6 +64,7 @@ class FakePiRuntime implements PiCredentialRuntime {
   }
 
   async listCredentials() {
+    if (this.listCredentialsError) throw this.listCredentialsError;
     return [...this.credentials].map(([providerId, type]) => ({ providerId, type }));
   }
 
@@ -69,8 +72,9 @@ class FakePiRuntime implements PiCredentialRuntime {
     return this.authStatuses.get(providerId) ?? { configured: false };
   }
 
-  async getAvailable(providerId: string) {
+  async getAvailable(providerId: string, options: { signal: AbortSignal }) {
     this.availableCalls.push(providerId);
+    this.availableSignals.push(options.signal);
     return this.getModels(providerId);
   }
 
@@ -283,6 +287,29 @@ describe("Pi credential boundary", () => {
     expect(status.catalog).toEqual({ kind: "no-models", models: [] });
     expect(status.liveValidity).toBe("not-verified");
     expect(status.providers.find((item) => item.id === "anthropic")?.status).toBe("no-models");
+  });
+
+  it("does not mark unconfigured providers failed when stored credentials cannot be listed", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.listCredentialsError = new Error("raw SDK failure");
+    const { boundary } = createBoundary(runtime);
+
+    const status = await boundary.readStatus();
+
+    expect(status.catalog).toMatchObject({ kind: "discovery-failed", failedProviders: [] });
+    expect(status.providers.every((provider) => provider.status === "not-configured")).toBe(true);
+    expect(JSON.stringify(status)).not.toContain("raw SDK failure");
+  });
+
+  it("bounds provider availability reads with the configured timeout signal", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.credentials.set("anthropic", "api_key");
+    const { boundary } = createBoundary(runtime);
+
+    await boundary.readStatus();
+
+    expect(runtime.availableSignals).toHaveLength(1);
+    expect(runtime.availableSignals[0]).toBeInstanceOf(AbortSignal);
   });
 
   it("distinguishes a committed credential from later synchronization failure", async () => {

@@ -49,7 +49,10 @@ export interface PiAuthPrompt {
 export interface PiCredentialRuntime extends PiCatalogRuntime {
   listCredentials(): Promise<readonly PiCredentialInfo[]>;
   getProviderAuthStatus(providerId: string): PiAuthStatus;
-  getAvailable(providerId: string): Promise<readonly PiSdkModel[]>;
+  getAvailable(
+    providerId: string,
+    options: { signal: AbortSignal },
+  ): Promise<readonly PiSdkModel[]>;
   login(
     providerId: string,
     type: "api_key",
@@ -145,7 +148,7 @@ export function validatePiToken(input: unknown): PiTokenValidation {
     return {
       ok: false,
       reason: "too-long",
-      message: "The API token must be 8,192 characters or fewer.",
+      message: `The API token must be ${MAX_TOKEN_LENGTH.toLocaleString("en-US")} characters or fewer.`,
     };
   }
   if (token.startsWith("$") || token.startsWith("!")) {
@@ -438,7 +441,6 @@ export class PiCredentialBoundary {
       credentials = await this.runtime.listCredentials();
     } catch {
       credentialReadFailed = true;
-      for (const provider of installed) failedProviders.add(provider.id);
     }
     const stored = new Map(credentials.map((credential) => [credential.providerId, credential]));
     const states = new Map<string, ProviderCredentialState>();
@@ -482,12 +484,15 @@ export class PiCredentialBoundary {
       [...states].filter(([, state]) => state.configured).map(([providerId]) => providerId),
     );
     const availableModels: PiSdkModel[] = [];
+    const availabilitySignal = AbortSignal.timeout(this.refreshTimeoutMs);
     await Promise.all(
       [...configured].map(async (providerId) => {
         const state = states.get(providerId);
         if (!state?.safeForRefresh || failedProviders.has(providerId)) return;
         try {
-          const providerModels = await this.runtime.getAvailable(providerId);
+          const providerModels = await this.runtime.getAvailable(providerId, {
+            signal: availabilitySignal,
+          });
           availableModels.push(...providerModels.filter((model) => model.provider === providerId));
         } catch {
           failedProviders.add(providerId);

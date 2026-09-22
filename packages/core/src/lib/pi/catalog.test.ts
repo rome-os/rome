@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  PI_ROME_TOOL_CAPABLE_APIS,
   isRomeCompatiblePiModel,
   listEligiblePiModels,
   listInstalledOneTokenProviders,
@@ -49,6 +50,10 @@ describe("Pi catalog policy", () => {
     expect(
       isRomeCompatiblePiModel(model("anthropic", "image-only", "anthropic-messages", ["image"])),
     ).toBe(false);
+  });
+
+  it("keeps the reviewed capability list immutable to importers", () => {
+    expect(Object.isFrozen(PI_ROME_TOOL_CAPABLE_APIS)).toBe(true);
   });
 
   it("intersects reviewed, installed, configured, and capable models", () => {
