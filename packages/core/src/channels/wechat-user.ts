@@ -412,8 +412,13 @@ export class WechatUserRuntime {
    */
   private async fetchClientArchive(path: string, signal?: AbortSignal): Promise<void> {
     if (await exists(path)) {
-      if (await this.matchesClientDigest(path, signal)) return;
-      log.warn("wechat_user.cached_client_rejected", { path });
+      const digest = await this.clientDigest(path, signal);
+      if (digest === WECHAT_CLIENT_SHA256) return;
+      log.warn("wechat_user.cached_client_rejected", {
+        path,
+        digest,
+        expected: WECHAT_CLIENT_SHA256,
+      });
       await rm(path, { force: true });
     }
 
@@ -429,22 +434,41 @@ export class WechatUserRuntime {
       );
     }
 
-    if (!(await this.matchesClientDigest(`${path}.part`, signal))) {
+    const digest = await this.clientDigest(`${path}.part`, signal);
+    if (digest !== WECHAT_CLIENT_SHA256) {
       await rm(`${path}.part`, { force: true });
       throw new WechatUserRuntimeError(
-        `The WeChat client downloaded from ${WECHAT_CLIENT_URL} does not match the supported ` +
-          "4.1.13.9 build. Update Rome before connecting.",
+        `The WeChat client downloaded from ${WECHAT_CLIENT_URL} hashes to ${digest}, not the ` +
+          "supported 4.1.13.9 build. Update Rome before connecting.",
       );
     }
-    await this.run("mv", [`${path}.part`, path]);
+
+    const promoted = await this.run("mv", [`${path}.part`, path]);
+    if (promoted.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not store the WeChat client at ${path}: ${promoted.stderr.trim() || "mv failed"}`,
+      );
+    }
   }
 
-  /** Whether the file at `path` is the pinned client build. */
-  private async matchesClientDigest(path: string, signal?: AbortSignal): Promise<boolean> {
+  /**
+   * The sha256 of the file at `path`.
+   *
+   * A digest this cannot read is not a digest that failed to match. Raising
+   * here rather than reporting a mismatch keeps a `sha256sum` that never
+   * answered from evicting a cached archive that was the right build all along.
+   */
+  private async clientDigest(path: string, signal?: AbortSignal): Promise<string> {
     const checksum = await this.run("sha256sum", [path], {
       ...(signal ? { signal } : {}),
     });
-    return checksum.code === 0 && checksum.stdout.trim().split(/\s+/)[0] === WECHAT_CLIENT_SHA256;
+    if (checksum.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not checksum the WeChat client at ${path}: ` +
+          `${checksum.stderr.trim() || "sha256sum failed"}`,
+      );
+    }
+    return checksum.stdout.trim().split(/\s+/)[0] ?? "";
   }
 
   private async ensureClientLink(): Promise<void> {
