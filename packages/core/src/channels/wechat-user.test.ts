@@ -316,6 +316,25 @@ describe("WechatUserRuntime.install", () => {
     expect(calls.some((c) => c[0] === "sha256sum")).toBe(false);
   });
 
+  it("leaves nothing behind when the replacement is also not the supported build", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "different build");
+    // Neither what is cached nor what replaces it is the pinned build.
+    const { run } = scriptedDownload({
+      "wechat.deb": "0".repeat(64),
+      "wechat.deb.part": "1".repeat(64),
+    });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/not the supported 4\.1\.13\.9 build/);
+
+    // A wedged install ends clean rather than holding a second archive it
+    // would reject just as permanently.
+    expect(existsSync(deb)).toBe(false);
+    expect(existsSync(`${deb}.part`)).toBe(false);
+  });
+
   it("keeps a cached archive that sha256sum could not read", async () => {
     const h = await tempHome();
     const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
