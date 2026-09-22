@@ -283,7 +283,7 @@ export class PiCredentialBoundary {
       credentialCommitted: true,
       replacedStoredCredential: replacing,
       synchronizationSucceeded:
-        synchronizationSucceeded && status.catalog.kind !== "discovery-failed",
+        synchronizationSucceeded && this.providerSynchronizationSucceeded(status, providerId),
       status,
     };
   }
@@ -344,9 +344,18 @@ export class PiCredentialBoundary {
     return {
       credentialRemoved: true,
       synchronizationSucceeded:
-        synchronizationSucceeded && status.catalog.kind !== "discovery-failed",
+        synchronizationSucceeded && this.providerSynchronizationSucceeded(status, providerId),
       status,
     };
+  }
+
+  private providerSynchronizationSucceeded(
+    status: PiConfigurationStatus,
+    providerId: string,
+  ): boolean {
+    return (
+      status.providers.find((provider) => provider.id === providerId)?.status !== "discovery-failed"
+    );
   }
 
   private requireSupportedProvider(providerId: string): void {

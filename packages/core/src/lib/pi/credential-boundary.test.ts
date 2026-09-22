@@ -318,6 +318,25 @@ describe("Pi credential boundary", () => {
     expect(JSON.stringify(status)).not.toContain("secret-bearing provider failure");
   });
 
+  it("reports target-provider synchronization independently of another provider failure", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.credentials.set("openai", "api_key");
+    const { boundary } = createBoundary(runtime, { safety: { openai: "expression" } });
+
+    const result = await boundary.saveCredential("anthropic", "opaque-token", {
+      confirmReplace: false,
+    });
+
+    expect(result.synchronizationSucceeded).toBe(true);
+    expect(result.status.catalog).toMatchObject({
+      kind: "discovery-failed",
+      failedProviders: ["openai"],
+    });
+    expect(result.status.providers.find((provider) => provider.id === "anthropic")).toMatchObject({
+      status: "models-available",
+    });
+  });
+
   it("does not treat an unrelated runtime aggregate error as every provider's failure", async () => {
     const runtime = new FakePiRuntime();
     runtime.credentials.set("anthropic", "api_key");
