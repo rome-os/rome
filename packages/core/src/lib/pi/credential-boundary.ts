@@ -47,7 +47,7 @@ export interface PiAuthPrompt {
 }
 
 export interface PiCredentialRuntime extends PiCatalogRuntime {
-  listCredentials(): Promise<readonly PiCredentialInfo[]>;
+  listCredentials(options: { signal: AbortSignal }): Promise<readonly PiCredentialInfo[]>;
   getProviderAuthStatus(providerId: string): PiAuthStatus;
   getAvailable(
     providerId: string,
@@ -59,9 +59,10 @@ export interface PiCredentialRuntime extends PiCatalogRuntime {
     interaction: {
       prompt(prompt: PiAuthPrompt): Promise<string>;
       notify(event: unknown): void;
+      signal: AbortSignal;
     },
-  ): Promise<unknown>;
-  logout(providerId: string): Promise<void>;
+  ): Promise<void>;
+  logout(providerId: string, options: { signal: AbortSignal }): Promise<void>;
   refresh(options: {
     providers: readonly string[];
     allowNetwork: boolean;
@@ -117,6 +118,7 @@ export type PiBoundaryErrorCode =
   | "invalid-token"
   | "replacement-confirmation-required"
   | "removal-confirmation-required"
+  | "catalog-unavailable"
   | "credential-save-failed"
   | "credential-remove-failed";
 
@@ -207,9 +209,16 @@ export class PiCredentialBoundary {
 
   async refresh(providerId?: string): Promise<PiConfigurationStatus> {
     if (providerId) this.requireSupportedProvider(providerId);
-    const providers = providerId
-      ? [providerId]
-      : listInstalledOneTokenProviders(this.runtime).map((provider) => provider.id);
+    let providers: string[];
+    if (providerId) {
+      providers = [providerId];
+    } else {
+      try {
+        providers = listInstalledOneTokenProviders(this.runtime).map((provider) => provider.id);
+      } catch {
+        return this.collectStatus();
+      }
+    }
     return this.collectStatus({ refreshProviderIds: providers });
   }
 
@@ -231,7 +240,9 @@ export class PiCredentialBoundary {
 
     let credentials: readonly PiCredentialInfo[];
     try {
-      credentials = await this.runtime.listCredentials();
+      credentials = await this.runtime.listCredentials({
+        signal: AbortSignal.timeout(this.refreshTimeoutMs),
+      });
     } catch {
       throw new PiCredentialBoundaryError(
         "credential-save-failed",
@@ -252,9 +263,9 @@ export class PiCredentialBoundary {
       await this.runtime.login(providerId, "api_key", {
         prompt: async (prompt) => {
           promptCount += 1;
-          if (promptCount !== 1 || (prompt.type !== "secret" && prompt.type !== "text")) {
+          if (promptCount !== 1 || prompt.type !== "secret") {
             throw new PiCredentialBoundaryError(
-              "credential-save-failed",
+              "unsupported-provider",
               "This Pi provider cannot be configured with the one-token form.",
             );
           }
@@ -263,6 +274,7 @@ export class PiCredentialBoundary {
         notify() {
           // The reviewed one-token path has no browser or device event to expose.
         },
+        signal: AbortSignal.timeout(this.refreshTimeoutMs),
       });
     } catch (error) {
       if (this.isCredentialSynchronizationError(error)) {
@@ -302,7 +314,9 @@ export class PiCredentialBoundary {
     this.requireSupportedProvider(providerId);
     let credentials: readonly PiCredentialInfo[];
     try {
-      credentials = await this.runtime.listCredentials();
+      credentials = await this.runtime.listCredentials({
+        signal: AbortSignal.timeout(this.refreshTimeoutMs),
+      });
     } catch {
       throw new PiCredentialBoundaryError(
         "credential-remove-failed",
@@ -328,7 +342,7 @@ export class PiCredentialBoundary {
 
     let synchronizationSucceeded = true;
     try {
-      await this.runtime.logout(providerId);
+      await this.runtime.logout(providerId, { signal: AbortSignal.timeout(this.refreshTimeoutMs) });
     } catch (error) {
       if (this.isCredentialSynchronizationError(error)) {
         synchronizationSucceeded = false;
@@ -356,21 +370,21 @@ export class PiCredentialBoundary {
     status: PiConfigurationStatus,
     providerId: string,
   ): boolean {
-    return (
-      status.providers.find((provider) => provider.id === providerId)?.status !== "discovery-failed"
-    );
+    const provider = status.providers.find((entry) => entry.id === providerId);
+    return provider !== undefined && provider.status !== "discovery-failed";
   }
 
   private requireSupportedProvider(providerId: string): void {
-    let supported = false;
+    let providers: ReturnType<typeof listInstalledOneTokenProviders>;
     try {
-      supported = listInstalledOneTokenProviders(this.runtime).some(
-        (provider) => provider.id === providerId,
-      );
+      providers = listInstalledOneTokenProviders(this.runtime);
     } catch {
-      // A catalog failure is intentionally indistinguishable from an unsupported provider here.
+      throw new PiCredentialBoundaryError(
+        "catalog-unavailable",
+        "The Pi provider catalog is unavailable. Try again.",
+      );
     }
-    if (!supported) {
+    if (!providers.some((provider) => provider.id === providerId)) {
       throw new PiCredentialBoundaryError(
         "unsupported-provider",
         "This Pi provider is not supported by the one-token form.",
@@ -438,7 +452,9 @@ export class PiCredentialBoundary {
     let credentials: readonly PiCredentialInfo[] = [];
     let credentialReadFailed = false;
     try {
-      credentials = await this.runtime.listCredentials();
+      credentials = await this.runtime.listCredentials({
+        signal: AbortSignal.timeout(this.refreshTimeoutMs),
+      });
     } catch {
       credentialReadFailed = true;
     }

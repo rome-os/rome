@@ -43,15 +43,26 @@ class FakePiRuntime implements PiCredentialRuntime {
   readonly refreshCalls: string[][] = [];
   readonly availableCalls: string[] = [];
   readonly availableSignals: AbortSignal[] = [];
+  readonly credentialSignals: AbortSignal[] = [];
   loginError?: Error;
   logoutError?: Error;
   listCredentialsError?: Error;
+  providersError?: Error;
+  providersErrorAfter?: number;
+  private providerReads = 0;
   refreshResult: PiRefreshResult = { aborted: false, errors: new Map() };
   refreshError?: Error;
   submittedValue?: string;
   loginPrompts: PiAuthPrompt[] = [{ type: "secret" }];
 
   getProviders() {
+    this.providerReads += 1;
+    if (
+      this.providersError &&
+      (this.providersErrorAfter === undefined || this.providerReads > this.providersErrorAfter)
+    ) {
+      throw this.providersError;
+    }
     return this.providers;
   }
 
@@ -63,7 +74,8 @@ class FakePiRuntime implements PiCredentialRuntime {
     return providerId ? this.models.filter((item) => item.provider === providerId) : this.models;
   }
 
-  async listCredentials() {
+  async listCredentials(options: { signal: AbortSignal }) {
+    this.credentialSignals.push(options.signal);
     if (this.listCredentialsError) throw this.listCredentialsError;
     return [...this.credentials].map(([providerId, type]) => ({ providerId, type }));
   }
@@ -83,6 +95,7 @@ class FakePiRuntime implements PiCredentialRuntime {
     _type: "api_key",
     interaction: Parameters<PiCredentialRuntime["login"]>[2],
   ) {
+    this.credentialSignals.push(interaction.signal);
     for (const prompt of this.loginPrompts) {
       this.submittedValue = await interaction.prompt(prompt);
     }
@@ -91,7 +104,8 @@ class FakePiRuntime implements PiCredentialRuntime {
     if (this.loginError) throw this.loginError;
   }
 
-  async logout(providerId: string) {
+  async logout(providerId: string, options: { signal: AbortSignal }) {
+    this.credentialSignals.push(options.signal);
     this.credentials.delete(providerId);
     this.mutations.push({ operation: "remove", providerId });
     if (this.logoutError) throw this.logoutError;
@@ -310,6 +324,44 @@ describe("Pi credential boundary", () => {
 
     expect(runtime.availableSignals).toHaveLength(1);
     expect(runtime.availableSignals[0]).toBeInstanceOf(AbortSignal);
+    expect(runtime.credentialSignals).toHaveLength(1);
+    expect(runtime.credentialSignals[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it("does not report synchronization when catalog status omits the mutated provider", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.providersError = new Error("raw catalog failure");
+    runtime.providersErrorAfter = 1;
+    const { boundary } = createBoundary(runtime);
+
+    const result = await boundary.saveCredential("anthropic", "opaque-token", {
+      confirmReplace: false,
+    });
+
+    expect(result.synchronizationSucceeded).toBe(false);
+    expect(result.status.providers).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("raw catalog failure");
+  });
+
+  it("returns a sanitized catalog-unavailable error instead of unsupported-provider", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.providersError = new Error("raw catalog failure");
+    const { boundary } = createBoundary(runtime);
+
+    await expect(
+      boundary.saveCredential("anthropic", "opaque-token", { confirmReplace: false }),
+    ).rejects.toMatchObject({ code: "catalog-unavailable" });
+  });
+
+  it("turns an unscoped refresh catalog failure into a sanitized status", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.providersError = new Error("raw catalog failure");
+    const { boundary } = createBoundary(runtime);
+
+    const status = await boundary.refresh();
+
+    expect(status.catalog).toMatchObject({ kind: "discovery-failed" });
+    expect(JSON.stringify(status)).not.toContain("raw catalog failure");
   });
 
   it("distinguishes a committed credential from later synchronization failure", async () => {
@@ -385,7 +437,7 @@ describe("Pi credential boundary", () => {
 
     await expect(
       boundary.saveCredential("anthropic", "opaque-token", { confirmReplace: false }),
-    ).rejects.toMatchObject({ code: "credential-save-failed" });
+    ).rejects.toMatchObject({ code: "unsupported-provider" });
     expect(runtime.mutations).toEqual([]);
   });
 

@@ -65,15 +65,17 @@ export async function createPiCredentialBoundary(
     getProviders: () => runtime.getProviders(),
     getProvider: (providerId) => runtime.getProvider(providerId),
     getModels: (providerId) => runtime.getModels(providerId),
-    listCredentials: () => runtime.listCredentials(),
+    listCredentials: (options) => runtime.listCredentials(options),
     getProviderAuthStatus: (providerId) => runtime.getProviderAuthStatus(providerId),
     getAvailable: (providerId, options) => runtime.getAvailable(providerId, options),
-    login: (providerId, type, interaction) =>
-      runtime.login(providerId, type, {
+    login: async (providerId, type, interaction) => {
+      await runtime.login(providerId, type, {
         prompt: (prompt) => interaction.prompt({ type: prompt.type }),
         notify: (event) => interaction.notify(event),
-      }),
-    logout: (providerId) => runtime.logout(providerId),
+        signal: interaction.signal,
+      });
+    },
+    logout: (providerId, options) => runtime.logout(providerId, options),
     refresh: (refreshOptions) => runtime.refresh(refreshOptions),
   };
   return new PiCredentialBoundary({
