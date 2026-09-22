@@ -180,6 +180,10 @@ and files use 0600. Windows directories restrict inherited access with the curre
 user's SID. `--cloud` selects an HTTPS Cloud origin. Plain HTTP is allowed only
 for loopback development.
 
+Gateway connections require WSS. Plain WS is allowed only for `localhost`,
+`127.0.0.1`, and `[::1]`. Gateway URLs cannot contain credentials, query parameters,
+or fragments. The same rules apply when reconnecting.
+
 Startup checks the credential through `GET /v1/gateway/config`. Missing,
 malformed, or confirmed-invalid credentials require browser authorization.
 Network failures and temporary service errors preserve the credential and retry

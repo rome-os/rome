@@ -1,3 +1,4 @@
+import { parseGatewayUrl } from "./gateway-url.js";
 import {
   CLOSE,
   gatewayMessage,
@@ -35,9 +36,7 @@ export interface GatewayClientOptions {
 }
 
 export function connectGateway(options: GatewayClientOptions) {
-  let url = new URL(options.gatewayUrl);
-  if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash)
-    throw new Error("A credential-free WSS URL is required");
+  let url = parseGatewayUrl(options.gatewayUrl);
   if (!/^(?:romedev_|romemob_)[A-Za-z0-9_-]{43}$/.test(options.deviceToken))
     throw new Error("Invalid device token format");
   let stopped = false;
@@ -73,9 +72,7 @@ export function connectGateway(options: GatewayClientOptions) {
           status("revoked");
           return;
         }
-        url = new URL(next);
-        if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash)
-          throw new Error("A credential-free WSS URL is required");
+        url = parseGatewayUrl(next);
       }
       current = options.createSocket(url.toString(), `Bearer ${options.deviceToken}`);
     } catch {

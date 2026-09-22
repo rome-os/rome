@@ -120,9 +120,34 @@ describe("device connection helper", () => {
     expect(f.sockets[0].readyState).toBe(1);
     f.client.stop();
   });
-  it("rejects URLs carrying credentials or plaintext transport", () => {
+  it.each([
+    "wss://gateway.test/connect",
+    "ws://localhost:8080/connect",
+    "ws://127.0.0.1:8080/connect",
+    "ws://[::1]:8080/connect",
+  ])("connects to an allowed Gateway URL %s", (gatewayUrl) => {
+    const factory = vi.fn(() => new Socket());
+    const client = connectGateway({
+      gatewayUrl,
+      deviceToken: `romedev_${"a".repeat(43)}`,
+      createSocket: factory,
+      onMessage: vi.fn(),
+    });
+    expect(factory).toHaveBeenCalledWith(gatewayUrl, `Bearer romedev_${"a".repeat(43)}`);
+    client.stop();
+  });
+  it("rejects credentials and plaintext transport outside loopback", () => {
     for (const gatewayUrl of [
       "ws://gateway.test",
+      "ws://192.168.1.10",
+      "ws://0.0.0.0",
+      "ws://[::]",
+      "ws://localhost.example",
+      "ws://127.0.0.1.example",
+      "http://127.0.0.1",
+      "ws://user:secret@127.0.0.1",
+      "ws://localhost/?token=secret",
+      "ws://[::1]/#secret",
       "wss://user:secret@gateway.test",
       "wss://gateway.test/?token=secret",
     ]) {
@@ -135,5 +160,40 @@ describe("device connection helper", () => {
         }),
       ).toThrow();
     }
+  });
+  it("validates refreshed Gateway URLs before sending credentials on reconnect", async () => {
+    vi.useFakeTimers();
+    const sockets: Socket[] = [];
+    const factory = vi.fn(() => {
+      const socket = new Socket();
+      sockets.push(socket);
+      return socket;
+    });
+    const beforeConnect = vi
+      .fn()
+      .mockResolvedValueOnce("wss://gateway.test/connect")
+      .mockResolvedValueOnce("ws://gateway.test/connect")
+      .mockResolvedValueOnce("ws://127.0.0.1:8080/connect");
+    const client = connectGateway({
+      gatewayUrl: "wss://gateway.test/connect",
+      deviceToken: `romedev_${"a".repeat(43)}`,
+      createSocket: factory,
+      onMessage: vi.fn(),
+      beforeConnect,
+      random: () => 0.5,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0].open();
+    sockets[0].close();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(beforeConnect).toHaveBeenCalledTimes(2);
+    expect(factory).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(factory).toHaveBeenLastCalledWith(
+      "ws://127.0.0.1:8080/connect",
+      `Bearer romedev_${"a".repeat(43)}`,
+    );
+    client.stop();
   });
 });

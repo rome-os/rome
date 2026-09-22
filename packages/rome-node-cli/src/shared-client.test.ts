@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { createServer } from "node:http";
-import { createServer as createTlsServer } from "node:https";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { WebSocketServer } from "ws";
@@ -24,11 +23,7 @@ async function fixture(dropReply = false) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-shared-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const token = `romedev_${"a".repeat(43)}`;
-  const certPath = resolve("src/fixtures/gateway-cert.pem");
-  const gateway = createTlsServer({
-    cert: await readFile(certPath),
-    key: await readFile(resolve("src/fixtures/gateway-key.pem")),
-  });
+  const gateway = createServer();
   const sockets = new WebSocketServer({ server: gateway });
   let connections = 0;
   let requests = 0;
@@ -70,7 +65,7 @@ async function fixture(dropReply = false) {
     res.setHeader("content-type", "application/json");
     if (req.headers.authorization !== `Bearer ${token}`) res.writeHead(401).end("{}");
     else if (req.url === "/v1/gateway/config")
-      res.end(JSON.stringify({ gatewayUrl: `wss://127.0.0.1:${address.port}` }));
+      res.end(JSON.stringify({ gatewayUrl: `ws://127.0.0.1:${address.port}` }));
     else res.end(JSON.stringify({ items: [{ id: "target" }] }));
   });
   await new Promise<void>((resolve) => cloud.listen(0, "127.0.0.1", resolve));
@@ -88,7 +83,7 @@ async function fixture(dropReply = false) {
     return new Promise<{ code: number | null; stdout: string; stderr: string }>(
       (resolve, reject) => {
         const child = spawn(process.execPath, args, {
-          env: { ...process.env, ROME_NODE_CONFIG_DIR: root, NODE_EXTRA_CA_CERTS: certPath },
+          env: { ...process.env, ROME_NODE_CONFIG_DIR: root },
           stdio: ["ignore", "pipe", "pipe"],
           windowsHide: true,
         });
@@ -130,7 +125,7 @@ async function fixture(dropReply = false) {
   function watch() {
     const events: ConnectionEvent[] = [];
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), "watch"], {
-      env: { ...process.env, ROME_NODE_CONFIG_DIR: root, NODE_EXTRA_CA_CERTS: certPath },
+      env: { ...process.env, ROME_NODE_CONFIG_DIR: root },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

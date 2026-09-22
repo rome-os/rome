@@ -1,4 +1,5 @@
 import { isRecord } from "./actions.js";
+import { parseGatewayUrl } from "./gateway-url.js";
 
 export class CloudError extends Error {
   constructor(readonly code: string) {
@@ -56,8 +57,9 @@ export async function gatewayConfig(origin: string, token: string): Promise<stri
   const body = await cloudRequest(origin, "/v1/gateway/config", token);
   if (!isRecord(body) || typeof body.gatewayUrl !== "string")
     throw new CloudError("invalid_response");
-  const url = new URL(body.gatewayUrl);
-  if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash)
+  try {
+    return parseGatewayUrl(body.gatewayUrl).toString();
+  } catch {
     throw new CloudError("invalid_response");
-  return url.toString();
+  }
 }
