@@ -441,7 +441,8 @@ export class WechatUserRuntime {
       await this.discard(`${path}.part`);
       throw new WechatUserRuntimeError(
         `The WeChat client downloaded from ${WECHAT_CLIENT_URL} hashes to ${digest}, not the ` +
-          "supported 4.1.13.9 build. Update Rome before connecting.",
+          "supported 4.1.13.9 build. Either the pin is out of date or the host is serving the " +
+          "wrong file.",
       );
     }
 
