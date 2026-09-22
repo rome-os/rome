@@ -26,7 +26,7 @@ describe("official Pi SDK credential adapter", () => {
     const syntheticToken = "synthetic-test-token";
     const fetch = rs
       .spyOn(globalThis, "fetch")
-      .mockImplementation(() => new Response(JSON.stringify([]), { status: 200 }));
+      .mockImplementation(async () => new Response(JSON.stringify([]), { status: 200 }));
     try {
       const boundary = await createPiCredentialBoundary({ agentDir, environment: {} });
       const result = await boundary.saveCredential("anthropic", syntheticToken, {
