@@ -1,4 +1,4 @@
-import { qualifyPiModelId } from "./identity.js";
+import { InvalidPiModelIdentityError, qualifyPiModelId } from "./identity.js";
 
 export interface PiSdkProvider {
   id: string;
@@ -165,7 +165,13 @@ export function listEligiblePiModels(
     ) {
       continue;
     }
-    const qualifiedModelId = qualifyPiModelId(model.provider, model.id);
+    let qualifiedModelId: string;
+    try {
+      qualifiedModelId = qualifyPiModelId(model.provider, model.id);
+    } catch (error) {
+      if (error instanceof InvalidPiModelIdentityError) continue;
+      throw error;
+    }
     if (models.has(qualifiedModelId)) continue;
     models.set(qualifiedModelId, {
       qualifiedModelId,

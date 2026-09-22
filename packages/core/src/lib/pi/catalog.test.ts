@@ -84,4 +84,15 @@ describe("Pi catalog policy", () => {
       ),
     ).toEqual(["anthropic/claude"]);
   });
+
+  it("omits malformed SDK model identities without hiding valid models", () => {
+    const installed = runtime(
+      [provider("anthropic")],
+      [model("anthropic", ""), model("anthropic", "claude")],
+    );
+
+    expect(listEligiblePiModels(installed, new Set(["anthropic"]))).toEqual([
+      expect.objectContaining({ qualifiedModelId: "anthropic/claude" }),
+    ]);
+  });
 });

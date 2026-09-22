@@ -4,6 +4,7 @@ import {
   PiCredentialBoundary,
   PiCredentialBoundaryError,
   type PiAuthStatus,
+  type PiAuthPrompt,
   type PiCredentialInfo,
   type PiCredentialRuntime,
   type PiRefreshResult,
@@ -46,6 +47,7 @@ class FakePiRuntime implements PiCredentialRuntime {
   refreshResult: PiRefreshResult = { aborted: false, errors: new Map() };
   refreshError?: Error;
   submittedValue?: string;
+  loginPrompts: PiAuthPrompt[] = [{ type: "secret" }];
 
   getProviders() {
     return this.providers;
@@ -77,7 +79,9 @@ class FakePiRuntime implements PiCredentialRuntime {
     _type: "api_key",
     interaction: Parameters<PiCredentialRuntime["login"]>[2],
   ) {
-    this.submittedValue = await interaction.prompt({ type: "secret" });
+    for (const prompt of this.loginPrompts) {
+      this.submittedValue = await interaction.prompt(prompt);
+    }
     this.credentials.set(providerId, "api_key");
     this.mutations.push({ operation: "save", providerId });
     if (this.loginError) throw this.loginError;
@@ -335,6 +339,27 @@ describe("Pi credential boundary", () => {
     expect(result.status.providers.find((provider) => provider.id === "anthropic")).toMatchObject({
       status: "models-available",
     });
+
+    const removal = await boundary.removeStoredCredential("anthropic", { confirmRemove: true });
+    expect(removal.synchronizationSucceeded).toBe(true);
+    expect(removal.status.catalog).toMatchObject({
+      kind: "discovery-failed",
+      failedProviders: ["openai"],
+    });
+  });
+
+  it.each([
+    ["select", [{ type: "select" }]],
+    ["a second prompt", [{ type: "secret" }, { type: "secret" }]],
+  ] as const)("rejects %s from Pi login without mutation", async (_name, loginPrompts) => {
+    const runtime = new FakePiRuntime();
+    runtime.loginPrompts = [...loginPrompts];
+    const { boundary } = createBoundary(runtime);
+
+    await expect(
+      boundary.saveCredential("anthropic", "opaque-token", { confirmReplace: false }),
+    ).rejects.toMatchObject({ code: "credential-save-failed" });
+    expect(runtime.mutations).toEqual([]);
   });
 
   it("does not treat an unrelated runtime aggregate error as every provider's failure", async () => {
