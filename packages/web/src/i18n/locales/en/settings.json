@@ -654,6 +654,7 @@
       },
       "saved": "Token saved in Pi. Catalog status is shown separately.",
       "savedSyncFailed": "Token saved in Pi, but catalog synchronization failed. Refresh discovery without re-entering the token.",
+      "notPersisted": "Pi did not save the token. Review it and try again.",
       "removed": "Stored Pi credential removed. External credentials, if any, remain.",
       "replaceTitle": "Replace stored Pi credential?",
       "removeTitle": "Remove stored Pi credential?",

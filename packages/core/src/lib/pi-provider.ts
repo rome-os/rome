@@ -1,4 +1,4 @@
-import { chmod, readFile, stat } from "node:fs/promises";
+import { chmod, lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../logger.js";
 import type {
@@ -144,7 +144,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export async function hardenPiAuthFilePermissions(authPath: string): Promise<void> {
   try {
-    const metadata = await stat(authPath);
+    const metadata = await lstat(authPath);
     if (!metadata.isFile()) {
       throw new Error("Pi credential storage is not a regular file.");
     }
@@ -499,6 +499,9 @@ export class PiSettingsService {
           throw error;
         }
       }
+      // Pi can create auth.json during login, so verify the file it actually
+      // wrote as well as an existing file before handing the token to Pi.
+      await hardenAuthFilePermissions?.();
       const literalStoredCredential =
         (await isStoredCredentialLiteral?.(input.providerId)) === true;
       let catalogFailed = false;
@@ -558,14 +561,29 @@ export class PiSettingsService {
     this.invalidateCache();
     await this.useRuntime(async (runtime) => {
       const stored = await this.withTimeout((signal) => runtime.listCredentials({ signal }), true);
-      if (!stored.some((item) => item.providerId === providerId)) return;
-      try {
-        await this.withTimeout((signal) => runtime.logout(providerId, { signal }), true);
-      } catch (error) {
-        if (!isCredentialSynchronizationError(error)) throw error;
+      if (stored.some((item) => item.providerId === providerId)) {
+        try {
+          await this.withTimeout((signal) => runtime.logout(providerId, { signal }), true);
+        } catch (error) {
+          if (isPiSettingsTimeoutError(error)) {
+            // Logout can commit auth.json before Pi completes local catalog
+            // synchronization. Treat a confirmed removal as partial success.
+            const credentials = await this.withTimeout(
+              (signal) => runtime.listCredentials({ signal }),
+              true,
+            );
+            if (credentials.some((credential) => credential.providerId === providerId)) {
+              throw error;
+            }
+          } else if (!isCredentialSynchronizationError(error)) {
+            throw error;
+          }
+        }
       }
     });
     this.invalidateCache();
+    // Pi can retain credential state inside the mutation runtime. Read the
+    // persisted auth file through a fresh runtime for the public response.
     return this.status({ bypassCache: true });
   }
 

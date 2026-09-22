@@ -603,6 +603,51 @@ describe("Pi provider settings", () => {
     expect(document.body.textContent).not.toContain("temporary-test-token");
   });
 
+  it("keeps a token for retry when Pi did not persist it", async () => {
+    const piStatus = {
+      providers: [
+        {
+          id: "kimi-coding",
+          name: "Kimi For Coding",
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        },
+      ],
+      models: [],
+      catalogStatus: "no-models",
+      liveValidity: "not-verified",
+      discoveryFailedProviders: [],
+    };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status")
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      if (url === "/api/ai-tools/anthropic-compatible-providers")
+        return ok({ providers: [], configured: null });
+      if (url === "/api/ai-tools/pi") return ok(piStatus);
+      if (url === "/api/ai-tools/pi/credential") {
+        return ok({
+          credentialPersisted: false,
+          synchronizationSucceeded: false,
+          status: piStatus,
+        });
+      }
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Configure" }));
+    const input = screen.getByLabelText("API token") as HTMLInputElement;
+    await user.type(input, "retry-token");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Pi did not save the token");
+    expect(input.value).toBe("retry-token");
+    expect(screen.queryByText(/Token saved in Pi/)).toBeNull();
+  });
+
   it("closes a pending Pi replacement confirmation with its dialog", async () => {
     const requests: string[] = [];
     const piStatus = {

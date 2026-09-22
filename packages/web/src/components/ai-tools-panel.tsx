@@ -566,10 +566,14 @@ export function AiToolsPanel({
       if (!response.ok) throw new Error(await getApiErrorMessage(response, t("aiTools.pi.failed")));
       const result = (await response.json()) as PiCredentialMutationResult;
       setPiStatus(result.status);
-      setPiToken("");
-      setPiNotice(
-        result.synchronizationSucceeded ? t("aiTools.pi.saved") : t("aiTools.pi.savedSyncFailed"),
-      );
+      if (!result.credentialPersisted) {
+        setPiError(t("aiTools.pi.notPersisted"));
+      } else {
+        setPiToken("");
+        setPiNotice(
+          result.synchronizationSucceeded ? t("aiTools.pi.saved") : t("aiTools.pi.savedSyncFailed"),
+        );
+      }
     } catch (error) {
       setPiError(error instanceof Error ? error.message : t("aiTools.pi.failed"));
     } finally {

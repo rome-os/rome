@@ -654,6 +654,7 @@
       },
       "saved": "令牌已保存到 Pi。目录状态会单独显示。",
       "savedSyncFailed": "令牌已保存到 Pi，但目录同步失败。无需重新输入令牌即可刷新发现。",
+      "notPersisted": "Pi 未保存此令牌。请检查后重试。",
       "removed": "已移除 Pi 存储的凭据。外部凭据（如有）不受影响。",
       "replaceTitle": "替换 Pi 存储的凭据？",
       "removeTitle": "移除 Pi 存储的凭据？",

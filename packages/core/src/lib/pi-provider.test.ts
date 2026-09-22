@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
@@ -651,18 +651,18 @@ describe("Pi settings service", () => {
 
   it("hardens the auth file before handing a token to Pi", async () => {
     let stored = false;
-    let hardened = false;
+    let hardenCalls = 0;
     const service = new PiSettingsService(async () => ({
       runtime: fakeRuntime({
         listCredentials: async () =>
           stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
         login: async () => {
-          expect(hardened).toBe(true);
+          expect(hardenCalls).toBe(1);
           stored = true;
         },
       }),
       hardenAuthFilePermissions: async () => {
-        hardened = true;
+        hardenCalls += 1;
       },
       dispose() {},
     }));
@@ -670,6 +670,7 @@ describe("Pi settings service", () => {
     await expect(
       service.saveCredential({ providerId: "kimi-coding", token: "opaque-token" }),
     ).resolves.toMatchObject({ credentialPersisted: true });
+    expect(hardenCalls).toBe(2);
   });
 
   it("tightens an existing Pi auth file before a credential mutation", async () => {
@@ -683,6 +684,43 @@ describe("Pi settings service", () => {
     } finally {
       await rm(agentDir, { recursive: true, force: true });
     }
+  });
+
+  it("refuses a symlink in place of Pi auth storage", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-auth-symlink-"));
+    const authPath = join(agentDir, "auth.json");
+    const target = join(agentDir, "target.json");
+    try {
+      await writeFile(target, "{}", { mode: 0o600 });
+      await symlink(target, authPath);
+      await expect(hardenPiAuthFilePermissions(authPath)).rejects.toThrow("not a regular file");
+    } finally {
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reconciles a timed-out logout that already removed the credential", async () => {
+    let stored = true;
+    let created = 0;
+    const service = new PiSettingsService(async () => {
+      created += 1;
+      return {
+        runtime: fakeRuntime({
+          listCredentials: async () =>
+            stored ? [{ providerId: "kimi-coding", type: "api_key" }] : [],
+          logout: async () => {
+            stored = false;
+            await new Promise<never>(() => {});
+          },
+        }),
+        dispose() {},
+      };
+    }, 1);
+
+    await expect(service.removeCredential("kimi-coding")).resolves.toMatchObject({
+      providers: [expect.objectContaining({ id: "kimi-coding", credentialSource: "none" })],
+    });
+    expect(created).toBe(2);
   });
 
   it("uses Pi-owned storage with 0600 permissions and never returns a token", async () => {
