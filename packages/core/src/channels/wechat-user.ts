@@ -407,8 +407,10 @@ export class WechatUserRuntime {
    * `exists` check forever and every later install fails on it. Verifying the
    * `.part` before the `mv` keeps a wrong download from becoming that file.
    *
-   * Only the unpack path calls this. Hashing the better part of a gigabyte on
-   * every start, for a client already unpacked, would buy nothing.
+   * Only the unpack path calls this, which is what keeps `install()`
+   * idempotent. Re-entering it with the client already unpacked has nothing to
+   * read the archive for, so it neither downloads a missing one nor hashes the
+   * better part of a gigabyte to prove one it will not open.
    */
   private async fetchClientArchive(path: string, signal?: AbortSignal): Promise<void> {
     if (await exists(path)) {

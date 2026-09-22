@@ -309,8 +309,8 @@ describe("WechatUserRuntime.install", () => {
     });
     await runtime.install();
 
-    // install() runs on every connect, so hashing the archive here would cost a
-    // 226 MB sha256 to guard a file nothing is about to read.
+    // install() is idempotent: re-entering it with the client unpacked has
+    // nothing to read the archive for, so it neither downloads nor hashes.
     expect(calls.some((c) => c[0] === "curl")).toBe(false);
     expect(calls.some((c) => c[0] === "dpkg-deb")).toBe(false);
     expect(calls.some((c) => c[0] === "sha256sum")).toBe(false);
