@@ -78,7 +78,7 @@ export const PI_REVIEWED_ONE_TOKEN_PROVIDERS = [
   { id: "meta", name: "Meta" },
   { id: "minimax", name: "MiniMax" },
   { id: "minimax-cn", name: "MiniMax China" },
-  { id: "qwen-token-plan", name: "Qwen Token Plan (existing catalog)" },
+  { id: "qwen-token-plan", name: "Qwen Token Plan" },
   { id: "qwen-token-plan-individual", name: "Qwen Token Plan (Individual)" },
   { id: "qwen-token-plan-cn", name: "Qwen Token Plan (China)" },
   { id: "xiaomi", name: "Xiaomi MiMo" },
