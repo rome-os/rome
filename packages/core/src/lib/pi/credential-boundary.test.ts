@@ -45,7 +45,6 @@ class FakePiRuntime implements PiCredentialRuntime {
   logoutError?: Error;
   refreshResult: PiRefreshResult = { aborted: false, errors: new Map() };
   refreshError?: Error;
-  configurationError?: string;
   submittedValue?: string;
 
   getProviders() {
@@ -96,8 +95,8 @@ class FakePiRuntime implements PiCredentialRuntime {
     return this.refreshResult;
   }
 
-  getError() {
-    return this.configurationError;
+  getError(): never {
+    throw new Error("unrelated SDK aggregate error");
   }
 }
 
@@ -317,6 +316,19 @@ describe("Pi credential boundary", () => {
       "anthropic/shared%2Fmodel",
     ]);
     expect(JSON.stringify(status)).not.toContain("secret-bearing provider failure");
+  });
+
+  it("does not treat an unrelated runtime aggregate error as every provider's failure", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.credentials.set("anthropic", "api_key");
+    const { boundary } = createBoundary(runtime);
+
+    const status = await boundary.readStatus();
+
+    expect(status.catalog).toMatchObject({ kind: "models-available" });
+    expect(status.providers.find((item) => item.id === "anthropic")).toMatchObject({
+      status: "models-available",
+    });
   });
 
   it("does not resolve or refresh a stored credential expression", async () => {

@@ -65,7 +65,6 @@ export interface PiCredentialRuntime extends PiCatalogRuntime {
     force: boolean;
     signal: AbortSignal;
   }): Promise<PiRefreshResult>;
-  getError(): string | undefined;
 }
 
 export interface PiCredentialBoundaryDependencies {
@@ -465,13 +464,7 @@ export class PiCredentialBoundary {
       }
     }
 
-    let runtimeHasError = false;
-    try {
-      runtimeHasError = this.runtime.getError() !== undefined;
-    } catch {
-      runtimeHasError = true;
-    }
-    if (credentialReadFailed || runtimeHasError) {
+    if (credentialReadFailed) {
       for (const provider of installed) {
         if (states.get(provider.id)?.configured) failedProviders.add(provider.id);
       }

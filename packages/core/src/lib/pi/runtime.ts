@@ -58,7 +58,6 @@ export async function createPiCredentialBoundary(
   const runtime = await ModelRuntime.create({
     authPath,
     modelsPath: null,
-    modelsStorePath: join(agentDir, "models-store.json"),
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -76,7 +75,6 @@ export async function createPiCredentialBoundary(
       }),
     logout: (providerId) => runtime.logout(providerId),
     refresh: (refreshOptions) => runtime.refresh(refreshOptions),
-    getError: () => runtime.getError(),
   };
   return new PiCredentialBoundary({
     runtime: adapter,

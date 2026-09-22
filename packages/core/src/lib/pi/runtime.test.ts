@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import { createPiCredentialBoundary, inspectPiStoredCredential } from "./runtime.js";
 
 describe("official Pi SDK credential adapter", () => {
@@ -25,6 +25,9 @@ describe("official Pi SDK credential adapter", () => {
   it("writes a synthetic literal through Pi storage with restricted permissions", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-storage-"));
     const syntheticToken = "synthetic-test-token";
+    const fetch = rs
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     try {
       const boundary = await createPiCredentialBoundary({ agentDir, environment: {} });
       const result = await boundary.saveCredential("anthropic", syntheticToken, {
@@ -35,6 +38,28 @@ describe("official Pi SDK credential adapter", () => {
       expect(JSON.stringify(result)).not.toContain(syntheticToken);
       expect((await stat(join(agentDir, "auth.json"))).mode & 0o777).toBe(0o600);
       expect(await readFile(join(agentDir, "auth.json"), "utf8")).toContain(syntheticToken);
+      expect(fetch).toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+      await rm(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["$VAR", "expression"],
+    ["${VAR}", "expression"],
+    ["$$literal", "literal"],
+    ["$!literal", "literal"],
+    ["trailing$", "literal"],
+  ] as const)("classifies Pi credential template syntax without resolving %s", async (key, safety) => {
+    const agentDir = await mkdtemp(join(tmpdir(), "rome-pi-template-"));
+    const authPath = join(agentDir, "auth.json");
+    try {
+      await writeFile(authPath, JSON.stringify({ anthropic: { type: "api_key", key } }), {
+        mode: 0o600,
+      });
+
+      expect(inspectPiStoredCredential("anthropic", authPath)).toBe(safety);
     } finally {
       await rm(agentDir, { recursive: true, force: true });
     }
