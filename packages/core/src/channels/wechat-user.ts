@@ -11,12 +11,12 @@ import { createLogger } from "../logger.js";
 const log = createLogger("wechat-user");
 
 /**
- * The pinned client build. WeChat ships no stable download for a given version,
- * so the digest is the pin: the key-recovery step locates its breakpoint by
- * scanning this exact binary, and a silently newer client would move it.
+ * The pinned client build. Rome mirrors this exact build because WeChat's own
+ * download URL carries no version and rolls forward. The digest is the pin: the
+ * key-recovery step locates its breakpoint by scanning this exact binary, and a
+ * silently different client would move it.
  */
-export const WECHAT_CLIENT_URL =
-  "https://packages.romeos.io/wechat-4.1.13.9-amd64.deb";
+export const WECHAT_CLIENT_URL = "https://packages.romeos.io/wechat-4.1.13.9-amd64.deb";
 const WECHAT_CLIENT_SHA256 = "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
 
 /**
