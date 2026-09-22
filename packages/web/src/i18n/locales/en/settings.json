@@ -809,6 +809,7 @@
     "checkedAt": "Last checked at {{time}}.",
     "empty": "No devices are authorized. Run rome-node connect on a computer and approve access to connect it.",
     "connection": {
+      "not_running": "Service not running",
       "online": "Connected",
       "stopped": "Not connected",
       "connecting": "Connecting",
@@ -820,6 +821,7 @@
       "incompatible": "Restart required"
     },
     "help": {
+      "not_running": "The device service is not running. Device connection status is unknown.",
       "unavailable": "Device status is unavailable. Try refreshing.",
       "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
       "incompatible": "Restart the device service with rome-node daemon stop and rome-node daemon start."

@@ -183,10 +183,13 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
       if (!status) throw new Error("Invalid caller daemon status.");
       return status;
     },
-    async getDevicesStatus(): Promise<DevicesStatus> {
+    /** Probes devices through an existing daemon. Returns null without starting one if absent. */
+    async getDevicesStatus(): Promise<DevicesStatus | null> {
       let body: unknown;
       try {
-        body = await call("devices.status");
+        const rpc = await connect(false);
+        if (!rpc) return null;
+        body = await rpc.request("devices.status");
       } catch (error) {
         if (error instanceof RpcError && error.code === -32601) throw new DaemonVersionError();
         throw error;

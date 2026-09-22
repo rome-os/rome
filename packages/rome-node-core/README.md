@@ -37,7 +37,8 @@ not the online state of remote devices. `listDevices()` returns authorized
 devices without asserting that they are online.
 
 `getDevicesStatus()` checks device reachability through read-only `system.info`
-requests and returns `{ connection, checkedAt, devices }`. Each device has
+requests through an existing daemon and returns `{ connection, checkedAt, devices }`.
+It returns `null` when no daemon runs and never starts or restarts one. Each device has
 `id`, `name`, `platform`, and status `connected`, `not_connected`, `unknown`, or
 `revoked`. The daemon shares concurrent checks and caches snapshots for ten
 seconds. A timeout is unknown, not proof that a device is offline. This call

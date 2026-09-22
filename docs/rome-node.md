@@ -38,6 +38,11 @@ Settings → Devices shows the caller connection, connected device count, and ea
 device's name, platform, and status. The dashboard refreshes every 15 seconds
 while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
 
+It only connects to an existing daemon and returns `null` if none is running.
+Opening the page, polling, and refreshing never start or restart the daemon.
+The HTTP API reports `not_running` in that case, and the page shows an unknown
+device count. Explicit daemon startup and device commands can start it again.
+
 Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,
 `target_unavailable` means not connected, and a timeout or other failure means

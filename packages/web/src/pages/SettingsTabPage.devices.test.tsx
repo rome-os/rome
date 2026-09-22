@@ -99,6 +99,30 @@ it("explains missing authorization instead of reporting zero devices", async () 
   expect(screen.queryByText("0 connected devices")).toBeNull();
 });
 
+it("clears device counts when the service stops and keeps refresh passive", async () => {
+  let running = true;
+  renderDevices(() =>
+    running
+      ? {
+          connection: "online",
+          checkedAt: new Date().toISOString(),
+          devices: [{ id: "mac", name: "Mac", platform: "macos", status: "connected" }],
+        }
+      : { connection: "not_running", checkedAt: new Date().toISOString(), devices: [] },
+  );
+  expect(await screen.findByText("1 connected device")).toBeTruthy();
+  running = false;
+  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(await screen.findByText("Service not running")).toBeTruthy();
+  expect(
+    screen.getByText("The device service is not running. Device connection status is unknown."),
+  ).toBeTruthy();
+  expect(screen.queryByText("1 connected device")).toBeNull();
+  expect(screen.queryByText("0 connected devices")).toBeNull();
+  expect(screen.queryByText("0 authorized devices")).toBeNull();
+  expect(screen.queryByText("Mac")).toBeNull();
+});
+
 it("does not present zero as the connected count when every check is unknown", async () => {
   renderDevices(() => ({
     connection: "retrying",

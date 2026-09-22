@@ -801,6 +801,7 @@
     "checkedAt": "上次检查：{{time}}。",
     "empty": "尚无已授权设备。在电脑上运行 rome-node connect 并批准访问即可连接。",
     "connection": {
+      "not_running": "服务未运行",
       "online": "已连接",
       "stopped": "未连接",
       "connecting": "正在连接",
@@ -812,6 +813,7 @@
       "incompatible": "需要重启"
     },
     "help": {
+      "not_running": "设备服务未运行，暂时无法确认设备连接状态。",
       "unavailable": "暂时无法获取设备状态，请刷新重试。",
       "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
       "incompatible": "运行 rome-node daemon stop，再运行 rome-node daemon start，重启设备服务。"

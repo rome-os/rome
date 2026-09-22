@@ -17,7 +17,10 @@ export function createNodeDevicesService(
     async getStatus(): Promise<DevicesStatus> {
       try {
         client ??= createClient();
-        return devicesStatusSchema.parse(await client.getDevicesStatus());
+        const status = await client.getDevicesStatus();
+        return status === null
+          ? { connection: "not_running", checkedAt: new Date().toISOString(), devices: [] }
+          : devicesStatusSchema.parse(status);
       } catch (error) {
         if (error instanceof DaemonVersionError) {
           client?.disconnect();

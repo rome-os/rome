@@ -25,6 +25,17 @@ it("returns device checks without credentials or caching at the HTTP edge", asyn
 });
 
 describe("device status failures", () => {
+  it("reports a missing daemon without fabricating an empty connected-device count", async () => {
+    const service = createNodeDevicesService(() => ({
+      disconnect() {},
+      getDevicesStatus: async () => null,
+    }));
+    const response = await devicesRoutes({ nodeDevices: service }).request("/devices");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ connection: "not_running", devices: [] });
+    service.close();
+  });
+
   it.each([
     [new CallerConfigurationError("not_configured", "secret"), "not_configured"],
     [new DaemonVersionError(), "incompatible"],

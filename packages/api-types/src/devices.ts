@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const devicesStatusSchema = z.object({
   connection: z.enum([
+    "not_running",
     "not_configured",
     "unavailable",
     "incompatible",

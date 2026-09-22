@@ -284,16 +284,47 @@ describe("CLI and JavaScript clients sharing one caller daemon", () => {
 
   it("reads device reachability over the shared daemon without replacing the CLI Gateway connection", async () => {
     const f = await fixture();
+    expect((await f.cli("device", "describe", "target")).code).toBe(0);
     const status = await f.api(`console.log(JSON.stringify(await client.getDevicesStatus()));`);
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
       connection: "online",
       devices: [{ id: "target", status: "connected" }],
     });
-    expect((await f.cli("device", "describe", "target")).code).toBe(0);
     expect(f.connections()).toBe(1);
     expect(f.requests()).toBe(2);
   });
+
+  it("keeps device status polling passive before startup and after an explicit stop", async () => {
+    const f = await fixture();
+    const client = createNodeClient(f.config);
+    cleanup.push(async () => client.disconnect());
+    expect(await client.getDevicesStatus()).toBeNull();
+    const initial = await f.api(`console.log(JSON.stringify(await client.getDevicesStatus()));`);
+    expect(initial.code, initial.stderr).toBe(0);
+    expect(JSON.parse(initial.stdout)).toBeNull();
+    expect(JSON.parse((await f.cli("daemon", "status")).stdout)).toEqual({ running: false });
+    expect(f.connections()).toBe(0);
+
+    expect((await f.cli("daemon", "start")).code).toBe(0);
+    expect(await client.getDevicesStatus()).toMatchObject({ connection: "online" });
+    expect(f.connections()).toBe(1);
+    await stopDaemon(f.config);
+    expect(await client.getConnectionStatus()).toBeNull();
+    for (let poll = 0; poll < 3; poll++) expect(await client.getDevicesStatus()).toBeNull();
+    const afterStop = await f.api(`console.log(JSON.stringify(await client.getDevicesStatus()));`);
+    expect(afterStop.code, afterStop.stderr).toBe(0);
+    expect(JSON.parse(afterStop.stdout)).toBeNull();
+    expect(JSON.parse((await f.cli("daemon", "status")).stdout)).toEqual({ running: false });
+    expect(f.connections()).toBe(1);
+
+    expect((await f.cli("device", "describe", "target")).code).toBe(0);
+    expect(await client.getDevicesStatus()).toMatchObject({
+      connection: "online",
+      devices: [{ id: "target", status: "connected" }],
+    });
+    expect(f.connections()).toBe(2);
+  }, 30000);
 
   it("returns unknown_outcome without replay when Gateway drops the response", async () => {
     const f = await fixture(true);

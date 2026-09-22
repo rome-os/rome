@@ -29,7 +29,9 @@ export function DevicesSection() {
   });
   const data = query.isError ? undefined : query.data;
   const connection = data?.connection ?? "unavailable";
-  const unavailable = ["unavailable", "incompatible", "not_configured"].includes(connection);
+  const unavailable = ["unavailable", "incompatible", "not_configured", "not_running"].includes(
+    connection,
+  );
   const devices = data?.devices ?? [];
   const connected = devices.filter((device) => device.status === "connected").length;
   const unknown = devices.filter((device) => device.status === "unknown").length;
@@ -100,7 +102,7 @@ export function DevicesSection() {
                   className="mt-4 text-ui text-muted-foreground"
                 >
                   {t(
-                    `devices.help.${connection as "unavailable" | "incompatible" | "not_configured"}`,
+                    `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
                   )}
                 </p>
               ) : devices.length === 0 ? (
