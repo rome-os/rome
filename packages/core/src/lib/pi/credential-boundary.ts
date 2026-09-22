@@ -398,12 +398,7 @@ export class PiCredentialBoundary {
   ): ProviderCredentialState {
     const storedCredential = stored.get(providerId);
     if (storedCredential) {
-      let safety: PiStoredCredentialSafety = "unreadable";
-      try {
-        safety = this.inspectStoredCredential(providerId);
-      } catch {
-        // Fail closed if credential metadata cannot be inspected without resolving it.
-      }
+      const safety = this.storedCredentialSafety(providerId);
       return {
         source: "stored",
         configured: true,
@@ -428,16 +423,33 @@ export class PiCredentialBoundary {
         if (auth.source === "environment") {
           return { source: "environment", configured: true, safeForRefresh: true };
         }
+        if (auth.source === "stored") {
+          const safety = this.storedCredentialSafety(providerId);
+          return {
+            source: "stored",
+            configured: true,
+            safeForRefresh: safety === "literal" || safety === "oauth",
+          };
+        }
         return {
           source: "external",
           configured: true,
-          safeForRefresh: auth.source !== "models_json_command",
+          safeForRefresh: auth.source === "fallback" || auth.source === "models_json_key",
         };
       }
     } catch {
       return { source: "none", configured: false, safeForRefresh: false };
     }
     return { source: "none", configured: false, safeForRefresh: false };
+  }
+
+  private storedCredentialSafety(providerId: string): PiStoredCredentialSafety {
+    try {
+      return this.inspectStoredCredential(providerId);
+    } catch {
+      // Fail closed if credential metadata cannot be inspected without resolving it.
+      return "unreadable";
+    }
   }
 
   private async collectStatus(options: ReadStatusOptions = {}): Promise<PiConfigurationStatus> {

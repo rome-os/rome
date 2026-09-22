@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, rs } from "@rstest/core";
+import { PI_ONE_TOKEN_PROVIDERS } from "./catalog.js";
 import { createPiCredentialBoundary, inspectPiStoredCredential } from "./runtime.js";
 
 describe("official Pi SDK credential adapter", () => {
@@ -12,9 +13,7 @@ describe("official Pi SDK credential adapter", () => {
       const boundary = await createPiCredentialBoundary({ agentDir, environment: {} });
       const providers = boundary.listProviders().map((provider) => provider.id);
 
-      expect(providers).toContain("anthropic");
-      expect(providers).toContain("kimi-coding");
-      expect(providers).toContain("moonshotai-cn");
+      expect(providers).toEqual(PI_ONE_TOKEN_PROVIDERS.map((provider) => provider.id));
       expect(providers).not.toContain("cloudflare-ai-gateway");
       expect(providers).not.toContain("openai-codex");
     } finally {
@@ -27,7 +26,7 @@ describe("official Pi SDK credential adapter", () => {
     const syntheticToken = "synthetic-test-token";
     const fetch = rs
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+      .mockImplementation(() => new Response(JSON.stringify([]), { status: 200 }));
     try {
       const boundary = await createPiCredentialBoundary({ agentDir, environment: {} });
       const result = await boundary.saveCredential("anthropic", syntheticToken, {

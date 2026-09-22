@@ -484,6 +484,20 @@ describe("Pi credential boundary", () => {
     });
   });
 
+  it("fails closed when stale runtime metadata claims a stored expression is external", async () => {
+    const runtime = new FakePiRuntime();
+    runtime.authStatuses.set("anthropic", { configured: true, source: "stored" });
+    const { boundary } = createBoundary(runtime, { safety: { anthropic: "expression" } });
+
+    const status = await boundary.refresh("anthropic");
+
+    expect(runtime.refreshCalls).toHaveLength(0);
+    expect(runtime.availableCalls).toHaveLength(0);
+    expect(status).toMatchObject({
+      catalog: { kind: "discovery-failed", failedProviders: ["anthropic"] },
+    });
+  });
+
   it("sanitizes SDK failures and never logs or returns the submitted secret", async () => {
     const submittedSecret = randomBytes(32).toString("hex");
     const runtime = new FakePiRuntime();
