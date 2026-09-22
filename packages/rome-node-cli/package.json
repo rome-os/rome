@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/node",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone CLI for Rome remote devices",
   "license": "MIT",
   "type": "module",
@@ -33,9 +33,9 @@
   "devDependencies": {
     "@rstest/core": "^0.11.11",
     "@types/node": "25.2.3",
+    "@types/ws": "^8.18.0",
     "typescript": "^5.9.3",
-    "ws": "^8.18.0",
-    "@types/ws": "^8.18.0"
+    "ws": "^8.18.0"
   },
   "repository": {
     "type": "git",
