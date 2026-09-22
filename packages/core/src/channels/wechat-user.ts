@@ -1,7 +1,7 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, symlink } from "node:fs/promises";
+import { access, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,8 @@ const log = createLogger("wechat-user");
  * silently different client would move it.
  */
 export const WECHAT_CLIENT_URL = "https://packages.romeos.io/wechat-4.1.13.9-amd64.deb";
-const WECHAT_CLIENT_SHA256 = "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
+export const WECHAT_CLIENT_SHA256 =
+  "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
 
 /**
  * The reader's understanding of WeChat's on-disk formats — SQLCipher page
@@ -379,31 +380,8 @@ export class WechatUserRuntime {
     const clientRoot = join(this.prefix, "client");
     await mkdir(this.prefix, { recursive: true });
 
-    if (!(await exists(deb))) {
-      log.info("wechat_user.downloading_client", { url: WECHAT_CLIENT_URL });
-      const downloaded = await this.run(
-        "curl",
-        ["-fsSL", "--retry", "3", "-o", `${deb}.part`, WECHAT_CLIENT_URL],
-        { timeoutMs: INSTALL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
-      );
-      if (downloaded.code !== 0) {
-        throw new WechatUserRuntimeError(
-          `Could not download the WeChat client: ${downloaded.stderr.trim() || "curl failed"}`,
-        );
-      }
-      await this.run("mv", [`${deb}.part`, deb]);
-    }
-
     if (!(await exists(join(this.clientDir, "wechat")))) {
-      const checksum = await this.run("sha256sum", [deb], {
-        ...(signal ? { signal } : {}),
-      });
-      if (checksum.code !== 0 || checksum.stdout.trim().split(/\s+/)[0] !== WECHAT_CLIENT_SHA256) {
-        throw new WechatUserRuntimeError(
-          "The WeChat client checksum does not match the supported 4.1.13.9 build. " +
-            "Install the supported archive or update Rome before connecting.",
-        );
-      }
+      await this.fetchClientArchive(deb, signal);
       log.info("wechat_user.unpacking_client", { prefix: clientRoot });
       await mkdir(clientRoot, { recursive: true });
       const unpacked = await this.run("dpkg-deb", ["-x", deb, clientRoot], {
@@ -418,6 +396,55 @@ export class WechatUserRuntime {
     }
 
     await this.ensureClientLink();
+  }
+
+  /**
+   * Leave a `deb` at `path` that matches the pinned digest, downloading it if
+   * the cache holds nothing or holds the wrong build.
+   *
+   * The digest admits the cached file rather than merely rejecting it, because
+   * `this.prefix` is volume-backed: a rejected file that stays on disk wins the
+   * `exists` check forever and every later install fails on it. Verifying the
+   * `.part` before the `mv` keeps a wrong download from becoming that file.
+   *
+   * Only the unpack path calls this. Hashing the better part of a gigabyte on
+   * every start, for a client already unpacked, would buy nothing.
+   */
+  private async fetchClientArchive(path: string, signal?: AbortSignal): Promise<void> {
+    if (await exists(path)) {
+      if (await this.matchesClientDigest(path, signal)) return;
+      log.warn("wechat_user.cached_client_rejected", { path });
+      await rm(path, { force: true });
+    }
+
+    log.info("wechat_user.downloading_client", { url: WECHAT_CLIENT_URL });
+    const downloaded = await this.run(
+      "curl",
+      ["-fsSL", "--retry", "3", "-o", `${path}.part`, WECHAT_CLIENT_URL],
+      { timeoutMs: INSTALL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+    );
+    if (downloaded.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not download the WeChat client: ${downloaded.stderr.trim() || "curl failed"}`,
+      );
+    }
+
+    if (!(await this.matchesClientDigest(`${path}.part`, signal))) {
+      await rm(`${path}.part`, { force: true });
+      throw new WechatUserRuntimeError(
+        `The WeChat client downloaded from ${WECHAT_CLIENT_URL} does not match the supported ` +
+          "4.1.13.9 build. Update Rome before connecting.",
+      );
+    }
+    await this.run("mv", [`${path}.part`, path]);
+  }
+
+  /** Whether the file at `path` is the pinned client build. */
+  private async matchesClientDigest(path: string, signal?: AbortSignal): Promise<boolean> {
+    const checksum = await this.run("sha256sum", [path], {
+      ...(signal ? { signal } : {}),
+    });
+    return checksum.code === 0 && checksum.stdout.trim().split(/\s+/)[0] === WECHAT_CLIENT_SHA256;
   }
 
   private async ensureClientLink(): Promise<void> {
