@@ -333,6 +333,20 @@ describe("WechatUserRuntime.install", () => {
     expect(calls.some((c) => c[0] === "curl")).toBe(false);
   });
 
+  it("keeps a cached archive that sha256sum answered for unparseably", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "the supported build");
+    // Exit 0, but nothing that can be read as a digest.
+    const { run, calls } = scriptedRun({ sha256sum: () => ok("  \n") });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/Could not checksum/);
+
+    expect(existsSync(deb)).toBe(true);
+    expect(calls.some((c) => c[0] === "curl")).toBe(false);
+  });
+
   it("raises a runtime error when the verified archive cannot be stored", async () => {
     const h = await tempHome();
     await mkdir(join(h, ".local/share/wechat"), { recursive: true });

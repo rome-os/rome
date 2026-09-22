@@ -421,7 +421,7 @@ export class WechatUserRuntime {
         digest,
         expected: WECHAT_CLIENT_SHA256,
       });
-      await rm(path, { force: true });
+      await this.discard(path);
     }
 
     log.info("wechat_user.downloading_client", { url: WECHAT_CLIENT_URL });
@@ -438,7 +438,7 @@ export class WechatUserRuntime {
 
     const digest = await this.clientDigest(`${path}.part`, signal);
     if (digest !== WECHAT_CLIENT_SHA256) {
-      await rm(`${path}.part`, { force: true });
+      await this.discard(`${path}.part`);
       throw new WechatUserRuntimeError(
         `The WeChat client downloaded from ${WECHAT_CLIENT_URL} hashes to ${digest}, not the ` +
           "supported 4.1.13.9 build. Update Rome before connecting.",
@@ -451,6 +451,20 @@ export class WechatUserRuntime {
         `Could not store the WeChat client at ${path}: ${promoted.stderr.trim() || "mv failed"}`,
       );
     }
+  }
+
+  /**
+   * Remove `path`, best effort.
+   *
+   * Every caller is already on its way to reporting why the file had to go. A
+   * failed unlink must not replace that story with a filesystem one, and it
+   * costs nothing: the cache path is overwritten by the `mv` that follows, and
+   * a stale `.part` is truncated by the next `curl -o`.
+   */
+  private async discard(path: string): Promise<void> {
+    await rm(path, { force: true }).catch((error: unknown) => {
+      log.warn("wechat_user.client_archive_not_removed", { path, error: String(error) });
+    });
   }
 
   /**
@@ -470,7 +484,16 @@ export class WechatUserRuntime {
           `${checksum.stderr.trim() || "sha256sum failed"}`,
       );
     }
-    return checksum.stdout.trim().split(/\s+/)[0] ?? "";
+    const digest = checksum.stdout.trim().split(/\s+/)[0] ?? "";
+    // An answer this cannot parse is as unread as one that never came, and
+    // reporting it as a mismatch would evict the archive it failed to measure.
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+      throw new WechatUserRuntimeError(
+        `Could not checksum the WeChat client at ${path}: sha256sum answered ` +
+          `"${checksum.stdout.trim().slice(0, 80)}"`,
+      );
+    }
+    return digest;
   }
 
   private async ensureClientLink(): Promise<void> {
