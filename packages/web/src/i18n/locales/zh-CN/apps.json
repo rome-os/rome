@@ -91,6 +91,8 @@
     "chatHint": "在此应用的源码项目中打开对话。",
     "publishTitle": "发布到应用商店",
     "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
+    "publishHintListed": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
+    "publishHintUnlisted": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。尚未发布到商店。",
     "uninstallHint": "移除应用，数据会保留以便日后重装。",
     "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },

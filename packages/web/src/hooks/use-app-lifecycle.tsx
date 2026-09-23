@@ -189,8 +189,9 @@ export function useAppLifecycle(
 
   // POST /apps/:id/publish — repack the installed bundle and push it to the
   // App Store. Nothing changes locally on success (the published version equals
-  // the installed one, so it can't become an upgrade candidate either) — no
-  // query invalidation, just the acting state and toasts.
+  // the installed one, so it can't become an upgrade candidate either) — only
+  // the app's store listing version is refetched, so the details page stops
+  // showing the pre-publish version.
   const publishMutation = useMutation({
     mutationFn: (vars: { id: string; fallback: string }) =>
       fetchJson<AppPublishResponse>(`/api/apps/${encodeURIComponent(vars.id)}/publish`, {
@@ -199,6 +200,9 @@ export function useAppLifecycle(
       }),
     onMutate: ({ id }) => markActing(id, t("installed.publishing")),
     onError: (err) => toastError(err),
+    onSuccess: (_result, { id }) => {
+      void invalidateApps.storeListing(id);
+    },
     onSettled: clearActing,
   });
 

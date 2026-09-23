@@ -22,6 +22,7 @@ export interface AppsResult {
 // useInvalidateApps) so lifecycle UX never blocks on the slow probe.
 const LIST_QUERY_KEY = ["apps", "list"] as const;
 const UPDATES_QUERY_KEY = ["apps", "updates"] as const;
+const STORE_LISTING_QUERY_KEY = ["apps", "store-listing"] as const;
 
 export interface AppsListResult {
   apps: InstalledAppCard[] | null;
@@ -121,6 +122,39 @@ export function useApps(): AppsResult {
   };
 }
 
+export type StoreListingVersion = { published: true; version: string } | { published: false };
+
+// The version the App Store already holds for an app id (its listing's
+// all-time high-water mark — the bar a publish must strictly exceed), so the
+// publish row can say whether publishing will be accepted. Advisory: an
+// unreachable or unconfigured store, a deleted listing, or any other failure
+// yields null and the row keeps its plain hint; the store still enforces the
+// version policy on publish.
+export function useStoreListingVersion(
+  appId: string,
+  options: { enabled: boolean },
+): StoreListingVersion | null {
+  const listing = useQuery({
+    queryKey: [...STORE_LISTING_QUERY_KEY, appId],
+    enabled: options.enabled,
+    staleTime: 60_000,
+    queryFn: async ({ signal }): Promise<StoreListingVersion | null> => {
+      // Scoped ids (`@handle/slug`) map onto the proxy's two-segment route.
+      const path = appId.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/app-store/listings/${path}`, {
+        cache: "no-store",
+        signal,
+      });
+      if (response.status === 404) return { published: false };
+      if (!response.ok) throw new Error("Listing request failed");
+      const body = (await response.json()) as { listing?: { highestVersion?: unknown } };
+      const version = body.listing?.highestVersion;
+      return typeof version === "string" ? { published: true, version } : null;
+    },
+  });
+  return listing.isError ? null : (listing.data ?? null);
+}
+
 export interface AppInvalidators {
   // The authoritative list. Await this for lifecycle "acting" UX — it settles
   // as soon as the list is back, independent of the upgrade probe.
@@ -129,6 +163,8 @@ export interface AppInvalidators {
   // can change upgrade availability (install / upgrade); skip it for ones that
   // can't (enable-disable, public-access, uninstall).
   updates: () => Promise<void>;
+  // One app's App Store listing version. Fire after a successful publish.
+  storeListing: (appId: string) => Promise<void>;
 }
 
 // Hand back to any mutation so a successful write pulls fresh server truth
@@ -143,5 +179,7 @@ export function useInvalidateApps(): AppInvalidators {
     // app keeps its green "update available" badge and invites a redundant
     // second upgrade until the fresh probe returns.
     updates: () => queryClient.resetQueries({ queryKey: UPDATES_QUERY_KEY }),
+    storeListing: (appId) =>
+      queryClient.invalidateQueries({ queryKey: [...STORE_LISTING_QUERY_KEY, appId] }),
   };
 }

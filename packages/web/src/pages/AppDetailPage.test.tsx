@@ -60,6 +60,8 @@ function installedCard(
 function mockBackend(initial: {
   installed: InstalledAppCard[];
   readmeByAppId?: Record<string, string | null>;
+  /** App Store high-water mark per app id; null means the store has no listing (404). */
+  storeVersionByAppId?: Record<string, string | null>;
   /** When set, GET /api/apps fails hard with this status. */
   listFailStatus?: number;
   /** POST /apps replaces the target card with this (upgrade lands server-side). */
@@ -118,6 +120,23 @@ function mockBackend(initial: {
         if (idx >= 0) installed.splice(idx, 1);
         return ok({ appId: id, purged: false });
       }
+    }
+    const storeMatch = url.match(/^\/api\/app-store\/listings\/(.+)$/);
+    if (storeMatch && initial.storeVersionByAppId) {
+      const id = storeMatch[1].split("/").map(decodeURIComponent).join("/");
+      const version = initial.storeVersionByAppId[id];
+      if (version == null) {
+        return { ok: false, status: 404, json: async () => ({ error: "not found" }) } as Response;
+      }
+      return ok({ available: true, listing: { id, highestVersion: version } });
+    }
+    if (url === "/api/apps/weather/publish" && method === "POST") {
+      if (initial.storeVersionByAppId) initial.storeVersionByAppId.weather = "1.0.0";
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ appId: "weather", version: { version: "1.0.0" } }),
+      } as Response;
     }
     const readmeMatch = url.match(/^\/api\/app-readmes\/([^/]+)$/);
     if (readmeMatch) {
@@ -393,6 +412,60 @@ describe("AppDetailPage manage section", () => {
     expect(within(manage).getByRole("button", { name: "Publish" })).toBeTruthy();
     expect(within(manage).getByRole("button", { name: "Uninstall" })).toBeTruthy();
     expect(within(manage).getByRole("button", { name: "Uninstall and erase data" })).toBeTruthy();
+  });
+
+  it("shows the App Store's version next to the installed one on the publish row", async () => {
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+      storeVersionByAppId: { weather: "1.0.0" },
+    });
+
+    renderPage("weather");
+
+    expect(
+      await screen.findByText(
+        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says an app is not on the App Store yet, and refreshes the version after publishing", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+      storeVersionByAppId: { weather: null },
+    });
+
+    renderPage("weather");
+
+    const manage = await screen.findByRole("region", { name: "Manage" });
+    expect(
+      await within(manage).findByText(
+        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
+      ),
+    ).toBeTruthy();
+
+    await user.click(within(manage).getByRole("button", { name: "Publish" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Publish" }));
+
+    expect(
+      await within(manage).findByText(
+        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps the plain publish hint when the App Store can't be read", async () => {
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+    });
+
+    renderPage("weather");
+
+    expect(
+      await screen.findByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
+    ).toBeTruthy();
   });
 
   it("hides the manage section when no lifecycle action applies", async () => {
