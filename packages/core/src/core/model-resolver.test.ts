@@ -372,6 +372,9 @@ describe("ModelResolver", () => {
       codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
     });
     await expect(
+      noEntitlements.getModelProvider({ exact: { providerId: "anthropic", model: "gpt-6-sol" } }),
+    ).resolves.toMatchObject({ modelProvider: claude, model: "gpt-6-sol" });
+    await expect(
       noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-astra" } }),
     ).rejects.toMatchObject({
       code: "model_unavailable",

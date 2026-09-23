@@ -195,7 +195,12 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
    * Throws when the model is entitlement-gated and access is lost. Astra ships
    * to the same paid plans as Sol, so it rides the Sol entitlement.
    */
-  const requireModelAccess = (model: string, codex: AIToolStateValue["codex"]): void => {
+  const requireModelAccess = (
+    providerId: ProviderId,
+    model: string,
+    codex: AIToolStateValue["codex"],
+  ): void => {
+    if (providerId !== "openai") return;
     const denied =
       (model === "gpt-6-astra" && !codex.solAccess) ||
       (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
@@ -219,7 +224,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(model, state.codex);
+        requireModelAccess(provider.id, model, state.codex);
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
@@ -227,7 +232,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(selection.model, state.codex);
+        requireModelAccess(provider.id, selection.model, state.codex);
         return { modelProvider: provider, model: selection.model };
       }
 
