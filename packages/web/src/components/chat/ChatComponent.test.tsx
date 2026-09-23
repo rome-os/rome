@@ -54,6 +54,8 @@ function renderChatComponent(
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
+    settings?: Record<string, unknown>;
+    agents?: Array<Record<string, unknown>>;
   },
 ) {
   const queryClient = new QueryClient({
@@ -68,7 +70,7 @@ function renderChatComponent(
   ) => {
     const url = String(input);
     if (url === "/api/settings") {
-      return Response.json({ guardianName: "Ada", agentName: "Atlas" });
+      return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
     }
     if (url === "/api/people") {
       return Response.json({
@@ -77,7 +79,13 @@ function renderChatComponent(
       });
     }
     if (url === "/api/chat/sessions") {
+      if (init?.method === "POST") {
+        return Response.json({ id: "new-session" });
+      }
       return Response.json(homeData?.sessions ?? []);
+    }
+    if (url === "/api/chat/agents") {
+      return Response.json(homeData?.agents ?? []);
     }
     if (url === "/api/chat/projects") {
       return Response.json({
@@ -152,6 +160,85 @@ describe("ChatComponent agent identity", () => {
     renderChatComponent({ sessionId: "session-1" });
 
     await waitFor(() => expect(screen.getByTestId("session-chat").textContent).toBe("Atlas"));
+  });
+
+  const agentCatalog = [
+    {
+      ownerId: "notes",
+      ownerType: "app",
+      label: "Notes",
+      description: "Works with notes",
+      iconUrl: null,
+      agents: [{ name: "notes:writer", localName: "Writer", description: "Drafts notes" }],
+    },
+    {
+      ownerId: "core",
+      ownerType: "core",
+      label: "Rome",
+      description: "",
+      iconUrl: null,
+      agents: [{ name: "core:main", localName: "Rome", description: "Main agent" }],
+    },
+  ];
+
+  it("seeds a fresh draft from the saved default before creating the session", async () => {
+    const user = userEvent.setup();
+    const { fetchSpy } = renderChatComponent(
+      {},
+      {
+        sessions: [],
+        projects: [],
+        settings: { webchatDefaultAgent: "notes:writer" },
+        agents: agentCatalog,
+      },
+    );
+
+    expect(await screen.findByText("Writer")).toBeTruthy();
+    await user.type(screen.getByRole("textbox"), "Draft this");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const create = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url) === "/api/chat/sessions" && init?.method === "POST",
+      );
+      expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({
+        agentName: "notes:writer",
+      });
+    });
+  });
+
+  it("keeps an agent-specific entry point ahead of the saved default", async () => {
+    const user = userEvent.setup();
+    const { fetchSpy } = renderChatComponent(
+      {
+        initialAgentMention: {
+          appId: "calendar",
+          appLabel: "Calendar",
+          agentName: "calendar:scheduler",
+        },
+      },
+      {
+        sessions: [],
+        projects: [],
+        settings: { webchatDefaultAgent: "notes:writer" },
+        agents: agentCatalog,
+      },
+    );
+
+    expect(await screen.findByText("Scheduler")).toBeTruthy();
+    expect(screen.queryByText("Writer")).toBeNull();
+    await user.type(screen.getByRole("textbox"), "Plan this");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const create = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url) === "/api/chat/sessions" && init?.method === "POST",
+      );
+      expect(JSON.parse(String(create?.[1]?.body))).toMatchObject({
+        agentName: "calendar:scheduler",
+      });
+    });
+    expect(fetchSpy.mock.calls.some(([url]) => String(url) === "/api/chat/agents")).toBe(false);
   });
 });
 

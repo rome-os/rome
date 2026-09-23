@@ -20,16 +20,22 @@ import { emitSessionsChanged, usePinSession, useSessionsChanged } from "@/lib/se
 import {
   ChatApiError,
   createSession as apiCreateSession,
+  listChatAgents,
   listSessions,
   postSessionTurn,
 } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
+import { useQuery } from "@tanstack/react-query";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import type { AgentMention, ChatErrorNotice, ChatSession } from "@/lib/chat-types";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
+import {
+  resolveDefaultAgentMention,
+  WEBCHAT_DEFAULT_AGENT_SETTING_KEY,
+} from "@/lib/webchat-default-agent";
 
 export type { SessionMessage };
 
@@ -67,6 +73,26 @@ export function ChatComponent({
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
     typeof settings?.agentName === "string" ? settings.agentName : undefined;
+  const savedDefaultAgent = settings?.[WEBCHAT_DEFAULT_AGENT_SETTING_KEY];
+  const { data: agentCatalog = [] } = useQuery({
+    queryKey: ["chat-agents"],
+    queryFn: async () => {
+      const catalog = await listChatAgents();
+      return Array.isArray(catalog) ? catalog : [];
+    },
+    // Agent-specific entry points already supplied the stronger choice. A
+    // session is also already locked, so neither case needs the draft default.
+    enabled:
+      !sessionId &&
+      (initialAgentMention === null || initialAgentMention === undefined) &&
+      typeof savedDefaultAgent === "string",
+    staleTime: 60_000,
+  });
+  const defaultAgentMention = useMemo(
+    () => resolveDefaultAgentMention(agentCatalog, savedDefaultAgent),
+    [agentCatalog, savedDefaultAgent],
+  );
+  const draftAgentMention = initialAgentMention ?? defaultAgentMention;
 
   const notifySessionsChanged = useCallback(() => {
     emitSessionsChanged();
@@ -379,7 +405,7 @@ export function ChatComponent({
             showProjectSelector
             showModelSelector
             initialProjectName={initialProjectName}
-            initialAgentMention={initialAgentMention}
+            initialAgentMention={draftAgentMention}
             streamError={draftStreamError}
           />
         }

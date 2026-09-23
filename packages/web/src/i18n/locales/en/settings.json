@@ -634,6 +634,12 @@
       "description": "Hides pinned-agent names, avatars, and the composer chip. Applies to this browser only.",
       "toggleLabel": "Mask agent identity in chat"
     },
+    "webchatDefaultAgent": {
+      "title": "Webchat default agent",
+      "description": "Preselects an agent for new dashboard chats. A choice made in a new chat still takes precedence.",
+      "loading": "Loading agents…",
+      "loadFailed": "Could not load the Webchat agent catalog."
+    },
     "developerSettings": {
       "title": "Developer Settings"
     },
