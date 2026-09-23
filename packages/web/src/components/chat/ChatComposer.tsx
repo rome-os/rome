@@ -218,6 +218,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [draftAgentMention, setDraftAgentMention] = useState<AgentMention | null>(
     initialAgentMention,
   );
+  // A default can arrive after the settings + catalog requests. Seed it only
+  // while the guardian has not explicitly changed this draft's agent; a saved
+  // default must never masquerade as, or overwrite, a one-chat override.
+  const draftAgentMentionTouchedRef = useRef(false);
+  const initialAgentMentionRef = useRef(initialAgentMention);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   // Index of the `@` that opened the menu. Used to splice the query out of
   // the textarea once the user picks an item.
@@ -236,6 +241,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setMentionQuery("");
     }
   }, [agentMentionLocked]);
+  useEffect(() => {
+    if (agentMentionLocked) return;
+    const previous = initialAgentMentionRef.current;
+    initialAgentMentionRef.current = initialAgentMention;
+    if (draftAgentMentionTouchedRef.current || draftAgentMention !== previous) return;
+    setDraftAgentMention(initialAgentMention);
+  }, [agentMentionLocked, draftAgentMention, initialAgentMention]);
   const effectiveMention = pinnedAgentMention ?? draftAgentMention;
 
   // Open while the message starts with `/` and the cursor is still inside the
@@ -497,6 +509,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         // Mirror acceptMention's cleanup: scoping the draft programmatically
         // must also dismiss any open `@` menu, or its stale anchor/query keeps
         // intercepting Enter/arrow keys against the wrong token.
+        draftAgentMentionTouchedRef.current = true;
         setDraftAgentMention(mention);
         setMentionMenuOpen(false);
         setMentionAnchorIndex(null);
@@ -764,6 +777,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           t.setSelectionRange(next, next);
         });
       }
+      draftAgentMentionTouchedRef.current = true;
       setDraftAgentMention(mention);
       setMentionMenuOpen(false);
       setMentionAnchorIndex(null);
@@ -990,7 +1004,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   ? collaborating.onCancel
                   : pinnedAgentMention
                     ? undefined
-                    : () => setDraftAgentMention(null)
+                    : () => {
+                        draftAgentMentionTouchedRef.current = true;
+                        setDraftAgentMention(null);
+                      }
             }
             removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />

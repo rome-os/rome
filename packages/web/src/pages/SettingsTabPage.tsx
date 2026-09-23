@@ -126,6 +126,9 @@ import {
   fetchConnections,
   type ApiConnection,
 } from "@/lib/connections-api";
+import { listChatAgents } from "@/lib/chat-api";
+import type { AgentCatalogGroup } from "@/lib/chat-types";
+import { findMainAgentName, WEBCHAT_DEFAULT_AGENT_SETTING_KEY } from "@/lib/webchat-default-agent";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -134,6 +137,7 @@ interface SettingsData {
   enableFable?: boolean;
   enableImpersonation?: boolean;
   showAiToolUsage?: boolean;
+  webchatDefaultAgent?: string;
 }
 
 interface TailscaleDevice {
@@ -1024,10 +1028,101 @@ function AdvancedSection({
         <SystemDiagnosisSection />
         <ComputerUseSection />
         <PresentationModeSection />
+        <WebchatDefaultAgentSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
     </Measure>
+  );
+}
+
+function WebchatDefaultAgentSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [groups, setGroups] = useState<AgentCatalogGroup[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listChatAgents()
+      .then((catalog) => {
+        if (cancelled) return;
+        setGroups(Array.isArray(catalog) ? catalog : []);
+        setLoadFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const stored = settings[WEBCHAT_DEFAULT_AGENT_SETTING_KEY];
+  const selectedIsLoaded =
+    typeof stored === "string" &&
+    groups?.some((group) => group.agents.some((agent) => agent.name === stored));
+  const effectiveValue = selectedIsLoaded ? stored : groups ? findMainAgentName(groups) : null;
+
+  return (
+    <FormRows>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{t("advanced.webchatDefaultAgent.title")}</FormRowLabel>
+          <FormRowDescription>
+            {loadFailed
+              ? t("advanced.webchatDefaultAgent.loadFailed")
+              : t("advanced.webchatDefaultAgent.description")}
+          </FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
+          <Select
+            value={effectiveValue ?? undefined}
+            onValueChange={(agentName) =>
+              void onSave({ [WEBCHAT_DEFAULT_AGENT_SETTING_KEY]: agentName })
+            }
+            disabled={saving || groups === null || loadFailed}
+          >
+            <SelectTrigger className="w-64" aria-label={t("advanced.webchatDefaultAgent.title")}>
+              <SelectValue placeholder={t("advanced.webchatDefaultAgent.loading")} />
+            </SelectTrigger>
+            <SelectContent>
+              {(groups ?? []).map((group) => (
+                <SelectGroup key={group.ownerId}>
+                  <SelectLabel>
+                    <span className="block">{group.label}</span>
+                    {group.description && (
+                      <span className="block max-w-72 truncate text-aux font-normal text-muted-foreground">
+                        {group.description}
+                      </span>
+                    )}
+                  </SelectLabel>
+                  {group.agents.map((agent) => (
+                    <SelectItem key={agent.name} value={agent.name}>
+                      <span className="flex min-w-0 flex-col">
+                        <span>{agent.localName ?? agent.name}</span>
+                        {agent.description && (
+                          <span className="max-w-72 truncate text-aux text-muted-foreground">
+                            {agent.description}
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormRowControl>
+      </FormRow>
+    </FormRows>
   );
 }
 

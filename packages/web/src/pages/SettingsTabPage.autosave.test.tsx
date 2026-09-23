@@ -52,6 +52,26 @@ function mockSettingsBackend() {
       }
       return ok(settings);
     }
+    if (url === "/api/chat/agents") {
+      return ok([
+        {
+          ownerId: "notes",
+          ownerType: "app",
+          label: "Notes",
+          description: "Works with notes",
+          iconUrl: null,
+          agents: [{ name: "notes:writer", localName: "Writer", description: "Drafts notes" }],
+        },
+        {
+          ownerId: "core",
+          ownerType: "core",
+          label: "Rome",
+          description: "",
+          iconUrl: null,
+          agents: [{ name: "core:main", localName: "Rome", description: "Main agent" }],
+        },
+      ]);
+    }
     if (url === "/api/sentinel-log") return ok([]);
     if (url === "/api/tailscale/devices") {
       return ok({ mode: "oauth", configured: false, devices: [] });
@@ -158,6 +178,26 @@ describe("SettingsPage Advanced autosave", () => {
         url: "/api/settings",
         method: "PUT",
         body: { enableFable: true },
+      }),
+    );
+  });
+
+  it("lists the Webchat catalog and immediately persists its canonical agent id", async () => {
+    const calls = mockSettingsBackend();
+    const user = userEvent.setup();
+    renderAdvancedSettings();
+
+    const picker = await screen.findByRole("combobox", { name: "Webchat default agent" });
+    await user.click(picker);
+    expect(await screen.findByText("Works with notes")).toBeTruthy();
+    expect(screen.getByText("Drafts notes")).toBeTruthy();
+    await user.click(screen.getByText("Writer"));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: "/api/settings",
+        method: "PUT",
+        body: { webchatDefaultAgent: "notes:writer" },
       }),
     );
   });

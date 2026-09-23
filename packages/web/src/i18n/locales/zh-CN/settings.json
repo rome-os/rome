@@ -634,6 +634,12 @@
       "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",
       "toggleLabel": "在聊天中隐藏代理身份"
     },
+    "webchatDefaultAgent": {
+      "title": "Webchat 默认 Agent",
+      "description": "为新的控制台聊天预选 Agent。在新聊天中明确选择的 Agent 仍然优先。",
+      "loading": "正在加载 Agent…",
+      "loadFailed": "无法加载 Webchat Agent 列表。"
+    },
     "developerSettings": {
       "title": "开发者设置"
     },
