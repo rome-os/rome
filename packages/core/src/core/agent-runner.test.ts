@@ -3549,7 +3549,7 @@ describe("AgentRunner", () => {
 
       expect(anthropicSessions).toHaveLength(0);
       expect(openAiSessions).toHaveLength(1);
-      expect(openAiSessions[0].model).toBe("gpt-5.6-luna");
+      expect(openAiSessions[0].model).toBe("gpt-6-luna");
       await manager.shutdown();
 
       const codexLoggedOut = {
@@ -3874,7 +3874,7 @@ describe("AgentRunner", () => {
       state.codex.solAccess = false;
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
-      expect(opens.map((params) => params.model)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra"]);
+      expect(opens.map((params) => params.model)).toEqual(["gpt-6-sol", "gpt-5.6-terra"]);
       expect(opens[1]).toMatchObject({
         isNewSession: false,
         providerThreadId: "codex-thread",
@@ -4104,7 +4104,7 @@ describe("AgentRunner", () => {
       });
 
       await collectMessages(session.sendTurn({ prompt: "first" }).events);
-      expect(opens.map((params) => params.model)).toEqual(["gpt-5.6-sol"]);
+      expect(opens.map((params) => params.model)).toEqual(["gpt-6-sol"]);
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
@@ -4160,13 +4160,13 @@ describe("AgentRunner", () => {
       // the stored provider thread; the successful turn then records the pin.
       expect(opens).toHaveLength(1);
       expect(opens[0]).toMatchObject({
-        model: "gpt-5.6-sol",
+        model: "gpt-6-sol",
         isNewSession: false,
         providerThreadId: "codex-thread",
       });
       expect(await repo.findById(legacyId)).toMatchObject({
         provider: "openai",
-        model: "gpt-5.6-sol",
+        model: "gpt-6-sol",
       });
       await manager.shutdown();
     });
