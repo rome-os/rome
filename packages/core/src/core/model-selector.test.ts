@@ -15,6 +15,11 @@ describe("webchat model selector", () => {
       providerId: "anthropic",
       model: "claude-opus-4-8[1m]",
     });
+    expect(resolveWebchatLargeModelSelection("claude-opus-5-5")).toMatchObject({
+      id: "claude-opus-5-5",
+      providerId: "anthropic",
+      model: "claude-opus-5-5[1m]",
+    });
     expect(resolveWebchatLargeModelSelection("claude-opus-5")).toMatchObject({
       id: "claude-opus-5",
       providerId: "anthropic",
@@ -42,6 +47,14 @@ describe("webchat model selector", () => {
     expect(resolveWebchatLargeModelSelection("gpt-6-astra")).toMatchObject({
       providerId: "openai",
       model: "gpt-6-astra",
+    });
+    expect(resolveWebchatLargeModelSelection("gpt-6-sol")).toMatchObject({
+      providerId: "openai",
+      model: "gpt-6-sol",
+    });
+    expect(resolveWebchatLargeModelSelection("gpt-6-luna")).toMatchObject({
+      providerId: "openai",
+      model: "gpt-6-luna",
     });
     expect(resolveWebchatLargeModelSelection("gpt-5-6-sol")).toMatchObject({
       providerId: "openai",
