@@ -618,6 +618,48 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "pi": {
+      "name": "Pi Coding Agent",
+      "inspectToConfigure": "配置后查看",
+      "configuredCount": "已配置 {{count}} 个提供商",
+      "incrementNotice": "此版本仅含凭据与模型发现；尚未接入聊天。",
+      "configure": "配置",
+      "title": "Pi 提供商配置",
+      "description": "将字面 API 令牌存入 Pi 的凭据存储并发现已认证模型。Rome 不会读回令牌。",
+      "provider": "上游提供商",
+      "token": "API 令牌",
+      "tokenPlaceholder": "粘贴字面令牌",
+      "persistence": "凭据持久化",
+      "externalSource": "外部来源",
+      "catalog": "目录发现",
+      "liveValidity": "实时有效性",
+      "notVerified": "未验证（不会发起计费请求）",
+      "models": "发现的限定模型",
+      "noModels": "未发现该提供商的模型。保存凭据后刷新。",
+      "loading": "正在加载 Pi 设置",
+      "failed": "Pi 设置操作失败。",
+      "refresh": "刷新发现",
+      "save": "保存令牌",
+      "replaceConfirm": "替换此 Pi 提供商已保存的令牌？",
+      "removeConfirm": "移除此 Pi 提供商已保存的令牌？这也会从使用同一存储的其他 Pi 工具中移除它。",
+      "sources": {
+        "stored": "由 Pi 保存",
+        "environment": "外部/环境变量（未保存令牌时使用）",
+        "none": "未配置"
+      },
+      "catalogStatuses": {
+        "models-available": "模型可用",
+        "no-models": "无模型",
+        "discovery-failed": "发现失败"
+      },
+      "saved": "令牌已保存到 Pi。目录状态会单独显示。",
+      "savedSyncFailed": "令牌已保存到 Pi，但目录同步失败。无需重新输入令牌即可刷新发现。",
+      "notPersisted": "Pi 未保存此令牌。请检查后重试。",
+      "removed": "已移除 Pi 存储的凭据。外部凭据（如有）不受影响。",
+      "replaceTitle": "替换 Pi 存储的凭据？",
+      "removeTitle": "移除 Pi 存储的凭据？",
+      "replace": "替换令牌"
     }
   },
   "sentinelLog": {

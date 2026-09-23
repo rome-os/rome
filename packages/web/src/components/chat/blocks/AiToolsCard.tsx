@@ -81,6 +81,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
               <AiToolsPanel
                 hiddenProviders={HIDDEN_PROVIDERS}
                 showHeader={false}
+                showPiSettings={false}
                 showUsage={false}
                 onConnectedChange={(isConnected) => {
                   if (isConnected) setProbe("connected");

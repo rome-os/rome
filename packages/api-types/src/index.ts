@@ -5,5 +5,6 @@ export * from "./conversation-settings.js";
 export * from "./favors.js";
 export * from "./persons.js";
 export * from "./projects.js";
+export * from "./pi-provider.js";
 export * from "./sessions.js";
 export * from "./trace-segments.js";

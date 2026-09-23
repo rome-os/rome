@@ -51,6 +51,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
+import type { PiSettingsService } from "../lib/pi-provider.js";
 
 export interface ApiConfig {
   port: number;
@@ -147,6 +148,8 @@ export interface ApiDeps {
   aiToolState: AIToolState;
   /** Process-global Codex auth/usage operations on the shared app-server. */
   codexAccountService: CodexAccountService;
+  /** Lazy Pi credential and catalog operations for the opt-in AI Tools flow. */
+  piSettings: PiSettingsService;
   /**
    * In-memory snapshot of app access policy, read by `/api/auth/verify` on
    * every proxied request. Kept in sync by the `/api/public-access` PUT handler.

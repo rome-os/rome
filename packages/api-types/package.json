@@ -17,6 +17,7 @@
     "./sessions": "./src/sessions.ts",
     "./anthropic-compatible-providers": "./src/anthropic-compatible-providers.ts",
     "./anthropic-compatible-env": "./src/anthropic-compatible-env.ts",
+    "./pi-provider": "./src/pi-provider.ts",
     "./app-keys": "./src/app-keys.ts",
     "./apps-runtime": "./src/apps-runtime.ts",
     "./discord-broker": "./src/discord-broker.ts",

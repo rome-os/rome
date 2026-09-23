@@ -35,6 +35,7 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
 import { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import { PiSettingsService } from "../lib/pi-provider.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
@@ -646,6 +647,19 @@ export async function buildTestDeps(
     agentTurnStreamRegistry,
     aiToolState,
     codexAccountService,
+    // Keep generic test dependencies isolated from Pi's user-owned files.
+    piSettings: new PiSettingsService(async () => ({
+      runtime: {
+        getProviders: () => [],
+        listCredentials: async () => [],
+        checkAuth: async () => undefined,
+        getAvailable: async () => [],
+        login: async () => ({}),
+        logout: async () => {},
+        refresh: async () => ({ errors: new Map() }),
+      },
+      dispose() {},
+    })),
     publicAccessState,
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),

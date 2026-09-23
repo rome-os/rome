@@ -4,12 +4,18 @@ import {
   listAnthropicCompatibleProviderSummaries,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
+import { PI_PROVIDER_CATALOG } from "@rome/api-types/pi-provider";
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import type {
   AIToolStatus,
   AnthropicCompatibleConfiguredSummary,
 } from "@/components/ai-tools-panel";
+import type {
+  PiDiscoveredModel,
+  PiProviderStatus,
+  PiSettingsStatus,
+} from "@rome/api-types/pi-provider";
 import type {
   FavorActionRequestSyncPage,
   FavorActionRequestView,
@@ -74,6 +80,73 @@ const anthropicProviders: AnthropicCompatibleProviderSummary[] =
 // the Claude row, which would hide the subscription state seeded above. The
 // configured branch is one dialog away, and the PUT below makes it stick.
 let configuredAnthropic: AnthropicCompatibleConfiguredSummary | null = null;
+
+// The Pi settings fixture follows the production boundary: it exposes only
+// redacted presence/catalog state, keeps each provider independent, and never
+// retains a submitted token.
+let piProviders: PiProviderStatus[] = PI_PROVIDER_CATALOG.map(([id, name]) => ({
+  id,
+  name,
+  configured: false,
+  credentialSource: "none",
+  modelCount: 0,
+}));
+let piModels: PiDiscoveredModel[] = [];
+
+function piStatus(): PiSettingsStatus {
+  return {
+    providers: piProviders,
+    models: piModels,
+    catalogStatus: piModels.length ? "models-available" : "no-models",
+    liveValidity: "not-verified",
+    discoveryFailedProviders: [],
+  };
+}
+
+function configureMockPiProvider(providerId: string): void {
+  piProviders = piProviders.map((provider) =>
+    provider.id === providerId
+      ? {
+          ...provider,
+          configured: true,
+          credentialSource: "stored",
+          storedCredentialType: "api_key",
+          modelCount: 1,
+        }
+      : provider,
+  );
+  if (!piModels.some((model) => model.providerId === providerId)) {
+    piModels = [
+      ...piModels,
+      {
+        qualifiedModelId: `${encodeURIComponent(providerId)}/mock-model`,
+        providerId,
+        providerName:
+          piProviders.find((provider) => provider.id === providerId)?.name ?? providerId,
+        modelId: "mock-model",
+        name: "Mock model",
+        api: "openai-completions",
+        input: ["text"],
+        reasoning: false,
+      },
+    ];
+  }
+}
+
+function removeMockPiProvider(providerId: string): void {
+  piProviders = piProviders.map((provider) =>
+    provider.id === providerId
+      ? {
+          id: provider.id,
+          name: provider.name,
+          configured: false,
+          credentialSource: "none",
+          modelCount: 0,
+        }
+      : provider,
+  );
+  piModels = piModels.filter((model) => model.providerId !== providerId);
+}
 
 // ── Access control ─────────────────────────────────────
 
@@ -304,6 +377,40 @@ export const settingsHandlers = [
   http.get("/api/ai-tools/anthropic-compatible-providers", () =>
     HttpResponse.json({ providers: anthropicProviders, configured: configuredAnthropic }),
   ),
+  http.get("/api/ai-tools/pi", () => HttpResponse.json(piStatus())),
+  http.put("/api/ai-tools/pi/credential", async ({ request }) => {
+    const body = (await request.json()) as { providerId?: unknown; confirmReplace?: unknown };
+    const providerId = typeof body.providerId === "string" ? body.providerId : "";
+    const provider = piProviders.find((item) => item.id === providerId);
+    if (!provider) return HttpResponse.json({ error: "Unknown Pi provider" }, { status: 400 });
+    if (provider.credentialSource === "stored" && body.confirmReplace !== true) {
+      return HttpResponse.json(
+        { error: "Confirm replacing the stored credential." },
+        { status: 409 },
+      );
+    }
+    configureMockPiProvider(providerId);
+    return HttpResponse.json({
+      credentialPersisted: true,
+      synchronizationSucceeded: true,
+      status: piStatus(),
+    });
+  }),
+  http.delete("/api/ai-tools/pi/credential/:providerId", ({ params }) => {
+    const providerId = String(params.providerId);
+    if (!piProviders.some((provider) => provider.id === providerId)) {
+      return HttpResponse.json({ error: "Unknown Pi provider" }, { status: 400 });
+    }
+    removeMockPiProvider(providerId);
+    return HttpResponse.json({ ok: true, status: piStatus() });
+  }),
+  http.post("/api/ai-tools/pi/refresh/:providerId", ({ params }) => {
+    const providerId = String(params.providerId);
+    if (!piProviders.some((provider) => provider.id === providerId)) {
+      return HttpResponse.json({ error: "Unknown Pi provider" }, { status: 400 });
+    }
+    return HttpResponse.json(piStatus());
+  }),
   http.put("/api/ai-tools/anthropic-compatible-credentials", async ({ request }) => {
     const body = (await request.json()) as { provider: string; apiKey?: string; env?: unknown };
     const preset = anthropicProviders.find((provider) => provider.id === body.provider);
