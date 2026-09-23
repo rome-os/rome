@@ -141,7 +141,7 @@ describe("ModelResolver", () => {
       r.getModelProvider({ tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-opus-5[1m]",
+      model: "claude-opus-5-5[1m]",
     });
   });
 
@@ -150,7 +150,7 @@ describe("ModelResolver", () => {
       resolver().getModelProvider({ tier: "large", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-opus-5[1m]",
+      model: "claude-opus-5-5[1m]",
     });
     await expect(
       resolver().getModelProvider({ tier: "small", providerId: "anthropic" }),
