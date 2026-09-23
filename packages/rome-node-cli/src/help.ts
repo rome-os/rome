@@ -39,19 +39,25 @@ A watcher does not restart an explicitly stopped daemon. Another command can sta
 Ctrl+C exits the watcher without stopping the daemon or remote operations.
 These events do not indicate whether individual remote devices are online.
 `,
-  connect: `Usage: rome-node connect [--cloud <origin>] [--name <name>]
+  connect: `Usage: rome-node connect [--device-code] [--cloud <origin>] [--name <name>]
 
 Run this on the computer that will execute programs.
 Open the printed browser URL and approve access when authorization is needed.
+By default, the browser returns to a loopback listener on this computer.
+Use --device-code over SSH or on a headless computer to approve from another device.
+This mode prints a URL and user code without opening a browser or callback listener.
+Stored credentials are reused in either mode. SSH is not detected automatically.
 The process stays in the foreground. Ctrl+C disconnects and preserves authorization.
 Programs run as the OS user who starts connect.
 
 Options:
   --cloud <origin>  Cloud origin (default: https://romeos.cc).
   --name <name>     Name for browser authorization (default: computer hostname).
+  --device-code     Authorize from another device without a callback or SSH tunnel.
 
 Example:
   rome-node connect --name "My computer"
+  rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
 `,
   auth: `Usage:
   rome-node auth [--cloud <origin>] < token-file

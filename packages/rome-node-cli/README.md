@@ -23,6 +23,16 @@ Open the printed authorization URL in a browser on that computer and approve it.
 The browser callback uses a temporary loopback listener. A remote browser needs
 a tunnel to that listener. Ctrl+C disconnects and preserves the credential.
 
+Over SSH or on a headless computer, use device authorization:
+
+```sh
+rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
+```
+
+Open the printed URL on another device and approve the displayed user code.
+The CLI prints the expiry and waits for approval without a callback listener or SSH tunnel.
+Ctrl+C cancels the authorization. Both modes reuse stored credentials when valid.
+
 Rome instances prepare caller authorization automatically at startup and after
 Cloud enrollment. In a server environment that supplies `ROME_INSTANCE_TOKEN`, run:
 

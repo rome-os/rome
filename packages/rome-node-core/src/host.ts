@@ -6,4 +6,5 @@ export {
   type HostOptions,
 } from "./connect.js";
 export { loginDevice, type DeviceSession } from "./login.js";
+export { loginDeviceCode, type DeviceAuthorizationPrompt } from "./device-authorization.js";
 export { createFileCredentialStore, type CredentialStore } from "./storage.js";

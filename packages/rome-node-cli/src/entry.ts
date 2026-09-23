@@ -39,6 +39,7 @@ async function main(): Promise<void> {
       name: { type: "string" },
       args: { type: "string" },
       server: { type: "boolean" },
+      "device-code": { type: "boolean" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -51,6 +52,8 @@ async function main(): Promise<void> {
   const config = nodeConfigFromEnvironment(process.env);
   if (values.server && !(positionals[0] === "auth" && positionals.length === 1))
     throw new Error("--server is only supported by rome-node auth.");
+  if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
+    throw new Error("--device-code is only supported by rome-node connect.");
   if (positionals[0] === "auth" && positionals[1] === "status" && positionals.length === 2) {
     const credential = await readOptionalCallerCredential(config);
     process.stdout.write(
@@ -132,9 +135,13 @@ async function main(): Promise<void> {
     return;
   }
   if (positionals[0] === "connect" && positionals.length === 1) {
-    const { connectHost, defaultDeviceName, loginDevice, createFileCredentialStore } = await import(
-      "@rome-os/node-core/host"
-    );
+    const {
+      connectHost,
+      defaultDeviceName,
+      loginDevice,
+      loginDeviceCode,
+      createFileCredentialStore,
+    } = await import("@rome-os/node-core/host");
     const name = values.name ?? defaultDeviceName();
     await withShutdown((signal) =>
       connectHost({
@@ -143,11 +150,20 @@ async function main(): Promise<void> {
         signal,
         credentials: createFileCredentialStore(join(config.directory, "credential.json")),
         authorize: (origin, deviceName, abort) =>
-          loginDevice(origin, deviceName, abort, (url) => {
-            process.stderr.write(
-              `Open this URL in your browser to authorize ${deviceName}:\n${url}\n`,
-            );
-          }),
+          values["device-code"]
+            ? loginDeviceCode(origin, deviceName, abort, (prompt) => {
+                process.stderr.write(
+                  `Open this URL in a browser on another device:\n${prompt.verificationUri}\n` +
+                    `User code: ${prompt.userCode}\n` +
+                    `Or open: ${prompt.verificationUriComplete}\n` +
+                    `Expires in ${prompt.expiresIn} seconds. Waiting for approval. Ctrl+C cancels.\n`,
+                );
+              })
+            : loginDevice(origin, deviceName, abort, (url) => {
+                process.stderr.write(
+                  `Open this URL in your browser to authorize ${deviceName}:\n${url}\n`,
+                );
+              }),
         onEvent: (event) => {
           if (event.type === "authorization_required")
             process.stderr.write(

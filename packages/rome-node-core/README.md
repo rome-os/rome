@@ -137,6 +137,13 @@ A custom credential store implements `load`, `save`, and `clear`. The built-in
 login adapter uses a temporary loopback callback listener. Applications can
 supply their own authorization function returning a device session.
 
+For authorization from another device, import `loginDeviceCode` from the same
+`/host` entry. It accepts the same origin, name, and abort signal as `loginDevice`.
+Its callback receives `{ verificationUri, verificationUriComplete, userCode, expiresIn }`,
+where `expiresIn` is in seconds. It returns a `DeviceSession` after approval and
+rejects on denial, expiry, cancellation, or a terminal error. It opens no browser
+or callback listener. The callback receives neither the device code nor the access token.
+
 The host exposes `system.info` and `exec`. Programs run as the application's OS
 user. Connection loss terminates direct child processes on a best-effort basis.
 A local caller timeout does not cancel remote execution.

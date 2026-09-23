@@ -172,8 +172,25 @@ so concurrent launches cannot establish competing Gateway connections. Set
 The daemon owns this local interface. Rome Core exposes a sanitized
 `GET /api/devices` snapshot for Settings → Devices through the shared JS client.
 
-On the target computer, `connect` uses the `rome-computer` PKCE flow and stores
-the resulting device credential in a private user directory:
+On the target computer, `connect` defaults to the `rome-computer` PKCE flow with
+a temporary loopback callback listener. Over SSH or on a headless computer, run:
+
+```sh
+rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
+```
+
+Open the printed verification URL on another device, enter the user code, and approve access.
+The complete URL includes the user code. The CLI also prints the authorization lifetime.
+This mode opens neither a browser nor a callback listener and requires no SSH tunnel.
+The CLI does not detect SSH automatically. `--device-code` is valid only for `connect`.
+`--name` defaults to the hostname and `--cloud` defaults to `https://romeos.cc`.
+
+The CLI polls at the interval returned by Cloud. Each `slow_down` response adds
+five seconds to subsequent polling intervals. Denial, expiry, and other terminal errors stop authorization.
+Ctrl+C cancels authorization requests and timers. Both flows reuse valid stored
+credentials and pass the resulting device session to the same Gateway host.
+
+The CLI stores the device credential in a private user directory:
 
 | Platform | Default directory |
 | --- | --- |
