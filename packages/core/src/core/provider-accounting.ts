@@ -175,10 +175,13 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "openai",
+    matchesModel: (model) => matchesModelAlias(model, "gpt-6-sol"),
+    resolveRates: (rawUsage) => openAiLongContextRates(2, 10, rawUsage),
+  },
+  {
+    provider: "openai",
     matchesModel: (model) =>
-      matchesModelAlias(model, "gpt-6-sol") ||
-      matchesModelAlias(model, "gpt-5.6-sol") ||
-      matchesModelAlias(model, "gpt-5.6"),
+      matchesModelAlias(model, "gpt-5.6-sol") || matchesModelAlias(model, "gpt-5.6"),
     resolveRates: (rawUsage) => openAiLongContextRates(5, 30, rawUsage),
   },
   {
@@ -188,8 +191,12 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "openai",
-    matchesModel: (model) =>
-      matchesModelAlias(model, "gpt-6-luna") || matchesModelAlias(model, "gpt-5.6-luna"),
+    matchesModel: (model) => matchesModelAlias(model, "gpt-6-luna"),
+    resolveRates: (rawUsage) => openAiLongContextRates(0.1, 0.5, rawUsage),
+  },
+  {
+    provider: "openai",
+    matchesModel: (model) => matchesModelAlias(model, "gpt-5.6-luna"),
     resolveRates: (rawUsage) => openAiLongContextRates(1, 6, rawUsage),
   },
   {
