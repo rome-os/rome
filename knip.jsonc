@@ -134,6 +134,10 @@
       "ignoreDependencies": ["expo-notifications"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
+    "packages/app-runtime-sdk": {
+      // Invoked by the package's consumer-compile script, not imported by repository code.
+      "entry": ["test/consumer/index.ts"]
+    },
     "packages/rome-node-core": {
       "entry": [
         "src/**/*.test.ts",

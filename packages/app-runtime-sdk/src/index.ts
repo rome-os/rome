@@ -5,6 +5,7 @@ import type { JSONSchema } from "zod/v4/core";
 export { z };
 export type { JSONSchema };
 export * from "./conversation-settings.js";
+export * from "./slack-relay.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
