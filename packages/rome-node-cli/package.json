@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/node",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Standalone CLI for Rome remote devices",
   "license": "MIT",
   "type": "module",
