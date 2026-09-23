@@ -64,3 +64,17 @@ sentinels in a normal Pi profile do not execute.
   access, quota, entitlement, or revocation.
 - The manual run performs a real provider request. Automated proof uses a child fixture branch and
   keeps Pi catalog refresh offline.
+
+## Prototype-only browser harness
+
+Start the same flow on a loopback-only development endpoint:
+
+```sh
+PI_PROTOTYPE_HOST=127.0.0.1 PI_PROTOTYPE_PORT=4397 \
+  pnpm --filter @rome/core exec tsx src/prototypes/pi-provider/browser-server.ts
+```
+
+Open `http://127.0.0.1:4397/pi-prototype/`. The token field is cleared as soon as Save is clicked,
+the page uses no browser storage, and only redacted status is returned. Fixed public errors prevent
+SDK or credential details from reaching the browser. This browser surface is also throwaway
+prototype code and does not register Pi as a production provider.
