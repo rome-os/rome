@@ -106,6 +106,7 @@
     "zod-from-json-schema": "^0.5.2"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.86.1",
     "@types/jsdom": "^28.0.3",
     "@types/turndown": "^5.0.6"
   }

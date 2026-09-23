@@ -11,6 +11,10 @@ import {
 } from "../../routines/guardian-timezone.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
+import {
+  PI_PROTOTYPE_CREDENTIAL_KEY_PREFIX,
+  redactPiPrototypeCredentialSetting,
+} from "../../prototypes/pi-provider/pi-child-prototype.js";
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
@@ -22,6 +26,13 @@ function redactSettingsForResponse(settings: Record<string, unknown>): Record<st
   }
   if (RELAY_SETTING_KEY in redacted) {
     redacted[RELAY_SETTING_KEY] = redactRelaySetting(redacted[RELAY_SETTING_KEY]);
+  }
+  // Prototype-only analogue of the Anthropic-compatible settings precedent:
+  // no generic settings read may project a stored Pi token onto the wire.
+  for (const key of Object.keys(redacted)) {
+    if (key.startsWith(PI_PROTOTYPE_CREDENTIAL_KEY_PREFIX)) {
+      redacted[key] = redactPiPrototypeCredentialSetting(redacted[key]);
+    }
   }
   return redacted;
 }
