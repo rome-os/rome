@@ -36,7 +36,7 @@ The tag lands on `origin/main`, and `docker-publish.yml` runs no CI gate of its 
 4. Confirm no release is already in flight.
 
    ```bash
-   gh run list --workflow "Docker Hub Publish" --limit 3
+   gh run list --workflow docker-publish.yml --limit 3
    ```
 
 ## 2. Pick the version
@@ -81,7 +81,7 @@ git tag -a v1.1.0 origin/main -m "Release v1.1.0" && git push origin refs/tags/v
 1. Watch the run to completion.
 
    ```bash
-   gh run watch "$(gh run list --workflow "Docker Hub Publish" --limit 1 --json databaseId --jq '.[0].databaseId')"
+   gh run watch "$(gh run list --workflow docker-publish.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
    ```
 
 2. Confirm the version reached the registry.
@@ -90,4 +90,12 @@ git tag -a v1.1.0 origin/main -m "Release v1.1.0" && git push origin refs/tags/v
    curl -fsSL "https://hub.docker.com/v2/repositories/yunfanye/rome/tags?page_size=20" | jq -r '.results[].name'
    ```
 
-3. Report the published version, whether `latest` moved, and the build SHA. A running instance reports the baked version at `/api/build-info`.
+3. Read the notes the `notes` job generated from the merged PR titles.
+
+   ```bash
+   gh release view vX.Y.Z
+   ```
+
+   The notes are editable on GitHub, and the job never overwrites an edit. If a PR title reads badly in the list, fix it there. [docs/releases.md](../../../docs/releases.md#release-notes) covers what the job decides on its own.
+
+4. Report the published version, whether `latest` moved, the build SHA, and the release URL. A running instance reports the baked version at `/api/build-info`.

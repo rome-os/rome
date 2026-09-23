@@ -44,9 +44,17 @@ The invariants behind that table, each enforced by the workflow rather than by c
 
 The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to the image's docker tag), `ROME_BUILD_SHA`, and `ROME_BUILD_TIME` into the image as env vars. The runtime reports them via `getBuildInfo()` → `/api/build-info`. `version` is `null` on non-release builds (local/source runs), and consumers degrade gracefully on null rather than guessing.
 
+### Release notes
+
+Every published version gets a GitHub Release on its `v*` tag, written by the `notes` job once the manifest reaches Docker Hub. GitHub generates the body from the pull requests merged since the `v*` tag before it, so the [PR titles](authoring/prs.md#title) are the notes. The range walks the tag graph rather than the release list. That keeps a backport on its own line of history, and keeps two tags on one commit from repeating each other.
+
+The job leaves an existing release alone. To correct the notes for a version, edit the release on GitHub. A rerun does not overwrite the edit.
+
+The "Latest" badge follows the docker `latest` tag rather than the publish date, so the same [tagging contract](#tagging-contract) decides both. A prerelease is marked as a prerelease and takes neither.
+
 ### Rehearsing the pipeline
 
-`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, version allocation, or release notes. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
 
 ## npm packages (via release-please)
 

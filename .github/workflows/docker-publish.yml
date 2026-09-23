@@ -181,6 +181,8 @@ jobs:
       RELEASE_TAG: ${{ needs.release.outputs.tag }}
     permissions:
       contents: read
+    outputs:
+      move_latest: ${{ steps.latest_check.outputs.move_latest }}
 
     steps:
       - name: Set up Docker Buildx
@@ -261,3 +263,53 @@ jobs:
           done
 
           docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+  notes:
+    runs-on: ubuntu-latest
+    needs:
+      - release
+      - publish
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Publish release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+          MOVE_LATEST: ${{ needs.publish.outputs.move_latest }}
+        run: |
+          # Notes come after the manifest so a failed build never leaves a
+          # release describing a version Docker Hub does not serve. An existing
+          # release is left alone, which keeps a rerun of this job from
+          # overwriting notes someone edited by hand.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} exists; leaving its notes alone."
+            exit 0
+          fi
+
+          # GitHub dates its own notes range from the release before this one,
+          # which on this repository means an npm package release or a v* tag
+          # that never got one. Walking the tag graph keeps the range on this
+          # release line, and --exclude holds the walk at the release commit so
+          # a scheduled tag sharing a commit with its predecessor still finds
+          # it.
+          start="$(git describe --tags --abbrev=0 --match 'v[0-9]*' \
+            --exclude "$RELEASE_TAG" "$RELEASE_TAG" 2>/dev/null || true)"
+
+          # The "Latest" badge follows the docker `latest` tag, so a backport or
+          # a prerelease leaves both where they are.
+          args=(--title "$RELEASE_TAG" --generate-notes --latest="$MOVE_LATEST")
+          if [[ -n "$start" ]]; then
+            args+=(--notes-start-tag "$start")
+          fi
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "$RELEASE_TAG" "${args[@]}"
