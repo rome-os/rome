@@ -21,7 +21,13 @@ describe("browser authorization callback", () => {
       for await (const chunk of request) body += chunk.toString();
       exchanged = new URLSearchParams(body);
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ access_token: token, device_id: "authorized-device" }));
+      response.end(
+        JSON.stringify({
+          access_token: token,
+          token_type: "Bearer",
+          device_id: "authorized-device",
+        }),
+      );
     });
     servers.push(cloud);
     await new Promise<void>((resolve) => cloud.listen(0, "127.0.0.1", resolve));

@@ -186,7 +186,12 @@ The CLI does not detect SSH automatically. `--device-code` is valid only for `co
 `--name` defaults to the hostname and `--cloud` defaults to `https://romeos.cc`.
 
 The CLI polls at the interval returned by Cloud. Each `slow_down` response adds
-five seconds to subsequent polling intervals. Denial, expiry, and other terminal errors stop authorization.
+five seconds to subsequent polling intervals.
+
+Network failures, request timeouts, HTTP 429, and HTTP 5xx responses retry with the same device code.
+These retries double the interval up to 60 seconds, without reducing a longer interval required by Cloud.
+The original expiry still applies. Denial, invalid responses, and other terminal OAuth errors stop authorization.
+
 Ctrl+C cancels authorization requests and timers. Both flows reuse valid stored
 credentials and pass the resulting device session to the same Gateway host.
 

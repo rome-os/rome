@@ -1,14 +1,9 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { platform } from "node:os";
 import { cloudOrigin } from "./cloud.js";
-import { validId } from "./protocol.js";
+import { devicePlatform, deviceSessionFromToken, type DeviceSession } from "./device-session.js";
 
-export interface DeviceSession {
-  cloudUrl: string;
-  token: string;
-  deviceId: string;
-}
+export type { DeviceSession } from "./device-session.js";
 export async function loginDevice(
   cloudUrl: string,
   name: string,
@@ -49,22 +44,16 @@ export async function loginDevice(
             redirect_uri: redirectUri,
             code: incoming.searchParams.get("code")!,
             code_verifier: verifier,
-            platform:
-              platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : "linux",
+            platform: devicePlatform(),
           }),
         });
         if (!result.ok) throw new Error("Token exchange rejected");
-        const body = (await result.json()) as { access_token?: unknown; device_id?: unknown };
-        if (
-          typeof body.access_token !== "string" ||
-          !/^romedev_[A-Za-z0-9_-]{43}$/.test(body.access_token) ||
-          !validId(body.device_id)
-        )
-          throw new Error("Invalid token response");
+        const session = deviceSessionFromToken(await result.json(), cloud.origin);
+        if (!session) throw new Error("Invalid token response");
         response
           .writeHead(200, { "content-type": "text/plain", "cache-control": "no-store" })
           .end("Device authorized. Return to Rome Node.");
-        resolve({ cloudUrl: cloud.origin, token: body.access_token, deviceId: body.device_id });
+        resolve(session);
       } catch {
         response
           .writeHead(400)

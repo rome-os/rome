@@ -1,8 +1,6 @@
-import { platform } from "node:os";
 import { isRecord } from "./actions.js";
 import { cloudOrigin } from "./cloud.js";
-import type { DeviceSession } from "./login.js";
-import { validId } from "./protocol.js";
+import { devicePlatform, deviceSessionFromToken, type DeviceSession } from "./device-session.js";
 
 export interface DeviceAuthorizationPrompt {
   verificationUri: string;
@@ -13,6 +11,7 @@ export interface DeviceAuthorizationPrompt {
 }
 
 class DeviceAuthorizationError extends Error {}
+class RetryableRequestError extends Error {}
 
 function seconds(value: unknown): value is number {
   // Node clamps overflowing timer delays to one millisecond.
@@ -34,14 +33,31 @@ function verificationUrl(value: unknown, origin: string): string {
 }
 
 async function post(origin: string, path: string, body: URLSearchParams, signal: AbortSignal) {
-  const response = await fetch(new URL(path, origin), {
-    method: "POST",
-    body,
-    signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
-    redirect: "error",
-    cache: "no-store",
-  });
-  const result: unknown = await response.json();
+  let response: Response;
+  try {
+    response = await fetch(new URL(path, origin), {
+      method: "POST",
+      body,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+      redirect: "error",
+      cache: "no-store",
+    });
+  } catch {
+    throw new RetryableRequestError();
+  }
+  // Proxies can return HTML or empty bodies for transient HTTP failures.
+  if (response.status === 429 || response.status >= 500) {
+    await response.body?.cancel().catch(() => {});
+    throw new RetryableRequestError();
+  }
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError)
+      throw new DeviceAuthorizationError("Invalid device authorization response.");
+    throw new RetryableRequestError();
+  }
   return { response, result };
 }
 
@@ -79,7 +95,7 @@ export async function loginDeviceCode(
       new URLSearchParams({
         client_id: "rome-computer",
         display_name: name,
-        platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : "linux",
+        platform: devicePlatform(),
       }),
       signal,
     );
@@ -109,27 +125,31 @@ export async function loginDeviceCode(
       await wait(Math.min(interval, Math.max(0, deadline - Date.now())), pollingSignal);
       if (Date.now() >= deadline) expiry.abort();
       pollingSignal.throwIfAborted();
-      const { response, result: token } = await post(
-        origin,
-        "/oauth2/token",
-        new URLSearchParams({
-          client_id: "rome-computer",
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          device_code: result.device_code,
-        }),
-        pollingSignal,
-      );
+      let polled: Awaited<ReturnType<typeof post>>;
+      try {
+        polled = await post(
+          origin,
+          "/oauth2/token",
+          new URLSearchParams({
+            client_id: "rome-computer",
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+            device_code: result.device_code,
+          }),
+          pollingSignal,
+        );
+      } catch (error) {
+        pollingSignal.throwIfAborted();
+        if (!(error instanceof RetryableRequestError)) throw error;
+        // Backoff must never reduce the interval required by Cloud's slow_down responses.
+        interval = Math.max(interval, Math.min(interval * 2, 60_000));
+        continue;
+      }
+      const { response, result: token } = polled;
       pollingSignal.throwIfAborted();
       if (response.ok) {
-        if (
-          !isRecord(token) ||
-          typeof token.access_token !== "string" ||
-          !/^romedev_[A-Za-z0-9_-]{43}$/.test(token.access_token) ||
-          token.token_type !== "Bearer" ||
-          !validId(token.device_id)
-        )
-          throw new DeviceAuthorizationError("Invalid token response.");
-        return { cloudUrl: origin, token: token.access_token, deviceId: token.device_id };
+        const session = deviceSessionFromToken(token, origin);
+        if (!session) throw new DeviceAuthorizationError("Invalid token response.");
+        return session;
       }
       if (response.status === 400 && isRecord(token)) {
         if (token.error === "authorization_pending") continue;

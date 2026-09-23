@@ -93,6 +93,143 @@ describe("device-code authorization", () => {
   });
 
   it.each([
+    "network",
+    "429",
+    "503",
+    "proxy-html",
+    "body-disconnect",
+  ])("backs off and recovers from %s without issuing another device code", async (failure) => {
+    const f = start();
+    if (failure === "network") f.fetch.mockRejectedValueOnce(new TypeError("fetch failed"));
+    else if (failure === "body-disconnect") {
+      const response = json(token);
+      rs.spyOn(response, "json").mockRejectedValueOnce(new TypeError("terminated"));
+      f.fetch.mockResolvedValueOnce(response);
+    } else if (failure === "proxy-html")
+      f.fetch.mockResolvedValueOnce(new Response("<html>Unavailable</html>", { status: 502 }));
+    else f.fetch.mockResolvedValueOnce(json({}, Number(failure)));
+    f.fetch.mockResolvedValueOnce(json(token));
+    await rs.advanceTimersByTimeAsync(5000);
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    await rs.advanceTimersByTimeAsync(9999);
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(await f.running).toEqual({
+      cloudUrl: origin,
+      token: token.access_token,
+      deviceId: token.device_id,
+    });
+    expect(f.prompt).toHaveBeenCalledTimes(1);
+    expect(String(f.fetch.mock.calls[2][0])).toBe(`${origin}/oauth2/token`);
+    expect((f.fetch.mock.calls[2][1]!.body as URLSearchParams).get("device_code")).toBe(
+      authorization.device_code,
+    );
+    expect(rs.getTimerCount()).toBe(0);
+  });
+
+  it("retries the request timeout after reducing polling frequency", async () => {
+    rs.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      expect(milliseconds).toBe(10_000);
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("Timed out", "TimeoutError")),
+        milliseconds,
+      );
+      return controller.signal;
+    });
+    const f = start();
+    let requestSignal: AbortSignal | undefined;
+    f.fetch.mockImplementationOnce(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          requestSignal = options!.signal!;
+          requestSignal.addEventListener("abort", () => reject(requestSignal!.reason), {
+            once: true,
+          });
+        }),
+    );
+    f.fetch.mockResolvedValueOnce(json(token));
+    await rs.advanceTimersByTimeAsync(14_999);
+    expect(requestSignal?.aborted).toBe(false);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(requestSignal?.aborted).toBe(true);
+    await rs.advanceTimersByTimeAsync(9999);
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(await f.running).toMatchObject({ deviceId: token.device_id });
+    expect(f.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps exponential backoff and preserves it across pending responses", async () => {
+    const f = start();
+    for (let i = 0; i < 5; i++) f.fetch.mockRejectedValueOnce(new TypeError("offline"));
+    f.fetch.mockResolvedValueOnce(json({ error: "authorization_pending" }, 400));
+    f.fetch.mockResolvedValueOnce(json(token));
+    let calls = 1;
+    for (const wait of [5000, 10000, 20000, 40000, 60000, 60000, 60000]) {
+      await rs.advanceTimersByTimeAsync(wait - 1);
+      expect(f.fetch).toHaveBeenCalledTimes(calls);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(f.fetch).toHaveBeenCalledTimes(++calls);
+    }
+    await f.running;
+  });
+
+  it("does not reduce a Cloud interval above the retry cap", async () => {
+    const f = start({ interval: 60 });
+    f.fetch.mockResolvedValueOnce(json({ error: "slow_down" }, 400));
+    f.fetch.mockRejectedValueOnce(new TypeError("offline"));
+    f.fetch.mockResolvedValueOnce(json(token));
+    await rs.advanceTimersByTimeAsync(125_000);
+    expect(f.fetch).toHaveBeenCalledTimes(3);
+    await rs.advanceTimersByTimeAsync(64_999);
+    expect(f.fetch).toHaveBeenCalledTimes(3);
+    await rs.advanceTimersByTimeAsync(1);
+    await f.running;
+  });
+
+  it.each(["canceled", "expired"])("stops retry backoff when %s", async (reason) => {
+    const f = start({ expires_in: 12 });
+    f.fetch.mockRejectedValue(new TypeError("offline"));
+    const rejected = expect(f.running).rejects.toThrow(reason);
+    await rs.advanceTimersByTimeAsync(5000);
+    if (reason === "canceled") f.controller.abort();
+    else await rs.advanceTimersByTimeAsync(7000);
+    await rejected;
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    expect(rs.getTimerCount()).toBe(0);
+  });
+
+  it.each([200, 400, 401])("keeps malformed JSON terminal for HTTP %s", async (status) => {
+    const f = start();
+    f.fetch.mockResolvedValueOnce(new Response("secret-invalid-json", { status }));
+    const rejected = expect(f.running).rejects.toThrow("Invalid device authorization response.");
+    await rs.advanceTimersByTimeAsync(5000);
+    await rejected;
+    await rs.advanceTimersByTimeAsync(600_000);
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([401, 403, 404])("keeps HTTP %s terminal", async (status) => {
+    const f = start();
+    f.fetch.mockResolvedValueOnce(json({ error: "invalid_client" }, status));
+    const rejected = expect(f.running).rejects.toThrow("rejected");
+    await rs.advanceTimersByTimeAsync(5000);
+    await rejected;
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry device-code issuance after an HTTP failure", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({}, 503));
+    const prompt = rs.fn();
+    await expect(
+      loginDeviceCode(origin, "Test", new AbortController().signal, prompt),
+    ).rejects.toThrow("Could not complete device authorization");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ["access_denied", "denied"],
     ["expired_token", "expired"],
     ["invalid_grant", "invalid"],

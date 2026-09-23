@@ -31,7 +31,7 @@ async function listen(server: Server) {
   return `http://127.0.0.1:${address.port}`;
 }
 
-async function fixture(pollError?: string) {
+async function fixture(options: { pollError?: string; transientStatus?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-connect-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const token = `romedev_${"a".repeat(43)}`;
@@ -50,6 +50,7 @@ async function fixture(pollError?: string) {
     socket = client;
   });
   const requests: { path: string; form: Record<string, string>; contentType?: string }[] = [];
+  let transientStatus = options.transientStatus;
   let cloudUrl = "";
   const cloud = createServer(async (req, res) => {
     let body = "";
@@ -69,8 +70,15 @@ async function fixture(pollError?: string) {
         }),
       );
     } else if (req.url === "/oauth2/token") {
-      if (pollError)
-        res.writeHead(400).end(JSON.stringify({ error: pollError, error_description: token }));
+      if (transientStatus) {
+        res
+          .writeHead(transientStatus, { "content-type": "text/html" })
+          .end("<html>Try later</html>");
+        transientStatus = undefined;
+      } else if (options.pollError)
+        res
+          .writeHead(400)
+          .end(JSON.stringify({ error: options.pollError, error_description: token }));
       else
         res.end(JSON.stringify({ access_token: token, token_type: "Bearer", device_id: "target" }));
     } else if (req.headers.authorization !== `Bearer ${token}`) res.writeHead(401).end("{}");
@@ -180,7 +188,7 @@ describe("connect authorization modes", () => {
   }, 10000);
 
   it("exits on denial without storing or revealing credentials", async () => {
-    const f = await fixture("access_denied");
+    const f = await fixture({ pollError: "access_denied" });
     const child = f.run(["connect", "--device-code", "--cloud", f.cloudUrl]);
     expect(await child.exited).toBe(1);
     expect(child.output()).toContain("denied");
@@ -198,7 +206,7 @@ describe("connect authorization modes", () => {
   it.skipIf(process.platform === "win32")(
     "cancels on Ctrl+C while waiting for approval",
     async () => {
-      const f = await fixture("authorization_pending");
+      const f = await fixture({ pollError: "authorization_pending" });
       const child = f.run(["connect", "--device-code", "--cloud", f.cloudUrl]);
       await until(() => child.output().includes("Waiting for approval"));
       child.child.kill("SIGINT");
@@ -232,6 +240,20 @@ describe("connect authorization modes", () => {
     f.socket()!.close(4001);
     await child.exited;
   });
+
+  it.each([429, 503])("recovers from HTTP %s during device-code polling", async (status) => {
+    const f = await fixture({ transientStatus: status });
+    const child = f.run(["connect", "--device-code", "--cloud", f.cloudUrl]);
+    await until(() => child.output().includes("Connection: online"));
+    expect(f.requests.filter((r) => r.path === "/oauth2/device_authorization")).toHaveLength(1);
+    expect(f.requests.filter((r) => r.path === "/oauth2/token")).toHaveLength(2);
+    expect(child.output().match(/User code:/g)).toHaveLength(1);
+    expect(child.output()).not.toContain("rejected");
+    expect(child.output()).not.toContain(f.deviceCode);
+    expect(child.output()).not.toContain(f.token);
+    f.socket()!.close(4001);
+    expect(await child.exited).toBe(1);
+  }, 10000);
 
   it("documents the flag offline and rejects it on other commands", async () => {
     const f = await fixture();
