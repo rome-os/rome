@@ -393,6 +393,40 @@ describe("ModelResolver", () => {
       reason: "model_access_denied",
     });
     await expect(
+      noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-sol:high" } }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await expect(
+      noEntitlements.getModelProvider({
+        exact: { providerId: "openai", model: "gpt-6-sol-2026-04-01:high" },
+      }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await expect(
+      noEntitlements.getModelProvider({
+        exact: { providerId: "openai", model: "gpt-6-luna:high" },
+      }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await expect(
+      noEntitlements.getModelProvider({
+        exact: { providerId: "openai", model: "gpt-6-luna-2026-04-01:high" },
+      }),
+    ).rejects.toMatchObject({
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await expect(
       noEntitlements.getModelProvider({ exact: { providerId: "openai", model: "gpt-5.6-sol" } }),
     ).rejects.toMatchObject({
       code: "model_unavailable",

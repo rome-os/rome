@@ -129,6 +129,24 @@ function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
   return state.loggedIn !== false && !providerQuotaExhausted(providerId, state);
 }
 
+/** Matches the effort and dated aliases Codex accepts for a concrete model. */
+function matchesModelAlias(model: string, baseModel: string): boolean {
+  const normalizedModel = model.toLowerCase();
+  const normalizedBaseModel = baseModel.toLowerCase();
+  if (
+    normalizedModel === normalizedBaseModel ||
+    normalizedModel.startsWith(`${normalizedBaseModel}:`)
+  ) {
+    return true;
+  }
+
+  const snapshotSuffix = normalizedModel.slice(`${normalizedBaseModel}-`.length);
+  return (
+    normalizedModel.startsWith(`${normalizedBaseModel}-`) &&
+    /^\d{4}-\d{2}-\d{2}(?::.+)?$/.test(snapshotSuffix)
+  );
+}
+
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
   if (tier === "large") return state.solAccess ? "gpt-6-sol" : "gpt-5.6-terra";
   if (tier === "small") return state.lunaAccess ? "gpt-6-luna" : "gpt-5.6-terra";
@@ -180,8 +198,8 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
   const requireModelAccess = (model: string, codex: AIToolStateValue["codex"]): void => {
     const denied =
       (model === "gpt-6-astra" && !codex.solAccess) ||
-      (model === "gpt-6-sol" && !codex.solAccess) ||
-      (model === "gpt-6-luna" && !codex.lunaAccess) ||
+      (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
+      (matchesModelAlias(model, "gpt-6-luna") && !codex.lunaAccess) ||
       (model === "gpt-5.6-sol" && !codex.solAccess) ||
       (model === "gpt-5.6-luna" && !codex.lunaAccess);
     if (!denied) return;
