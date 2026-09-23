@@ -20,6 +20,14 @@
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
     },
+    "./slack-relay": {
+      "types": "./dist/slack-relay.d.ts",
+      "default": "./dist/slack-relay.js"
+    },
+    "./slack-relay/fixtures": {
+      "types": "./dist/slack-relay-fixtures.d.ts",
+      "default": "./dist/slack-relay-fixtures.js"
+    },
     "./tsconfig.app.json": "./tsconfig.app.json"
   },
   "files": [
@@ -32,7 +40,8 @@
   "scripts": {
     "build": "tsc",
     "prepare": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p test/consumer/tsconfig.json",
+    "test:consumer-compile": "pnpm run build && tsc -p test/consumer/tsconfig.json"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.1",
