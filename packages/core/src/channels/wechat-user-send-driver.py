@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = ("Search", "搜索")
 BACK = ("Back", "返回")
 CHATS = ("Chats", "聊天")
+TITLE = ("Weixin", "微信")  # the main window's X title; the Chinese one is not seen live yet
 FOCUSED, SHOWING, EDITABLE, ACTIVE = 12, 25, 7, 1
 # Contact and feature results are 64 px rows; headers and suggestions 32 to 38 px.
 RESULT_ROW_PX = 48
@@ -146,7 +147,8 @@ class Desktop:
 
     def window(self):
         tree = self._run("xwininfo", "-root", "-tree").stdout
-        ids = [l.split()[0] for l in tree.splitlines() if '"Weixin": ("wechat" "wechat")' in l]
+        ids = [l.split()[0] for l in tree.splitlines()
+               if any(f'"{t}": ("wechat" "wechat")' in l for t in TITLE)]
         return ids[0] if len(ids) == 1 else None
 
     def viewable(self):
@@ -243,7 +245,9 @@ class Driver:
         raise Failure("focus-lost", "the search box would not take keyboard focus")
 
     def results(self):
-        return [(n, n.name, tuple(n.extents())) for top in self.app.children() if top != self.frame
+        # The search popup is an unnamed filler top-level (prototype round 2). WeChat's
+        # windows, the main one and a chat opened on its own alike, are frames.
+        return [(n, n.name, tuple(n.extents())) for top in self.app.children() if top.role != "frame"
                 for n in find(top, lambda n, st: n.role == "list item")]
 
     def result(self, box, name):
@@ -389,9 +393,10 @@ def main():
             ready_client()
             return print(json.dumps({"ready": True, "reason": "ready"}))
         # The store cuts a line at an envelope marker, so such a body's echo could never match.
-        if not args.name.strip() or not args.text.strip() or len(args.text) > MAX_TEXT or any(
-                m in args.text for m in ENVELOPE_MARKERS):
-            raise Failure("invalid", f"--name must be set; --text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
+        if (not args.chat.strip() or not args.name.strip() or not args.text.strip()
+                or len(args.text) > MAX_TEXT or any(m in args.text for m in ENVELOPE_MARKERS)):
+            raise Failure("invalid", "--chat and --name must be set; "
+                          f"--text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
         app, desktop = ready_client()
         message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text)
         print(json.dumps({"ok": True, "conversationId": args.chat, "messageId": message_id}, ensure_ascii=False))

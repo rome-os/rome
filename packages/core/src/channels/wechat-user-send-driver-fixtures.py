@@ -424,6 +424,13 @@ class SendTests(unittest.TestCase):
                 d.main()
             self.assertEqual(json.loads(out.getvalue()), {**answer, "reason": "LookupError: gone"})
 
+    def test_a_chat_open_in_its_own_window_is_not_a_search_result(self):
+        client, desk, store, clock = rig()
+        bubbles = [FakeNode(client, "list item", "File Transfer", box=(500, 100 + 70 * i, 300, 64))
+                   for i in range(2)]
+        client.app.kids.append(FakeNode(client, "frame", "Li Wei", [FakeNode(client, "list", "Messages", bubbles)]))
+        self.assertEqual(send(client, desk, store, clock), "filehelper:1")
+
     def test_dry_run_reaches_the_input_and_clears_it(self):
         client, desk, store, clock = rig()
         self.assertIsNone(send(client, desk, store, clock, press_return=False))
@@ -432,6 +439,22 @@ class SendTests(unittest.TestCase):
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_echo_limits_match_the_reader(self):
+        spec = importlib.util.spec_from_file_location("helper", HERE / "wechat-user-helper.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        self.assertEqual((d.MAX_TEXT, d.ENVELOPE_MARKERS), (helper.MAX_TEXT, helper.ENVELOPE_MARKERS))
+
+    def test_the_main_window_is_found_by_either_title(self):
+        tree = ('  0x1a "{}": ("wechat" "wechat")  880x640+0+0\n'
+                '  0x2b "Chrome": ("google-chrome" "Google-chrome")  800x600+0+0\n')
+        desk = d.Desktop()
+        for title in ("Weixin", "微信"):
+            desk._run = lambda *a, t=title: subprocess.CompletedProcess(a, 0, tree.format(t), "")
+            self.assertEqual(desk.window(), "0x1a", title)
+        desk._run = lambda *a: subprocess.CompletedProcess(a, 0, tree.format("Weixin") * 2, "")
+        self.assertIsNone(desk.window())  # two main windows: none is trusted
+
     def test_signed_in_client_is_ready(self):
         client, desk, _, _ = rig()
         d.readiness(client.app, desk)
@@ -467,8 +490,9 @@ class ReadinessTests(unittest.TestCase):
         for text in ("x" * 4001, " ", "see <msg>x</msg>", '<?xml version="1.0"?>'):
             answer = self.run_driver("send", "--chat", "filehelper", "--name", "File Transfer", "--text", text)
             self.assertEqual((answer["ok"], answer["code"], answer["typed"]), (False, "invalid", False), text)
-        answer = self.run_driver("send", "--chat", "filehelper", "--name", " ", "--text", "hi")
-        self.assertEqual(answer["code"], "invalid")
+        for chat, name in (("filehelper", " "), ("", "File Transfer"), (" ", "File Transfer")):
+            answer = self.run_driver("send", "--chat", chat, "--name", name, "--text", "hi")
+            self.assertEqual(answer["code"], "invalid", (chat, name))
 
 
 if __name__ == "__main__":
