@@ -275,7 +275,9 @@ export interface CreateSessionInput {
   personaId?: string;
   projectPath: string;
   largeModelSelection?: string;
-  reasoningEffort: ReasoningEffort;
+  // The turn, not the session, carries reasoning effort; a turn that omits it
+  // gets the guardian's stored preference.
+  reasoningEffort?: ReasoningEffort;
   agentName?: string;
 }
 

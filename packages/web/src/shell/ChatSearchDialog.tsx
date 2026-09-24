@@ -1,10 +1,21 @@
-import { AlertCircle, Archive, Check, Folder, MessageSquare, SearchX, X } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  Check,
+  Folder,
+  MessageSquare,
+  SearchX,
+  SendHorizontal,
+  X,
+} from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import { TileIcon } from "@/components/app-tile-icon";
+import { AgentMentionChip } from "@/components/chat/composer/AgentMentionChip";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -17,10 +28,26 @@ import {
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { useAppsList } from "@/hooks/use-apps";
+import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
+import { prettyAgentName } from "@/lib/agent-name";
 import { getHostAppRoute } from "@/lib/auth-routing";
-import { listSessions, searchChatMessages } from "@/lib/chat-api";
-import type { ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
+import {
+  ChatApiError,
+  createSession,
+  listChatAgents,
+  listSessions,
+  postSessionTurn,
+  searchChatMessages,
+} from "@/lib/chat-api";
+import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import type {
+  AgentCatalogGroup,
+  AgentMention,
+  ChatSearchMessageMatch,
+  ChatSession,
+} from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
 const RECENT_CHAT_LIMIT = 10;
@@ -56,6 +83,16 @@ export function isChatSearchShortcut(
 ): boolean {
   const modifier = isApplePlatform(platform) ? event.metaKey : event.ctrlKey;
   return modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k";
+}
+
+/**
+ * The agent filter while the query is a lone `@` token at its start, else
+ * null. Only a leading token counts, so a search that merely contains `@` (an
+ * email address in a message) stays a search.
+ */
+export function agentMentionQuery(query: string): string | null {
+  const match = /^@(\S*)$/.exec(query.trimStart());
+  return match ? match[1] : null;
 }
 
 function activeSessionFromPath(pathname: string): string | null {
@@ -194,10 +231,30 @@ export interface ChatSearchDialogProps {
 
 export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) {
   const { t } = useTranslation("common");
+  const { t: tChat } = useTranslation("chat");
   const navigate = useNavigate();
   const location = useLocation();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  // The agent a new chat will go to. Once pinned, the field holds the
+  // message rather than a search.
+  const [agentMention, setAgentMention] = useState<AgentMention | null>(null);
+  const [agentCatalog, setAgentCatalog] = useState<AgentCatalogGroup[] | null>(null);
+  const [agentCatalogError, setAgentCatalogError] = useState(false);
+  const [agentCatalogAttempt, setAgentCatalogAttempt] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  // Guards a second Enter before `sending` commits.
+  const sendingRef = useRef(false);
+  // Bumped each time the dialog opens or closes, so a send that finishes after
+  // the guardian dismissed the dialog does not navigate or report into it.
+  const openGenerationRef = useRef(0);
+  // A session created by a send whose turn then failed. A retry to the same
+  // agent reuses it rather than leaving an empty chat behind per attempt.
+  const pendingSessionRef = useRef<{ sessionId: string; agentName: string } | null>(null);
+  // The last failed turn. Resending the same text reuses its `inputId`, so a
+  // turn the server accepted before the failure is not recorded twice.
+  const failedTurnRef = useRef<{ sessionId: string; text: string; inputId: string } | null>(null);
   const [sessions, setSessions] = useState<ChatSession[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -226,10 +283,45 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   }, [onOpenChange, open]);
 
   useEffect(() => {
+    openGenerationRef.current += 1;
     if (!open) return;
     setQuery("");
+    setAgentMention(null);
+    setAgentCatalog(null);
+    setSendError(null);
+    pendingSessionRef.current = null;
+    failedTurnRef.current = null;
   }, [open]);
 
+  const mentionQuery = agentMention ? null : agentMentionQuery(query);
+  const pickingAgent = mentionQuery !== null;
+  const messagingAgent = agentMention !== null;
+  // Picking or messaging an agent takes the field over, so chat and app
+  // search see an empty query and stay idle.
+  const searchQuery = pickingAgent || messagingAgent ? "" : query;
+
+  // The catalog is fetched the first time `@` is typed in each opening, so an
+  // agent installed since the last one shows up. A failed load is not kept.
+  useEffect(() => {
+    if (!open || !pickingAgent || agentCatalog !== null) return;
+    let cancelled = false;
+    setAgentCatalogError(false);
+    listChatAgents()
+      .then((groups) => {
+        if (!cancelled) setAgentCatalog(groups);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentCatalogError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentCatalog, agentCatalogAttempt, open, pickingAgent]);
+
+  const matchingAgentGroups = useMemo(
+    () => (mentionQuery === null ? [] : filterAgentCatalog(agentCatalog ?? [], mentionQuery)),
+    [agentCatalog, mentionQuery],
+  );
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -249,7 +341,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
   // Debounced transcript search: matches inside user + assistant messages.
   // Failures degrade silently to title/project-only results.
-  const trimmedQuery = query.trim();
+  const trimmedQuery = searchQuery.trim();
   useEffect(() => {
     if (!open || !trimmedQuery) {
       setContentMatches([]);
@@ -280,7 +372,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     };
   }, [open, trimmedQuery]);
 
-  const normalizedQuery = normalizeSearchText(query);
+  const normalizedQuery = normalizeSearchText(searchQuery);
   const matchingApps = useMemo(
     () => matchingOpenableApps(apps ?? [], normalizedQuery),
     [apps, normalizedQuery],
@@ -336,16 +428,106 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     [normalizedQuery],
   );
 
-  const openSession = useCallback(
-    (session: ChatSession) => {
+  const openSessionById = useCallback(
+    (sessionId: string) => {
       onOpenChange(false);
       const preserveHiddenSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
       navigate(
-        `/chat/${encodeURIComponent(session.id)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
+        `/chat/${encodeURIComponent(sessionId)}${preserveHiddenSidebar ? "?hideSidebar=1" : ""}`,
       );
     },
     [location.search, navigate, onOpenChange],
   );
+
+  const openSession = useCallback(
+    (session: ChatSession) => openSessionById(session.id),
+    [openSessionById],
+  );
+
+  const pickAgent = useCallback((group: AgentCatalogGroup, agentName: string) => {
+    setAgentMention({
+      appId: group.ownerId,
+      appLabel: group.label,
+      agentName,
+      iconUrl: group.iconUrl,
+    });
+    setQuery("");
+    setSendError(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const unpinAgent = useCallback(() => {
+    if (sendingRef.current) return;
+    setAgentMention(null);
+    setSendError(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const messageText = messagingAgent ? query.trim() : "";
+
+  // Starts the chat the way the new-chat composer does, with its defaults: the
+  // default project, and the stored model and reasoning preferences, which
+  // the server applies when the request omits them.
+  const sendToAgent = useCallback(async () => {
+    if (!agentMention || !messageText || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
+    const generation = openGenerationRef.current;
+    const agentName = agentMention.agentName;
+    let sessionId: string | null = null;
+    let inputId: string | null = null;
+    let errorMessage = tChat("stream.errors.createChatFallback");
+    try {
+      const pending = pendingSessionRef.current;
+      sessionId = pending?.agentName === agentName ? pending.sessionId : null;
+      if (!sessionId) {
+        try {
+          const created = await createSession({
+            name: tChat("sidebar.newChat"),
+            projectPath: DEFAULT_PROJECT_NAME,
+            agentName,
+          });
+          sessionId = created.id;
+        } catch (error) {
+          if (error instanceof ChatApiError && error.message) errorMessage = error.message;
+          throw error;
+        }
+        pendingSessionRef.current = { sessionId, agentName };
+        // An unsent chat is still a chat; the lists should show it even if
+        // the turn below fails.
+        emitSessionsChanged();
+      }
+      const failed = failedTurnRef.current;
+      inputId =
+        failed && failed.sessionId === sessionId && failed.text === messageText
+          ? failed.inputId
+          : crypto.randomUUID();
+      const body = new FormData();
+      body.set("text", messageText);
+      body.set("inputId", inputId);
+      errorMessage = tChat("stream.errors.sendFallback");
+      const result = await postSessionTurn(sessionId, body);
+      if (!result.ok) {
+        errorMessage =
+          result.message ||
+          (result.status === 0
+            ? tChat("stream.errors.sendInvalidResponse")
+            : tChat("stream.errors.sendStatus", { status: result.status }));
+        throw new Error(errorMessage);
+      }
+      pendingSessionRef.current = null;
+      failedTurnRef.current = null;
+      emitSessionsChanged();
+      if (generation === openGenerationRef.current) openSessionById(sessionId);
+    } catch {
+      if (sessionId && inputId) failedTurnRef.current = { sessionId, text: messageText, inputId };
+      if (generation === openGenerationRef.current) setSendError(errorMessage);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [agentMention, messageText, openSessionById, tChat]);
 
   const openApp = useCallback(
     (entry: AppSearchEntry) => {
@@ -377,6 +559,87 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     : chatLoading;
   const hasResults = resultCount > 0;
   const hasPartialFailure = isSearching && (loadError || Boolean(appsError));
+  const agentCatalogLoading = pickingAgent && agentCatalog === null && !agentCatalogError;
+  const agentCount = matchingAgentGroups.reduce((count, group) => count + group.agents.length, 0);
+  const agentName = agentMention ? prettyAgentName(agentMention.agentName) : "";
+  const inputLabel = agentMention
+    ? t("recentChats.agentMessageLabel", { agent: agentName })
+    : t("recentChats.search");
+  // Whether the listbox has options, which decides its padding.
+  const listHasOptions = pickingAgent
+    ? agentCount > 0
+    : messagingAgent
+      ? messageText.length > 0
+      : hasResults;
+
+  const agentGroups = matchingAgentGroups.map((group) => (
+    <CommandGroup key={`agents:${group.ownerId}`} heading={group.label}>
+      {group.agents.map((agent) => {
+        const label = prettyAgentName(agent.localName ?? agent.name);
+        return (
+          <CommandItem
+            key={`agent:${agent.name}`}
+            value={`agent:${agent.name}`}
+            aria-label={label}
+            onSelect={() => pickAgent(group, agent.name)}
+            className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+          >
+            <span
+              className={cn(
+                "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+                "bg-surface-muted text-muted-foreground",
+                "group-data-[selected=true]:bg-background",
+              )}
+            >
+              {group.iconUrl ? (
+                <img src={group.iconUrl} alt="" className="size-5 rounded-4" />
+              ) : (
+                <RomeLogo aria-hidden="true" className="size-5" />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-ui text-foreground">{label}</span>
+              {agent.description ? (
+                <span className="mt-1 block truncate text-aux text-muted-foreground">
+                  {agent.description}
+                </span>
+              ) : null}
+            </span>
+          </CommandItem>
+        );
+      })}
+    </CommandGroup>
+  ));
+
+  const sendItem =
+    messagingAgent && messageText ? (
+      <CommandItem
+        value="send-to-agent"
+        disabled={sending}
+        onSelect={() => void sendToAgent()}
+        className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+      >
+        <span
+          className={cn(
+            "inline-flex size-9 shrink-0 items-center justify-center rounded-8 border border-border",
+            "bg-surface-muted text-muted-foreground",
+            "group-data-[selected=true]:bg-background group-data-[selected=true]:text-foreground",
+          )}
+        >
+          {sending ? (
+            <Spinner size="sm" label={t("recentChats.agentSending", { agent: agentName })} />
+          ) : (
+            <SendHorizontal className="size-4" aria-hidden />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-ui text-foreground">
+            {t("recentChats.agentStartChat", { agent: agentName })}
+          </span>
+          <span className="mt-1 block truncate text-aux text-muted-foreground">{messageText}</span>
+        </span>
+      </CommandItem>
+    ) : null;
 
   const appItems = matchingApps.map((entry) => (
     <CommandItem
@@ -490,17 +753,46 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         shouldFilter={false}
         loop
         vimBindings={false}
-        label={t("recentChats.search")}
+        // cmdk names its input from this label, over the input's own
+        // aria-label, so the field's name follows the mode here.
+        label={inputLabel}
         className="bg-transparent"
       >
         <CommandInput
           ref={inputRef}
-          aria-label={t("recentChats.search")}
-          aria-busy={relevantLoading}
+          aria-label={inputLabel}
+          aria-busy={
+            pickingAgent ? agentCatalogLoading : messagingAgent ? sending : relevantLoading
+          }
           value={query}
-          onValueChange={setQuery}
-          placeholder={t("recentChats.searchPlaceholder")}
+          onValueChange={(value) => {
+            setQuery(value);
+            if (sendError) setSendError(null);
+          }}
+          onKeyDown={(event) => {
+            // Backspace at the start of an empty message unpins the agent,
+            // the way a token field gives back its last token.
+            if (event.key === "Backspace" && agentMention && query === "") {
+              event.preventDefault();
+              unpinAgent();
+            }
+          }}
+          placeholder={
+            agentMention
+              ? t("recentChats.agentMessagePlaceholder", { agent: agentName })
+              : t("recentChats.searchPlaceholder")
+          }
           className="h-14"
+          leading={
+            agentMention ? (
+              <AgentMentionChip
+                mention={agentMention}
+                pinned={false}
+                onRemove={unpinAgent}
+                removeLabel={t("recentChats.agentRemove", { agent: agentName })}
+              />
+            ) : null
+          }
         >
           {query ? (
             <IconButton
@@ -521,7 +813,72 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         </CommandInput>
 
         <div className="min-h-52">
-          {!isSearching ? (
+          {pickingAgent ? (
+            agentCatalogLoading ? (
+              <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
+                <Spinner label={t("recentChats.agentLoading")} />
+                <span aria-hidden>{t("recentChats.agentLoading")}</span>
+              </div>
+            ) : agentCatalogError ? (
+              <div
+                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+                role="alert"
+              >
+                <span className="mb-3 inline-flex size-10 items-center justify-center rounded-full bg-destructive-bg text-destructive-fg">
+                  <AlertCircle className="size-5" aria-hidden />
+                </span>
+                <p className="text-ui text-foreground">{t("recentChats.agentLoadError")}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setAgentCatalogAttempt((attempt) => attempt + 1)}
+                  onKeyDown={stopEnterPropagation}
+                  className="mt-3"
+                >
+                  {t("recentChats.searchRetry")}
+                </Button>
+              </div>
+            ) : agentCount === 0 ? (
+              <div
+                className="flex min-h-52 flex-col items-center justify-center px-6 text-center"
+                role="status"
+              >
+                <SearchX className="mb-3 size-6 text-muted-foreground" aria-hidden />
+                <p className="text-ui text-foreground">
+                  {(agentCatalog ?? []).length === 0
+                    ? t("recentChats.agentEmpty")
+                    : t("recentChats.agentNoMatch")}
+                </p>
+              </div>
+            ) : (
+              <div className="px-4 pb-1 pt-3 text-aux text-muted-foreground">
+                {t("recentChats.agentPickHeading")}
+              </div>
+            )
+          ) : messagingAgent ? (
+            <>
+              {sendError ? (
+                <div
+                  className="mx-4 mt-3 flex items-center gap-2 rounded-8 bg-destructive-bg px-3 py-2 text-ui text-destructive-fg"
+                  role="alert"
+                >
+                  <AlertCircle className="size-4 shrink-0" aria-hidden />
+                  <span className="min-w-0 flex-1">{sendError}</span>
+                </div>
+              ) : null}
+              {messageText ? null : (
+                <div
+                  className="flex min-h-40 flex-col items-center justify-center px-6 text-center"
+                  role="status"
+                >
+                  <MessageSquare className="mb-3 size-6 text-muted-foreground" aria-hidden />
+                  <p className="text-ui text-muted-foreground">
+                    {t("recentChats.agentMessageHint", { agent: agentName })}
+                  </p>
+                </div>
+              )}
+            </>
+          ) : !isSearching ? (
             chatLoading ? (
               <div className="flex min-h-52 items-center justify-center gap-2 text-ui text-muted-foreground">
                 <Spinner label={t("recentChats.searchLoading")} />
@@ -644,16 +1001,30 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
           {/* cmdk's input emits aria-controls unconditionally, so the listbox
               remains mounted in loading, failure, and empty states. */}
           <CommandList
-            label={t("recentChats.searchResultsLabel")}
-            className={`max-h-[55vh] sm:max-h-96 ${hasResults ? "px-2 pb-2" : ""}`}
+            label={
+              pickingAgent
+                ? t("recentChats.agentResultsLabel")
+                : messagingAgent
+                  ? t("recentChats.agentMessageLabel", { agent: agentName })
+                  : t("recentChats.searchResultsLabel")
+            }
+            className={`max-h-[55vh] sm:max-h-96 ${listHasOptions ? "px-2 pb-2" : ""}`}
           >
-            {hasResults && isSearching && matchingApps.length > 0 ? (
-              <CommandGroup heading={t("recentChats.searchAppsGroup")}>{appItems}</CommandGroup>
+            {pickingAgent ? agentGroups : null}
+            {messagingAgent ? sendItem : null}
+            {!pickingAgent && !messagingAgent ? (
+              <>
+                {hasResults && isSearching && matchingApps.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchAppsGroup")}>{appItems}</CommandGroup>
+                ) : null}
+                {hasResults && isSearching && visibleEntries.length > 0 ? (
+                  <CommandGroup heading={t("recentChats.searchChatsGroup")}>
+                    {chatItems}
+                  </CommandGroup>
+                ) : null}
+                {hasResults && !isSearching ? chatItems : null}
+              </>
             ) : null}
-            {hasResults && isSearching && visibleEntries.length > 0 ? (
-              <CommandGroup heading={t("recentChats.searchChatsGroup")}>{chatItems}</CommandGroup>
-            ) : null}
-            {hasResults && !isSearching ? chatItems : null}
           </CommandList>
         </div>
       </Command>
@@ -669,7 +1040,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
           <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
             ↵
           </kbd>
-          {t("recentChats.searchOpenHint")}
+          {pickingAgent
+            ? t("recentChats.agentPickHint")
+            : messagingAgent
+              ? t("recentChats.agentSendHint")
+              : t("recentChats.searchOpenHint")}
         </span>
         <span className="inline-flex items-center gap-2">
           <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
