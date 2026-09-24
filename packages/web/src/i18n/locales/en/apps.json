@@ -173,6 +173,7 @@
       "linkLabel": "Share link",
       "copyLink": "Copy link",
       "linkCopied": "Copied",
+      "linkSaveFirst": "Save access before sharing this link.",
       "cancel": "Cancel",
       "save": "Save access",
       "saving": "Saving..."

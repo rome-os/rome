@@ -530,6 +530,15 @@ export function useAppLifecycle(
   const shareOrigin = shareableOrigin();
   const accessShareUrl =
     accessTarget?.fullHref && shareOrigin ? `${shareOrigin}${accessTarget.fullHref}` : null;
+  // The link only opens once the picked mode is saved, and saving closes the
+  // dialog, so copy waits for a saved shared mode. The Clipboard API exists in
+  // secure contexts only; elsewhere the field, which selects on focus, is the
+  // way to copy.
+  const accessSavedMode: AppAccessMode | null = accessTarget
+    ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
+    : null;
+  const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
+  const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const copyAccessShareUrl = () => {
     if (!accessShareUrl) return;
     void navigator.clipboard?.writeText(accessShareUrl).then(
@@ -737,12 +746,23 @@ export function useAppLifecycle(
                     onFocus={(event) => event.currentTarget.select()}
                   />
                 </div>
-                <Button type="button" variant="outline" size="md" onClick={copyAccessShareUrl}>
-                  {accessLinkCopied
-                    ? t("installed.accessDialog.linkCopied")
-                    : t("installed.accessDialog.copyLink")}
-                </Button>
+                {canCopyAccessLink ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    onClick={copyAccessShareUrl}
+                    disabled={accessLinkUnsaved}
+                  >
+                    {accessLinkCopied
+                      ? t("installed.accessDialog.linkCopied")
+                      : t("installed.accessDialog.copyLink")}
+                  </Button>
+                ) : null}
               </div>
+              {accessLinkUnsaved ? (
+                <FieldDescription>{t("installed.accessDialog.linkSaveFirst")}</FieldDescription>
+              ) : null}
             </div>
           ) : null}
 
