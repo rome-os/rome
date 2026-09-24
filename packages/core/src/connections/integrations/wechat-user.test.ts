@@ -336,6 +336,17 @@ describe("the WeChat personal Talker", () => {
     }
   });
 
+  it("turns accessibility on for a client that is already running", async () => {
+    const runtime = fakeRuntime({ statuses: [READY] });
+    const { talker } = buildTalker(runtime);
+    try {
+      await rs.waitFor(() => expect(runtime.prepareSession).toHaveBeenCalledTimes(1));
+      expect(runtime.start).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
   it("keeps history available and retries a failed client launch without rejecting the grant", async () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, state: "stopped", running: false }],

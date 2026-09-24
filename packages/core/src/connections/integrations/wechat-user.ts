@@ -515,6 +515,12 @@ export function createWechatUserDescriptor(
                     status = await runtime.status();
                   }
                   if (epoch.signal.aborted) return;
+                  if (status.running) {
+                    // Keeps accessibility on for a client that was already
+                    // running, which joins the bus live. Idempotent.
+                    await runtime.prepareSession();
+                    if (epoch.signal.aborted) return;
+                  }
                   if (!status.running) {
                     degradation = {
                       reason:
