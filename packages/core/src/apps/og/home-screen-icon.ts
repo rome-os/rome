@@ -26,5 +26,8 @@ export function renderHomeScreenIconSvg(icon: OgIcon): string {
 export async function renderHomeScreenIcon(app: ResolvedApp): Promise<Buffer | null> {
   const icon = await readIcon(app);
   if (icon === null) return null;
-  return svgToPng(renderHomeScreenIconSvg(icon), HOME_SCREEN_ICON_SIZE);
+  // No fonts: loading the system fonts takes seconds on a host with many
+  // installed, the render itself a few milliseconds, and resvg never draws
+  // text inside an embedded <image> SVG anyway.
+  return svgToPng(renderHomeScreenIconSvg(icon), HOME_SCREEN_ICON_SIZE, false);
 }
