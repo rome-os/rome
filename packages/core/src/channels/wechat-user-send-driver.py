@@ -180,15 +180,18 @@ class Store:
         self.python = os.environ.get("WECHAT_READER_PYTHON", venv)
         self.helper = os.path.join(HERE, "wechat-user-helper.py")
 
-    def lines(self, *args):
+    def lines(self, *args, timeout=120):
         r = subprocess.run([self.python, self.helper, "messages", *args],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=timeout)
         if r.returncode != 0:
             raise Failure("not-ready", f"the store could not be read: {r.stderr.strip()[:300]}")
         return json.loads(r.stdout)["messages"]
 
-    def chat(self, chat_id): return self.lines("--conversation", chat_id, "--limit", "200")
-    def recent(self, since): return self.lines("--since", str(since), "--limit", "500")
+    def chat(self, chat_id, timeout=120):
+        return self.lines("--conversation", chat_id, "--limit", "200", timeout=timeout)
+
+    def recent(self, since, timeout=120):
+        return self.lines("--since", str(since), "--limit", "500", timeout=timeout)
 
 
 def is_echo(m, body):
@@ -323,9 +326,11 @@ class Driver:
             return self._send(chat_id, name, body, press_return)
         except Exception as e:  # noqa: BLE001 — any failure is a coded Failure with `typed`
             # The target's input was empty before typing, so what it holds is ours. Another
-            # chat's input is never touched. Best effort: the answer below still says typed.
+            # chat's input is never touched. The name is read last, just before set_text: a
+            # chat switch in that one round trip is the residual race. Best effort: the
+            # answer below still says typed.
             with contextlib.suppress(Exception):
-                if self.box and not self.returned and self.box.name == name and self.box.text():
+                if self.box and not self.returned and self.box.text() and self.box.name == name:
                     self.box.set_text("")
             if isinstance(e, Failure):
                 e.typed = e.typed or self.typed
@@ -334,7 +339,13 @@ class Driver:
             raise Failure(code, f"{type(e).__name__}: {e}{tail}", self.typed) from e
 
     def _send(self, chat_id, name, body, press_return):
-        before = {m["id"] for m in self.store.chat(chat_id) if is_echo(m, body)}
+        history = self.store.chat(chat_id)
+        # The store names the chat the way the client shows it. A chat with no lines yet (a
+        # first message) has no name to check, and relies on the search and input checks.
+        names = {m.get("conversationName") for m in history} - {None, ""}
+        if names and name not in names:
+            raise Failure("not-found", f"the store names {chat_id!r} {sorted(names)!r}, not {name!r}")
+        before = {m["id"] for m in history if is_echo(m, body)}
         started = int(self.clock.time()) - 1
         elsewhere_before = {m["id"] for m in self.store.recent(started - 60)}
         self.bring_forward()
@@ -345,10 +356,13 @@ class Driver:
             return None
         self.press(name, body)
         deadline = self.clock.time() + ECHO_TIMEOUT_S
+        # Each read after Return gets only what is left of the budget, so the answer comes in time.
+        left = lambda: max(1, deadline - self.clock.time())  # noqa: E731
         while True:
             try:
-                fresh = [m for m in self.store.chat(chat_id) if is_echo(m, body) and m["id"] not in before]
-                stray = [m for m in self.store.recent(started) if is_echo(m, body)
+                fresh = [m for m in self.store.chat(chat_id, timeout=left())
+                         if is_echo(m, body) and m["id"] not in before]
+                stray = [m for m in self.store.recent(started, timeout=left()) if is_echo(m, body)
                          and m["conversationId"] != chat_id and m["id"] not in elsewhere_before]
             except Exception:  # noqa: BLE001 — a read that fails after Return is no echo yet
                 fresh, stray = [], []

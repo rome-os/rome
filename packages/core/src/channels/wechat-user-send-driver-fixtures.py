@@ -172,14 +172,14 @@ class FakeStore:
             chat, text = self.client.sent[self.seen]
             conv = self.where.get(chat, chat)
             self.lines.append({"id": f"{conv}:{len(self.lines) + 1}", "conversationId": conv,
-                               "isSelf": True, "type": "text", "text": text})
+                               "conversationName": chat, "isSelf": True, "type": "text", "text": text})
             self.seen += 1
 
-    def chat(self, chat_id):
+    def chat(self, chat_id, timeout=120):
         self._sync()
         return [m for m in self.lines if m["conversationId"] == chat_id]
 
-    def recent(self, since):
+    def recent(self, since, timeout=120):
         self._sync()
         return list(self.lines)
 
@@ -356,10 +356,10 @@ class SendTests(unittest.TestCase):
         client, desk, store, clock = rig()
         chat, fails = store.chat, [2]
 
-        def flaky(chat_id):
+        def flaky(chat_id, timeout=120):
             if client.sent and fails[0]:
                 fails[0] -= 1
-                raise subprocess.TimeoutExpired("wechat-user-helper.py", 120)
+                raise subprocess.TimeoutExpired("wechat-user-helper.py", timeout)
             return chat(chat_id)
         store.chat = flaky
         self.assertEqual(send(client, desk, store, clock), "filehelper:1")
@@ -430,6 +430,54 @@ class SendTests(unittest.TestCase):
                    for i in range(2)]
         client.app.kids.append(FakeNode(client, "frame", "Li Wei", [FakeNode(client, "list", "Messages", bubbles)]))
         self.assertEqual(send(client, desk, store, clock), "filehelper:1")
+
+    def test_a_chat_the_store_names_otherwise_is_refused_before_anything(self):
+        client, desk, store, clock = rig()
+        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper", "conversationName": "Li Wei",
+                            "isSelf": False, "type": "text", "text": "hi"})
+        self.assertFails("not-found", False, lambda: send(client, desk, store, clock))
+        self.assertEqual((desk.events, client.all_inputs()["Li Wei"]), ([], ""))
+
+    def test_a_chat_the_store_names_the_same_is_sent(self):
+        client, desk, store, clock = rig()
+        store.lines.append({"id": "filehelper:1", "conversationId": "filehelper",
+                            "conversationName": "File Transfer", "isSelf": False, "type": "text", "text": "hi"})
+        self.assertEqual(send(client, desk, store, clock), "filehelper:2")
+
+    def test_the_echo_wait_keeps_to_its_budget_when_the_store_hangs(self):
+        client, desk, store, clock = rig()
+        chat, recent, returned_at = store.chat, store.recent, []
+
+        def hang(read):
+            def wrapped(*args, timeout=120):
+                if not client.sent:
+                    return read(*args)
+                returned_at[:] = returned_at or [clock.now]
+                clock.now += timeout  # a read that hangs until its timeout
+                raise subprocess.TimeoutExpired("wechat-user-helper.py", timeout)
+            return wrapped
+        store.chat, store.recent = hang(chat), hang(recent)
+        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+        self.assertLessEqual(clock.now - returned_at[0], d.ECHO_TIMEOUT_S + 5)
+
+    def test_a_chat_switch_during_cleanup_leaves_the_other_draft(self):
+        client, desk, store, clock = rig()
+        client.input.value = "the guardian's own draft"  # in Li Wei, the chat open at the start
+        failing, text = [], client.input.text
+
+        def grab():
+            failing.append(True)
+            raise LookupError("the node went away")
+
+        def text_then_switch():
+            value = text()
+            if failing and client.input.name == "File Transfer":
+                client.open("Li Wei")  # the guardian switches chats mid-cleanup
+            return value
+        client.input.grab_focus, client.input.text = grab, text_then_switch
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertEqual(client.all_inputs()["Li Wei"], "the guardian's own draft")
+        self.assertNotIn("Return", desk.events)
 
     def test_dry_run_reaches_the_input_and_clears_it(self):
         client, desk, store, clock = rig()
