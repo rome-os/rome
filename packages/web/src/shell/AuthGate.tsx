@@ -3,6 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { getRoutedAppId, resolveAuthRouting } from "../lib/auth-routing";
 import { BACKEND_RETRY_INTERVAL_MS, hasSession, useAuthState } from "../lib/auth-state";
 import { reportDetectedTimezoneOnce } from "../lib/guardian-timezone";
+import { rememberLoginReturn } from "../lib/login-return";
 import { BackendUnreachableScreen } from "../components/backend-unreachable";
 
 interface PublicAppProbe {
@@ -99,6 +100,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   });
 
   if (decision.action === "redirect" && decision.location !== location.pathname) {
+    // Sign-in sends the guardian back here (LoginPage, CallbackPage).
+    if (decision.location === "/login") {
+      rememberLoginReturn(`${location.pathname}${location.search}`);
+    }
     return <Navigate to={decision.location} replace />;
   }
 

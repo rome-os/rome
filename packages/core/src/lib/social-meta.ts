@@ -102,3 +102,47 @@ export function renderSocialMeta(indexHtml: string, card: SocialCard | null): st
   const documentTitle = `${card.title}${TITLE_SEPARATOR}${SITE_NAME}`;
   return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(documentTitle)}</title>`);
 }
+
+// Home-screen identity: the manifest, iOS icon and name tags, marked as their
+// own block in packages/web/index.html. Every tag is replaced rather than
+// added to, since iOS reads the first apple-mobile-web-app-title it finds.
+const IDENTITY_START_MARKER = "<!-- rome:app-identity:start -->";
+const IDENTITY_END_MARKER = "<!-- rome:app-identity:end -->";
+const SHELL_TOUCH_ICON_RE = /<link rel="apple-touch-icon" href="([^"]*)"/;
+
+export interface AppIdentity {
+  name: string;
+  /** Same-origin path of the app's web manifest. */
+  manifestUrl: string;
+  /** Same-origin path of the app's PNG icon; omitted → the shell's own icon is kept. */
+  iconUrl?: string;
+}
+
+/**
+ * Swap the marked home-screen block for `identity`. Returns the input
+ * unchanged when there is no identity or the markers are absent.
+ */
+export function renderAppIdentity(indexHtml: string, identity: AppIdentity | null): string {
+  if (identity === null) return indexHtml;
+  const start = indexHtml.indexOf(IDENTITY_START_MARKER);
+  const end = indexHtml.indexOf(IDENTITY_END_MARKER);
+  if (start === -1 || end === -1 || end < start) return indexHtml;
+
+  const existingBlock = indexHtml.slice(start + IDENTITY_START_MARKER.length, end);
+  const iconValue =
+    identity.iconUrl !== undefined
+      ? escapeHtml(identity.iconUrl)
+      : (existingBlock.match(SHELL_TOUCH_ICON_RE)?.[1] ?? null);
+  const name = escapeHtml(identity.name);
+  const lines = [`<link rel="manifest" href="${escapeHtml(identity.manifestUrl)}" />`];
+  if (iconValue !== null) lines.push(`<link rel="apple-touch-icon" href="${iconValue}" />`);
+  lines.push(
+    `<meta name="apple-mobile-web-app-title" content="${name}" />`,
+    `<meta name="application-name" content="${name}" />`,
+  );
+
+  const before = indexHtml.slice(0, start + IDENTITY_START_MARKER.length);
+  const after = indexHtml.slice(end);
+  const block = lines.map((line) => `    ${line}`).join("\n");
+  return `${before}\n${block}\n    ${after}`;
+}

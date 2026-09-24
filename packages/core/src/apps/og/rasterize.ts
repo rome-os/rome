@@ -13,13 +13,14 @@ export const RENDER_FONT_OPTIONS = {
 };
 
 /**
- * SVG → PNG at the SVG's own size, rendered on resvg's thread pool so a boot
- * that replays every installed app never blocks the event loop.
+ * SVG → PNG `width` pixels wide (the card's 1200 by default), rendered on
+ * resvg's thread pool so a boot that replays every installed app never blocks
+ * the event loop.
  */
-export async function svgToPng(svg: string): Promise<Buffer> {
+export async function svgToPng(svg: string, width = 1200): Promise<Buffer> {
   const image = await renderAsync(svg, {
     font: RENDER_FONT_OPTIONS,
-    fitTo: { mode: "width", value: 1200 },
+    fitTo: { mode: "width", value: width },
   });
   return image.asPng();
 }

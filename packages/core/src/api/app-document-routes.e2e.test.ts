@@ -3,8 +3,10 @@
  * `api/index.ts`) with per-app social meta on `/apps/*` and `/full/apps/*`
  * document routes, swapped via `buildAppSocialCard` +
  * `renderSocialMeta` (`api/app-social-card.ts`, `lib/social-meta.ts`).
- * Everything else — unknown apps, non-app SPA routes, static assets — must
- * keep serving the shell/asset unchanged.
+ * The same routes swap the home-screen manifest, icon and name
+ * (`api/app-home-screen.ts`, `renderAppIdentity`). Everything else — unknown
+ * apps, non-app SPA routes, static assets — must keep serving the shell/asset
+ * unchanged.
  *
  * The fixture drives the real production `buildApp` against a temp
  * `webRoot` so a future regression in the mount order, the social-meta
@@ -22,6 +24,12 @@ import type { AppView, ResolvedApp } from "../apps/state.js";
 import { buildTestDeps, createTestDb } from "../test/helpers.js";
 
 const INDEX_HTML = `<html><head>
+<!-- rome:app-identity:start -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Rome" />
+<meta name="application-name" content="Rome" />
+<!-- rome:app-identity:end -->
 <title>Rome</title>
 <!-- rome:social:start -->
 <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />
@@ -131,6 +139,37 @@ describe("app document routes through buildApp", () => {
         '<meta property="og:title" content="Rome OS - Enjoy your life with Rome" />',
       );
     }
+  });
+
+  it("swaps the home-screen manifest and name for a routed app", async () => {
+    const { app } = await buildTestHost();
+    for (const routePath of ["/full/apps/reddit", "/apps/reddit/posts/1"]) {
+      const body = await (await app.request(routePath, { headers: HEADERS })).text();
+      expect(body).toContain('<link rel="manifest" href="/app-manifest/reddit.webmanifest" />');
+      expect(body).toContain('<meta name="apple-mobile-web-app-title" content="Reddit Radar" />');
+      expect(body).not.toContain('<meta name="apple-mobile-web-app-title" content="Rome" />');
+      // The fixture has no icon, so Rome's own touch icon stays.
+      expect(body).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
+    }
+  });
+
+  it("keeps Rome's home-screen identity for unknown apps and non-app routes", async () => {
+    const { app } = await buildTestHost();
+    for (const routePath of ["/full/apps/nope", "/dashboard"]) {
+      const body = await (await app.request(routePath, { headers: HEADERS })).text();
+      expect(body).toContain('<link rel="manifest" href="/manifest.webmanifest" />');
+      expect(body).toContain('<meta name="apple-mobile-web-app-title" content="Rome" />');
+    }
+  });
+
+  it("serves the app's manifest without a session", async () => {
+    const { app } = await buildTestHost();
+    const res = await app.request("/app-manifest/reddit.webmanifest", { headers: HEADERS });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      start_url: "/full/apps/reddit",
+      name: "Reddit Radar",
+    });
   });
 
   it("still serves static assets ahead of the SPA fallback", async () => {

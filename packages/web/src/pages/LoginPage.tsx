@@ -11,6 +11,7 @@ import { CloudLoginButton, cloudErrorReasonKey } from "@/components/cloud-login-
 import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
+import { takeLoginReturn } from "@/lib/login-return";
 import { beginDashboardVisitorLogin, visitorErrorReasonKey } from "@/lib/visitor-login";
 
 function envFlagEnabled(value: unknown): boolean {
@@ -87,7 +88,7 @@ export default function LoginPage() {
         }
 
         await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
-        navigate("/");
+        navigate(takeLoginReturn());
       } catch {
         setServerError(t("networkError"));
       }

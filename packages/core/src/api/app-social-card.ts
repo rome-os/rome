@@ -26,7 +26,7 @@ export interface AppSocialCardDeps {
   ogImageStore: Pick<OgImageStore, "stat">;
 }
 
-function isResolvedWebApp(
+export function isResolvedWebApp(
   view: unknown,
 ): view is ResolvedApp & { web: NonNullable<ResolvedApp["web"]> } {
   return (

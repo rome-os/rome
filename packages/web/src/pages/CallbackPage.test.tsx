@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import { rememberLoginReturn } from "@/lib/login-return";
 import CallbackPage from "./CallbackPage";
 
 // The /callback screen tries setup resume first (`POST /api/setups/return`,
@@ -202,6 +203,30 @@ describe("CallbackPage return-leg routing", () => {
         true,
       ),
     );
+  });
+
+  it("lands a sign-in on the page the guardian was sent to /login from", async () => {
+    rememberLoginReturn("/full/apps/ttt");
+    stubFetch({
+      redeem: () => new Response(JSON.stringify({ nextPath: "/" }), { status: 200 }),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-return&state=s-return");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/full/apps/ttt");
+    expect(window.localStorage.getItem("rome-login-return")).toBeNull();
+  });
+
+  it("keeps the server's own destination when it names one other than home", async () => {
+    rememberLoginReturn("/full/apps/ttt");
+    stubFetch({
+      redeem: () => new Response(JSON.stringify({ nextPath: "/onboard" }), { status: 200 }),
+    });
+    renderCallbackAndTrackLanding("?handoff=h-onboard&state=s-onboard");
+
+    const landed = await screen.findByTestId("landed-on");
+    expect(landed.textContent).toBe("/onboard");
+    window.localStorage.clear();
   });
 
   it("does not redeem a late return owned by a cancelled setup", async () => {
