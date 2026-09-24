@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -351,6 +352,78 @@ class SendTests(unittest.TestCase):
         store.where = {"File Transfer": "wxid_other"}
         self.assertFails("misdelivered", True, lambda: send(client, desk, store, clock))
 
+    def test_a_store_read_that_raises_after_return_is_no_echo_yet(self):
+        client, desk, store, clock = rig()
+        chat, fails = store.chat, [2]
+
+        def flaky(chat_id):
+            if client.sent and fails[0]:
+                fails[0] -= 1
+                raise subprocess.TimeoutExpired("wechat-user-helper.py", 120)
+            return chat(chat_id)
+        store.chat = flaky
+        self.assertEqual(send(client, desk, store, clock), "filehelper:1")
+        store.lines, store.seen, client.sent, fails[0] = [], 0, [], 10**6
+        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+
+    def test_an_unexpected_error_after_return_still_answers_typed(self):
+        client, desk, store, clock = rig()
+        press = desk.press_return
+
+        def press_then_raise():
+            press()
+            raise subprocess.TimeoutExpired("xdotool", 15)
+        desk.press_return = press_then_raise
+        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+        self.assertEqual(client.sent, [("File Transfer", "rome test")])
+
+    def test_an_unexpected_error_after_typing_clears_the_input(self):
+        client, desk, store, clock = rig()
+        client.input.grab_focus = lambda: (_ for _ in ()).throw(LookupError("the node went away"))
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertEqual((client.all_inputs()["File Transfer"], client.sent), ("", []))
+        self.assertNotIn("Return", desk.events)
+
+    def test_a_lookup_that_fails_before_return_clears_the_input(self):
+        client, desk, store, clock = rig()
+        extra = FakeNode(client, "text", "Li Wei", editable=True)
+        set_text, once = client.input.set_text, [True]
+
+        def type_then_split(s):
+            set_text(s)
+            if s == "rome test" and once.pop() if once else False:
+                client.frame.kids.append(extra)  # a second input shows for a moment
+        client.input.set_text = type_then_split
+        self.assertFails("wrong-chat", True, lambda: send(client, desk, store, clock))
+        self.assertEqual(client.all_inputs()["File Transfer"], "")
+        self.assertNotIn("Return", desk.events)
+        client.frame.kids.remove(extra)
+        self.assertEqual(send(client, desk, store, clock), "filehelper:1")  # no draft left to block it
+
+    def test_another_chats_draft_is_never_cleared(self):
+        client, desk, store, clock = rig()
+        client.input.value = "the guardian's own draft"  # in Li Wei, the chat open at the start
+        set_text = client.input.set_text
+
+        def type_then_switch(s):
+            set_text(s)
+            if s == "rome test":
+                client.open("Li Wei")  # the chat changes under the typed body
+        client.input.set_text = type_then_switch
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertEqual(client.all_inputs()["Li Wei"], "the guardian's own draft")
+        self.assertNotIn("Return", desk.events)
+
+    def test_main_answers_an_unexpected_error_as_json(self):
+        for argv, answer in ((["send", "--chat", "filehelper", "--name", "File Transfer", "--text", "hi"],
+                              {"ok": False, "code": "not-ready", "typed": False}),
+                             (["check"], {"ready": False})):
+            out = io.StringIO()
+            with patch.object(d, "ready_client", side_effect=LookupError("gone")), \
+                    patch.object(sys, "argv", ["driver", *argv]), redirect_stdout(out):
+                d.main()
+            self.assertEqual(json.loads(out.getvalue()), {**answer, "reason": "LookupError: gone"})
+
     def test_dry_run_reaches_the_input_and_clears_it(self):
         client, desk, store, clock = rig()
         self.assertIsNone(send(client, desk, store, clock, press_return=False))
@@ -376,18 +449,26 @@ class ReadinessTests(unittest.TestCase):
         desk.viewable = lambda: False
         d.readiness(client.app, desk)
 
-    def test_check_reports_a_missing_client_without_touching_anything(self):
-        env = {**os.environ, "PATH": str(HERE / "no-such-bin") + ":/usr/bin:/bin"}
-        out = subprocess.run([sys.executable, str(HERE / "wechat-user-send-driver.py"), "check"],
-                             capture_output=True, text=True, env=env)
-        self.assertEqual(json.loads(out.stdout)["ready"], False, out.stderr)
+    def run_driver(self, *args):
+        """The driver with a PATH whose only pgrep finds no client, so no real
+        client on this machine can answer."""
+        with tempfile.TemporaryDirectory() as bin_dir:
+            (Path(bin_dir) / "pgrep").write_text("#!/bin/sh\nexit 1\n")
+            (Path(bin_dir) / "pgrep").chmod(0o755)
+            out = subprocess.run([sys.executable, str(HERE / "wechat-user-send-driver.py"), *args],
+                                 capture_output=True, text=True, env={**os.environ, "PATH": bin_dir})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
 
-    def test_send_refuses_a_body_over_the_limit_before_anything_else(self):
-        out = subprocess.run([sys.executable, str(HERE / "wechat-user-send-driver.py"), "send",
-                              "--chat", "filehelper", "--name", "File Transfer", "--text", "x" * 4001],
-                             capture_output=True, text=True)
-        self.assertEqual(out.returncode, 2)
-        self.assertEqual(out.stdout, "")
+    def test_check_reports_a_missing_client_without_touching_anything(self):
+        self.assertEqual(self.run_driver("check"), {"ready": False, "reason": "the WeChat client is not running"})
+
+    def test_send_refuses_a_bad_body_before_anything_else(self):
+        for text in ("x" * 4001, " ", "see <msg>x</msg>", '<?xml version="1.0"?>'):
+            answer = self.run_driver("send", "--chat", "filehelper", "--name", "File Transfer", "--text", text)
+            self.assertEqual((answer["ok"], answer["code"], answer["typed"]), (False, "invalid", False), text)
+        answer = self.run_driver("send", "--chat", "filehelper", "--name", " ", "--text", "hi")
+        self.assertEqual(answer["code"], "invalid")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ highlighted. Only the store confirms a send: a new self-sent line with the body
 in the chat, answered with the reader's message id (`<wxid>:<local id>`).
 """
 import argparse
+import contextlib
 import json
 import os
 import subprocess
@@ -24,6 +25,7 @@ import sys
 import time
 
 MAX_TEXT = 4000
+ENVELOPE_MARKERS = ("<?xml", "<msg>", "<msg ")  # the reader cuts a line's text at these
 ECHO_TIMEOUT_S = 30
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Accessible names per interface language. Only English is verified live.
@@ -195,7 +197,7 @@ class Driver:
     def __init__(self, app, desktop, store, clock=time):
         self.app, self.desk, self.store, self.clock = app, desktop, store, clock
         self.frame = main_frame(app)
-        self.typed = False
+        self.typed, self.returned, self.box = False, False, None
 
     def active(self):
         # AT-SPI reports the frame active for a few hundred ms after X focus
@@ -292,10 +294,9 @@ class Driver:
         box = self.target_input(name)
         if box.text():
             raise Failure("not-ready", f"the {name!r} input already holds a draft")
+        self.box, self.typed = box, True  # before set_text: a set_text that raises may have typed
         box.set_text(body)
-        self.typed = True
         if box.text() != body:
-            box.set_text("")
             raise Failure("not-ready", "the input did not take the text exactly", True)
         return box
 
@@ -306,6 +307,7 @@ class Driver:
         if box.text() != body or FOCUSED not in box.states() or not self.active():
             box.set_text("")
             raise Failure("focus-lost", "WeChat lost the front before Return; the input was cleared", True)
+        self.returned = True  # from here the text may have gone out
         self.desk.press_return()
         self.clock.sleep(1)
         if box.text():
@@ -313,6 +315,21 @@ class Driver:
             raise Failure("no-echo", "Return did not send; the input was cleared", True)
 
     def send(self, chat_id, name, body, press_return=True):
+        try:
+            return self._send(chat_id, name, body, press_return)
+        except Exception as e:  # noqa: BLE001 — any failure is a coded Failure with `typed`
+            # The target's input was empty before typing, so what it holds is ours. Another
+            # chat's input is never touched. Best effort: the answer below still says typed.
+            with contextlib.suppress(Exception):
+                if self.box and not self.returned and self.box.name == name and self.box.text():
+                    self.box.set_text("")
+            if isinstance(e, Failure):
+                e.typed = e.typed or self.typed
+                raise
+            code, tail = ("no-echo", " after Return; check WeChat") if self.returned else ("not-ready", "")
+            raise Failure(code, f"{type(e).__name__}: {e}{tail}", self.typed) from e
+
+    def _send(self, chat_id, name, body, press_return):
         before = {m["id"] for m in self.store.chat(chat_id) if is_echo(m, body)}
         started = int(self.clock.time()) - 1
         elsewhere_before = {m["id"] for m in self.store.recent(started - 60)}
@@ -329,7 +346,7 @@ class Driver:
                 fresh = [m for m in self.store.chat(chat_id) if is_echo(m, body) and m["id"] not in before]
                 stray = [m for m in self.store.recent(started) if is_echo(m, body)
                          and m["conversationId"] != chat_id and m["id"] not in elsewhere_before]
-            except Failure:  # a read that fails after Return is a read with no echo yet
+            except Exception:  # noqa: BLE001 — a read that fails after Return is no echo yet
                 fresh, stray = [], []
             if stray:
                 raise Failure("misdelivered", f"the text landed in {stray[0]['conversationId']}", True)
@@ -367,21 +384,21 @@ def main():
     sub.add_parser("check")
     args = parser.parse_args()
 
-    if args.command == "check":
-        try:
-            ready_client()
-            print(json.dumps({"ready": True, "reason": "ready"}))
-        except Failure as e:
-            print(json.dumps({"ready": False, "reason": e.reason}, ensure_ascii=False))
-        return
-    if not args.text.strip() or len(args.text) > MAX_TEXT or not args.name.strip():
-        parser.error(f"--text must be 1 to {MAX_TEXT} characters and --name non-empty")
     try:
+        if args.command == "check":
+            ready_client()
+            return print(json.dumps({"ready": True, "reason": "ready"}))
+        # The store cuts a line at an envelope marker, so such a body's echo could never match.
+        if not args.name.strip() or not args.text.strip() or len(args.text) > MAX_TEXT or any(
+                m in args.text for m in ENVELOPE_MARKERS):
+            raise Failure("invalid", f"--name must be set; --text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
         app, desktop = ready_client()
         message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text)
         print(json.dumps({"ok": True, "conversationId": args.chat, "messageId": message_id}, ensure_ascii=False))
-    except Failure as e:
-        print(json.dumps({"ok": False, "code": e.code, "typed": e.typed, "reason": e.reason}, ensure_ascii=False))
+    except Exception as e:  # noqa: BLE001 — every answer is one JSON object; Driver.send sets typed
+        e = e if isinstance(e, Failure) else Failure("not-ready", f"{type(e).__name__}: {e}")
+        answer = {"ready": False} if args.command == "check" else {"ok": False, "code": e.code, "typed": e.typed}
+        print(json.dumps({**answer, "reason": e.reason}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
