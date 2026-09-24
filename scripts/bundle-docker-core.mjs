@@ -14,7 +14,8 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // The WeChat scripts are read at runtime relative to `import.meta.url`, which is
 // src/channels/ under tsx and dist/ in the image, so a compiled runtime finds
 // them only if they are copied to the paths below: helperPath() in
-// channels/wechat-user.ts reads the reader helper, and stageCaptureDriver() in
+// channels/wechat-user.ts reads the reader helper, the send driver reads that
+// helper as its sibling, and stageCaptureDriver() in
 // channels/wechat-user-keys.ts reads the launch driver and the key tool.
 export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
@@ -29,6 +30,11 @@ export const bundledAssets = [
     "packages/core/src/channels/wechat-user-launch-driver.py",
     "dist/wechat-user-launch-driver.py",
     "WeChat launch driver",
+  ],
+  [
+    "packages/core/src/channels/wechat-user-send-driver.py",
+    "dist/wechat-user-send-driver.py",
+    "WeChat send driver",
   ],
   [
     "packages/core/src/channels/vendor/wcdb_key_tool.py",
