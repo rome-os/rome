@@ -305,6 +305,12 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   // search see an empty query and stay idle.
   const searchQuery = pickingAgent || messagingAgent ? "" : query;
 
+  // A failed load is forgotten once the picker closes, so the next `@` opens
+  // on the loading state rather than an alert left over from the last try.
+  useEffect(() => {
+    if (!pickingAgent) setAgentCatalogError(false);
+  }, [pickingAgent]);
+
   // The catalog is fetched the first time `@` is typed in each opening, so an
   // agent installed since the last one shows up. A failed load is not kept.
   useEffect(() => {

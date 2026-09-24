@@ -914,3 +914,48 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ChatSearchDialog agent catalog errors", () => {
+  // Records all text React writes into the document, including text a later
+  // render in the same act() replaces before an assertion could see it. React
+  // reuses the panel's nodes across states, so an old error shows up as
+  // rewritten text rather than as a new `role="alert"` element.
+  function writtenText(): { stop: () => string[] } {
+    const seen: string[] = [];
+    const collect = (records: MutationRecord[]) => {
+      for (const record of records) {
+        if (record.type === "characterData") seen.push(record.target.textContent ?? "");
+        for (const node of record.addedNodes) seen.push(node.textContent ?? "");
+      }
+    };
+    const observer = new MutationObserver(collect);
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+    return {
+      stop: () => {
+        collect(observer.takeRecords());
+        observer.disconnect();
+        return seen;
+      },
+    };
+  }
+
+  it("does not render an old load error when @ is deleted and typed again", async () => {
+    mockAgentMessaging({
+      agentResponses: [Response.json({ error: "boom" }, { status: 500 })],
+    });
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    await user.type(input, "@");
+    expect((await screen.findByRole("alert")).textContent).toContain("Agents couldn't be loaded");
+
+    const watch = writtenText();
+    await user.type(input, "{Backspace}@");
+
+    expect(await screen.findByRole("option", { name: "Explorer" })).toBeTruthy();
+    const written = watch.stop();
+    expect(written.filter((text) => text.includes("Agents couldn't be loaded"))).toEqual([]);
+    expect(written.some((text) => text.includes("Loading agents…"))).toBe(true);
+  });
+});
