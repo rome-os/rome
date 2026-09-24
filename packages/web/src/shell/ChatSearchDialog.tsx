@@ -831,7 +831,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               <AgentMentionChip
                 mention={agentMention}
                 pinned={false}
-                onRemove={unpinAgent}
+                // Unpinning mid-send would orphan the send, so the × waits.
+                onRemove={sending ? undefined : unpinAgent}
                 removeLabel={t("recentChats.agentRemove", { agent: agentName })}
               />
             ) : null
@@ -844,6 +845,8 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               icon={<X aria-hidden />}
               onClick={() => {
                 setQuery("");
+                // Typing clears the error in onValueChange; this path skips it.
+                setSendError(null);
                 inputRef.current?.focus();
               }}
               className="text-muted-foreground hover:text-foreground"

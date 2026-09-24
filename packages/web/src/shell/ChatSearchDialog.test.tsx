@@ -844,6 +844,64 @@ describe("ChatSearchDialog agent messaging", () => {
   });
 });
 
+describe("ChatSearchDialog agent message controls", () => {
+  it("clears a failed send's error along with the text", async () => {
+    mockAgentMessaging({
+      turnResponses: [Response.json({ error: "Agent is busy" }, { status: 503 })],
+    });
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      "@expl",
+    );
+    await user.click(await screen.findByRole("option", { name: "Explorer" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Message Explorer" }),
+      "Find sources{Enter}",
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain("Agent is busy");
+
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("combobox", { name: "Message Explorer" }) as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("offers no chip remove control while a send is in flight", async () => {
+    let finishTurn: (response: Response) => void = () => {};
+    mockAgentMessaging({
+      turnResponses: [
+        new Promise<Response>((resolve) => {
+          finishTurn = resolve;
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      "@expl",
+    );
+    await user.click(await screen.findByRole("option", { name: "Explorer" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Message Explorer" }),
+      "Find sources{Enter}",
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Remove Explorer" })).toBeNull(),
+    );
+
+    finishTurn(Response.json({ error: "Agent is busy" }, { status: 503 }));
+    expect(await screen.findByRole("button", { name: "Remove Explorer" })).toBeTruthy();
+  });
+});
+
 describe("ChatSearchDialog agent messaging across openings", () => {
   it("offers Retry when the agent catalog fails with a server error", async () => {
     mockAgentMessaging({
