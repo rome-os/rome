@@ -14,6 +14,7 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 - Intentionally independent work starts **detached**: it becomes a new root execution with no parent. Cancelling the caller does not cancel it, and it can be cancelled separately by its own execution id.
 - A detached start returns only an acceptance receipt, never the eventual result. Acceptance is not durable across a restart.
 - Cancelling a root execution cancels everything under it.
+- A root `type: system` action owned by core or by a first-party app runs in the main process rather than in an action worker, unless it is `cancellable`. It does not draw on the worker budget, and it cannot be cancelled. Trust comes from the app's first-party install record, never from the `type` its manifest declares.
 
 **Not to be confused with:**
 
