@@ -28,6 +28,8 @@ export interface ChatSession {
   largeModelSelection?: string | null;
   /** Concrete model pinned by the session’s last successful turn, when known. */
   model?: string | null;
+  /** Reasoning effort the session’s last successful turn ran with, when known. */
+  reasoningEffort?: ReasoningEffort | null;
   projectName: string;
   projectPath?: string | null;
   agentName?: string | null;

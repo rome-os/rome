@@ -237,6 +237,20 @@ describe("Chat agent identity", () => {
     expect(screen.getByLabelText("navbar.sessionModel").textContent).toBe("gpt-5.5");
   });
 
+  it("shows the effort the session's last turn ran with beside the model", () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "A conversation",
+      model: "gpt-5.5",
+      reasoningEffort: "xhigh",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="session-1" />);
+    expect(screen.getByLabelText("navbar.sessionModelWithEffort").textContent).toBe(
+      "gpt-5.5 · reasoningEffort.options.ultrathink",
+    );
+  });
+
   it("does not invent a model for a session without a pin", () => {
     renderChat(<Chat sessionId="session-1" />);
     expect(screen.queryByLabelText("navbar.sessionModel")).toBeNull();

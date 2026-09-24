@@ -29,6 +29,7 @@ A session remembers the concrete model that produced its history — the **sessi
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
+- Each successful model turn also records the reasoning effort it ran with. Webchat shows that effort beside the pinned model. The recorded effort is for display only and never seeds a later turn's effort, which each turn still takes from its own request or the agent's configured effort.
 
 **Not to be confused with:**
 
