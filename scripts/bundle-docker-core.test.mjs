@@ -109,6 +109,7 @@ test("bundles the WeChat scripts the compiled runtime reads from dist", async ()
       "packages/core/src/channels/wechat-user-launch-driver.py",
       "dist/wechat-user-launch-driver.py",
     ],
+    ["packages/core/src/channels/wechat-user-send-driver.py", "dist/wechat-user-send-driver.py"],
     ["packages/core/src/channels/vendor/wcdb_key_tool.py", "dist/vendor/wcdb_key_tool.py"],
   ];
 
