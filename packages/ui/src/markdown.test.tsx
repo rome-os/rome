@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { Markdown } from "./markdown.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+  document.documentElement.className = "";
+});
 
 function renderMd(md: string, props: { compact?: boolean; className?: string } = {}) {
   return render(<Markdown {...props}>{md}</Markdown>);
@@ -113,5 +117,48 @@ describe("Markdown", () => {
     expect(screen.getByRole("heading", { level: 1 }).getAttribute("data-streamdown")).toBe(
       "heading-1",
     );
+  });
+});
+
+describe("Markdown Mermaid theme", () => {
+  function countThemeReads(ui: React.ReactElement): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    render(ui);
+    const reads = spy.mock.calls.length;
+    cleanup();
+    spy.mockRestore();
+    return reads;
+  }
+
+  it("resolves the theme once however many instances are mounted", () => {
+    const single = countThemeReads(<Markdown>one</Markdown>);
+    const many = countThemeReads(
+      <>
+        {Array.from({ length: 20 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+
+    expect(single).toBeGreaterThan(0);
+    expect(many).toBe(single);
+  });
+
+  it("resolves the theme again once when the theme root changes", async () => {
+    const single = countThemeReads(<Markdown>one</Markdown>);
+    render(
+      <>
+        {Array.from({ length: 5 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    await act(async () => {
+      document.documentElement.classList.add("dark");
+    });
+
+    expect(spy.mock.calls.length).toBe(single);
   });
 });
