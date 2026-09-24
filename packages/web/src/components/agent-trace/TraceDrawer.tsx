@@ -310,7 +310,11 @@ export function TraceDrawer({
             : "fixed inset-y-0 right-0 w-[480px] translate-x-full"
         }`}
       >
-        <div className="flex min-w-0 items-center gap-2 border-b border-border px-4 py-3">
+        {/* `h-12` is the chat title header's height (Chat.tsx). The docked
+            drawer sits beside that header, so the two bottom borders must
+            meet; a padding-driven height around the 28px close button lands
+            lower. */}
+        <div className="flex h-12 min-w-0 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
           <h3 className="text-ui text-foreground">{t("trace.drawer.title")}</h3>
           {streaming && (
             <span className="inline-flex items-center gap-1 rounded-full bg-info-bg px-2 py-1 text-badge text-info-fg">

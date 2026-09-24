@@ -106,6 +106,35 @@ describe("traceDrawerOpenPlacementClass", () => {
   });
 });
 
+describe("TraceDrawer header", () => {
+  it("uses the chat title header's fixed 48px height instead of padding", () => {
+    // A live target renders from props alone, so no fetch settles after the
+    // assertions below.
+    render(
+      <TraceDrawer
+        target={{
+          kind: "live",
+          sessionId: "parent-session",
+          turnId: "parent-turn",
+          summary: targetSummary,
+          segments: [],
+          streaming: false,
+        }}
+        onClose={() => {}}
+        renderInlineBlock={() => null}
+        renderRunBlocks={() => null}
+      />,
+    );
+
+    const header = screen.getByRole("heading", { name: "trace.drawer.title" }).parentElement;
+    expect(header).not.toBeNull();
+    const classes = header?.className ?? "";
+    expect(classes).toContain("h-12");
+    expect(classes).toContain("shrink-0");
+    expect(classes).not.toMatch(/\bpy-\d/);
+  });
+});
+
 describe("TraceDrawer subagent usage", () => {
   it("loads included usage by default and refetches when the switch is disabled", async () => {
     const loadStoredTrace = rs.fn(async (_messageId: string, include: boolean) =>
