@@ -54,6 +54,13 @@ describe("home-screen routes", () => {
             src: "/app-icon/ttt.png?v=1790121600000",
             sizes: "512x512",
             type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/app-icon/ttt.png?v=1790121600000",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
       });
@@ -68,8 +75,11 @@ describe("home-screen routes", () => {
 
     it("falls back to Rome's icon when the app has none", async () => {
       const res = await app.request("/app-manifest/plain.webmanifest");
-      const manifest = (await res.json()) as { icons: { src: string }[] };
-      expect(manifest.icons[0].src).toBe("/icon-512.png");
+      const manifest = (await res.json()) as { icons: { src: string; purpose: string }[] };
+      expect(manifest.icons).toEqual([
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ]);
     });
 
     it("404s for unknown apps, apps without a frontend and other shapes", async () => {

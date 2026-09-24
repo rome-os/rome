@@ -51,6 +51,9 @@ export function buildAppWebManifest(appId: string, app: WebApp): Record<string, 
   const route = `/full/apps/${appIdToPathSegment(appId)}`;
   const iconUrl = homeScreenIconUrl(appId, app);
   const size = `${HOME_SCREEN_ICON_SIZE}x${HOME_SCREEN_ICON_SIZE}`;
+  const icon = iconUrl
+    ? { src: iconUrl, sizes: size, type: "image/png" }
+    : { src: "/icon-512.png", sizes: "512x512", type: "image/png" };
   return {
     id: route,
     start_url: route,
@@ -60,10 +63,9 @@ export function buildAppWebManifest(appId: string, app: WebApp): Record<string, 
     display: "standalone",
     background_color: "#f4f3ef",
     theme_color: "#f4f3ef",
-    icons: [
-      iconUrl
-        ? { src: iconUrl, sizes: size, type: "image/png", purpose: "any" }
-        : { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-    ],
+    // The same full-bleed image serves as maskable too, as in Rome's own
+    // manifest: Android then crops it to the launcher shape instead of
+    // shrinking it onto a white plate. iOS reads apple-touch-icon instead.
+    icons: (["any", "maskable"] as const).map((purpose) => ({ ...icon, purpose })),
   };
 }
