@@ -19,6 +19,7 @@
 
 import type { ConversationId, TalkRouter } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
+import { asGuardian } from "../connections/guardian-send.js";
 
 export interface SendAccount {
   channel: string;
@@ -123,6 +124,10 @@ export interface SendReceipt {
 /**
  * Hand the text to the channel.
  *
+ * The guardian pressed Send, so the call runs in the guardian-send scope. It
+ * is the only place that opens it, so a talker on the guardian's own account
+ * can tell this send from any agent's (`connections/guardian-send.ts`).
+ *
  * Throws whatever the talker throws — the caller records the failure, because
  * only it knows which outbox row is waiting on the answer.
  */
@@ -131,6 +136,8 @@ export async function sendToTarget(
   target: SendTarget,
   text: string,
 ): Promise<SendReceipt> {
-  const receipt = await deps.talkRouter.send(target.connectionId, target.conversationId, { text });
+  const receipt = await asGuardian(() =>
+    deps.talkRouter.send(target.connectionId, target.conversationId, { text }),
+  );
   return { messageId: receipt.messageId ?? null };
 }
