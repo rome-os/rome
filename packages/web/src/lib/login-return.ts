@@ -1,6 +1,6 @@
 // Where to go once sign-in succeeds. The auth gate sends a signed-out visitor
-// to /login from whatever page they asked for; without this, both sign-in
-// paths land on "/" and a home-screen shortcut to an app opens Rome's home
+// to /login from whatever page they asked for; without this, every sign-in
+// path lands on "/" and a home-screen shortcut to an app opens Rome's home
 // page instead (an iOS home-screen web app does not share Safari's cookies, so
 // its first launch always signs in).
 //
@@ -30,13 +30,23 @@ export function rememberLoginReturn(path: string): void {
   }
 }
 
-/** The remembered page, or "/" when there is none. Clears it either way. */
-export function takeLoginReturn(): string {
+/** The remembered page, or "/" when there is none. Leaves it in place. */
+export function peekLoginReturn(): string {
   try {
     const path = window.localStorage.getItem(LOGIN_RETURN_STORAGE_KEY);
-    window.localStorage.removeItem(LOGIN_RETURN_STORAGE_KEY);
     return path !== null && isReturnablePath(path) ? path : "/";
   } catch {
     return "/";
   }
+}
+
+/** The remembered page, or "/" when there is none. Clears it either way. */
+export function takeLoginReturn(): string {
+  const path = peekLoginReturn();
+  try {
+    window.localStorage.removeItem(LOGIN_RETURN_STORAGE_KEY);
+  } catch {
+    // Nothing to clear when storage is unavailable.
+  }
+  return path;
 }

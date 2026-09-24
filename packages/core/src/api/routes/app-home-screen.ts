@@ -25,7 +25,7 @@ function decodeSegment(path: string, re: RegExp): string | null {
  * the session cookie. Paths are matched by hand because Hono's `:name` labels
  * cannot carry a literal suffix. The icon is rendered per request — it is
  * fetched only when someone adds or installs the app — and cached by the
- * browser under its `?v=<assetVersion>` URL.
+ * browser under its `?v=<updatedAt>` URL.
  */
 export function appHomeScreenRoutes(deps: Pick<ApiDeps, "appCatalog">): Hono {
   const app = new Hono();

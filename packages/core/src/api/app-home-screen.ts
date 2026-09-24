@@ -16,7 +16,9 @@ type WebApp = ResolvedApp & { web: NonNullable<ResolvedApp["web"]> };
 
 function homeScreenIconUrl(appId: string, app: WebApp): string | undefined {
   if (!hasRenderableIcon(app)) return undefined;
-  return `/app-icon/${appIdToPathSegment(appId)}.png?v=${app.web.assetVersion}`;
+  // Versioned by the install, not the web bundle: an icon can change in a
+  // release that leaves the bundle's assetVersion alone.
+  return `/app-icon/${appIdToPathSegment(appId)}.png?v=${Date.parse(app.updatedAt)}`;
 }
 
 /**

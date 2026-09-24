@@ -19,6 +19,7 @@ describe("home-screen routes", () => {
       appId,
       displayName,
       manifest: {},
+      updatedAt: "2026-09-23T00:00:00.000Z",
       web: { assetVersion: "abc123def456" },
       iconAbsolutePath,
     });
@@ -50,7 +51,7 @@ describe("home-screen routes", () => {
         display: "standalone",
         icons: [
           {
-            src: "/app-icon/ttt.png?v=abc123def456",
+            src: "/app-icon/ttt.png?v=1790121600000",
             sizes: "512x512",
             type: "image/png",
           },
@@ -62,7 +63,7 @@ describe("home-screen routes", () => {
       const res = await app.request("/app-manifest/%40acme%2Fradar.webmanifest");
       const manifest = (await res.json()) as { id: string; icons: { src: string }[] };
       expect(manifest.id).toBe("/full/apps/%40acme%2Fradar");
-      expect(manifest.icons[0].src).toBe("/app-icon/%40acme%2Fradar.png?v=abc123def456");
+      expect(manifest.icons[0].src).toBe("/app-icon/%40acme%2Fradar.png?v=1790121600000");
     });
 
     it("falls back to Rome's icon when the app has none", async () => {
@@ -81,7 +82,7 @@ describe("home-screen routes", () => {
 
   describe("GET /app-icon/<seg>.png", () => {
     it("renders a 512 PNG with a long immutable cache", async () => {
-      const res = await app.request("/app-icon/ttt.png?v=abc123def456");
+      const res = await app.request("/app-icon/ttt.png?v=1790121600000");
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")).toBe("image/png");
       expect(res.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
