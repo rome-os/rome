@@ -1,5 +1,5 @@
-import { mkdir, readdir, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { getProjectsRoot } from "../paths.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "./constants.js";
 
@@ -83,6 +83,53 @@ export function resolveWebchatProjectPath(
   rootPath: string = getWebchatProjectsRoot(),
 ): string {
   return join(rootPath, normalizeWebchatProjectPath(projectPath));
+}
+
+function isStrictSubpath(fromRoot: string): boolean {
+  return (
+    fromRoot !== "" &&
+    fromRoot !== ".." &&
+    !fromRoot.startsWith(`..${sep}`) &&
+    !isAbsolute(fromRoot)
+  );
+}
+
+/**
+ * Resolve a caller-supplied project directory to an absolute working dir inside
+ * the projects root. Accepts a path relative to the root (`landingpage/content`)
+ * or an absolute path inside it. Throws when the path is the root itself, falls
+ * outside it (including through a symlink), or is not an existing directory.
+ * Never creates the directory.
+ */
+export async function resolveProjectWorkingDirWithinRoot(
+  requestedPath: string,
+  rootPath: string = getWebchatProjectsRoot(),
+): Promise<string> {
+  const trimmed = requestedPath.trim();
+  let projectPath = trimmed;
+  if (isAbsolute(trimmed)) {
+    const fromRoot = relative(resolve(rootPath), resolve(trimmed));
+    if (!isStrictSubpath(fromRoot)) {
+      throw new Error(`Working directory "${requestedPath}" is not inside the projects root`);
+    }
+    projectPath = fromRoot.split(sep).join("/");
+  }
+  const workingDir = resolveWebchatProjectPath(projectPath, rootPath);
+
+  let realWorkingDir: string;
+  let realRoot: string;
+  try {
+    [realWorkingDir, realRoot] = await Promise.all([realpath(workingDir), realpath(rootPath)]);
+  } catch {
+    throw new Error(`Working directory "${requestedPath}" does not exist`);
+  }
+  if (!isStrictSubpath(relative(realRoot, realWorkingDir))) {
+    throw new Error(`Working directory "${requestedPath}" is not inside the projects root`);
+  }
+  if (!(await stat(realWorkingDir)).isDirectory()) {
+    throw new Error(`Working directory "${requestedPath}" is not a directory`);
+  }
+  return workingDir;
 }
 
 export async function ensureWebchatProjectWorkspace(

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import {
   listWebchatProjects,
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
+  resolveProjectWorkingDirWithinRoot,
   resolveWebchatContinuationWorkingDir,
   resolveWebchatWorkingDir,
   resolveWebchatProjectPath,
@@ -158,5 +159,76 @@ describe("webchat project helpers", () => {
         resolveWebchatContinuationWorkingDir("webchat", "missing", repo),
       ).resolves.toBeUndefined();
     });
+  });
+});
+
+describe("resolveProjectWorkingDirWithinRoot", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })));
+    tempDirs.length = 0;
+  });
+
+  function makeRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), "rome-project-working-dir-"));
+    tempDirs.push(root);
+    mkdirSync(join(root, "landingpage", "content"), { recursive: true });
+    return root;
+  }
+
+  it("resolves a relative project path and an absolute path inside the root", async () => {
+    const root = makeRoot();
+    const expected = join(root, "landingpage", "content");
+
+    await expect(resolveProjectWorkingDirWithinRoot("landingpage/content", root)).resolves.toBe(
+      expected,
+    );
+    await expect(resolveProjectWorkingDirWithinRoot(` ${expected} `, root)).resolves.toBe(expected);
+    await expect(
+      resolveProjectWorkingDirWithinRoot(join(root, "landingpage", "..", "landingpage"), root),
+    ).resolves.toBe(join(root, "landingpage"));
+  });
+
+  it("rejects the root itself and paths that leave it", async () => {
+    const root = makeRoot();
+    const outside = mkdtempSync(join(tmpdir(), "rome-project-outside-"));
+    tempDirs.push(outside);
+
+    for (const requested of [root, outside, join(root, ".."), "/etc"]) {
+      await expect(resolveProjectWorkingDirWithinRoot(requested, root)).rejects.toThrow(
+        "is not inside the projects root",
+      );
+    }
+    for (const requested of ["", "../outside", "landingpage/../..", "a\\b"]) {
+      await expect(resolveProjectWorkingDirWithinRoot(requested, root)).rejects.toThrow();
+    }
+  });
+
+  it("rejects a symlink inside the root that points outside it", async () => {
+    const root = makeRoot();
+    const outside = mkdtempSync(join(tmpdir(), "rome-project-outside-"));
+    tempDirs.push(outside);
+    symlinkSync(outside, join(root, "escape"));
+    symlinkSync(join(root, "landingpage"), join(root, "alias"));
+
+    await expect(resolveProjectWorkingDirWithinRoot("escape", root)).rejects.toThrow(
+      "is not inside the projects root",
+    );
+    await expect(resolveProjectWorkingDirWithinRoot("alias", root)).resolves.toBe(
+      join(root, "alias"),
+    );
+  });
+
+  it("rejects a missing directory and a file", async () => {
+    const root = makeRoot();
+    writeFileSync(join(root, "notes.txt"), "not a project", "utf-8");
+
+    await expect(resolveProjectWorkingDirWithinRoot("missing", root)).rejects.toThrow(
+      "does not exist",
+    );
+    await expect(resolveProjectWorkingDirWithinRoot("notes.txt", root)).rejects.toThrow(
+      "is not a directory",
+    );
   });
 });

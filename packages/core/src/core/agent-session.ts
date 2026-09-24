@@ -342,6 +342,12 @@ export interface AgentSessionManager {
     init?: AgentSessionInit,
   ): Promise<AgentSession>;
   peek(key: AgentSessionKey): AgentSession | undefined;
+  /**
+   * Working directory of the open session with this runtime id, searching this
+   * manager's sessions and the subagent sessions they own. Undefined when no
+   * open session has the id. Never opens a session.
+   */
+  findWorkingDirBySessionId?(sessionId: string): string | undefined;
   shutdown(): Promise<void>;
 }
 
@@ -637,6 +643,15 @@ export function createAgentSessionManager(
       }
       const sess = sessions.get(keyOf(canonicalKey));
       return sess && sess.status !== "closed" ? sess : undefined;
+    },
+    findWorkingDirBySessionId(sessionId) {
+      for (const sess of sessions.values()) {
+        if (sess.status === "closed") continue;
+        if (sess.sessionId === sessionId) return sess.workingDirectory;
+        const nested = sess.openedChildManager?.findWorkingDirBySessionId?.(sessionId);
+        if (nested) return nested;
+      }
+      return undefined;
     },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
@@ -1946,6 +1961,15 @@ class AgentSessionImpl implements AgentSession {
       !this.hasActiveForkedTurns &&
       !this.inputs.busy
     );
+  }
+
+  get workingDirectory(): string {
+    return this.workingDir;
+  }
+
+  /** The subagent manager, or undefined when this session never ran a subagent. */
+  get openedChildManager(): AgentSessionManager | undefined {
+    return this._childManager;
   }
 
   get childManager(): AgentSessionManager {

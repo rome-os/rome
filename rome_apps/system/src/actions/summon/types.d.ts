@@ -1,8 +1,10 @@
 /**
- * summon — Spawn a subagent in the current project.
+ * summon — Spawn a subagent in the calling session's project or a given
+ * project directory.
  *
- * Agent-callable action (requires guardian approval). Runs a named agent
- * within the current project. Supports resuming previous sessions.
+ * Agent-callable action. Runs a named agent in `workingDir` when given (a path
+ * relative to the projects root, or an absolute path inside it), else in the
+ * calling session's project. Supports resuming previous sessions.
  *
  * @example
  * // Start a new coding session
@@ -11,6 +13,13 @@
  *   prompt: "Refactor the database layer to use connection pooling",
  * });
  * // result.data => { result: "...", sessionId: "sess_abc" }
+ *
+ * // Work in a specific project
+ * await callAction("summon", {
+ *   agentName: "coding",
+ *   prompt: "Fix the failing build",
+ *   workingDir: "landingpage/content",
+ * });
  *
  * // Resume a previous session
  * await callAction("summon", {
