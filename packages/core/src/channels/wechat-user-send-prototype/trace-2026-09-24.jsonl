@@ -1,0 +1,118 @@
+{"run": "dry run 1: stopped by the focus guard after Escape opened WeChat's Log out? dialog (Cancel clicked by hand)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.09, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.97, "event": "store.snapshot", "target_rome_test_ids": []}
+{"t": 1.81, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 2.0, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233073-1-activated.png"}
+{"t": 2.02, "event": "stopped", "reason": "focus moved to window 0x1000083, not the WeChat main window 0x1000011"}
+{"run": "dry run 2, after removing Escape"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.08, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.41, "event": "store.snapshot", "target_rome_test_ids": []}
+{"t": 1.26, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.45, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233108-1-activated.png"}
+{"t": 2.54, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233108-2-search.png"}
+{"t": 3.95, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233108-3-opened.png"}
+{"t": 4.34, "event": "input.before_paste", "text": ""}
+{"t": 5.08, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 5.26, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233108-4-before-enter.png"}
+{"t": 5.71, "event": "dry_run.cleared", "left": ""}
+{"t": 5.71, "event": "done", "sent": false}
+{"run": "scenario 1: the one real send"}
+{"t": 0.0, "event": "start", "mode": "send", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.08, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.43, "event": "store.snapshot", "target_rome_test_ids": []}
+{"t": 1.27, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.46, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233127-1-activated.png"}
+{"t": 2.54, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233127-2-search.png"}
+{"t": 3.94, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233127-3-opened.png"}
+{"t": 4.33, "event": "input.before_paste", "text": ""}
+{"t": 5.07, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 5.24, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233127-4-before-enter.png"}
+{"t": 5.26, "event": "enter.pressed"}
+{"t": 6.15, "event": "input.after_enter", "text": ""}
+{"t": 7.11, "event": "store.poll", "after_s": 1.9, "target": [{"id": "filehelper:1", "isSelf": true, "type": "text", "timestamp": 1790233132}], "elsewhere": []}
+{"t": 7.11, "event": "done", "sent": true, "confirmed": true, "store_ids": ["filehelper:1"], "echo_count": 1, "after_s": 1.9}
+{"run": "scenario 2a: window minimized (dry run)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.09, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.89, "event": "store.snapshot", "target_rome_test_ids": ["filehelper:1"]}
+{"t": 1.77, "event": "window.activated", "window": "0x1000011", "before": "IsUnMapped", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.96, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233176-1-activated.png"}
+{"t": 2.57, "event": "check.search_focus", "green_px": 68, "shot": "/tmp/wechat-send-prototype/1790233176-2-search-focus.png"}
+{"t": 3.33, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233176-2-search.png"}
+{"t": 4.72, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233176-3-opened.png"}
+{"t": 5.12, "event": "input.before_paste", "text": ""}
+{"t": 5.85, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 6.03, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233176-4-before-enter.png"}
+{"t": 6.47, "event": "dry_run.cleared", "left": ""}
+{"t": 6.47, "event": "done", "sent": false}
+{"run": "scenario 2b: window behind Chrome (dry run)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.1, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.45, "event": "store.snapshot", "target_rome_test_ids": ["filehelper:1"]}
+{"t": 1.32, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.52, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233191-1-activated.png"}
+{"t": 2.13, "event": "check.search_focus", "green_px": 68, "shot": "/tmp/wechat-send-prototype/1790233191-2-search-focus.png"}
+{"t": 2.9, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233191-2-search.png"}
+{"t": 4.29, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233191-3-opened.png"}
+{"t": 4.69, "event": "input.before_paste", "text": ""}
+{"t": 5.42, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 5.59, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233191-4-before-enter.png"}
+{"t": 6.03, "event": "dry_run.cleared", "left": ""}
+{"t": 6.03, "event": "done", "sent": false}
+{"run": "scenario 2c: leftover search text (dry run)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.08, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.4, "event": "store.snapshot", "target_rome_test_ids": ["filehelper:1"]}
+{"t": 1.25, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.43, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233215-1-activated.png"}
+{"t": 2.04, "event": "check.search_focus", "green_px": 68, "shot": "/tmp/wechat-send-prototype/1790233215-2-search-focus.png"}
+{"t": 2.8, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233215-2-search.png"}
+{"t": 4.22, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233215-3-opened.png"}
+{"t": 4.62, "event": "input.before_paste", "text": ""}
+{"t": 5.35, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 5.53, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233215-4-before-enter.png"}
+{"t": 5.98, "event": "dry_run.cleared", "left": ""}
+{"t": 5.98, "event": "done", "sent": false}
+{"run": "scenario 2d: another chat open with its input clicked (dry run)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "880x640+0+0"]]}
+{"t": 0.08, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.47, "event": "store.snapshot", "target_rome_test_ids": ["filehelper:1"]}
+{"t": 1.31, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [880, 640], "active": "0x1000011"}
+{"t": 1.52, "event": "check.sidebar", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233231-1-activated.png"}
+{"t": 2.15, "event": "check.search_focus", "green_px": 68, "shot": "/tmp/wechat-send-prototype/1790233231-2-search-focus.png"}
+{"t": 2.95, "event": "search.top_hit", "query": "Transfer", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233231-2-search.png"}
+{"t": 4.34, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233231-3-opened.png"}
+{"t": 4.74, "event": "input.before_paste", "text": ""}
+{"t": 5.47, "event": "input.after_paste", "text": "rome test", "exact": true}
+{"t": 5.64, "event": "check.header", "diff": 0.0, "shot": "/tmp/wechat-send-prototype/1790233231-4-before-enter.png"}
+{"t": 6.09, "event": "dry_run.cleared", "left": ""}
+{"t": 6.09, "event": "done", "sent": false}
+{"run": "scenario 2 guard: window resized to 900x660, --send"}
+{"t": 0.0, "event": "start", "mode": "send", "body": "rome test", "target": "filehelper", "display": ":99"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.02, "event": "check.windows", "windows": [["0x1000011", "900x660+0+0"]]}
+{"t": 0.09, "event": "check.store", "exit": 0, "keysReady": true, "err": null}
+{"t": 0.47, "event": "store.snapshot", "target_rome_test_ids": ["filehelper:1"]}
+{"t": 1.32, "event": "window.activated", "window": "0x1000011", "before": "IsViewable", "after": "IsViewable", "origin": [200, 80], "size": [900, 660], "active": "0x1000011"}
+{"t": 1.32, "event": "stopped", "reason": "main window is IsViewable at 900x660; the reference crops need a viewable 880x640 window"}
+{"run": "scenario 3: no client window on scratch display :150, --send"}
+{"t": 0.0, "event": "start", "mode": "send", "body": "rome test", "target": "filehelper", "display": ":150"}
+{"t": 0.01, "event": "check.process", "pids": ["1264"]}
+{"t": 0.01, "event": "check.windows", "windows": []}
+{"t": 0.02, "event": "stopped", "reason": "expected one WeChat main window, saw 0"}
