@@ -252,6 +252,12 @@ export interface ModelSessionFork {
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
+  /**
+   * Effort the provider fixed when the session opened and applies to every
+   * turn, ignoring a per-turn `reasoningEffort`. Unset when each turn's
+   * requested effort applies.
+   */
+  readonly fixedReasoningEffort?: ModelReasoningEffort;
   /** A disposed provider execution must be reopened before another turn. */
   readonly isClosed?: boolean;
   /** Single, lifetime stream of AgentMessages produced by the provider. */

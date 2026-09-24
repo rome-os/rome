@@ -3222,7 +3222,10 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            sink.reasoningEffort = mwInput.reasoningEffort ?? this.defaultReasoningEffort;
+            sink.reasoningEffort =
+              this.modelSession.fixedReasoningEffort ??
+              mwInput.reasoningEffort ??
+              this.defaultReasoningEffort;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

@@ -869,6 +869,7 @@ export class AnthropicProvider implements ModelProvider {
     const session: ModelSession = {
       providerId,
       model: effectiveModel,
+      fixedReasoningEffort: params.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       get isClosed(): boolean {
         return closed || abortController.signal.aborted;
       },

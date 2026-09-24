@@ -2327,6 +2327,28 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("records the effort a provider fixed at open over a different requested effort", async () => {
+      // Claude applies its open-time effort to every turn of a warm session.
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const open = provider.openSession.bind(provider);
+      provider.openSession = async (params) =>
+        Object.assign(await open(params), { fixedReasoningEffort: "high" as const });
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:effort-fixed",
+      });
+
+      await collectMessages(session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events);
+
+      const row = await new SessionsRepository(testDb.db).findById(session.sessionId);
+      expect(row?.reasoningEffort).toBe("high");
+      await manager.shutdown();
+    });
+
     it("keeps the model pin NULL for a session whose turns never succeed", async () => {
       const failingProvider: MockModelProvider = new MockModelProvider();
       failingProvider.run = async function* () {
