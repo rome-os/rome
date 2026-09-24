@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -53,12 +53,12 @@ function Harness({ app = APP }: { app?: InstalledAppCard }) {
   );
 }
 
-async function openDialog() {
+async function openDialog(app: InstalledAppCard = APP) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <Harness />
+        <Harness app={app} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -132,5 +132,35 @@ describe("the app access dialog", () => {
     const card = radio.closest("label");
     expect(card?.className).toContain("has-data-[state=checked]:border-foreground");
     expect(card?.className).toContain("has-focus-visible:outline-ring/50");
+  });
+
+  describe("share link", () => {
+    const SHARE_URL = `${window.location.origin}/full/apps/@ray/demo`;
+    const shareLink = () => screen.queryByRole("textbox", { name: "Share link" });
+
+    it("is absent while the app is private", async () => {
+      await openDialog();
+      expect(shareLink()).toBeNull();
+    });
+
+    it("shows the standalone URL once a shared mode is picked, noting it needs saving", async () => {
+      await openDialog();
+      await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
+
+      expect((shareLink() as HTMLInputElement | null)?.value).toBe(SHARE_URL);
+      expect(screen.getByText("The link opens the app once this access is saved.")).toBeTruthy();
+    });
+
+    it("copies the link of an app that is already public", async () => {
+      const writeText = rs.fn(async (_text: string) => {});
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
+
+      expect(screen.queryByText("The link opens the app once this access is saved.")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
+
+      expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+      expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    });
   });
 });

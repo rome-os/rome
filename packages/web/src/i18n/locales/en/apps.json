@@ -170,6 +170,10 @@
       "removeEmail": "Remove {{email}}",
       "emptyEmails": "Add at least one Rome Cloud email.",
       "invalidEmails": "These emails look invalid: {{emails}}",
+      "linkLabel": "Share link",
+      "copyLink": "Copy link",
+      "linkCopied": "Copied",
+      "linkUnsaved": "The link opens the app once this access is saved.",
       "cancel": "Cancel",
       "save": "Save access",
       "saving": "Saving..."

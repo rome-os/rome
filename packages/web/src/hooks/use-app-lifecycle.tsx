@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { Globe, Lock, Mail, X } from "lucide-react";
+import { Globe, Link2, Lock, Mail, X } from "lucide-react";
 import type {
   AppAccessMode,
   AppInstallResponse,
@@ -114,6 +114,7 @@ export function useAppLifecycle(
   const [accessEmailsDraft, setAccessEmailsDraft] = useState<string[]>([]);
   const [accessEmailInput, setAccessEmailInput] = useState("");
   const [accessDialogError, setAccessDialogError] = useState("");
+  const [accessLinkCopied, setAccessLinkCopied] = useState(false);
 
   // Every lifecycle write follows the same shape: mark the app as acting, run
   // the request, toast any error, then invalidate the apps query so consumers
@@ -426,6 +427,7 @@ export function useAppLifecycle(
     setAccessEmailsDraft(app.cloudAllowedEmails ?? []);
     setAccessEmailInput("");
     setAccessDialogError("");
+    setAccessLinkCopied(false);
   };
 
   const cancelAccessDialog = () => {
@@ -521,6 +523,24 @@ export function useAppLifecycle(
     ? t("installed.accessDialog.title", { name: accessTarget.displayName })
     : "";
   const accessSaving = accessMutation.isPending;
+  // The link to share is the standalone route: it is what a visitor lands on
+  // anyway, and it opens without the guardian's shell around the app.
+  const accessShareUrl = accessTarget?.fullHref
+    ? `${window.location.origin}${accessTarget.fullHref}`
+    : null;
+  const accessSavedMode: AppAccessMode | null = accessTarget
+    ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
+    : null;
+  const copyAccessShareUrl = () => {
+    if (!accessShareUrl) return;
+    void navigator.clipboard?.writeText(accessShareUrl).then(
+      () => {
+        setAccessLinkCopied(true);
+        setTimeout(() => setAccessLinkCopied(false), 1500);
+      },
+      () => {},
+    );
+  };
 
   const dialogs = (
     <>
@@ -699,6 +719,34 @@ export function useAppLifecycle(
                   {t("installed.accessDialog.emptyEmails")}
                 </p>
               )}
+            </div>
+          ) : null}
+
+          {accessModeDraft !== "private" && accessShareUrl ? (
+            <div className="space-y-2">
+              <FieldLabel htmlFor="app-access-link">
+                {t("installed.accessDialog.linkLabel")}
+              </FieldLabel>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input
+                    id="app-access-link"
+                    size="md"
+                    icon={<Link2 />}
+                    value={accessShareUrl}
+                    readOnly
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </div>
+                <Button type="button" variant="outline" size="md" onClick={copyAccessShareUrl}>
+                  {accessLinkCopied
+                    ? t("installed.accessDialog.linkCopied")
+                    : t("installed.accessDialog.copyLink")}
+                </Button>
+              </div>
+              {accessModeDraft !== accessSavedMode ? (
+                <FieldDescription>{t("installed.accessDialog.linkUnsaved")}</FieldDescription>
+              ) : null}
             </div>
           ) : null}
 
