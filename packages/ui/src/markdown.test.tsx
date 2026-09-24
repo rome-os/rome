@@ -191,7 +191,7 @@ describe("Markdown Mermaid theme", () => {
 
     render(<Markdown>mounted</Markdown>);
 
-    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(single);
+    expect(spy.mock.calls.length).toBe(single);
   });
 
   it("does not re-render new instances when they replace the old ones in one commit", () => {
