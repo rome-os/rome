@@ -2346,6 +2346,14 @@ class AgentSessionImpl implements AgentSession {
 
   private providerInfoStored = false;
 
+  /** The effort `session` applies to a turn that requests `requested`. */
+  private appliedReasoningEffort(
+    session: ModelSession,
+    requested: ModelReasoningEffort | undefined,
+  ): ModelReasoningEffort {
+    return session.fixedReasoningEffort ?? requested ?? this.defaultReasoningEffort;
+  }
+
   private async maybePersistReasoningEffort(
     reasoningEffort: ModelReasoningEffort | undefined,
   ): Promise<void> {
@@ -2397,6 +2405,7 @@ class AgentSessionImpl implements AgentSession {
     channelThreadKey: string,
     forkSessionId: string,
     forkSession: ModelSession,
+    reasoningEffort: ModelReasoningEffort,
   ): Promise<void> {
     const providerThreadId = forkSession.providerThreadId;
     if (!providerThreadId) {
@@ -2427,6 +2436,16 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         forkSessionId,
         channelThreadKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    try {
+      await this.deps.sessionManager.setReasoningEffort(forkSessionId, reasoningEffort);
+    } catch (err) {
+      log.warn("failed to persist fork reasoning effort", {
+        sessionId: this.sessionId,
+        forkSessionId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -2842,6 +2861,7 @@ class AgentSessionImpl implements AgentSession {
           input.persistThreadKey(forkSessionId),
           forkSessionId,
           forkSession,
+          this.appliedReasoningEffort(forkSession, input.reasoningEffort),
         );
       }
       // Best-effort: turn_end is the stream's true terminal, so a close-time
@@ -3222,10 +3242,10 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            sink.reasoningEffort =
-              this.modelSession.fixedReasoningEffort ??
-              mwInput.reasoningEffort ??
-              this.defaultReasoningEffort;
+            sink.reasoningEffort = this.appliedReasoningEffort(
+              this.modelSession,
+              mwInput.reasoningEffort,
+            );
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

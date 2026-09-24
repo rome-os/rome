@@ -748,6 +748,8 @@ describe("AgentRunner", () => {
         provider: "mock",
         providerThreadId: "fork-provider-thread",
         model: "mock-model",
+        // The branch header shows the effort its turn ran with, not the model alone.
+        reasoningEffort: "high",
         status: "active",
       });
       // A fork never rewrites its parent: the source keeps its own pin.

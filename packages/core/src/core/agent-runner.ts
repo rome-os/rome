@@ -255,7 +255,9 @@ export interface ModelSession {
   /**
    * Effort the provider fixed when the session opened and applies to every
    * turn, ignoring a per-turn `reasoningEffort`. Unset when each turn's
-   * requested effort applies.
+   * requested effort applies. The runtime records the effort a turn ran with
+   * from these two rules alone, so a provider that applies effort any other
+   * way must report the applied effort before the recorded value is correct.
    */
   readonly fixedReasoningEffort?: ModelReasoningEffort;
   /** A disposed provider execution must be reopened before another turn. */
