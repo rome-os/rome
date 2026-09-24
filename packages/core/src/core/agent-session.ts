@@ -1580,7 +1580,6 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
-    reasoningEffort,
     openModelSession,
     toolCount:
       (initialResolution
@@ -1625,8 +1624,6 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
-  /** Effort a turn runs with when its input names none. */
-  reasoningEffort: ModelReasoningEffort;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1690,8 +1687,6 @@ interface TurnSink {
   subagentLinksCleared: boolean;
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
-  /** Effort the turn's model call ran with; unset until the model is called. */
-  reasoningEffort?: ModelReasoningEffort;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1869,9 +1864,8 @@ class AgentSessionImpl implements AgentSession {
    * this model (never a tier re-map) once a pin exists.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
-  private readonly defaultReasoningEffort: ModelReasoningEffort;
   /** Last effort written to the session row, so an unchanged effort skips the write. */
-  private storedReasoningEffort?: ModelReasoningEffort;
+  private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
@@ -1909,7 +1903,6 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
-    this.defaultReasoningEffort = args.reasoningEffort;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -2143,7 +2136,7 @@ class AgentSessionImpl implements AgentSession {
               sink.lifecycleInterrupted || outbound.accounting?.stopReason === "interrupted";
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
-            await this.maybePersistReasoningEffort(sink.reasoningEffort);
+            await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2346,17 +2339,7 @@ class AgentSessionImpl implements AgentSession {
 
   private providerInfoStored = false;
 
-  /** The effort `session` applies to a turn that requests `requested`. */
-  private appliedReasoningEffort(
-    session: ModelSession,
-    requested: ModelReasoningEffort | undefined,
-  ): ModelReasoningEffort {
-    return session.fixedReasoningEffort ?? requested ?? this.defaultReasoningEffort;
-  }
-
-  private async maybePersistReasoningEffort(
-    reasoningEffort: ModelReasoningEffort | undefined,
-  ): Promise<void> {
+  private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
     if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
     try {
       await this.deps.sessionManager.setReasoningEffort(this.sessionId, reasoningEffort);
@@ -2405,7 +2388,6 @@ class AgentSessionImpl implements AgentSession {
     channelThreadKey: string,
     forkSessionId: string,
     forkSession: ModelSession,
-    reasoningEffort: ModelReasoningEffort,
   ): Promise<void> {
     const providerThreadId = forkSession.providerThreadId;
     if (!providerThreadId) {
@@ -2440,6 +2422,8 @@ class AgentSessionImpl implements AgentSession {
       });
       return;
     }
+    const reasoningEffort = forkSession.appliedReasoningEffort;
+    if (!reasoningEffort) return;
     try {
       await this.deps.sessionManager.setReasoningEffort(forkSessionId, reasoningEffort);
     } catch (err) {
@@ -2861,7 +2845,6 @@ class AgentSessionImpl implements AgentSession {
           input.persistThreadKey(forkSessionId),
           forkSessionId,
           forkSession,
-          this.appliedReasoningEffort(forkSession, input.reasoningEffort),
         );
       }
       // Best-effort: turn_end is the stream's true terminal, so a close-time
@@ -3242,10 +3225,6 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            sink.reasoningEffort = this.appliedReasoningEffort(
-              this.modelSession,
-              mwInput.reasoningEffort,
-            );
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

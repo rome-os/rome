@@ -1,21 +1,18 @@
 import { useTranslation } from "react-i18next";
-import { REASONING_EFFORT_OPTIONS } from "@/lib/chat-constants";
-import type { ReasoningEffort } from "@/lib/chat-types";
 
+/** The session's model, followed by its last turn's effort in the provider's own terms. */
 export function SessionModelLabel({
   model,
   reasoningEffort,
 }: {
   model: string | null | undefined;
-  reasoningEffort?: ReasoningEffort | null;
+  reasoningEffort?: string | null;
 }) {
   const { t } = useTranslation("chat");
   if (!model) return null;
 
-  const effortOption = REASONING_EFFORT_OPTIONS.find((option) => option.id === reasoningEffort);
-  const effort = effortOption ? t(effortOption.labelKey) : null;
-  const description = effort
-    ? t("navbar.sessionModelWithEffort", { model, effort })
+  const description = reasoningEffort
+    ? t("navbar.sessionModelWithEffort", { model, effort: reasoningEffort })
     : t("navbar.sessionModel", { model });
 
   return (
@@ -24,7 +21,7 @@ export function SessionModelLabel({
       title={description}
       aria-label={description}
     >
-      {effort ? `${model} · ${effort}` : model}
+      {reasoningEffort ? `${model} · ${reasoningEffort}` : model}
     </span>
   );
 }

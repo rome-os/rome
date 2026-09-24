@@ -724,6 +724,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
+            appliedReasoningEffort: "max",
             events: (async function* (): AsyncIterable<AgentMessage> {
               yield { type: "result", content: "Fork answer" };
             })(),
@@ -748,8 +749,8 @@ describe("AgentRunner", () => {
         provider: "mock",
         providerThreadId: "fork-provider-thread",
         model: "mock-model",
-        // The branch header shows the effort its turn ran with, not the model alone.
-        reasoningEffort: "high",
+        // The branch header shows the effort its provider reported, not the model alone.
+        reasoningEffort: "max",
         status: "active",
       });
       // A fork never rewrites its parent: the source keeps its own pin.
@@ -2329,12 +2330,12 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
-    it("records the effort a provider fixed at open over a different requested effort", async () => {
-      // Claude applies its open-time effort to every turn of a warm session.
+    it("records the effort the provider reports it applied, in the provider's terms", async () => {
+      // Claude runs a warm session at its open-time effort and calls it `max`.
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const open = provider.openSession.bind(provider);
       provider.openSession = async (params) =>
-        Object.assign(await open(params), { fixedReasoningEffort: "high" as const });
+        Object.defineProperty(await open(params), "appliedReasoningEffort", { value: "max" });
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
@@ -2347,7 +2348,7 @@ describe("AgentRunner", () => {
       await collectMessages(session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events);
 
       const row = await new SessionsRepository(testDb.db).findById(session.sessionId);
-      expect(row?.reasoningEffort).toBe("high");
+      expect(row?.reasoningEffort).toBe("max");
       await manager.shutdown();
     });
 

@@ -508,6 +508,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
+    let appliedReasoningEffort: string | undefined;
     const dynamicToolOutputs = new Map<string, unknown>();
     const usageByTurnId = new Map<
       string,
@@ -522,6 +523,9 @@ export class CodexAppServerProvider implements ModelProvider {
       providerThreadId: params.providerThreadId,
       get lastCompletedTurnCheckpoint(): string | undefined {
         return lastCompletedTurnCheckpoint;
+      },
+      get appliedReasoningEffort(): string | undefined {
+        return appliedReasoningEffort;
       },
     } as ModelSession;
 
@@ -889,6 +893,8 @@ export class CodexAppServerProvider implements ModelProvider {
       };
       activeTurn = turn;
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
+      // A borrowed exact fork runs here too; only the session's own turns report.
+      if (runtime === sourceRuntime) appliedReasoningEffort = effort;
       try {
         const started = (await this.appServerManager.requestForThread(tid, Method.turnStart, {
           threadId: tid,

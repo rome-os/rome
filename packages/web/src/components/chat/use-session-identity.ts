@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentMention, ReasoningEffort } from "@/lib/chat-types";
+import type { AgentMention } from "@/lib/chat-types";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
@@ -10,8 +10,8 @@ export interface SessionIdentity {
   /** The session's display name, or null while loading / unnamed. */
   sessionName: string | null;
   model: string | null;
-  /** Reasoning effort the session's last successful turn ran with, or null when unknown. */
-  reasoningEffort: ReasoningEffort | null;
+  /** Provider-reported effort of the session's last successful turn, or null when unknown. */
+  reasoningEffort: string | null;
   /** The session's locked agent, resolved to its owning app's label + icon. */
   pinnedAgentMention: AgentMention | null;
   /** ISO timestamp when the session was archived, or null when not archived. */
@@ -36,7 +36,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const presentationMode = usePresentationMode();
   const sessionGeneration = useRef(0);
   const [model, setModel] = useState<string | null>(null);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);

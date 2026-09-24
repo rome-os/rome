@@ -3,15 +3,7 @@ import type {
   StoredSessionTurnCheckpoint,
 } from "../db/repositories/sessions.js";
 import type { AgentSession } from "../types.js";
-import { REASONING_EFFORT_VALUES } from "@rome-os/app-runtime";
-import type { ModelReasoningEffort } from "./agent-runner.js";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
-
-function toReasoningEffort(value: string | null): ModelReasoningEffort | null {
-  return (REASONING_EFFORT_VALUES as readonly string[]).includes(value ?? "")
-    ? (value as ModelReasoningEffort)
-    : null;
-}
 
 export class SessionManager {
   constructor(
@@ -32,7 +24,7 @@ export class SessionManager {
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
-        reasoningEffort: ModelReasoningEffort | null;
+        reasoningEffort: string | null;
         createdAt: Date;
         lastActiveAt: Date;
       }
@@ -50,7 +42,7 @@ export class SessionManager {
       provider: row.provider,
       providerThreadId: row.providerThreadId,
       model: row.model,
-      reasoningEffort: toReasoningEffort(row.reasoningEffort),
+      reasoningEffort: row.reasoningEffort,
       createdAt: row.createdAt,
       lastActiveAt: row.lastActiveAt,
     };
@@ -129,11 +121,8 @@ export class SessionManager {
     await this.sessionsRepository.setProviderInfo(sessionId, provider, providerThreadId, model);
   }
 
-  /** Persist the reasoning effort the session's last successful model turn ran with. */
-  async setReasoningEffort(
-    sessionId: string,
-    reasoningEffort: ModelReasoningEffort,
-  ): Promise<void> {
+  /** Persist the provider-reported effort the session's last successful model turn ran with. */
+  async setReasoningEffort(sessionId: string, reasoningEffort: string): Promise<void> {
     await this.sessionsRepository.setReasoningEffort(sessionId, reasoningEffort);
   }
 
