@@ -582,12 +582,13 @@ export class WechatUserRuntime {
         `Could not start the WeChat session bus: ${result.stderr.trim()}`,
       );
     }
-    await this.startAccessibility();
+    await this.ensureAccessibility();
   }
 
-  /** Reading and login need no accessibility, so a failure here is logged, not
-   *  thrown. Sending checks for the tree itself and reports it as not ready. */
-  private async startAccessibility(): Promise<void> {
+  /** Turn accessibility on for the session bus, which must already exist.
+   *  Reading and login need no accessibility, so this never throws: a failure
+   *  is logged. Sending checks for the tree itself and reports it as not ready. */
+  async ensureAccessibility(): Promise<void> {
     const started = await this.run(
       "sh",
       ["-c", START_ACCESSIBILITY, "wechat-accessibility", this.accessibilityLauncher],
