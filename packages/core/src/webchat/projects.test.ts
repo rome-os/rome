@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -171,7 +171,7 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
   });
 
   function makeRoot(): string {
-    const root = mkdtempSync(join(tmpdir(), "rome-project-working-dir-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "rome-project-working-dir-")));
     tempDirs.push(root);
     mkdirSync(join(root, "landingpage", "content"), { recursive: true });
     return root;
@@ -205,7 +205,7 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
     }
   });
 
-  it("rejects a symlink inside the root that points outside it", async () => {
+  it("rejects a symlink escaping the root and returns the real dir of one inside it", async () => {
     const root = makeRoot();
     const outside = mkdtempSync(join(tmpdir(), "rome-project-outside-"));
     tempDirs.push(outside);
@@ -216,7 +216,7 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
       "is not inside the projects root",
     );
     await expect(resolveProjectWorkingDirWithinRoot("alias", root)).resolves.toBe(
-      join(root, "alias"),
+      join(root, "landingpage"),
     );
   });
 

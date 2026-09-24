@@ -73,6 +73,7 @@ export interface AgentSession {
   agentName: string;
   channelThreadKey: string;
   providerThreadId?: string;
+  workingDir?: string;
   createdAt: Date;
   lastActiveAt: Date;
   status: "active" | "completed" | "error";

@@ -51,6 +51,10 @@ export const sessions = sqliteTable("sessions", {
    *  written by the same after-turn provider-info write. Null for legacy
    *  rows and sessions that never completed a turn. Nothing reads it yet. */
   model: text("model"),
+  /** The cwd the session's provider ran in, so an explicit resume reopens the
+   *  provider where its transcript lives. Null for legacy rows, which resume
+   *  in the default project. */
+  workingDir: text("working_dir"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
   status: text("status", {

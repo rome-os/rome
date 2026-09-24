@@ -18,13 +18,16 @@ import { SkillCatalog } from "./skill-catalog.js";
 
 const AGENT = "worker";
 
-describe("AgentSessionManager.findWorkingDirBySessionId", () => {
+describe("AgentSessionManager working dirs", () => {
   let directory: string;
   let testDb: TestDb;
   let manager: AgentSessionManager;
+  let sessionsRepo: SessionsRepository;
+  const previousProjectsRoot = process.env.ROME_PROJECTS_ROOT;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-working-dir-"));
+    process.env.ROME_PROJECTS_ROOT = join(directory, "projects");
     await writeFile(
       join(directory, `${AGENT}.yaml`),
       JSON.stringify({
@@ -40,6 +43,7 @@ describe("AgentSessionManager.findWorkingDirBySessionId", () => {
     const loader = new AgentLoader();
     await loader.loadAll(directory);
     testDb = createTestDb();
+    sessionsRepo = new SessionsRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
       displayName: "anthropic",
@@ -63,7 +67,7 @@ describe("AgentSessionManager.findWorkingDirBySessionId", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(new SessionsRepository(testDb.db)),
+        sessionManager: new SessionManager(sessionsRepo),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),
@@ -83,6 +87,8 @@ describe("AgentSessionManager.findWorkingDirBySessionId", () => {
     await manager.shutdown();
     testDb.close();
     await rm(directory, { recursive: true, force: true });
+    if (previousProjectsRoot === undefined) delete process.env.ROME_PROJECTS_ROOT;
+    else process.env.ROME_PROJECTS_ROOT = previousProjectsRoot;
     rs.restoreAllMocks();
   });
 
@@ -109,5 +115,53 @@ describe("AgentSessionManager.findWorkingDirBySessionId", () => {
     await parent.close("user");
     expect(manager.findWorkingDirBySessionId!(parent.sessionId)).toBeUndefined();
     expect(manager.findWorkingDirBySessionId!(child.sessionId)).toBeUndefined();
+  });
+
+  it("finds the source session's working dir for an action called from its forked turn", async () => {
+    const parentDir = join(directory, "parent-project");
+    await mkdir(parentDir);
+    const parent = await manager.acquire(
+      { agentName: AGENT, channelThreadKey: "webchat:fork" },
+      { workingDir: parentDir },
+    );
+
+    const fork = parent.runForkedTurn!({ prompt: "side question" })[Symbol.asyncIterator]();
+    const start = await fork.next();
+    if (start.done || start.value.type !== "turn_start") throw new Error("expected turn_start");
+    const forkSessionId = start.value.sessionId;
+    expect(manager.findWorkingDirBySessionId!(forkSessionId)).toBe(parentDir);
+
+    while (!(await fork.next()).done) {}
+    expect(manager.findWorkingDirBySessionId!(forkSessionId)).toBeUndefined();
+  });
+
+  it("resumes a session by id in the working dir it was created in", async () => {
+    const projectDir = join(directory, "site");
+    await mkdir(projectDir);
+    const original = await manager.acquire(
+      { agentName: AGENT, channelThreadKey: "action:resume" },
+      { workingDir: projectDir },
+    );
+    const sessionId = original.sessionId;
+    await original.close("idle");
+
+    const resumed = await manager.acquireBySessionId!(sessionId, AGENT);
+
+    expect(resumed.sessionId).toBe(sessionId);
+    expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
+  });
+
+  it("resumes a legacy session with no recorded working dir in the default project", async () => {
+    await sessionsRepo.create({
+      id: "legacy-session",
+      agentName: AGENT,
+      channelThreadKey: "action:legacy",
+    });
+
+    await manager.acquireBySessionId!("legacy-session", AGENT);
+
+    expect(manager.findWorkingDirBySessionId!("legacy-session")).toBe(
+      join(directory, "projects", "default"),
+    );
   });
 });

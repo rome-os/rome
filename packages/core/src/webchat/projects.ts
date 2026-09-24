@@ -95,11 +95,11 @@ function isStrictSubpath(fromRoot: string): boolean {
 }
 
 /**
- * Resolve a caller-supplied project directory to an absolute working dir inside
- * the projects root. Accepts a path relative to the root (`landingpage/content`)
- * or an absolute path inside it. Throws when the path is the root itself, falls
- * outside it (including through a symlink), or is not an existing directory.
- * Never creates the directory.
+ * Resolve a caller-supplied project directory to the real path of a working dir
+ * inside the projects root, with every symlink resolved. Accepts a path relative
+ * to the root (`landingpage/content`) or an absolute path inside it. Throws when
+ * the path is the root itself, falls outside it (including through a symlink),
+ * or is not an existing directory. Never creates the directory.
  */
 export async function resolveProjectWorkingDirWithinRoot(
   requestedPath: string,
@@ -129,7 +129,7 @@ export async function resolveProjectWorkingDirWithinRoot(
   if (!(await stat(realWorkingDir)).isDirectory()) {
     throw new Error(`Working directory "${requestedPath}" is not a directory`);
   }
-  return workingDir;
+  return realWorkingDir;
 }
 
 export async function ensureWebchatProjectWorkspace(

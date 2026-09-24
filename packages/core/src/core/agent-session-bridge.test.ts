@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -110,7 +110,7 @@ describe("AgentSessionBridge working dir", () => {
   });
 
   function setup(callerWorkingDirs: Record<string, string> = {}) {
-    const projectsRoot = mkdtempSync(join(tmpdir(), "rome-bridge-projects-"));
+    const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
     const acquired: AgentSessionInit[] = [];
@@ -126,6 +126,10 @@ describe("AgentSessionBridge working dir", () => {
     } as unknown as AgentSession;
     const manager = {
       acquire: async (_key: unknown, init: AgentSessionInit) => {
+        acquired.push(init);
+        return session;
+      },
+      acquireBySessionId: async (_id: string, _agent: string, init: AgentSessionInit) => {
         acquired.push(init);
         return session;
       },
@@ -210,5 +214,13 @@ describe("AgentSessionBridge working dir", () => {
     });
 
     expect(acquired.map((init) => init.workingDir)).toEqual([join(projectsRoot, "landingpage")]);
+  });
+
+  it("leaves an explicit resume to reopen where its transcript lives", async () => {
+    const { acquired, runTurn } = setup({ "caller-session": "/profile/projects/site" });
+
+    await runTurn({ sessionId: "summoned-1", actionContext: { sessionId: "caller-session" } });
+
+    expect(acquired.map((init) => init.workingDir)).toEqual([undefined]);
   });
 });

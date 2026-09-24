@@ -625,9 +625,11 @@ export function createAgentSessionManager(
     if (!row) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
+    // Reopen where the transcript was written unless the caller names a dir.
+    const workingDir = init?.workingDir ?? row.workingDir ?? undefined;
     return acquire(
       { agentName, channelThreadKey: row.channelThreadKey },
-      { ...(init ?? {}), resumeSessionId: sessionId },
+      { ...(init ?? {}), workingDir, resumeSessionId: sessionId },
     );
   };
 
@@ -647,7 +649,9 @@ export function createAgentSessionManager(
     findWorkingDirBySessionId(sessionId) {
       for (const sess of sessions.values()) {
         if (sess.status === "closed") continue;
-        if (sess.sessionId === sessionId) return sess.workingDirectory;
+        if (sess.sessionId === sessionId || sess.hasActiveFork(sessionId)) {
+          return sess.workingDirectory;
+        }
         const nested = sess.openedChildManager?.findWorkingDirBySessionId?.(sessionId);
         if (nested) return nested;
       }
@@ -837,11 +841,14 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
+      workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
       status: "active",
     };
     await deps.sessionManager.createSession(dbSession);
+  } else if (init.preparedSessionId) {
+    await deps.sessionManager.setWorkingDir(sessionId, workingDir);
   }
 
   if (config.outputSchema && init.handback) {
@@ -1831,6 +1838,8 @@ class AgentSessionImpl implements AgentSession {
   currentTurnId?: string;
   lastActiveAt = Date.now();
   private activeForkedTurnCount = 0;
+  // Forks run in this session's working dir; actions they call carry the fork's id.
+  private activeForkSessionIds = new Set<string>();
   // Manager built lazily for subagent runs; keeps subagents owned by this session.
   private _childManager?: AgentSessionManager;
   private modelSession: ModelSession;
@@ -1965,6 +1974,10 @@ class AgentSessionImpl implements AgentSession {
 
   get workingDirectory(): string {
     return this.workingDir;
+  }
+
+  hasActiveFork(forkSessionId: string): boolean {
+    return this.activeForkSessionIds.has(forkSessionId);
   }
 
   /** The subagent manager, or undefined when this session never ran a subagent. */
@@ -2411,6 +2424,7 @@ class AgentSessionImpl implements AgentSession {
         id: forkSessionId,
         agentName: this.key.agentName,
         channelThreadKey,
+        workingDir: this.workingDir,
         createdAt: new Date(),
         lastActiveAt: new Date(),
         status: "active",
@@ -2657,6 +2671,7 @@ class AgentSessionImpl implements AgentSession {
     // shim slated for removal (step 2 of the stream-shape cleanup), and
     // forked-stream consumers read identity off turn_start.
     const forkSessionId = uuidv4();
+    this.activeForkSessionIds.add(forkSessionId);
     const turnId = uuidv4();
     const startMs = Date.now();
 
@@ -2872,6 +2887,7 @@ class AgentSessionImpl implements AgentSession {
         }
       }
       this.activeForkedTurnCount = Math.max(0, this.activeForkedTurnCount - 1);
+      this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
       this.emitStatus();
       try {
