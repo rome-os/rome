@@ -92,6 +92,8 @@
     "agentStartChat": "Start a new chat with {{agent}}",
     "agentSending": "Starting a chat with {{agent}}…",
     "agentSendFailed": "Your message to {{agent}} wasn't sent: {{error}}",
+    "agentSent": "Message sent to {{agent}}",
+    "agentSentOpen": "Open",
     "agentRemove": "Remove {{agent}}",
     "agentPickHint": "Select",
     "agentSendHint": "Send",

@@ -531,7 +531,19 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         throw new Error(errorMessage);
       }
       emitSessionsChanged();
-      if (!isCurrent()) return;
+      if (!isCurrent()) {
+        // Escape mid-send reads as cancel, so a send that lands after the
+        // dialog closed says so rather than leaving the guardian to resend.
+        const createdId = sessionId;
+        toast.success(t("recentChats.agentSent", { agent: prettyAgentName(agentName) }), {
+          description: messageText,
+          action: {
+            label: t("recentChats.agentSentOpen"),
+            onClick: () => openSessionById(createdId),
+          },
+        });
+        return;
+      }
       pendingSessionRef.current = null;
       failedTurnRef.current = null;
       openSessionById(sessionId);

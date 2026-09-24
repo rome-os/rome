@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { fireEvent, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
@@ -857,6 +857,49 @@ describe("ChatSearchDialog agent messaging across openings", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Agents couldn't be loaded");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("option", { name: "Explorer" })).toBeTruthy();
+  });
+
+  it("confirms a send that succeeds after the dialog closed, with a way to open the chat", async () => {
+    let finishTurn: (response: Response) => void = () => {};
+    const { requests } = mockAgentMessaging({
+      turnResponses: [
+        new Promise<Response>((resolve) => {
+          finishTurn = resolve;
+        }),
+      ],
+    });
+    const toastSuccess = rs.spyOn(toast, "success").mockImplementation(() => "toast-id");
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      "@expl",
+    );
+    await user.click(await screen.findByRole("option", { name: "Explorer" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Message Explorer" }),
+      "Find sources{Enter}",
+    );
+    await waitFor(() => expect(requests.some((r) => r.url.endsWith("/turns"))).toBe(true));
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    finishTurn(Response.json({ turnId: "turn-1", status: "running" }));
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1));
+    const [title, options] = toastSuccess.mock.calls[0] as [
+      string,
+      { description: string; action: { label: string; onClick: () => void } },
+    ];
+    expect(title).toBe("Message sent to Explorer");
+    expect(options.description).toBe("Find sources");
+    expect(options.action.label).toBe("Open");
+    // Closing the dialog is not a request to navigate; only the action opens it.
+    expect(screen.getByTestId("location").textContent).toBe("/chat");
+
+    act(() => options.action.onClick());
+    expect(screen.getByTestId("location").textContent).toBe("/chat/new-chat");
   });
 
   it("reports a send that fails after the dialog closed, and leaves the next opening unblocked", async () => {
