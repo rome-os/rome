@@ -204,6 +204,14 @@ interface ActionEngineOptions {
   ) => Promise<ActionResult | undefined>;
   /** Main-only process factory. Worker engines intentionally receive none. */
   actionWorkerFork?: (entryPath: string, options: ForkOptions) => ChildProcess;
+  /**
+   * Main-only trust check: true when the named action is owned by core or by
+   * an app installed as first-party. A root `type: "system"` action that passes
+   * it runs in main instead of taking a worker (see `resolveExecutionMode`).
+   * `type` alone is self-declared by any app manifest, so it is never trusted
+   * without this check. Absent = no root runs in main.
+   */
+  isFirstPartyAction?: (actionName: string) => boolean;
 }
 
 interface ExecutionInvocation {
@@ -291,6 +299,7 @@ export class ActionEngine {
   private actionWorkerCoordinator: ActionWorkerCoordinator | null = null;
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
+  private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
@@ -320,6 +329,7 @@ export class ActionEngine {
     this.clock = options?.clock ?? systemClock;
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
+    this.isFirstPartyAction = options?.isFirstPartyAction;
     this.workerWarmPoolSize =
       this.processRole === "main"
         ? Math.max(0, Math.floor(options?.workerWarmPoolSize ?? DEFAULT_WORKER_WARM_POOL_SIZE))
@@ -1450,9 +1460,35 @@ export class ActionEngine {
 
   private resolveExecutionMode(action: Action, isRoot: boolean): "in_process" | "subprocess" {
     if (isRoot) {
-      return this.processRole === "main" ? "subprocess" : "in_process";
+      if (this.processRole !== "main") return "in_process";
+      return this.runsRootInMain(action) ? "in_process" : "subprocess";
     }
     return action.config.cancellable ? "subprocess" : "in_process";
+  }
+
+  /**
+   * A root first-party `type: "system"` action runs in main rather than in a
+   * worker. These actions are thin wrappers over main-owned services (channels,
+   * agent sessions, app lifecycle) that a worker would reach back into over
+   * RPC anyway, so a worker adds a fork and an IPC round trip without taking
+   * load off main — and makes them compete for the capped worker budget with
+   * long-running app jobs. Trade-offs this accepts: an in-process root cannot be
+   * killed by `cancel()`, and an unhandled error in its handler reaches main's
+   * process-level handlers. `cancellable` actions keep their worker so
+   * process-level termination stays available to them.
+   */
+  private runsRootInMain(action: Action): boolean {
+    if (action.config.type !== "system" || action.config.cancellable) return false;
+    if (!this.isFirstPartyAction) return false;
+    try {
+      return this.isFirstPartyAction(action.config.name);
+    } catch (err) {
+      log.warn("first-party action check failed; using a worker", {
+        action: action.config.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 
   private emitRuntimeEvent(

@@ -329,6 +329,146 @@ describe("ActionEngine", () => {
       children[0].completeNext();
       await expect(first).resolves.toEqual({ status: "ok", data: "root" });
     });
+
+    describe("first-party system roots", () => {
+      // A forked (fake) worker answers `data: <actionName>`; running in main
+      // returns whatever `execute` returns — so `data` tells the paths apart.
+      const inMain = async (): Promise<ActionResult> => ({ status: "ok", data: "ran-in-main" });
+
+      function engineWith(
+        actions: Action[],
+        isFirstPartyAction?: (name: string) => boolean,
+        maxWorkerProcesses = 8,
+      ) {
+        const registry = new ActionRegistryImpl([]);
+        for (const action of actions) registry.register(action);
+        const { children, actionWorkerFork } = installFakeChildProcessFactory();
+        const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+          processRole: "main",
+          workerWarmPoolSize: 0,
+          maxWorkerProcesses,
+          actionWorkerFork,
+          isFirstPartyAction,
+        });
+        return { engine, children, actionWorkerFork };
+      }
+
+      it("runs a first-party system root in main without forking a worker", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:send_message", { type: "system", execute: inMain })],
+          (name) => name === "system:send_message",
+        );
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+
+      it("still runs a first-party system root when the worker cap is exhausted", async () => {
+        const registry = new ActionRegistryImpl([]);
+        registry.register(buildAction("root"));
+        registry.register(buildAction("system:send_message", { type: "system", execute: inMain }));
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+          processRole: "main",
+          workerWarmPoolSize: 0,
+          maxWorkerProcesses: 1,
+          actionWorkerFork,
+          isFirstPartyAction: (name) => name === "system:send_message",
+        });
+
+        const busy = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await expect(engine.run("root", {})).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+
+        children[0].completeNext();
+        await expect(busy).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("forks a worker for a system action whose app is not first-party", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("store-app:send_message", { type: "system", execute: inMain })],
+          () => false,
+        );
+
+        await expect(engine.run("store-app:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "store-app:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker for a cancellable first-party system action", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [
+            buildAction("system:long_job", {
+              type: "system",
+              cancellable: true,
+              execute: inMain,
+            }),
+          ],
+          () => true,
+        );
+
+        await expect(engine.run("system:long_job", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:long_job",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker for a first-party custom action", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:custom_thing", { type: "custom", execute: inMain })],
+          () => true,
+        );
+
+        await expect(engine.run("system:custom_thing", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:custom_thing",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("forks a worker when no first-party check is configured", async () => {
+        const { engine, actionWorkerFork } = engineWith([
+          buildAction("system:send_message", { type: "system", execute: inMain }),
+        ]);
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+
+      it("falls back to a worker when the first-party check throws", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:send_message", { type: "system", execute: inMain })],
+          () => {
+            throw new Error("catalog unavailable");
+          },
+        );
+
+        await expect(engine.run("system:send_message", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:send_message",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 
   // run() — root call, record mode

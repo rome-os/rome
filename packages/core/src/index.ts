@@ -137,6 +137,7 @@ import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
+import { isFirstPartyAction } from "./apps/first-party-action.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import {
@@ -506,6 +507,9 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
+      // Trust comes from the lockfile's first-party flag, never from the
+      // action's self-declared `type`.
+      isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
         if (!channelContext) return;
         const matches = (await talkRouter.list()).filter(
