@@ -1,0 +1,14 @@
+== 2026-09-24T06:39:59Z identity check for prototype-webchat-default-agent-replay-rome-1
+PANTHEON_SLUG: unset
+ROME_INSTANCE_TOKEN: unset
+ROME_CLOUD_TOKEN: empty
+STATSIG_SERVER_SECRET_KEY: empty
+PANTHEON_BASE_ORIGIN=https://romeos.cc FEATURE_GATE_ROME_CLOUD_AUTH=off ROME_DEV_SKIP_TOKEN_SEED=1
+settings keys: artifactLegacyBindingsV1, computerUse.connections, conversation_settings_cutover_v1, events_to_routines_migrated
+token/relay/instance keys: []
+relay: {"relay":{"configured":false,"drainUrl":null,"depositUrl":null,"targetApp":null,"state":"notConnected","backlog":null,"nextAttemptAt":null,"failure":null}}
+auth/me enrollment: {}
+log lines:
+{"timestamp":"2026-09-24T06:39:12.842Z","level":"info","component":"startup","message":"Cloud-auth gating configured","rome.log.source":"rome","data":{"slug":null,"gateConfigured":false,"gateOverrides
+{"timestamp":"2026-09-24T06:39:13.904Z","level":"info","component":"instance-identity","message":"instance not enrolled (no instance token present)","rome.log.source":"rome"}
+{"timestamp":"2026-09-24T06:39:13.904Z","level":"info","component":"rome-cloud-relay","message":"relay mailbox not provisioned (instance not enrolled)","rome.log.source":"rome"}
