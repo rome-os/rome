@@ -5,7 +5,7 @@
 //   node scripts/prototype-webchat-default-agent/ui.prototype.mjs <flow> [profile]
 // Flows: advanced | s1 | entry | swap | remove | blank
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 
 // playwright is a transitive dev dependency; resolve it from pnpm's hoist dir.
 const require = createRequire(new URL("../../node_modules/.pnpm/node_modules/", import.meta.url));
@@ -17,9 +17,25 @@ const [flow, profile = "a"] = process.argv.slice(2);
 const ts = () => new Date().toISOString();
 const trace = (event, data) => console.log(`${ts()} ${event} ${JSON.stringify(data ?? {})}`);
 
-const ctx = await chromium.launchPersistentContext(`/tmp/wda/browser-${profile}`, {
-  viewport: { width: 1400, height: 900 },
-});
+// Under `pnpm dev:all` there is no browser in the rome container, so WDA_CDP
+// points at the worktree's Chrome sidecar (shares the container's loopback).
+// Each profile gets its own isolated context (separate cookie jar), and its
+// session cookie is kept in a state file so reruns don't re-login.
+const CDP = process.env.WDA_CDP;
+const STATE = `${process.env.WDA_STATE_DIR ?? "/tmp/wda"}/browser-${profile}.state.json`;
+let browser = null;
+let ctx;
+if (CDP) {
+  browser = await chromium.connectOverCDP(CDP);
+  ctx = await browser.newContext({
+    viewport: { width: 1400, height: 900 },
+    ...(existsSync(STATE) ? { storageState: STATE } : {}),
+  });
+} else {
+  ctx = await chromium.launchPersistentContext(`/tmp/wda/browser-${profile}`, {
+    viewport: { width: 1400, height: 900 },
+  });
+}
 const page = ctx.pages()[0] ?? (await ctx.newPage());
 page.on("console", (m) => {
   if (m.text().includes("[wda-proto]")) trace("browser-console", { text: m.text() });
@@ -43,6 +59,7 @@ async function login() {
     data: { userId: "proto", password: "proto-pass-123" },
   });
   trace("login", { profile, status: r.status() });
+  if (CDP) await ctx.storageState({ path: STATE });
 }
 
 async function api(path) {
@@ -276,3 +293,4 @@ switch (flow) {
     console.error("unknown flow", flow);
 }
 await ctx.close();
+if (browser) await browser.close(); // disconnects; the sidecar Chrome keeps running

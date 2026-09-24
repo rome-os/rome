@@ -2,7 +2,28 @@
 
 This prototype answers `webchat-default-agent/prototype-brief.md` in `zhangfand/rome-work@8868d1b`.
 
-## Try it
+## Try it under `pnpm dev:all` (the verified path)
+
+Run it on a development machine, never on a host that runs a production Rome.
+
+```bash
+git switch prototype/webchat-default-agent-replay
+# Hold the stack on local auth, and keep it un-enrolled even if a token is in the env.
+ROME_DEV_SKIP_TOKEN_SEED=1 FEATURE_GATE_ROME_CLOUD_AUTH=off pnpm dev:all   # stays attached to logs
+P=scripts/prototype-webchat-default-agent/dev-all.sh
+$P sh 'curl -s -X POST 127.0.0.1:4141/api/onboard/create-account -H "content-type: application/json" -d "{\"userId\":\"proto\",\"password\":\"proto-pass-123\"}"'
+$P scenarios install        # fixture app wda-proto-app with agent wda-proto-app:helper
+$P scenarios state
+```
+
+Open `http://<slug>.rome.localhost:3000/settings/advanced`, where `<slug>` is
+the output of `scripts/worktree-slug.sh`. Sign in as `proto` / `proto-pass-123`.
+Use the same `scenarios` commands listed below through `$P scenarios ...`.
+`$P ui <flow> a|b` replays the browser checks in the worktree's Chrome sidecar.
+The `a` and `b` arguments are two isolated browser contexts. To restart Rome,
+run `docker restart <slug>-rome-1`.
+
+## Try it with a bare process (first run only)
 
 ```bash
 pnpm install
