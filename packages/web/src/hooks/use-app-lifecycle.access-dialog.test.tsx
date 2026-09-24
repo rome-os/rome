@@ -8,6 +8,10 @@ import type { InstalledAppCard } from "@rome/api-types/apps";
 import i18n from "@/i18n";
 import { useAppLifecycle } from "./use-app-lifecycle";
 
+// jsdom serves the page on localhost, which the dialog treats as unshareable.
+const origin = rs.hoisted(() => ({ value: "https://jessie.romeos.cc" as string | null }));
+rs.mock("@/lib/shareable-origin", () => ({ shareableOrigin: () => origin.value }));
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
   Element.prototype.hasPointerCapture = () => false;
@@ -27,7 +31,7 @@ const APP: InstalledAppCard = {
   phase: "installed",
   hasFrontend: true,
   href: "/apps/@ray/demo",
-  fullHref: "/full/apps/@ray/demo",
+  fullHref: "/full/apps/%40ray%2Fdemo",
   capabilities: [],
   capabilityDetails: { agents: [], actions: [], skills: [], hooks: [] },
   isEnabled: true,
@@ -135,7 +139,7 @@ describe("the app access dialog", () => {
   });
 
   describe("share link", () => {
-    const SHARE_URL = `${window.location.origin}/full/apps/@ray/demo`;
+    const SHARE_URL = "https://jessie.romeos.cc/full/apps/%40ray%2Fdemo";
     const shareLink = () => screen.queryByRole("textbox", { name: "Share link" });
 
     it("is absent while the app is private", async () => {
@@ -143,12 +147,21 @@ describe("the app access dialog", () => {
       expect(shareLink()).toBeNull();
     });
 
-    it("shows the standalone URL once a shared mode is picked, noting it needs saving", async () => {
+    it("shows the standalone URL once a shared mode is picked", async () => {
       await openDialog();
       await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
 
       expect((shareLink() as HTMLInputElement | null)?.value).toBe(SHARE_URL);
-      expect(screen.getByText("The link opens the app once this access is saved.")).toBeTruthy();
+    });
+
+    it("is absent on a loopback host, whose link opens nowhere else", async () => {
+      origin.value = null;
+      try {
+        await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
+        expect(shareLink()).toBeNull();
+      } finally {
+        origin.value = "https://jessie.romeos.cc";
+      }
     });
 
     it("copies the link of an app that is already public", async () => {
@@ -156,7 +169,6 @@ describe("the app access dialog", () => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
       await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
 
-      expect(screen.queryByText("The link opens the app once this access is saved.")).toBeNull();
       await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
 
       expect(writeText).toHaveBeenCalledWith(SHARE_URL);

@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { parseEmailTextarea } from "@/lib/email-list";
+import { shareableOrigin } from "@/lib/shareable-origin";
 import { fetchJson } from "@/lib/fetch-json";
 import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "@/hooks/use-apps";
 
@@ -524,13 +525,11 @@ export function useAppLifecycle(
     : "";
   const accessSaving = accessMutation.isPending;
   // The link to share is the standalone route: it is what a visitor lands on
-  // anyway, and it opens without the guardian's shell around the app.
-  const accessShareUrl = accessTarget?.fullHref
-    ? `${window.location.origin}${accessTarget.fullHref}`
-    : null;
-  const accessSavedMode: AppAccessMode | null = accessTarget
-    ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
-    : null;
+  // anyway, and it opens without the guardian's shell around the app. None is
+  // offered on a loopback host, whose links open nowhere else.
+  const shareOrigin = shareableOrigin();
+  const accessShareUrl =
+    accessTarget?.fullHref && shareOrigin ? `${shareOrigin}${accessTarget.fullHref}` : null;
   const copyAccessShareUrl = () => {
     if (!accessShareUrl) return;
     void navigator.clipboard?.writeText(accessShareUrl).then(
@@ -744,9 +743,6 @@ export function useAppLifecycle(
                     : t("installed.accessDialog.copyLink")}
                 </Button>
               </div>
-              {accessModeDraft !== accessSavedMode ? (
-                <FieldDescription>{t("installed.accessDialog.linkUnsaved")}</FieldDescription>
-              ) : null}
             </div>
           ) : null}
 
