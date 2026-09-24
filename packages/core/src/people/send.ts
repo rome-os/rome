@@ -20,6 +20,7 @@
 import type { ConversationId, TalkRouter } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { asGuardian } from "../connections/guardian-send.js";
+import { currentSessionActor } from "../lib/session-actor.js";
 
 export interface SendAccount {
   channel: string;
@@ -124,9 +125,12 @@ export interface SendReceipt {
 /**
  * Hand the text to the channel.
  *
- * The guardian pressed Send, so the call runs in the guardian-send scope. It
- * is the only place that opens it, so a talker on the guardian's own account
- * can tell this send from any agent's (`connections/guardian-send.ts`).
+ * When the guardian pressed Send in their own browser, the call runs in the
+ * guardian-send scope. This is the only place that opens it, so a talker on
+ * the guardian's own account can tell this send from any agent's
+ * (`connections/guardian-send.ts`). A request from inside the container, over
+ * loopback, is also treated as the guardian's elsewhere, but here it sends
+ * without the scope.
  *
  * Throws whatever the talker throws — the caller records the failure, because
  * only it knows which outbox row is waiting on the answer.
@@ -137,8 +141,18 @@ export async function sendToTarget(
   text: string,
 ): Promise<SendReceipt> {
   const message = { text };
-  const receipt = await asGuardian(message, () =>
-    deps.talkRouter.send(target.connectionId, target.conversationId, message),
-  );
+  const send = () => deps.talkRouter.send(target.connectionId, target.conversationId, message);
+  const receipt = (await fromGuardianBrowser()) ? await asGuardian(message, send) : await send();
   return { messageId: receipt.messageId ?? null };
+}
+
+/**
+ * Whether this request comes from the guardian's own browser session, proven
+ * by its session cookie. This is defence in depth, not a boundary: the
+ * container is the trust boundary, and a process in it with the server's
+ * privileges can still act as the guardian.
+ */
+async function fromGuardianBrowser(): Promise<boolean> {
+  const actor = await currentSessionActor();
+  return actor?.kind === "guardian" && actor.via === "cookie";
 }

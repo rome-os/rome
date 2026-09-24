@@ -8,8 +8,17 @@ import type {
   TalkFeatureName,
 } from "@rome-os/app-runtime";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { Hono, type MiddlewareHandler } from "hono";
+import { peopleRoutes } from "../api/routes/people.js";
+import { createSession } from "../lib/auth.js";
+import {
+  runWithSessionActor,
+  sessionActorMiddleware,
+  type SessionActor,
+} from "../lib/session-actor.js";
 import { sendToTarget } from "../people/send.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { buildTestDeps, createTestDb, type TestDb } from "../test/helpers.js";
+import { seedBaseline } from "../test/seeds.js";
 import { asGuardian, consumeGuardianSend } from "./guardian-send.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -92,10 +101,12 @@ describe("guardian-send token", () => {
     const router = createTalkRouter(registry);
     const chat = "wxid_a" as ConversationId;
 
-    const guardianSend = sendToTarget(
-      { talkRouter: router },
-      { connectionId: connection.id, conversationId: chat },
-      "hi",
+    const guardianSend = runWithSessionActor(BROWSER_GUARDIAN, () =>
+      sendToTarget(
+        { talkRouter: router },
+        { connectionId: connection.id, conversationId: chat },
+        "hi",
+      ),
     );
     await rs.waitFor(() => expect(passed).toHaveLength(2));
     await router.send(connection.id, chat, { text: "notice" });
@@ -110,14 +121,106 @@ describe("guardian-send token", () => {
     ]);
   });
 
-  it("is opened only by people/send.ts", async () => {
+  it("is reached only through the People routes", async () => {
     const src = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const openers: string[] = [];
+    // Code (not comments) naming each link of the chain, outside tests.
+    const users: Record<string, string[]> = {};
     for (const file of await sourceFiles(src)) {
-      if (/\.test\.ts$/.test(file) || file.endsWith("guardian-send.ts")) continue;
-      if ((await readFile(file, "utf8")).includes("asGuardian")) openers.push(relative(src, file));
+      if (/\.test\.ts$/.test(file)) continue;
+      const code = (await readFile(file, "utf8"))
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      for (const name of Object.keys(CHAIN)) {
+        if (new RegExp(`\\b${name}\\b`).test(code)) {
+          (users[name] ??= []).push(relative(src, file));
+        }
+      }
     }
-    expect(openers).toEqual(["people/send.ts"]);
+    for (const name of Object.keys(CHAIN)) users[name]?.sort();
+    expect(users).toEqual(CHAIN);
+  });
+});
+
+/** Each link of the guardian-send chain and the only files whose code names it:
+ *  where it is defined, and its one caller. */
+const CHAIN: Record<string, string[]> = {
+  asGuardian: ["connections/guardian-send.ts", "people/send.ts"],
+  sendToTarget: ["people/outbox.ts", "people/send.ts"],
+  sendToAccount: ["api/routes/people.ts", "people/outbox.ts"],
+  retrySend: ["api/routes/people.ts", "people/outbox.ts"],
+};
+
+const BROWSER_GUARDIAN: SessionActor = { kind: "guardian", userId: "guardian", via: "cookie" };
+
+describe("the People send and retry routes", () => {
+  let testDb: TestDb | undefined;
+  afterEach(() => testDb?.close());
+
+  /**
+   * One send through the People routes behind `actor`, then a retry of it.
+   * The first provider call fails, so the retry has a row to take. Answers
+   * what the talker's token said for each message it was handed.
+   */
+  async function sendThenRetry(
+    actor: (db: TestDb["db"]) => MiddlewareHandler,
+    headers: Record<string, string> = {},
+  ): Promise<{ retried: number; scoped: boolean[] }> {
+    testDb = createTestDb();
+    await seedBaseline(testDb.db);
+    const deps = await buildTestDeps(testDb.db);
+    const personId = await deps.personMappingRepo.create({
+      displayName: "Send Target",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-1" }],
+    });
+    const scoped: boolean[] = [];
+    const send = deps.talkRouter.send.bind(deps.talkRouter);
+    deps.talkRouter.send = async (connectionId, conversationId, message) => {
+      scoped.push(consumeGuardianSend(message));
+      if (scoped.length === 1) throw new Error("provider rejected");
+      return send(connectionId, conversationId, message);
+    };
+    const app = new Hono().use("*", actor(testDb.db)).route("/", peopleRoutes(deps));
+    const person = `/people/${personId}`;
+    await app.request(`${person}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({ channel: "telegram", channelUserId: "tg-1", text: "hi" }),
+    });
+    const outbox = (await (await app.request(`${person}/outbox`, { headers })).json()) as {
+      messages: Array<{ id: string; state: string }>;
+    };
+    const failed = outbox.messages.find((row) => row.state === "failed");
+    const retried = await app.request(`${person}/outbox/${failed?.id}/retry`, {
+      method: "POST",
+      headers,
+    });
+    return { retried: retried.status, scoped };
+  }
+
+  it("opens the scope for the guardian's cookie session, on send and retry", async () => {
+    const cookie = `rome_session=${createSession("guardian")}`;
+    const { retried, scoped } = await sendThenRetry((db) => sessionActorMiddleware(db), {
+      cookie,
+    });
+    expect(retried).toBe(202);
+    expect(scoped).toEqual([true, true]);
+  });
+
+  it("sends without the scope for a loopback caller, on send and retry", async () => {
+    const loopback: SessionActor = { kind: "guardian", userId: "guardian", via: "loopback" };
+    const { retried, scoped } = await sendThenRetry(
+      () => (_c, next) => runWithSessionActor(loopback, next),
+    );
+    expect(retried).toBe(202);
+    expect(scoped).toEqual([false, false]);
+  });
+
+  it("sends without the scope for a request with no session", async () => {
+    const { retried, scoped } = await sendThenRetry((db) => sessionActorMiddleware(db));
+    expect(retried).toBe(202);
+    expect(scoped).toEqual([false, false]);
   });
 });
 
