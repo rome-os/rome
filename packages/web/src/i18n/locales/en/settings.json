@@ -826,11 +826,11 @@
     "unknownCount_one": "The connection status of {{count}} device could not be confirmed.",
     "unknownCount_other": "The connection status of {{count}} devices could not be confirmed.",
     "checkedAt": "Last checked at {{time}}.",
-    "empty": "No devices are authorized. Run rome-node connect on a computer and approve access to connect it.",
+    "empty": "No computers are linked to this account.",
     "connection": {
       "not_running": "Service not running",
       "online": "Connected",
-      "stopped": "Not connected",
+      "stopped": "Idle",
       "connecting": "Connecting",
       "retrying": "Reconnecting",
       "revoked": "Access revoked",
@@ -840,16 +840,27 @@
       "incompatible": "Restart required"
     },
     "help": {
-      "not_running": "The device service is not running. Device connection status is unknown.",
+      "not_running": "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
       "unavailable": "Device status is unavailable. Try refreshing.",
       "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
-      "incompatible": "Restart the device service with rome-node daemon stop and rome-node daemon start."
+      "incompatible": "On the Rome instance, run rome-node daemon stop, then rome-node daemon start. This restarts the shared service and interrupts device requests in progress.",
+      "stopped": "The device service is running. Its connection stays idle until a linked computer needs to be checked or used."
     },
     "status": {
       "connected": "Connected",
       "not_connected": "Not connected",
       "unknown": "Unknown",
       "revoked": "Access revoked"
+    },
+    "start": "Start service",
+    "starting": "Starting…",
+    "startFailed": "Could not start the device service",
+    "setup": {
+      "title": "Connect a computer",
+      "description": "The device service runs on your Rome instance. Each computer you want to use needs its own connection.",
+      "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
+      "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
+      "instructions": "Installation and connection guide"
     }
   }
 }

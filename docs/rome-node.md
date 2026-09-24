@@ -41,7 +41,18 @@ while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
 It only connects to an existing daemon and returns `null` if none is running.
 Opening the page, polling, and refreshing never start or restart the daemon.
 The HTTP API reports `not_running` in that case, and the page shows an unknown
-device count. Explicit daemon startup and device commands can start it again.
+device count. **Start service** explicitly starts the daemon on the Rome instance
+through `POST /api/devices/start`. It does not authorize a computer, replace
+credentials, or restart an incompatible service. Device commands can also start it.
+
+A running daemon without a Gateway connection appears as **Idle**, not as a
+stopped service. The connection opens when a linked computer needs a reachability
+check or a remote action. An empty authorized-device list does not require it.
+
+The **Connect a computer** section stays visible even when the service is stopped.
+It directs users to run `rome-node connect` on the target computer, approve access
+with the same Cloud account, and keep the terminal open. Programs run as that
+computer's OS user. This is separate from starting the service on the Rome instance.
 
 Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,

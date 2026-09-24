@@ -263,6 +263,7 @@ const favorPacks: FavorRechargePackView[] = [
 ];
 
 export const settingsHandlers = [
+  http.post("/api/devices/start", () => new HttpResponse(null, { status: 204 })),
   http.get("/api/devices", () =>
     HttpResponse.json({
       connection: "online",
