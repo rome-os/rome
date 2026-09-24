@@ -102,7 +102,8 @@ export interface MarkdownTheme {
    * Element whose CSS custom properties should seed the generated Mermaid
    * theme. Defaults to document.documentElement. Mounted instances re-resolve
    * the theme when the root's `class`, `data-theme`, or `style` attribute
-   * changes. A stylesheet change alone does not reach them.
+   * changes. Changes elsewhere, such as on an ancestor or in a stylesheet, do
+   * not reach them.
    */
   root?: Element | null;
   /**
@@ -289,11 +290,13 @@ function subscribeToThemeRoot(root: Element, listener: () => void): () => void {
   return () => {
     store.listeners.delete(listener);
     if (store.listeners.size > 0) return;
-    // With nothing mounted, nothing watches the root, so a kept resolution
-    // could go stale unseen. The next mount resolves afresh.
+    // With nothing mounted, nothing watches the root, so the next mount
+    // re-validates. Marking entries stale rather than dropping them keeps the
+    // object for sameMermaidTheme, so instances that replace these in the same
+    // commit are not re-rendered.
     store.observer?.disconnect();
     store.observer = null;
-    store.byTokens.clear();
+    for (const entry of store.byTokens.values()) entry.stale = true;
   };
 }
 

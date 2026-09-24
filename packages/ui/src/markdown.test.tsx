@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { Suspense } from "react";
-import { Markdown, readMarkdownMermaidTheme } from "./markdown.js";
+import { Markdown, type MarkdownTheme, readMarkdownMermaidTheme } from "./markdown.js";
 
 afterEach(() => {
   cleanup();
@@ -192,5 +192,27 @@ describe("Markdown Mermaid theme", () => {
     render(<Markdown>mounted</Markdown>);
 
     expect(spy.mock.calls.length).toBeGreaterThanOrEqual(single);
+  });
+
+  it("does not re-render new instances when they replace the old ones in one commit", () => {
+    // Every Markdown render reads `theme.mermaid`, so the getter counts renders.
+    let renders = 0;
+    const theme: MarkdownTheme = {
+      get mermaid() {
+        renders++;
+        return undefined;
+      },
+    };
+    const transcript = (id: string) =>
+      Array.from({ length: 3 }, (_, index) => (
+        <Markdown key={`${id}-${index}`} theme={theme}>{`${id} message ${index}`}</Markdown>
+      ));
+    const { rerender } = render(<>{transcript("a")}</>);
+    const mountRenders = renders;
+    renders = 0;
+
+    rerender(<>{transcript("b")}</>);
+
+    expect(renders).toBe(mountRenders);
   });
 });
