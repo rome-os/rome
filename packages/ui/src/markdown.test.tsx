@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { Markdown } from "./markdown.js";
+import { Suspense } from "react";
+import { Markdown, readMarkdownMermaidTheme } from "./markdown.js";
 
 afterEach(() => {
   cleanup();
@@ -130,6 +131,14 @@ describe("Markdown Mermaid theme", () => {
     return reads;
   }
 
+  function readsPerResolve(): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    readMarkdownMermaidTheme();
+    const reads = spy.mock.calls.length;
+    spy.mockRestore();
+    return reads;
+  }
+
   it("resolves the theme once however many instances are mounted", () => {
     const single = countThemeReads(<Markdown>one</Markdown>);
     const many = countThemeReads(
@@ -145,7 +154,7 @@ describe("Markdown Mermaid theme", () => {
   });
 
   it("resolves the theme again once when the theme root changes", async () => {
-    const single = countThemeReads(<Markdown>one</Markdown>);
+    const single = readsPerResolve();
     render(
       <>
         {Array.from({ length: 5 }, (_, index) => (
@@ -160,5 +169,28 @@ describe("Markdown Mermaid theme", () => {
     });
 
     expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("re-validates a theme resolved by a render that never committed", async () => {
+    const single = readsPerResolve();
+    // The sibling suspends, so React discards the Markdown render after it
+    // resolved the theme, and no instance ever watches the root.
+    const never = new Promise<never>(() => {});
+    function Suspends(): never {
+      throw never;
+    }
+    render(
+      <Suspense fallback={null}>
+        <Markdown>discarded</Markdown>
+        <Suspends />
+      </Suspense>,
+    );
+    cleanup();
+    document.documentElement.classList.add("dark");
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    render(<Markdown>mounted</Markdown>);
+
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(single);
   });
 });

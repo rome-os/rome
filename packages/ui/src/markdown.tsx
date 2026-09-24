@@ -100,7 +100,9 @@ export interface MarkdownThemeTokens {
 export interface MarkdownTheme {
   /**
    * Element whose CSS custom properties should seed the generated Mermaid
-   * theme. Defaults to document.documentElement.
+   * theme. Defaults to document.documentElement. Mounted instances re-resolve
+   * the theme when the root's `class`, `data-theme`, or `style` attribute
+   * changes. A stylesheet change alone does not reach them.
    */
   root?: Element | null;
   /**
@@ -274,6 +276,9 @@ function subscribeToThemeRoot(root: Element, listener: () => void): () => void {
   const store = themeRootStore(root);
   store.listeners.add(listener);
   if (!store.observer && typeof MutationObserver !== "undefined") {
+    // Entries resolved during render went unwatched until now, and a render
+    // that never committed can leave one behind, so re-validate them once.
+    for (const entry of store.byTokens.values()) entry.stale = true;
     const observer = new MutationObserver(() => {
       for (const entry of store.byTokens.values()) entry.stale = true;
       for (const notify of store.listeners) notify();
