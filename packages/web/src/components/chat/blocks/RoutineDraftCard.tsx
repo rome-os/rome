@@ -5,27 +5,49 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createRoutine, listRoutineNames } from "@/lib/chat-api";
 import type { PreviewPayload, RoutineDraftSpec } from "@/lib/chat-types";
+import { useSyncCreatedRoutine } from "@/hooks/use-routines";
 
 type CardState =
   | { kind: "draft" }
   | { kind: "creating" }
-  | { kind: "on" }
+  // Definitive success driven by the POST response, so the card can never spin
+  // forever if the live routine_created_card push is delayed or dropped.
+  | { kind: "created" }
+  // Historical guard: a routine of this name already exists and this draft has
+  // no companion record, so creation must not be re-offered.
+  | { kind: "exists" }
   | { kind: "error"; message: string };
+
+interface RoutineDraftCardProps {
+  draft: RoutineDraftSpec;
+  sessionId: string;
+  turnId: string;
+  toolUseId: string;
+}
 
 /**
  * The confirm card for a routine the agent proposed via `propose_routine`.
- * Turning it on creates the routine through POST /api/routines (which also
- * activates it), so confirmation needs no second agent turn. On mount we check
- * existing routine names so a reload after creation shows "On" instead of
- * re-offering to create a duplicate.
+ * Turning it on creates the routine and asks the server to append a durable
+ * routine_created_card to this chat. Once that persisted record lands (live, or
+ * on reload) render suppresses this draft entirely and shows the record-driven
+ * RoutineCreatedCard with the /routines/:id link — this component never owns the
+ * completed card's link.
  */
-export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
+export function RoutineDraftCard({ draft, sessionId, turnId, toolUseId }: RoutineDraftCardProps) {
   const [state, setState] = useState<CardState>({ kind: "draft" });
+  const syncCreatedRoutine = useSyncCreatedRoutine();
 
+  // Historical drafts turned on before the persisted routine_created_card record
+  // shipped have no companion record, so render still mounts this proposal.
+  // Guard the one-click action against creating a duplicate of an already-active
+  // routine by settling to a non-clickable state when a routine of this name
+  // already exists. This guard never sources the detail link (a historical draft
+  // has no record and therefore offers no link); it only disables re-creation.
   useEffect(() => {
     let cancelled = false;
     void listRoutineNames().then((names) => {
-      if (!cancelled && names.includes(draft.name)) setState({ kind: "on" });
+      if (cancelled || !names.includes(draft.name)) return;
+      setState((prev) => (prev.kind === "draft" ? { kind: "exists" } : prev));
     });
     return () => {
       cancelled = true;
@@ -39,18 +61,25 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
       trigger: draft.trigger,
       actionName: draft.actionName,
       args: draft.args,
+      webchatContext: { sessionId, turnId, toolUseId },
     });
-    if (result.ok) {
-      setState({ kind: "on" });
-    } else {
-      setState({
-        kind: "error",
-        message: result.error ?? `Couldn't turn it on (${result.status}).`,
-      });
+    if (result.ok && result.routine && result.routineId) {
+      syncCreatedRoutine(result.routine);
+      // Settle from the POST response itself — the routine is created and
+      // activated, so never keep spinning if the live push is delayed or lost.
+      // The persisted record stays the source of truth for the detail link:
+      // when its push lands (or on reload) render replaces this draft with the
+      // record-driven RoutineCreatedCard that carries the /routines/:id link.
+      setState({ kind: "created" });
+      return;
     }
+    syncCreatedRoutine(undefined);
+    setState({
+      kind: "error",
+      message: result.error ?? `Couldn't turn it on (${result.status}).`,
+    });
   };
 
-  const isOn = state.kind === "on";
   const isSchedule = draft.trigger.type === "schedule";
   const isManual = draft.trigger.type === "manual";
   const TriggerIcon = isManual ? Play : isSchedule ? CalendarClock : BellRing;
@@ -60,6 +89,7 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
     : isSchedule
       ? "Scheduled routine"
       : "Event routine";
+  const settled = state.kind === "created" || state.kind === "exists";
 
   return (
     <div className="mb-3 overflow-hidden rounded-12 border border-border bg-surface">
@@ -68,7 +98,7 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
           <TriggerIcon aria-hidden />
           {badgeLabel}
         </Badge>
-        {isOn && (
+        {settled && (
           <Badge variant="success">
             <Check aria-hidden />
             On
@@ -96,7 +126,7 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
         </div>
       )}
 
-      {isOn ? (
+      {settled ? (
         <div className="border-t border-border bg-surface-muted/50 px-4 py-2 text-aux text-muted-foreground">
           {isManual
             ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'

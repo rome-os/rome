@@ -153,6 +153,10 @@ export interface StreamBlock {
   status?: ApprovalCardStatus | "running" | "completed" | "cancelled";
   /** Present on routine_draft_card parts. */
   draft?: RoutineDraftSpec;
+  /** Present on routine_created_card parts. */
+  sourceToolUseId?: string;
+  routineId?: string;
+  routineName?: string;
   /** Present on pending_interaction / handoff parts — the app that owns the
    * component or surface. */
   appId?: string;

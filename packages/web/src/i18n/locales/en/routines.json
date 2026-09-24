@@ -4,6 +4,10 @@
     "createButton": "Create Routine"
   },
   "loading": "Loading routines...",
+  "created": {
+    "badge": "Created",
+    "confirmation": "Routine created: {{name}}."
+  },
   "stats": {
     "total": "Total",
     "active": "Active",

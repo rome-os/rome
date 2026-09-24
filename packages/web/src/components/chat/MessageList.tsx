@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks } from "@/components/chat/blocks";
+import { renderFlatBlocks, routineCreatedRecordKey } from "@/components/chat/blocks";
 import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
@@ -192,6 +192,33 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
   return index;
 }
 
+function indexCreatedRoutineRecordKeys(rows: ChatRow[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== "agent") continue;
+    for (const message of row.messages) {
+      for (const part of parseMessageBlocks(message)) {
+        if (
+          part.type === "routine_created_card" &&
+          typeof part.sourceToolUseId === "string" &&
+          part.sourceToolUseId.trim() !== "" &&
+          typeof part.routineId === "string" &&
+          part.routineId.trim() !== "" &&
+          typeof part.routineName === "string" &&
+          part.routineName.trim() !== ""
+        ) {
+          if (message.turnId) {
+            keys.add(
+              routineCreatedRecordKey(message.sessionId, message.turnId, part.sourceToolUseId),
+            );
+          }
+        }
+      }
+    }
+  }
+  return keys;
+}
+
 // The raw text a copy button puts on the clipboard for an agent turn: every
 // text block (commentary + final answer) across the turn's messages, joined as
 // the markdown source — not the rendered HTML.
@@ -218,6 +245,7 @@ const RowView = memo(function RowView({
   onOpenSubagentTrace,
   activeTraceTarget,
   subagentIconByName,
+  createdRoutineRecordKeys,
   feedback = false,
 }: {
   row: ChatRow;
@@ -228,6 +256,7 @@ const RowView = memo(function RowView({
   onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
+  createdRoutineRecordKeys: ReadonlySet<string>;
   feedback?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
@@ -296,6 +325,7 @@ const RowView = memo(function RowView({
                 ...actions,
                 sessionId: m.sessionId,
                 turnId: m.turnId ?? undefined,
+                createdRoutineRecordKeys,
               })}
             </div>
           );
@@ -309,6 +339,7 @@ const RowView = memo(function RowView({
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
+              createdRoutineRecordKeys,
             })}
             <TurnSummaryGroup
               plan={summary?.plan}
@@ -328,6 +359,7 @@ const RowView = memo(function RowView({
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
+              createdRoutineRecordKeys,
             })}
           </div>
         );
@@ -507,6 +539,7 @@ export function MessageList({
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
   const sourceText = live.sourceText ?? live.text;
   const persistedTextRows = useMemo(() => indexPersistedTextRows(rows), [rows]);
+  const createdRoutineRecordKeys = useMemo(() => indexCreatedRoutineRecordKeys(rows), [rows]);
   const persistedRow = blockKey ? persistedTextRows.get(blockKey) : undefined;
   const nextAnchor = { blockKey, afterRowKey: persistedRow?.key ?? rows.at(-1)?.key ?? null };
   const [anchor, setAnchor] = useState(nextAnchor);
@@ -558,6 +591,7 @@ export function MessageList({
               onOpenSubagentTrace={onOpenSubagentTrace}
               activeTraceTarget={activeTraceTarget}
               subagentIconByName={subagentIconByName}
+              createdRoutineRecordKeys={createdRoutineRecordKeys}
               feedback={feedback}
             />
           );

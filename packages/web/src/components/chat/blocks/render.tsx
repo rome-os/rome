@@ -8,6 +8,7 @@ import { AppComponentBlock } from "./AppComponentBlock";
 import { ErrorRunBlock } from "./ErrorBlock";
 import { HandoffCard } from "./HandoffCard";
 import { QuestionCard } from "./QuestionCard";
+import { RoutineCreatedCard } from "./RoutineCreatedCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentStepBlock } from "./SubagentStepBlock";
 import { TextBlock } from "./TextBlock";
@@ -31,6 +32,9 @@ export interface RenderBlockOptions {
   /** Turn that owns the rendered text blocks, used to preserve disclosure state
    * when a live block is replaced by its persisted transcript representation. */
   turnId?: string;
+  /** Persisted routine-created outcomes in the loaded transcript, keyed by the
+   * proposal toolUseId they complete. */
+  createdRoutineRecordKeys?: ReadonlySet<string>;
   /** Map of `interactionResultKey(sessionId, toolUseId)` → submitted output. */
   interactionResults?: Map<string, Record<string, unknown>>;
   /** Invoked when an inline app component submits its result. */
@@ -44,6 +48,14 @@ export interface RenderBlockOptions {
   onDismissAppComponent?: (sessionId: string, toolUseId: string) => void | Promise<void>;
 }
 
+export function routineCreatedRecordKey(
+  sessionId: string,
+  turnId: string,
+  toolUseId: string,
+): string {
+  return `${sessionId}\0${turnId}\0${toolUseId}`;
+}
+
 export function renderSingleBlock(
   block: StreamBlock,
   key: string | number,
@@ -55,6 +67,7 @@ export function renderSingleBlock(
     toolUseInput,
     sessionId,
     turnId,
+    createdRoutineRecordKeys,
     interactionResults,
     onSubmitAppComponent,
     onDismissAppComponent,
@@ -153,8 +166,42 @@ export function renderSingleBlock(
         />
       );
     case "routine_draft_card":
-      if (!block.draft) return null;
-      return <RoutineDraftCard key={`routine-${block.toolUseId ?? key}`} draft={block.draft} />;
+      if (
+        !block.draft ||
+        !block.toolUseId ||
+        !sessionId ||
+        !turnId ||
+        createdRoutineRecordKeys?.has(routineCreatedRecordKey(sessionId, turnId, block.toolUseId))
+      ) {
+        return null;
+      }
+      return (
+        <RoutineDraftCard
+          key={`routine-${block.toolUseId}`}
+          draft={block.draft}
+          sessionId={sessionId}
+          turnId={turnId}
+          toolUseId={block.toolUseId}
+        />
+      );
+    case "routine_created_card":
+      if (
+        typeof block.sourceToolUseId !== "string" ||
+        block.sourceToolUseId.trim() === "" ||
+        typeof block.routineId !== "string" ||
+        block.routineId.trim() === "" ||
+        typeof block.routineName !== "string" ||
+        block.routineName.trim() === ""
+      ) {
+        return null;
+      }
+      return (
+        <RoutineCreatedCard
+          key={`routine-created-${block.sourceToolUseId}`}
+          routineId={block.routineId}
+          routineName={block.routineName}
+        />
+      );
     case "submission_card":
       // The borrowed agent's submit_output is not rendered in the conversation
       // flow — the result already lives on the app's own surface beside the

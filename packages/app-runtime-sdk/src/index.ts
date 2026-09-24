@@ -1209,6 +1209,16 @@ export type MessagePart =
       draft: RoutineDraftSpec;
     }
   | {
+      /** Durable outcome of creating a routine from a routine_draft_card. */
+      type: "routine_created_card";
+      /** Correlates the outcome to the proposal it completes. */
+      sourceToolUseId: string;
+      /** Persisted routine identity; the transcript link uses this value. */
+      routineId: string;
+      /** Name at creation time, retained as historical transcript copy. */
+      routineName: string;
+    }
+  | {
       /**
        * A parked inline guardian input the agent is waiting on. The action that
        * called for it returned a `pending_interaction` result; the webchat drain

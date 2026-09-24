@@ -1,6 +1,8 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 
 // RomeLogo (the avatar fallback) renders an SVG mask that jsdom can't construct;
 // stub it so the transcript renders. Same approach as ChatComponent.test.tsx.
@@ -631,6 +633,94 @@ function anchorIds(container: HTMLElement): (string | null)[] {
     el.getAttribute("data-timeline-anchor"),
   );
 }
+
+describe("persisted routine creation outcomes", () => {
+  const draft = {
+    sentence: "Every Friday, Rome will send the weekly update.",
+    name: "Weekly update",
+    watchLabel: "Every Friday",
+    thenSummary: "send the weekly update",
+    trigger: {
+      type: "schedule",
+      tzid: "UTC",
+      localTime: "09:00",
+      rrule: "FREQ=WEEKLY;BYDAY=FR",
+    },
+    actionName: "send_message",
+    args: { channel: "webchat", text: "Send the update" },
+  };
+
+  function routineTranscript(createdPart: Record<string, unknown>): ChatMessage[] {
+    return [
+      {
+        id: "routine-draft",
+        sessionId: "s-1",
+        turnId: "turn-routine",
+        role: "assistant",
+        content: JSON.stringify([{ type: "routine_draft_card", toolUseId: "draft-tool-1", draft }]),
+        createdAt: "2026-09-19T09:00:00.000Z",
+      },
+      {
+        id: "routine-created",
+        sessionId: "s-1",
+        turnId: "turn-routine",
+        role: "assistant",
+        content: JSON.stringify([createdPart]),
+        createdAt: "2026-09-19T09:00:01.000Z",
+      },
+    ];
+  }
+
+  function persistedRoutineList(messages: ChatMessage[]) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    return (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{settledList(messages)}</MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("projects the stored record after reload and links its exact persisted id", () => {
+    const messages = routineTranscript({
+      type: "routine_created_card",
+      sourceToolUseId: "draft-tool-1",
+      routineId: "routine/new id",
+      routineName: "Weekly update",
+    });
+    const { rerender } = render(persistedRoutineList(messages));
+
+    expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+    expect(screen.getByText("Routine created: Weekly update.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Run history" }).getAttribute("href")).toBe(
+      "/routines/routine%2Fnew%20id",
+    );
+
+    // A fresh message array models reopening/reloading from persisted history.
+    rerender(persistedRoutineList(structuredClone(messages)));
+    expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+    expect(screen.getByRole("link", { name: "Run history" }).getAttribute("href")).toBe(
+      "/routines/routine%2Fnew%20id",
+    );
+  });
+
+  it("does not project malformed created records or suppress their draft", () => {
+    render(
+      persistedRoutineList(
+        routineTranscript({
+          type: "routine_created_card",
+          sourceToolUseId: "draft-tool-1",
+          routineName: "Weekly update",
+        }),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
+    expect(screen.queryByText("Routine created: Weekly update.")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Run history" })).toBeNull();
+  });
+});
 
 describe("timeline anchors", () => {
   it("tags every user row with its message id, and nothing else", () => {

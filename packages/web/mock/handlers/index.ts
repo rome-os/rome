@@ -45,7 +45,7 @@ import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser"
 import { memoryFileHandlers } from "./memory-files";
 import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
-import { routineHandlers } from "./routines";
+import { routineHandlers, setMockRoutineCreatedListener } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
@@ -1015,6 +1015,26 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
   targetVersion: null,
   deadline: null,
   serverNow: Date.now(),
+});
+
+setMockRoutineCreatedListener((context, routine) => {
+  const transcript = transcripts[context.sessionId];
+  if (!transcript) return;
+  transcript.push({
+    id: `routine-created-${routine.id}`,
+    sessionId: context.sessionId,
+    turnId: context.turnId,
+    role: "assistant",
+    content: JSON.stringify([
+      {
+        type: "routine_created_card",
+        sourceToolUseId: context.toolUseId,
+        routineId: routine.id,
+        routineName: routine.name,
+      },
+    ]),
+    createdAt: new Date().toISOString(),
+  });
 });
 
 export const handlers = [
