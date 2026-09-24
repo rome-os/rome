@@ -136,8 +136,9 @@ export async function sendToTarget(
   target: SendTarget,
   text: string,
 ): Promise<SendReceipt> {
-  const receipt = await asGuardian(() =>
-    deps.talkRouter.send(target.connectionId, target.conversationId, { text }),
+  const message = { text };
+  const receipt = await asGuardian(message, () =>
+    deps.talkRouter.send(target.connectionId, target.conversationId, message),
   );
   return { messageId: receipt.messageId ?? null };
 }
