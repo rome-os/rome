@@ -14,6 +14,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { listChatAgents } from "@/lib/chat-api";
+import {
+  decideDraftDefaultAgentSeed,
+  fetchDefaultAgent,
+  type DraftSeedDecision,
+} from "@/lib/default-agent.prototype";
 import type { AgentMention } from "@/lib/chat-types";
 import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
@@ -178,6 +185,31 @@ export function FreeGrid() {
       agentName,
     };
   }, [locState?.agentMention, locState?.agentName]);
+  // PROTOTYPE (webchat-default-agent): decide once per draft (one navigation =
+  // one draft, keyed by location.key) whether the saved default seeds it. The
+  // first settled decision is latched, so refetches and re-renders never
+  // change it and a removed/swapped chip is never re-applied.
+  const defaultAgentQuery = useQuery({
+    queryKey: ["chat-default-agent"],
+    queryFn: fetchDefaultAgent,
+  });
+  const agentCatalogQuery = useQuery({ queryKey: ["chat-agents"], queryFn: listChatAgents });
+  const draftKey = location.key;
+  const seedLatchRef = useRef<{ draftKey: string; decision: DraftSeedDecision } | null>(null);
+  const liveSeedDecision = decideDraftDefaultAgentSeed({
+    sessionId: urlSessionId,
+    entryPointMention: initialAgentMention,
+    defaultAgent: defaultAgentQuery.data,
+    catalog: agentCatalogQuery.data,
+  });
+  if (seedLatchRef.current?.draftKey !== draftKey && liveSeedDecision.settled) {
+    seedLatchRef.current = { draftKey, decision: liveSeedDecision };
+    console.info("[wda-proto] seed decision latched", { draftKey, ...liveSeedDecision });
+  }
+  const latched =
+    seedLatchRef.current?.draftKey === draftKey ? seedLatchRef.current.decision : null;
+  const defaultAgentSeed =
+    latched?.settled && latched.mention ? { draftKey, mention: latched.mention } : null;
   // Composer prefill from `navigateRome({ path: "chat/new", draft, skill })` —
   // task text plus an optional structured skill chip seeded by the Skills app.
   const initialDraftText = locState?.draft || undefined;
@@ -334,6 +366,21 @@ export function FreeGrid() {
             )}
           >
             {!chatSessionId && (
+              <div
+                data-testid="wda-proto-seed"
+                className="shrink-0 border-b border-dashed border-warning px-2 py-1 font-mono text-aux text-muted-foreground"
+              >
+                prototype · draft {draftKey} · saved default{" "}
+                {defaultAgentQuery.data?.saved?.agentName ?? "(none)"} · effective{" "}
+                {defaultAgentQuery.data?.effective ?? "…"} · seed{" "}
+                {latched
+                  ? latched.settled
+                    ? `${latched.mention?.agentName ?? "none"} (${latched.reason})`
+                    : latched.reason
+                  : `pending (${liveSeedDecision.reason})`}
+              </div>
+            )}
+            {!chatSessionId && (
               <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">
                 {toolView.collapsed && (
                   <IconButton
@@ -352,6 +399,7 @@ export function FreeGrid() {
               onSessionChosen={handleSessionChosen}
               initialProjectName={initialProjectName}
               initialAgentMention={initialAgentMention}
+              defaultAgentSeed={defaultAgentSeed}
               initialDraftText={initialDraftText}
               initialSkillName={initialSkillName}
             />

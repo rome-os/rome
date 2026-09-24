@@ -132,6 +132,10 @@ import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./channels/email.js";
 import { resolveWebchatContinuationWorkingDir } from "./webchat/projects.js";
 import { SkillCatalog } from "./core/skill-catalog.js";
+import {
+  createWebchatDefaultAgentSubscriber,
+  reconcileWebchatDefaultAgentAtBoot,
+} from "./webchat/default-agent.prototype.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
@@ -380,6 +384,9 @@ async function main() {
       });
     }
   });
+  // PROTOTYPE (webchat-default-agent): after agentLoaderSubscriber so the
+  // loader already reflects this event when the removal rule reads it.
+  appCatalog.subscribe(createWebchatDefaultAgentSubscriber({ settingsRepo, agentLoader }));
   appCatalog.subscribe(async function actionLoaderSubscriber() {
     try {
       await actionLoader.loadFromCatalog(appCatalog);
@@ -460,6 +467,9 @@ async function main() {
     installed: firstPartyBoot.installed,
     reinstalled: firstPartyBoot.reinstalled,
   });
+  // PROTOTYPE (webchat-default-agent): catalog has converged (lockfile boot +
+  // first-party installs), so an absent/disabled owner is a real removal.
+  await reconcileWebchatDefaultAgentAtBoot({ settingsRepo, appCatalog, agentLoader });
   appsLog.info("artifact legacy bindings loaded", {
     agents: Object.keys(artifactIdentity.legacyBindings.agent).length,
     actions: Object.keys(artifactIdentity.legacyBindings.action).length,

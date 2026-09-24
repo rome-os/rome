@@ -105,6 +105,9 @@ import { SystemUpgradeSection } from "@/components/system-upgrade-section";
 import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
 import { useTailscaleConnect } from "@/hooks/use-tailscale-connect";
 import { useInvalidateSettings } from "@/hooks/use-settings";
+import { useQueryClient } from "@tanstack/react-query";
+import { listChatAgents } from "@/lib/chat-api";
+import { fetchDefaultAgent, saveDefaultAgent } from "@/lib/default-agent.prototype";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
@@ -1019,6 +1022,7 @@ function AdvancedSection({
           This is a mitigation. It keys on which window is rendering, not on
           what kind of backend is behind the page, so the same dashboard opened
           in a browser at the loopback port still shows it. */}
+        <WebchatDefaultAgentPrototypeSection />
         {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
@@ -1028,6 +1032,60 @@ function AdvancedSection({
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
     </Measure>
+  );
+}
+
+/** PROTOTYPE (webchat-default-agent): rough chooser. Saves on change. */
+function WebchatDefaultAgentPrototypeSection() {
+  const qc = useQueryClient();
+  const state = useQuery({ queryKey: ["chat-default-agent"], queryFn: fetchDefaultAgent });
+  const catalog = useQuery({ queryKey: ["chat-agents"], queryFn: listChatAgents });
+  const [error, setError] = useState<string | null>(null);
+  const value = state.data?.effective ?? "main";
+  async function onChange(next: string) {
+    setError(null);
+    try {
+      await saveDefaultAgent(next === "main" ? null : next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+    await qc.invalidateQueries({ queryKey: ["chat-default-agent"] });
+    await qc.invalidateQueries({ queryKey: ["settings"] });
+  }
+  return (
+    <div
+      data-testid="wda-proto-advanced"
+      className="flex flex-col gap-2 rounded-8 border border-dashed border-warning p-3"
+    >
+      <label className="text-ui text-foreground" htmlFor="wda-proto-select">
+        Webchat default agent (prototype)
+      </label>
+      <select
+        id="wda-proto-select"
+        className="rounded-4 border border-border bg-surface p-1 text-ui"
+        value={value}
+        disabled={!state.data || !catalog.data}
+        onChange={(e) => void onChange(e.target.value)}
+      >
+        <option value="main">Rome main agent</option>
+        {(catalog.data ?? []).map((group) => (
+          <optgroup key={group.ownerId} label={group.label}>
+            {group.agents
+              .filter((agent) => agent.name !== "main" && agent.name !== "core:main")
+              .map((agent) => (
+                <option key={agent.name} value={agent.name}>
+                  {agent.localName ?? agent.name}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </select>
+      <p className="font-mono text-aux text-muted-foreground">
+        saved: {state.data?.saved ? JSON.stringify(state.data.saved) : "null"} · savedLoaded:{" "}
+        {String(state.data?.savedLoaded ?? "…")} · effective: {state.data?.effective ?? "…"}
+      </p>
+      {error && <p className="text-aux text-destructive">{error}</p>}
+    </div>
   );
 }
 

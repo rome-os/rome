@@ -32,6 +32,7 @@ interface ChatWidgetProps {
   onSessionChosen: (sessionId: string) => void;
   initialProjectName?: string;
   initialAgentMention?: AgentMention | null;
+  defaultAgentSeed?: { draftKey: string; mention: AgentMention } | null;
   initialDraftText?: string;
   initialSkillName?: string;
 }
@@ -41,6 +42,7 @@ export function ChatWidget({
   onSessionChosen,
   initialProjectName,
   initialAgentMention,
+  defaultAgentSeed,
   initialDraftText,
   initialSkillName,
 }: ChatWidgetProps) {
@@ -113,6 +115,7 @@ export function ChatWidget({
       onSessionMessage={handleSessionMessage}
       initialProjectName={initialProjectName}
       initialAgentMention={initialAgentMention}
+      defaultAgentSeed={defaultAgentSeed}
       initialDraftText={initialDraftText}
       initialSkillName={initialSkillName}
     />

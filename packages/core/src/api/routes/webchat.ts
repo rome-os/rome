@@ -1,4 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import {
+  WEBCHAT_DEFAULT_AGENT_SETTING,
+  parseSavedDefault,
+} from "../../webchat/default-agent.prototype.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono, type Context } from "hono";
@@ -1966,6 +1970,42 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return a.label.localeCompare(b.label);
       }),
     );
+  });
+
+  // PROTOTYPE (webchat-default-agent): read/write the saved default. Saving
+  // records the owner app id so removal stays detectable after unload. The
+  // effective default is the saved agent only while it is loaded; otherwise main.
+  app.get("/chat/default-agent", async (c) => {
+    const saved = parseSavedDefault(await deps.settingsRepo.get(WEBCHAT_DEFAULT_AGENT_SETTING));
+    const savedLoaded = saved ? deps.agentLoader.has(saved.agentName) : false;
+    return c.json({
+      saved,
+      savedLoaded,
+      effective: saved && savedLoaded ? saved.agentName : "main",
+    });
+  });
+
+  app.put("/chat/default-agent", async (c) => {
+    const body = await c.req
+      .json<{ agentName?: string | null }>()
+      .catch(() => ({}) as { agentName?: string | null });
+    const requested = body.agentName?.trim() || null;
+    if (!requested || isCoreMainAgentId(requested)) {
+      await deps.settingsRepo.delete(WEBCHAT_DEFAULT_AGENT_SETTING);
+      log.info("wda_proto_default_saved", { agentName: "main" });
+      return c.json({ saved: null, effective: "main" });
+    }
+    if (!deps.agentLoader.has(requested)) {
+      return c.json({ error: `Agent "${requested}" is not loaded` }, 400);
+    }
+    const record = deps.agentLoader.getRecord(requested);
+    const saved = {
+      agentName: deps.agentLoader.getCanonicalName(requested),
+      ownerAppId: record.metadata.ownerId,
+    };
+    await deps.settingsRepo.set(WEBCHAT_DEFAULT_AGENT_SETTING, saved);
+    log.info("wda_proto_default_saved", saved);
+    return c.json({ saved, effective: saved.agentName });
   });
 
   app.get("/chat/projects", async (c) => {

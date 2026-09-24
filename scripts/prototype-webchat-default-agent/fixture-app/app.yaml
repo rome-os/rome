@@ -1,0 +1,8 @@
+formatVersion: 1
+id: wda-proto-app
+name: WDA Proto App
+version: 0.1.0
+description: Throwaway fixture for the webchat-default-agent prototype. One non-main agent.
+
+agents:
+  - agents/helper.yaml

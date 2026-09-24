@@ -40,6 +40,8 @@ export interface ChatComponentProps {
   onSessionMessage?: (message: SessionMessage) => void;
   initialProjectName?: string;
   initialAgentMention?: AgentMention | null;
+  // PROTOTYPE (webchat-default-agent): saved default to apply once per draft.
+  defaultAgentSeed?: { draftKey: string; mention: AgentMention } | null;
   // Pre-fills the draft composer without sending — task text seeded
   // via navigateRome chat/new draft.
   initialDraftText?: string;
@@ -55,6 +57,7 @@ export function ChatComponent({
   onSessionMessage,
   initialProjectName,
   initialAgentMention,
+  defaultAgentSeed,
   initialDraftText,
   initialSkillName,
 }: ChatComponentProps) {
@@ -93,6 +96,22 @@ export function ChatComponent({
     appliedDraftRef.current = initialDraftText;
     draftComposerRef.current?.insertText(initialDraftText);
   }, [initialDraftText, sessionId]);
+
+  // PROTOTYPE (webchat-default-agent): apply the saved default once per draft,
+  // and never over a mention the guardian already picked in this draft.
+  const appliedDefaultSeedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sessionId || !defaultAgentSeed) return;
+    if (appliedDefaultSeedRef.current === defaultAgentSeed.draftKey) return;
+    appliedDefaultSeedRef.current = defaultAgentSeed.draftKey;
+    const composer = draftComposerRef.current;
+    if (!composer || composer.getAgentMention()) {
+      console.info("[wda-proto] seed skipped: composer already has a mention");
+      return;
+    }
+    composer.setAgentMention(defaultAgentSeed.mention);
+    console.info("[wda-proto] seed applied", defaultAgentSeed);
+  }, [defaultAgentSeed, sessionId]);
 
   // Same once-per-value seeding for a structured skill selection — the chip
   // counterpart of the draft text.

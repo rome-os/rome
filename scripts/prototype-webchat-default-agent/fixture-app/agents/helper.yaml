@@ -1,0 +1,9 @@
+name: helper
+description: Prototype fixture agent. Always starts its reply with "HELPER:".
+model: haiku
+permissionMode: bypassPermissions
+tools: []
+actions: []
+systemPromptPrefix: |
+  You are the prototype fixture agent "helper". Begin every reply with the exact
+  token "HELPER:" and then answer in one short sentence.

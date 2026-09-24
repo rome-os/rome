@@ -87,6 +87,8 @@ export interface ChatComposerHandle {
   focus: () => void;
   insertText: (text: string, options?: { focus?: boolean }) => void;
   setAgentMention: (mention: AgentMention | null) => void;
+  /** PROTOTYPE (webchat-default-agent): current draft mention, if any. */
+  getAgentMention: () => AgentMention | null;
   setSkillSelection: (skill: SkillSelection | null) => void;
   addFiles: (files: File[]) => void;
   /**
@@ -502,6 +504,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setMentionAnchorIndex(null);
         setMentionQuery("");
       },
+      getAgentMention: () => draftAgentMention,
       setSkillSelection: (skill: SkillSelection | null) => {
         if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
