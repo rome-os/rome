@@ -1,8 +1,8 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { useEffect } from "react";
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { AuthGate } from "./AuthGate";
@@ -89,5 +89,65 @@ describe("AuthGate auth-state refetch contract", () => {
     const bootstrapCalls = fetchSpy.mock.calls.filter(([i]) => String(i) === "/api/bootstrap");
     expect(healthCalls).toHaveLength(1);
     expect(bootstrapCalls).toHaveLength(1);
+  });
+});
+
+describe("AuthGate on an embedded app route", () => {
+  function stubAuth(phase: string, isPublic: boolean) {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/api/health") return new Response(JSON.stringify({ status: "ok" }));
+      if (url === "/api/bootstrap") return new Response(JSON.stringify({ phase }));
+      if (url.startsWith("/api/apps/jev-tracker/manifest")) {
+        return new Response(JSON.stringify({ isPublic }));
+      }
+      return new Response("{}");
+    });
+  }
+
+  function Landed() {
+    const location = useLocation();
+    return <output>{`${location.pathname}${location.search}`}</output>;
+  }
+
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route
+              path="/apps/*"
+              element={
+                <AuthGate>
+                  <div>guardian shell</div>
+                </AuthGate>
+              }
+            />
+            <Route path="*" element={<Landed />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("sends a visitor to the standalone route, keeping the rest of the address", async () => {
+    stubAuth("needs-signin", true);
+    renderAt("/apps/jev-tracker/trips?week=3");
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("/full/apps/jev-tracker/trips?week=3"),
+    );
+  });
+
+  it("keeps the guardian in the shell", async () => {
+    stubAuth("ready", true);
+    renderAt("/apps/jev-tracker");
+    expect(await screen.findByText("guardian shell")).toBeTruthy();
+  });
+
+  it("still sends a visitor to sign in for an app that is not public", async () => {
+    stubAuth("needs-signin", false);
+    renderAt("/apps/jev-tracker");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("/login"));
   });
 });
