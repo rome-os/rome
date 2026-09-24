@@ -78,6 +78,11 @@ import {
 } from "../../core/conversation-title.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
+import {
+  WEBCHAT_DEFAULT_AGENT_SETTING,
+  effectiveDefaultAgent,
+  readSavedDefaultAgent,
+} from "../../webchat/default-agent.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 
 const log = createLogger("api:webchat");
@@ -1966,6 +1971,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return a.label.localeCompare(b.label);
       }),
     );
+  });
+
+  app.get("/chat/default-agent", async (c) => {
+    const saved = await readSavedDefaultAgent(deps.settingsRepo);
+    return c.json({ saved, effective: effectiveDefaultAgent(saved, deps.agentLoader) });
+  });
+
+  app.put("/chat/default-agent", async (c) => {
+    const body = await c.req
+      .json<{ agentName?: string | null }>()
+      .catch(() => ({}) as { agentName?: string | null });
+    const requested = typeof body.agentName === "string" ? body.agentName.trim() : "";
+    if (!requested || isCoreMainAgentId(requested)) {
+      await deps.settingsRepo.delete(WEBCHAT_DEFAULT_AGENT_SETTING);
+      return c.json({ saved: null, effective: "main" });
+    }
+    if (!deps.agentLoader.has(requested)) {
+      return c.json({ error: `Agent "${requested}" is not loaded` }, 400);
+    }
+    const saved = {
+      agentName: deps.agentLoader.getCanonicalName(requested),
+      ownerAppId: deps.agentLoader.getRecord(requested).metadata.ownerId,
+    };
+    await deps.settingsRepo.set(WEBCHAT_DEFAULT_AGENT_SETTING, saved);
+    return c.json({ saved, effective: saved.agentName });
   });
 
   app.get("/chat/projects", async (c) => {

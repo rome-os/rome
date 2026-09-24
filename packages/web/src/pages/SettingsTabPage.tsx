@@ -105,6 +105,7 @@ import { SystemUpgradeSection } from "@/components/system-upgrade-section";
 import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
 import { useTailscaleConnect } from "@/hooks/use-tailscale-connect";
 import { useInvalidateSettings } from "@/hooks/use-settings";
+import { WebchatDefaultAgentSetting } from "@/components/webchat-default-agent-setting";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
@@ -1023,6 +1024,9 @@ function AdvancedSection({
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
         <ComputerUseSection />
+        <FormRows>
+          <WebchatDefaultAgentSetting />
+        </FormRows>
         <PresentationModeSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}

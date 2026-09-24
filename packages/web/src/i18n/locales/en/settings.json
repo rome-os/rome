@@ -648,6 +648,13 @@
   },
   "advanced": {
     "title": "Advanced Settings",
+    "webchatDefaultAgent": {
+      "title": "Default agent for new chats",
+      "description": "New dashboard chats start with this agent. You can still pick another agent for one chat.",
+      "savedUnavailable": "The saved agent isn't loaded right now, so new chats start with Rome's main agent.",
+      "loading": "Loading agents…",
+      "saveFailed": "Couldn't save the default agent."
+    },
     "presentationMode": {
       "title": "Presentation mode",
       "description": "Hides pinned-agent names, avatars, and the composer chip. Applies to this browser only.",

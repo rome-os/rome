@@ -648,6 +648,13 @@
   },
   "advanced": {
     "title": "高级设置",
+    "webchatDefaultAgent": {
+      "title": "新对话的默认 Agent",
+      "description": "新建的仪表盘对话会从这个 Agent 开始。你仍可以为单个对话选择其他 Agent。",
+      "savedUnavailable": "已保存的 Agent 当前未加载，因此新对话将使用 Rome 的主 Agent。",
+      "loading": "正在加载 Agent…",
+      "saveFailed": "无法保存默认 Agent。"
+    },
     "presentationMode": {
       "title": "演示模式",
       "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",

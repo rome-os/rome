@@ -282,7 +282,29 @@ export interface CreateSessionInput {
 export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
   const res = await fetch("/api/chat/agents", { credentials: "include" });
   if (!res.ok) return [];
-  return (await res.json()) as AgentCatalogGroup[];
+  const data: unknown = await res.json();
+  return Array.isArray(data) ? (data as AgentCatalogGroup[]) : [];
+}
+
+/** The instance's saved Webchat default and the agent new chats would use now. */
+export interface WebchatDefaultAgent {
+  saved: { agentName: string; ownerAppId: string } | null;
+  effective: string;
+}
+
+export async function getWebchatDefaultAgent(): Promise<WebchatDefaultAgent> {
+  const res = await fetch("/api/chat/default-agent", { credentials: "include" });
+  return jsonOrThrow<WebchatDefaultAgent>(res);
+}
+
+export async function setWebchatDefaultAgent(agentName: string): Promise<WebchatDefaultAgent> {
+  const res = await fetch("/api/chat/default-agent", {
+    method: "PUT",
+    credentials: "include",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ agentName }),
+  });
+  return jsonOrThrow<WebchatDefaultAgent>(res);
 }
 
 export async function listSkills(): Promise<SkillSummary[]> {

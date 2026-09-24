@@ -132,6 +132,10 @@ import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./channels/email.js";
 import { resolveWebchatContinuationWorkingDir } from "./webchat/projects.js";
 import { SkillCatalog } from "./core/skill-catalog.js";
+import {
+  createWebchatDefaultAgentSubscriber,
+  reconcileWebchatDefaultAgentAtBoot,
+} from "./webchat/default-agent.js";
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
@@ -380,6 +384,8 @@ async function main() {
       });
     }
   });
+  // Clears the Webchat default when its owning app is uninstalled or disabled.
+  appCatalog.subscribe(createWebchatDefaultAgentSubscriber(settingsRepo));
   appCatalog.subscribe(async function actionLoaderSubscriber() {
     try {
       await actionLoader.loadFromCatalog(appCatalog);
@@ -460,6 +466,7 @@ async function main() {
     installed: firstPartyBoot.installed,
     reinstalled: firstPartyBoot.reinstalled,
   });
+  await reconcileWebchatDefaultAgentAtBoot(settingsRepo, appCatalog);
   appsLog.info("artifact legacy bindings loaded", {
     agents: Object.keys(artifactIdentity.legacyBindings.agent).length,
     actions: Object.keys(artifactIdentity.legacyBindings.action).length,

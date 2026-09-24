@@ -59,6 +59,11 @@ function applyFilter(
   return out;
 }
 
+/** An agent's label in every Webchat agent chooser. */
+export function agentCatalogLabel(agent: AgentCatalogEntry): string {
+  return agent.localName ?? agent.name;
+}
+
 /**
  * Autocomplete for `@<app>/<agent>` mentions: an AppGroupedPickerMenu adapter
  * over `GET /api/chat/agents` (already grouped + ordered by the server).
@@ -112,7 +117,7 @@ export const AgentMentionMenu = forwardRef<AgentMentionMenuHandle, AgentMentionM
         pickGroupText={t("agentMention.pickApp")}
         groups={filtered}
         getItemKey={(agent) => agent.name}
-        renderItemLabel={(agent) => agent.localName ?? agent.name}
+        renderItemLabel={agentCatalogLabel}
         getItemDescription={(agent) => agent.description}
         onSelect={(group, agent) =>
           onSelect({
