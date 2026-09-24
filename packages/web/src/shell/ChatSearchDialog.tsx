@@ -12,6 +12,7 @@ import { Spinner } from "@rome-os/ui/spinner";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import { TileIcon } from "@/components/app-tile-icon";
 import { AgentMentionChip } from "@/components/chat/composer/AgentMentionChip";
@@ -289,6 +290,10 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     setAgentMention(null);
     setAgentCatalog(null);
     setSendError(null);
+    // A send from an earlier opening may still be in flight. It reports
+    // through a toast instead, so this opening starts unblocked.
+    sendingRef.current = false;
+    setSending(false);
     pendingSessionRef.current = null;
     failedTurnRef.current = null;
   }, [open]);
@@ -474,6 +479,9 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     setSending(true);
     setSendError(null);
     const generation = openGenerationRef.current;
+    // Retry state and UI belong to the opening that sent. Once the dialog has
+    // closed, this send must not leak its state into a later opening.
+    const isCurrent = () => generation === openGenerationRef.current;
     const agentName = agentMention.agentName;
     let sessionId: string | null = null;
     let inputId: string | null = null;
@@ -493,7 +501,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
           if (error instanceof ChatApiError && error.message) errorMessage = error.message;
           throw error;
         }
-        pendingSessionRef.current = { sessionId, agentName };
+        if (isCurrent()) pendingSessionRef.current = { sessionId, agentName };
         // An unsent chat is still a chat; the lists should show it even if
         // the turn below fails.
         emitSessionsChanged();
@@ -516,18 +524,35 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
             : tChat("stream.errors.sendStatus", { status: result.status }));
         throw new Error(errorMessage);
       }
+      emitSessionsChanged();
+      if (!isCurrent()) return;
       pendingSessionRef.current = null;
       failedTurnRef.current = null;
-      emitSessionsChanged();
-      if (generation === openGenerationRef.current) openSessionById(sessionId);
+      openSessionById(sessionId);
     } catch {
+      if (!isCurrent()) {
+        // The dialog that held the draft is gone, so the toast carries the
+        // text for the guardian to recover.
+        toast.error(
+          t("recentChats.agentSendFailed", {
+            agent: prettyAgentName(agentName),
+            error: errorMessage,
+          }),
+          {
+            description: messageText,
+          },
+        );
+        return;
+      }
       if (sessionId && inputId) failedTurnRef.current = { sessionId, text: messageText, inputId };
-      if (generation === openGenerationRef.current) setSendError(errorMessage);
+      setSendError(errorMessage);
     } finally {
-      sendingRef.current = false;
-      setSending(false);
+      if (isCurrent()) {
+        sendingRef.current = false;
+        setSending(false);
+      }
     }
-  }, [agentMention, messageText, openSessionById, tChat]);
+  }, [agentMention, messageText, openSessionById, t, tChat]);
 
   const openApp = useCallback(
     (entry: AppSearchEntry) => {

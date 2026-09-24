@@ -283,8 +283,7 @@ export interface CreateSessionInput {
 
 export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
   const res = await fetch("/api/chat/agents", { credentials: "include" });
-  if (!res.ok) return [];
-  return (await res.json()) as AgentCatalogGroup[];
+  return jsonOrThrow<AgentCatalogGroup[]>(res);
 }
 
 export async function listSkills(): Promise<SkillSummary[]> {

@@ -91,6 +91,7 @@
     "agentMessageHint": "输入消息后按 Enter，即可与 {{agent}} 开启新对话。",
     "agentStartChat": "与 {{agent}} 开启新对话",
     "agentSending": "正在与 {{agent}} 开启对话…",
+    "agentSendFailed": "给 {{agent}} 的消息未发送：{{error}}",
     "agentRemove": "移除 {{agent}}",
     "agentPickHint": "选择",
     "agentSendHint": "发送",

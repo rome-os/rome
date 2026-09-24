@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useLocation, MemoryRouter } from "react-router-dom";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { toast } from "sonner";
 import i18n from "@/i18n";
 import type { AgentCatalogGroup, ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -663,11 +664,13 @@ const AGENT_CATALOG: AgentCatalogGroup[] = [
 ];
 
 interface AgentFetchOptions {
-  turnResponses?: Response[];
+  turnResponses?: Array<Response | Promise<Response>>;
+  agentResponses?: Response[];
 }
 
-function mockAgentMessaging({ turnResponses = [] }: AgentFetchOptions = {}) {
+function mockAgentMessaging({ turnResponses = [], agentResponses = [] }: AgentFetchOptions = {}) {
   const pendingTurns = [...turnResponses];
+  const pendingAgents = [...agentResponses];
   const requests: Array<{ url: string; method: string; body: unknown }> = [];
   const spy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
@@ -685,7 +688,7 @@ function mockAgentMessaging({ turnResponses = [] }: AgentFetchOptions = {}) {
     if (url === "/api/chat/sessions?status=all") return Response.json([]);
     if (url.startsWith("/api/chat/sessions/search?q=")) return Response.json([]);
     if (url === "/api/apps") return Response.json({ apps: [] });
-    if (url === "/api/chat/agents") return Response.json(AGENT_CATALOG);
+    if (url === "/api/chat/agents") return pendingAgents.shift() ?? Response.json(AGENT_CATALOG);
     if (url === "/api/chat/sessions" && method === "POST") {
       return Response.json(chatSession("new-chat", "New Chat", "default"));
     }
@@ -838,5 +841,76 @@ describe("ChatSearchDialog agent messaging", () => {
     expect((turns[0].body as { inputId: string }).inputId).toBe(
       (turns[1].body as { inputId: string }).inputId,
     );
+  });
+});
+
+describe("ChatSearchDialog agent messaging across openings", () => {
+  it("offers Retry when the agent catalog fails with a server error", async () => {
+    mockAgentMessaging({
+      agentResponses: [Response.json({ error: "boom" }, { status: 500 })],
+    });
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(await screen.findByRole("combobox", { name: "Search apps and chats" }), "@");
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Agents couldn't be loaded");
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("option", { name: "Explorer" })).toBeTruthy();
+  });
+
+  it("reports a send that fails after the dialog closed, and leaves the next opening unblocked", async () => {
+    let failTurn: (response: Response) => void = () => {};
+    const { requests } = mockAgentMessaging({
+      turnResponses: [
+        new Promise<Response>((resolve) => {
+          failTurn = resolve;
+        }),
+      ],
+    });
+    const toastError = rs.spyOn(toast, "error").mockImplementation(() => "toast-id");
+    const user = userEvent.setup();
+    renderSearch("/chat", true);
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      "@expl",
+    );
+    await user.click(await screen.findByRole("option", { name: "Explorer" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Message Explorer" }),
+      "Find sources{Enter}",
+    );
+    await waitFor(() => expect(requests.some((r) => r.url.endsWith("/turns"))).toBe(true));
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    failTurn(Response.json({ error: "Agent is busy" }, { status: 503 }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Your message to Explorer wasn't sent: Agent is busy",
+        {
+          description: "Find sources",
+        },
+      ),
+    );
+    expect(screen.getByTestId("location").textContent).toBe("/chat");
+
+    // The next opening sends a fresh chat instead of inheriting the stale
+    // send's in-flight guard or its session.
+    await user.click(screen.getByRole("button", { name: "Open search" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Search apps and chats" }),
+      "@writ",
+    );
+    await user.click(await screen.findByRole("option", { name: "Writer" }));
+    await user.type(
+      await screen.findByRole("combobox", { name: "Message Writer" }),
+      "Draft it{Enter}",
+    );
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/chat/new-chat"));
+    expect(requests.filter((r) => r.url === "/api/chat/sessions")).toHaveLength(2);
+    expect(toastError).toHaveBeenCalledTimes(1);
   });
 });

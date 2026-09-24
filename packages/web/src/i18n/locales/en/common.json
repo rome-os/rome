@@ -91,6 +91,7 @@
     "agentMessageHint": "Type a message, then press Enter to start a new chat with {{agent}}.",
     "agentStartChat": "Start a new chat with {{agent}}",
     "agentSending": "Starting a chat with {{agent}}…",
+    "agentSendFailed": "Your message to {{agent}} wasn't sent: {{error}}",
     "agentRemove": "Remove {{agent}}",
     "agentPickHint": "Select",
     "agentSendHint": "Send",
