@@ -1,0 +1,1424 @@
+{"run": "enable: org.a11y.Bus stand-in log (client pid 1264 reacting)"}
+RequestName org.a11y.Bus -> (1,) a11y bus unix:path=/tmp/a11y/bus
+00:22:14 call :1.2 org.freedesktop.DBus.Properties Get ('org.a11y.Status', 'ScreenReaderEnabled')
+00:22:14 call :1.2 org.freedesktop.DBus.Properties Get ('org.a11y.Status', 'IsEnabled')
+00:22:14 call :1.2 org.a11y.Bus GetAddress ()
+00:22:14 call :1.9 org.a11y.Bus GetAddress ()
+{"run": "scenario 1 extra: first dry run from another chat"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "body": "rome test", "target": "filehelper"}
+{"t": 0.02, "event": "check.process", "pids": ["1264"]}
+{"t": 1.6, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 1.66, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 1.93, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 2.23, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 3.49, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 3.49, "event": "input.before", "text": ""}
+{"t": 3.5, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 3.85, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 3.85, "event": "dry_run.cleared", "left": ""}
+{"t": 3.85, "event": "done", "sent": false}
+{"run": "scenario 2: real send #1"}
+{"t": 0.0, "event": "start", "mode": "send", "body": "rome test", "target": "filehelper"}
+{"t": 0.02, "event": "check.process", "pids": ["1264"]}
+{"t": 1.72, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 1.78, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 2.1, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 2.41, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 3.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 3.72, "event": "input.before", "text": ""}
+{"t": 3.72, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 4.08, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.28, "event": "check.focus", "input_focused": true, "frame_active": true}
+{"t": 4.3, "event": "enter.pressed"}
+{"t": 4.9, "event": "input.after_enter", "text": ""}
+{"t": 6.11, "event": "store.poll", "after_s": 1.8, "target": [{"id": "filehelper:2", "isSelf": true, "type": "text", "timestamp": 1790234885}], "elsewhere": []}
+{"t": 6.11, "event": "done", "sent": true, "store_ids": ["filehelper:2"], "elsewhere": []}
+{"run": "scenario 3: matrix v1 (before the Back fallback)"}
+{"t": 1.56, "event": "reliability.setup", "run": 1, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 1.57, "event": "check.process", "pids": ["1264"]}
+{"t": 3.18, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 3.24, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 3.52, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 3.83, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 5.11, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.11, "event": "input.before", "text": ""}
+{"t": 5.11, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.45, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.46, "event": "dry_run.cleared", "left": ""}
+{"t": 5.46, "event": "reliability.result", "run": 1, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 3.9}
+{"t": 7.06, "event": "reliability.setup", "run": 2, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 7.07, "event": "check.process", "pids": ["1264"]}
+{"t": 8.9, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 8.97, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 9.24, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 9.55, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 10.82, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 10.82, "event": "input.before", "text": ""}
+{"t": 10.82, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 11.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 11.19, "event": "dry_run.cleared", "left": ""}
+{"t": 11.19, "event": "reliability.result", "run": 2, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 12.82, "event": "reliability.setup", "run": 3, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 12.84, "event": "check.process", "pids": ["1264"]}
+{"t": 14.51, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 14.57, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 14.84, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 15.15, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 16.42, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 16.42, "event": "input.before", "text": ""}
+{"t": 16.42, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 16.83, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 16.84, "event": "dry_run.cleared", "left": ""}
+{"t": 16.84, "event": "reliability.result", "run": 3, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 18.36, "event": "reliability.setup", "run": 4, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 18.37, "event": "check.process", "pids": ["1264"]}
+{"t": 20.02, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 20.12, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 20.4, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 20.72, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 21.99, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 21.99, "event": "input.before", "text": ""}
+{"t": 21.99, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 22.34, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.34, "event": "dry_run.cleared", "left": ""}
+{"t": 22.34, "event": "reliability.result", "run": 4, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 23.97, "event": "reliability.setup", "run": 5, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 23.98, "event": "check.process", "pids": ["1264"]}
+{"t": 24.3, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 24.36, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 24.65, "event": "reliability.result", "run": 5, "condition": "size:480,440,600,300", "outcome": "stopped", "reason": "no showing search box", "secs": 0.7}
+{"t": 26.16, "event": "reliability.setup", "run": 6, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 26.17, "event": "check.process", "pids": ["1264"]}
+{"t": 26.47, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 26.54, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 26.84, "event": "reliability.result", "run": 6, "condition": "size:480,440,600,300", "outcome": "stopped", "reason": "no showing search box", "secs": 0.7}
+{"t": 28.41, "event": "reliability.setup", "run": 7, "condition": "size:1100,720,150,60", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 28.42, "event": "check.process", "pids": ["1264"]}
+{"t": 30.52, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 30.58, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 30.95, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 31.26, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 32.66, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 32.67, "event": "input.before", "text": ""}
+{"t": 32.67, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 33.01, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 33.02, "event": "dry_run.cleared", "left": ""}
+{"t": 33.02, "event": "reliability.result", "run": 7, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 4.6}
+{"t": 34.55, "event": "reliability.setup", "run": 8, "condition": "size:1100,720,150,60", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 34.57, "event": "check.process", "pids": ["1264"]}
+{"t": 36.3, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 36.36, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 36.65, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 36.96, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 38.28, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 38.28, "event": "input.before", "text": ""}
+{"t": 38.28, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 38.64, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 38.64, "event": "dry_run.cleared", "left": ""}
+{"t": 38.64, "event": "reliability.result", "run": 8, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 40.23, "event": "reliability.setup", "run": 9, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 40.25, "event": "check.process", "pids": ["1264"]}
+{"t": 41.99, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 42.05, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 42.33, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 42.64, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 43.89, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 43.89, "event": "input.before", "text": ""}
+{"t": 43.9, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 44.25, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 44.25, "event": "dry_run.cleared", "left": ""}
+{"t": 44.25, "event": "reliability.result", "run": 9, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 45.78, "event": "reliability.setup", "run": 10, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 45.79, "event": "check.process", "pids": ["1264"]}
+{"t": 47.45, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 47.51, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 47.77, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 48.08, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 49.37, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 49.37, "event": "input.before", "text": ""}
+{"t": 49.38, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 49.77, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 49.77, "event": "dry_run.cleared", "left": ""}
+{"t": 49.77, "event": "reliability.result", "run": 10, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 51.32, "event": "reliability.setup", "run": 11, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 51.34, "event": "check.process", "pids": ["1264"]}
+{"t": 53.09, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 53.16, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 53.49, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 53.8, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 55.15, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 55.15, "event": "input.before", "text": ""}
+{"t": 55.16, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 55.53, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 55.53, "event": "dry_run.cleared", "left": ""}
+{"t": 55.53, "event": "reliability.result", "run": 11, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 57.1, "event": "reliability.setup", "run": 12, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 57.11, "event": "check.process", "pids": ["1264"]}
+{"t": 58.67, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 58.73, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 59.05, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 59.36, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 60.61, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 60.62, "event": "input.before", "text": ""}
+{"t": 60.62, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 60.95, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 60.96, "event": "dry_run.cleared", "left": ""}
+{"t": 60.96, "event": "reliability.result", "run": 12, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 3.9}
+{"t": 62.49, "event": "reliability.setup", "run": 13, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 62.5, "event": "check.process", "pids": ["1264"]}
+{"t": 64.38, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 64.44, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 64.8, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 65.12, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 66.47, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 66.47, "event": "input.before", "text": ""}
+{"t": 66.48, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 66.86, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 66.86, "event": "dry_run.cleared", "left": ""}
+{"t": 66.86, "event": "reliability.result", "run": 13, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 68.35, "event": "reliability.setup", "run": 14, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 68.36, "event": "check.process", "pids": ["1264"]}
+{"t": 69.91, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 69.98, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 70.29, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 70.6, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 71.85, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 71.85, "event": "input.before", "text": ""}
+{"t": 71.85, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 72.21, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 72.21, "event": "dry_run.cleared", "left": ""}
+{"t": 72.21, "event": "reliability.result", "run": 14, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 3.9}
+{"t": 73.87, "event": "reliability.setup", "run": 15, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 73.88, "event": "check.process", "pids": ["1264"]}
+{"t": 75.77, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 75.86, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 76.28, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 76.59, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 78.05, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 78.05, "event": "input.before", "text": ""}
+{"t": 78.05, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 78.55, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 78.56, "event": "dry_run.cleared", "left": ""}
+{"t": 78.56, "event": "reliability.result", "run": 15, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.7}
+{"t": 80.54, "event": "reliability.setup", "run": 16, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 80.55, "event": "check.process", "pids": ["1264"]}
+{"t": 82.72, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 82.78, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 83.16, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 83.48, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 84.76, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 84.76, "event": "input.before", "text": ""}
+{"t": 84.77, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 85.21, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 85.21, "event": "dry_run.cleared", "left": ""}
+{"t": 85.21, "event": "reliability.result", "run": 16, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.7}
+{"t": 86.91, "event": "reliability.setup", "run": 17, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 86.93, "event": "check.process", "pids": ["1264"]}
+{"t": 88.81, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 88.88, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 89.25, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 89.56, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 91.06, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 91.06, "event": "input.before", "text": ""}
+{"t": 91.06, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 91.64, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 91.65, "event": "dry_run.cleared", "left": ""}
+{"t": 91.65, "event": "reliability.result", "run": 17, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.7}
+{"t": 93.81, "event": "reliability.setup", "run": 18, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 93.83, "event": "check.process", "pids": ["1264"]}
+{"t": 96.51, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 96.61, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 97.24, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 97.56, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 98.85, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 98.85, "event": "input.before", "text": ""}
+{"t": 98.85, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 99.22, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 99.22, "event": "dry_run.cleared", "left": ""}
+{"t": 99.22, "event": "reliability.result", "run": 18, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 5.4}
+{"t": 101.03, "event": "reliability.setup", "run": 19, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 101.05, "event": "check.process", "pids": ["1264"]}
+{"t": 103.04, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 103.13, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 103.49, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 103.81, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 105.15, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 105.15, "event": "input.before", "text": ""}
+{"t": 105.16, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 105.55, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 105.56, "event": "dry_run.cleared", "left": ""}
+{"t": 105.56, "event": "reliability.result", "run": 19, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.5}
+{"t": 107.36, "event": "reliability.setup", "run": 20, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 107.37, "event": "check.process", "pids": ["1264"]}
+{"t": 109.23, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 109.29, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 109.61, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 109.92, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 111.24, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 111.24, "event": "input.before", "text": ""}
+{"t": 111.25, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 111.75, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 111.75, "event": "dry_run.cleared", "left": ""}
+{"t": 111.75, "event": "reliability.result", "run": 20, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 113.76, "event": "reliability.setup", "run": 21, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 113.78, "event": "check.process", "pids": ["1264"]}
+{"t": 115.63, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 115.69, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 116.0, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 116.32, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 117.61, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 117.61, "event": "input.before", "text": ""}
+{"t": 117.61, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 118.04, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 118.04, "event": "dry_run.cleared", "left": ""}
+{"t": 118.04, "event": "reliability.result", "run": 21, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 119.79, "event": "reliability.setup", "run": 22, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 119.8, "event": "check.process", "pids": ["1264"]}
+{"t": 121.53, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 121.6, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 121.91, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 122.22, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 123.48, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 123.48, "event": "input.before", "text": ""}
+{"t": 123.48, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 123.84, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 123.84, "event": "dry_run.cleared", "left": ""}
+{"t": 123.84, "event": "reliability.result", "run": 22, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 125.74, "event": "reliability.setup", "run": 23, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 125.75, "event": "check.process", "pids": ["1264"]}
+{"t": 127.68, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 127.77, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 128.11, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 128.42, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 129.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 129.72, "event": "input.before", "text": ""}
+{"t": 129.72, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 130.11, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 130.12, "event": "dry_run.cleared", "left": ""}
+{"t": 130.12, "event": "reliability.result", "run": 23, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 132.11, "event": "reliability.setup", "run": 24, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 132.12, "event": "check.process", "pids": ["1264"]}
+{"t": 134.19, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 134.25, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 134.57, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 134.88, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 136.24, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 136.25, "event": "input.before", "text": ""}
+{"t": 136.25, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 136.71, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 136.71, "event": "dry_run.cleared", "left": ""}
+{"t": 136.71, "event": "reliability.result", "run": 24, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.6}
+{"t": 138.65, "event": "reliability.setup", "run": 25, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 138.66, "event": "check.process", "pids": ["1264"]}
+{"t": 140.51, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 140.58, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 140.9, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 141.22, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 142.54, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 142.54, "event": "input.before", "text": ""}
+{"t": 142.54, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 142.94, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 142.95, "event": "dry_run.cleared", "left": ""}
+{"t": 142.95, "event": "reliability.result", "run": 25, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 144.95, "event": "reliability.setup", "run": 26, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 144.97, "event": "check.process", "pids": ["1264"]}
+{"t": 146.78, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 146.84, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 147.18, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 147.49, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 148.89, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 148.89, "event": "input.before", "text": ""}
+{"t": 148.9, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 149.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 149.44, "event": "dry_run.cleared", "left": ""}
+{"t": 149.44, "event": "reliability.result", "run": 26, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.5}
+{"t": 151.65, "event": "reliability.setup", "run": 27, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 151.66, "event": "check.process", "pids": ["1264"]}
+{"t": 153.54, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 153.6, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 153.91, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 154.22, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 155.5, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 155.5, "event": "input.before", "text": ""}
+{"t": 155.51, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 155.86, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 155.87, "event": "dry_run.cleared", "left": ""}
+{"t": 155.87, "event": "reliability.result", "run": 27, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 158.05, "event": "reliability.setup", "run": 28, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 158.07, "event": "check.process", "pids": ["1264"]}
+{"t": 159.97, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 160.03, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 160.36, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 160.67, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 161.97, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 161.97, "event": "input.before", "text": ""}
+{"t": 161.98, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 162.37, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 162.37, "event": "dry_run.cleared", "left": ""}
+{"t": 162.37, "event": "reliability.result", "run": 28, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 162.45, "event": "reliability.summary", "total": 28, "ok": 26, "by_condition": {"size:880,640,200,80": {"runs": 2, "ok": 2, "stops": []}, "size:760,560,40,30": {"runs": 2, "ok": 2, "stops": []}, "size:480,440,600,300": {"runs": 2, "ok": 0, "stops": ["no showing search box", "no showing search box"]}, "size:1100,720,150,60": {"runs": 2, "ok": 2, "stops": []}, "size:1280,770,0,0": {"runs": 2, "ok": 2, "stops": []}, "minimized": {"runs": 4, "ok": 4, "stops": []}, "behind-chrome": {"runs": 4, "ok": 4, "stops": []}, "leftover-search": {"runs": 5, "ok": 5, "stops": []}, "other-chat": {"runs": 5, "ok": 5, "stops": []}}}
+{"run": "scenario 3: narrow windows with the Back fallback"}
+{"t": 1.75, "event": "reliability.setup", "run": 1, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 1.76, "event": "check.process", "pids": ["1264"]}
+{"t": 2.19, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 2.25, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 2.62, "event": "search.missing", "back_button": true}
+{"t": 3.68, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 3.99, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 5.22, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.22, "event": "input.before", "text": ""}
+{"t": 5.23, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.58, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.58, "event": "dry_run.cleared", "left": ""}
+{"t": 5.58, "event": "reliability.result", "run": 1, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.8}
+{"t": 7.32, "event": "reliability.setup", "run": 2, "condition": "size:430,420,100,100", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 7.33, "event": "check.process", "pids": ["1264"]}
+{"t": 7.65, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 7.71, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 8.09, "event": "search.missing", "back_button": true}
+{"t": 9.09, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 9.4, "event": "search.hit", "name": "File Transfer", "extents": [173, 204, 342, 64]}
+{"t": 10.89, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 10.89, "event": "input.before", "text": ""}
+{"t": 10.9, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 11.37, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 11.37, "event": "dry_run.cleared", "left": ""}
+{"t": 11.37, "event": "reliability.result", "run": 2, "condition": "size:430,420,100,100", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 13.17, "event": "reliability.setup", "run": 3, "condition": "size:560,480,300,200", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 13.18, "event": "check.process", "pids": ["1264"]}
+{"t": 13.52, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 13.58, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 14.0, "event": "search.missing", "back_button": true}
+{"t": 15.01, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 15.33, "event": "search.hit", "name": "File Transfer", "extents": [373, 304, 472, 64]}
+{"t": 16.57, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 16.57, "event": "input.before", "text": ""}
+{"t": 16.57, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 16.91, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 16.91, "event": "dry_run.cleared", "left": ""}
+{"t": 16.91, "event": "reliability.result", "run": 3, "condition": "size:560,480,300,200", "outcome": "reached-and-cleared", "reason": null, "secs": 3.7}
+{"t": 18.56, "event": "reliability.setup", "run": 4, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 18.57, "event": "check.process", "pids": ["1264"]}
+{"t": 18.86, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 18.92, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 19.26, "event": "search.missing", "back_button": true}
+{"t": 20.28, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 20.59, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 21.83, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 21.83, "event": "input.before", "text": ""}
+{"t": 21.84, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 22.14, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.15, "event": "dry_run.cleared", "left": ""}
+{"t": 22.15, "event": "reliability.result", "run": 4, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.6}
+{"t": 22.23, "event": "reliability.summary", "total": 4, "ok": 4, "by_condition": {"size:480,440,600,300": {"runs": 2, "ok": 2, "stops": []}, "size:430,420,100,100": {"runs": 1, "ok": 1, "stops": []}, "size:560,480,300,200": {"runs": 1, "ok": 1, "stops": []}}}
+{"run": "scenario 4: missing target (dry)"}
+{"t": 0.01, "event": "start", "mode": "dry-run", "probe": "missing target", "query": "9f3q"}
+{"t": 0.02, "event": "check.process", "pids": ["1264"]}
+{"t": 2.2, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 2.29, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 2.64, "event": "search.set", "query": "9f3q", "read_back": "9f3q", "focused": true}
+{"t": 7.71, "event": "stopped", "reason": "no search result named ['Rome Nobody 9f3q']; nothing typed into any chat"}
+{"run": "scenario 4: accessibility bus absent"}
+{"t": 0.02, "event": "check.process", "pids": ["1264"]}
+{"t": 0.03, "event": "stopped", "probe": "a11y bus absent", "reason": "accessibility tree missing: [Errno 2] No such file or directory"}
+{"run": "scenario 3: matrix v2 (Back fallback, focus retry before query)"}
+{"t": 1.61, "event": "reliability.setup", "run": 1, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 1.63, "event": "check.process", "pids": ["1264"]}
+{"t": 3.4, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 3.47, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 3.74, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 4.05, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 5.35, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.35, "event": "input.before", "text": ""}
+{"t": 5.36, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.74, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.74, "event": "dry_run.cleared", "left": ""}
+{"t": 5.74, "event": "reliability.result", "run": 1, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 7.54, "event": "reliability.setup", "run": 2, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 7.55, "event": "check.process", "pids": ["1264"]}
+{"t": 9.45, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 9.51, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 9.85, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 10.16, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 11.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 11.44, "event": "input.before", "text": ""}
+{"t": 11.45, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 11.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 11.79, "event": "dry_run.cleared", "left": ""}
+{"t": 11.79, "event": "reliability.result", "run": 2, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 13.39, "event": "reliability.setup", "run": 3, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 13.4, "event": "check.process", "pids": ["1264"]}
+{"t": 15.23, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 15.29, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 15.6, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 15.91, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 17.25, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 17.25, "event": "input.before", "text": ""}
+{"t": 17.26, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 17.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 17.73, "event": "dry_run.cleared", "left": ""}
+{"t": 17.73, "event": "reliability.result", "run": 3, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 19.44, "event": "reliability.setup", "run": 4, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 19.45, "event": "check.process", "pids": ["1264"]}
+{"t": 21.21, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 21.29, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 21.62, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 21.94, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 23.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 23.19, "event": "input.before", "text": ""}
+{"t": 23.19, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 23.55, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 23.55, "event": "dry_run.cleared", "left": ""}
+{"t": 23.55, "event": "reliability.result", "run": 4, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 25.09, "event": "reliability.setup", "run": 5, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 25.1, "event": "check.process", "pids": ["1264"]}
+{"t": 25.44, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 25.5, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 25.84, "event": "search.missing", "back_button": true}
+{"t": 26.86, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 27.17, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 28.41, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 28.41, "event": "input.before", "text": ""}
+{"t": 28.41, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 28.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 28.72, "event": "dry_run.cleared", "left": ""}
+{"t": 28.72, "event": "reliability.result", "run": 5, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.6}
+{"t": 30.3, "event": "reliability.setup", "run": 6, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 30.31, "event": "check.process", "pids": ["1264"]}
+{"t": 30.63, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 30.7, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 31.11, "event": "search.missing", "back_button": true}
+{"t": 32.11, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": false}
+{"t": 37.26, "event": "search.set", "query": "文件传输助手", "read_back": "文件传输助手", "focused": false}
+{"t": 42.4, "event": "reliability.result", "run": 6, "condition": "size:480,440,600,300", "outcome": "stopped", "reason": "no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat", "secs": 12.1}
+{"t": 43.85, "event": "reliability.setup", "run": 7, "condition": "size:1100,720,150,60", "open_chat": [], "search_text": "", "frame_active": true}
+{"t": 43.87, "event": "check.process", "pids": ["1264"]}
+{"t": 45.69, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 45.75, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 45.94, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 46.25, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 47.59, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 47.59, "event": "input.before", "text": ""}
+{"t": 47.59, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 47.99, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 48.0, "event": "dry_run.cleared", "left": ""}
+{"t": 48.0, "event": "reliability.result", "run": 7, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 49.72, "event": "reliability.setup", "run": 8, "condition": "size:1100,720,150,60", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 49.73, "event": "check.process", "pids": ["1264"]}
+{"t": 51.95, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 52.01, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 52.39, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 52.72, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 54.17, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 54.17, "event": "input.before", "text": ""}
+{"t": 54.17, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 54.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 54.72, "event": "dry_run.cleared", "left": ""}
+{"t": 54.72, "event": "reliability.result", "run": 8, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 5.0}
+{"t": 56.73, "event": "reliability.setup", "run": 9, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 56.78, "event": "check.process", "pids": ["1264"]}
+{"t": 58.88, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 58.95, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 59.26, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 59.57, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 60.85, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 60.85, "event": "input.before", "text": ""}
+{"t": 60.86, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 61.2, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 61.21, "event": "dry_run.cleared", "left": ""}
+{"t": 61.21, "event": "reliability.result", "run": 9, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 4.5}
+{"t": 62.75, "event": "reliability.setup", "run": 10, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 62.76, "event": "check.process", "pids": ["1264"]}
+{"t": 64.44, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 64.5, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 64.76, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 65.07, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 66.32, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 66.32, "event": "input.before", "text": ""}
+{"t": 66.32, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 66.68, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 66.68, "event": "dry_run.cleared", "left": ""}
+{"t": 66.68, "event": "reliability.result", "run": 10, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 3.9}
+{"t": 68.17, "event": "reliability.setup", "run": 11, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 68.19, "event": "check.process", "pids": ["1264"]}
+{"t": 69.81, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 69.88, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 70.41, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 70.72, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 72.04, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 72.04, "event": "input.before", "text": ""}
+{"t": 72.04, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 72.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 72.44, "event": "dry_run.cleared", "left": ""}
+{"t": 72.44, "event": "reliability.result", "run": 11, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 73.95, "event": "reliability.setup", "run": 12, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 73.97, "event": "check.process", "pids": ["1264"]}
+{"t": 75.73, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 75.79, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 76.11, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 76.42, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 77.74, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 77.74, "event": "input.before", "text": ""}
+{"t": 77.75, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 78.13, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 78.14, "event": "dry_run.cleared", "left": ""}
+{"t": 78.14, "event": "reliability.result", "run": 12, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 79.62, "event": "reliability.setup", "run": 13, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 79.64, "event": "check.process", "pids": ["1264"]}
+{"t": 81.25, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 81.31, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 81.6, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 81.91, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 83.22, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 83.22, "event": "input.before", "text": ""}
+{"t": 83.22, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 83.63, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 83.63, "event": "dry_run.cleared", "left": ""}
+{"t": 83.63, "event": "reliability.result", "run": 13, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 85.24, "event": "reliability.setup", "run": 14, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 85.26, "event": "check.process", "pids": ["1264"]}
+{"t": 87.07, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 87.15, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 87.53, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 87.84, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 89.23, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 89.23, "event": "input.before", "text": ""}
+{"t": 89.23, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 89.65, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 89.65, "event": "dry_run.cleared", "left": ""}
+{"t": 89.65, "event": "reliability.result", "run": 14, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 91.4, "event": "reliability.setup", "run": 15, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 91.42, "event": "check.process", "pids": ["1264"]}
+{"t": 93.42, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 93.48, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 93.81, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 94.12, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 95.41, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 95.41, "event": "input.before", "text": ""}
+{"t": 95.41, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 95.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 95.8, "event": "dry_run.cleared", "left": ""}
+{"t": 95.8, "event": "reliability.result", "run": 15, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 97.48, "event": "reliability.setup", "run": 16, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 97.49, "event": "check.process", "pids": ["1264"]}
+{"t": 99.29, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 99.35, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 99.66, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 99.97, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 101.33, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 101.33, "event": "input.before", "text": ""}
+{"t": 101.33, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 101.76, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 101.77, "event": "dry_run.cleared", "left": ""}
+{"t": 101.77, "event": "reliability.result", "run": 16, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 103.47, "event": "reliability.setup", "run": 17, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 103.49, "event": "check.process", "pids": ["1264"]}
+{"t": 105.3, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 105.37, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 105.71, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 106.02, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 107.34, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 107.34, "event": "input.before", "text": ""}
+{"t": 107.34, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 107.7, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 107.71, "event": "dry_run.cleared", "left": ""}
+{"t": 107.71, "event": "reliability.result", "run": 17, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 109.42, "event": "reliability.setup", "run": 18, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 109.43, "event": "check.process", "pids": ["1264"]}
+{"t": 111.3, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 111.37, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 111.71, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 112.02, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 113.36, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 113.36, "event": "input.before", "text": ""}
+{"t": 113.36, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 113.75, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 113.75, "event": "dry_run.cleared", "left": ""}
+{"t": 113.75, "event": "reliability.result", "run": 18, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 115.76, "event": "reliability.setup", "run": 19, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 115.77, "event": "check.process", "pids": ["1264"]}
+{"t": 118.25, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 118.32, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 118.64, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 118.95, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 120.32, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 120.32, "event": "input.before", "text": ""}
+{"t": 120.32, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 120.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 120.72, "event": "dry_run.cleared", "left": ""}
+{"t": 120.72, "event": "reliability.result", "run": 19, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.0}
+{"t": 122.68, "event": "reliability.setup", "run": 20, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 122.7, "event": "check.process", "pids": ["1264"]}
+{"t": 124.83, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 124.89, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 125.2, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 125.51, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 126.76, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 126.76, "event": "input.before", "text": ""}
+{"t": 126.76, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 127.13, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 127.14, "event": "dry_run.cleared", "left": ""}
+{"t": 127.14, "event": "reliability.result", "run": 20, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.5}
+{"t": 128.93, "event": "reliability.setup", "run": 21, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 128.94, "event": "check.process", "pids": ["1264"]}
+{"t": 130.76, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 130.85, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 131.16, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 131.46, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 132.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 132.72, "event": "input.before", "text": ""}
+{"t": 132.73, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 133.07, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 133.08, "event": "dry_run.cleared", "left": ""}
+{"t": 133.08, "event": "reliability.result", "run": 21, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 134.85, "event": "reliability.setup", "run": 22, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 134.86, "event": "check.process", "pids": ["1264"]}
+{"t": 136.61, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 136.68, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 137.01, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 137.32, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 138.64, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 138.65, "event": "input.before", "text": ""}
+{"t": 138.65, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 139.07, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 139.07, "event": "dry_run.cleared", "left": ""}
+{"t": 139.07, "event": "reliability.result", "run": 22, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 140.89, "event": "reliability.setup", "run": 23, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 140.91, "event": "check.process", "pids": ["1264"]}
+{"t": 142.53, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 142.6, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 142.86, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 143.17, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 144.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 144.44, "event": "input.before", "text": ""}
+{"t": 144.45, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 144.88, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 144.88, "event": "dry_run.cleared", "left": ""}
+{"t": 144.88, "event": "reliability.result", "run": 23, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 4.0}
+{"t": 146.86, "event": "reliability.setup", "run": 24, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 146.87, "event": "check.process", "pids": ["1264"]}
+{"t": 148.59, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 148.66, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 148.96, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 149.27, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 150.57, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 150.57, "event": "input.before", "text": ""}
+{"t": 150.58, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 150.97, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 150.97, "event": "dry_run.cleared", "left": ""}
+{"t": 150.97, "event": "reliability.result", "run": 24, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 153.34, "event": "reliability.setup", "run": 25, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 153.36, "event": "check.process", "pids": ["1264"]}
+{"t": 156.98, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 157.05, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 157.55, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 157.86, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 159.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 159.19, "event": "input.before", "text": ""}
+{"t": 159.2, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 159.6, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 159.6, "event": "dry_run.cleared", "left": ""}
+{"t": 159.6, "event": "reliability.result", "run": 25, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 6.3}
+{"t": 162.11, "event": "reliability.setup", "run": 26, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 162.13, "event": "check.process", "pids": ["1264"]}
+{"t": 165.06, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 165.14, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 165.5, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 165.82, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 167.24, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 167.24, "event": "input.before", "text": ""}
+{"t": 167.25, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 167.71, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 167.72, "event": "dry_run.cleared", "left": ""}
+{"t": 167.72, "event": "reliability.result", "run": 26, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 5.6}
+{"t": 169.86, "event": "reliability.setup", "run": 27, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 169.88, "event": "check.process", "pids": ["1264"]}
+{"t": 172.62, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 172.68, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 173.29, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 173.6, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 175.13, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 175.13, "event": "input.before", "text": ""}
+{"t": 175.14, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 175.67, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 175.67, "event": "dry_run.cleared", "left": ""}
+{"t": 175.67, "event": "reliability.result", "run": 27, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 5.8}
+{"t": 178.33, "event": "reliability.setup", "run": 28, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 178.35, "event": "check.process", "pids": ["1264"]}
+{"t": 181.65, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 181.72, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 182.15, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 182.47, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 184.01, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 184.01, "event": "input.before", "text": ""}
+{"t": 184.01, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 184.69, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 184.69, "event": "dry_run.cleared", "left": ""}
+{"t": 184.69, "event": "reliability.result", "run": 28, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 6.4}
+{"t": 184.73, "event": "reliability.setup", "run": 29, "condition": "focus-steal", "steal_after_s": 2.51}
+{"t": 184.75, "event": "check.process", "pids": ["1264"]}
+{"t": 187.87, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 187.94, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 188.52, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 188.85, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 190.57, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 190.57, "event": "input.before", "text": ""}
+{"t": 190.58, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 191.36, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 191.36, "event": "dry_run.cleared", "left": ""}
+{"t": 191.36, "event": "reliability.result", "run": 29, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 6.6}
+{"t": 191.39, "event": "reliability.setup", "run": 30, "condition": "focus-steal", "steal_after_s": 3.89}
+{"t": 191.41, "event": "check.process", "pids": ["1264"]}
+{"t": 195.02, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 195.1, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 195.53, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": false}
+{"t": 200.68, "event": "search.set", "query": "文件传输助手", "read_back": "文件传输助手", "focused": false}
+{"t": 205.81, "event": "reliability.result", "run": 30, "condition": "focus-steal", "outcome": "stopped", "reason": "no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat", "secs": 14.4}
+{"t": 205.84, "event": "reliability.setup", "run": 31, "condition": "focus-steal", "steal_after_s": 0.52}
+{"t": 205.85, "event": "check.process", "pids": ["1264"]}
+{"t": 207.62, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 207.68, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 208.01, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 208.32, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 209.6, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 209.61, "event": "input.before", "text": ""}
+{"t": 209.61, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 210.06, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 210.06, "event": "dry_run.cleared", "left": ""}
+{"t": 210.06, "event": "reliability.result", "run": 31, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 210.08, "event": "reliability.setup", "run": 32, "condition": "focus-steal", "steal_after_s": 3.38}
+{"t": 210.09, "event": "check.process", "pids": ["1264"]}
+{"t": 211.87, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 211.93, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 212.26, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 212.57, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 213.95, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 213.95, "event": "input.before", "text": ""}
+{"t": 213.95, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 214.4, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 214.41, "event": "dry_run.cleared", "left": ""}
+{"t": 214.41, "event": "reliability.result", "run": 32, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 216.06, "event": "reliability.setup", "run": 33, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 216.07, "event": "check.process", "pids": ["1264"]}
+{"t": 216.37, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 216.45, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 216.85, "event": "search.missing", "back_button": true}
+{"t": 217.85, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 218.16, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 219.46, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 219.46, "event": "input.before", "text": ""}
+{"t": 219.46, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 219.8, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 219.81, "event": "dry_run.cleared", "left": ""}
+{"t": 219.81, "event": "reliability.result", "run": 33, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.7}
+{"t": 221.36, "event": "reliability.setup", "run": 34, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 221.37, "event": "check.process", "pids": ["1264"]}
+{"t": 221.69, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 221.78, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 222.18, "event": "search.missing", "back_button": true}
+{"t": 223.2, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 223.51, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 224.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 224.79, "event": "input.before", "text": ""}
+{"t": 224.8, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 225.15, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 225.15, "event": "dry_run.cleared", "left": ""}
+{"t": 225.15, "event": "reliability.result", "run": 34, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.8}
+{"t": 225.26, "event": "reliability.summary", "total": 34, "ok": 32, "by_condition": {"size:880,640,200,80": {"runs": 2, "ok": 2, "stops": []}, "size:760,560,40,30": {"runs": 2, "ok": 2, "stops": []}, "size:480,440,600,300": {"runs": 4, "ok": 3, "stops": ["no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat"]}, "size:1100,720,150,60": {"runs": 2, "ok": 2, "stops": []}, "size:1280,770,0,0": {"runs": 2, "ok": 2, "stops": []}, "minimized": {"runs": 4, "ok": 4, "stops": []}, "behind-chrome": {"runs": 4, "ok": 4, "stops": []}, "leftover-search": {"runs": 5, "ok": 5, "stops": []}, "other-chat": {"runs": 5, "ok": 5, "stops": []}, "focus-steal": {"runs": 4, "ok": 3, "stops": ["no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat"]}}}
+{"run": "scenario 3: forced steal before the search grabs focus (3 dry runs)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal before search"}
+{"t": 2.58, "event": "probe.stole_focus", "frame_active": true}
+{"t": 3.22, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 3.48, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 3.82, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 5.42, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.42, "event": "input.before", "text": ""}
+{"t": 5.42, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.91, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.92, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal before search"}
+{"t": 3.09, "event": "probe.stole_focus", "frame_active": true}
+{"t": 3.48, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 3.82, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 4.13, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 5.46, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.46, "event": "input.before", "text": ""}
+{"t": 5.46, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.96, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.98, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal before search"}
+{"t": 2.48, "event": "probe.stole_focus", "frame_active": true}
+{"t": 2.93, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 3.18, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 3.49, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.98, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.99, "event": "input.before", "text": ""}
+{"t": 4.99, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.49, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.49, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"run": "scenario 3: matrix v3, final guards except the in-wait retry"}
+{"t": 1.89, "event": "reliability.setup", "run": 1, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 1.92, "event": "check.process", "pids": ["1264"]}
+{"t": 4.48, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 4.63, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 5.43, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 5.74, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 7.2, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 7.2, "event": "input.before", "text": ""}
+{"t": 7.21, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 7.67, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 7.68, "event": "dry_run.cleared", "left": ""}
+{"t": 7.68, "event": "reliability.result", "run": 1, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 5.8}
+{"t": 9.51, "event": "reliability.setup", "run": 2, "condition": "size:880,640,200,80", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 9.55, "event": "check.process", "pids": ["1264"]}
+{"t": 11.77, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 11.92, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 12.56, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 12.87, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 14.45, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 14.45, "event": "input.before", "text": ""}
+{"t": 14.46, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 14.94, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 14.94, "event": "dry_run.cleared", "left": ""}
+{"t": 14.94, "event": "reliability.result", "run": 2, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "reason": null, "secs": 5.4}
+{"t": 16.83, "event": "reliability.setup", "run": 3, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 16.89, "event": "check.process", "pids": ["1264"]}
+{"t": 19.36, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 19.54, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 20.24, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 20.55, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 22.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.19, "event": "input.before", "text": ""}
+{"t": 22.19, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 22.74, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.75, "event": "dry_run.cleared", "left": ""}
+{"t": 22.75, "event": "reliability.result", "run": 3, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 24.62, "event": "reliability.setup", "run": 4, "condition": "size:760,560,40,30", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 24.63, "event": "check.process", "pids": ["1264"]}
+{"t": 27.33, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 27.46, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 28.13, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 28.45, "event": "search.hit", "name": "File Transfer", "extents": [113, 134, 320, 64]}
+{"t": 30.02, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 30.02, "event": "input.before", "text": ""}
+{"t": 30.02, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 30.53, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 30.54, "event": "dry_run.cleared", "left": ""}
+{"t": 30.54, "event": "reliability.result", "run": 4, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 32.43, "event": "reliability.setup", "run": 5, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 32.47, "event": "check.process", "pids": ["1264"]}
+{"t": 32.9, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 33.12, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 33.79, "event": "search.missing", "back_button": true}
+{"t": 35.08, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 35.4, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 36.9, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 36.9, "event": "input.before", "text": ""}
+{"t": 36.9, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 37.3, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 37.3, "event": "dry_run.cleared", "left": ""}
+{"t": 37.3, "event": "reliability.result", "run": 5, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 4.9}
+{"t": 39.33, "event": "reliability.setup", "run": 6, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 39.38, "event": "check.process", "pids": ["1264"]}
+{"t": 39.86, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 40.07, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 40.75, "event": "search.missing", "back_button": true}
+{"t": 42.07, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 42.38, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 43.72, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 43.72, "event": "input.before", "text": ""}
+{"t": 43.72, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 44.15, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 44.15, "event": "dry_run.cleared", "left": ""}
+{"t": 44.15, "event": "reliability.result", "run": 6, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 4.8}
+{"t": 46.07, "event": "reliability.setup", "run": 7, "condition": "size:1100,720,150,60", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 46.12, "event": "check.process", "pids": ["1264"]}
+{"t": 48.47, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 48.54, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 49.2, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 49.52, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 50.93, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 50.93, "event": "input.before", "text": ""}
+{"t": 50.93, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 51.43, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 51.43, "event": "dry_run.cleared", "left": ""}
+{"t": 51.43, "event": "reliability.result", "run": 7, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 5.4}
+{"t": 53.26, "event": "reliability.setup", "run": 8, "condition": "size:1100,720,150,60", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 53.29, "event": "check.process", "pids": ["1264"]}
+{"t": 55.57, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 55.63, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 56.22, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 56.53, "event": "search.hit", "name": "File Transfer", "extents": [223, 164, 320, 64]}
+{"t": 57.88, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 57.88, "event": "input.before", "text": ""}
+{"t": 57.88, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 58.24, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 58.25, "event": "dry_run.cleared", "left": ""}
+{"t": 58.25, "event": "reliability.result", "run": 8, "condition": "size:1100,720,150,60", "outcome": "reached-and-cleared", "reason": null, "secs": 5.0}
+{"t": 60.02, "event": "reliability.setup", "run": 9, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 60.04, "event": "check.process", "pids": ["1264"]}
+{"t": 62.58, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 62.66, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 63.2, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 63.51, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 65.0, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 65.0, "event": "input.before", "text": ""}
+{"t": 65.0, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 65.47, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 65.48, "event": "dry_run.cleared", "left": ""}
+{"t": 65.48, "event": "reliability.result", "run": 9, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 5.5}
+{"t": 67.52, "event": "reliability.setup", "run": 10, "condition": "size:1280,770,0,0", "open_chat": ["File Transfer"], "search_text": "", "frame_active": true}
+{"t": 67.55, "event": "check.process", "pids": ["1264"]}
+{"t": 70.29, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 70.47, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 71.13, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 71.44, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 73.01, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 73.01, "event": "input.before", "text": ""}
+{"t": 73.01, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 73.43, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 73.43, "event": "dry_run.cleared", "left": ""}
+{"t": 73.43, "event": "reliability.result", "run": 10, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 75.3, "event": "reliability.setup", "run": 11, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 75.34, "event": "check.process", "pids": ["1264"]}
+{"t": 78.35, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 78.56, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 79.23, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 79.54, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 81.05, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 81.06, "event": "input.before", "text": ""}
+{"t": 81.06, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 81.6, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 81.61, "event": "dry_run.cleared", "left": ""}
+{"t": 81.61, "event": "reliability.result", "run": 11, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 6.3}
+{"t": 83.49, "event": "reliability.setup", "run": 12, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 83.53, "event": "check.process", "pids": ["1264"]}
+{"t": 86.51, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 86.61, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 87.32, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 87.64, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 89.31, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 89.31, "event": "input.before", "text": ""}
+{"t": 89.32, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 89.88, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 89.89, "event": "dry_run.cleared", "left": ""}
+{"t": 89.89, "event": "reliability.result", "run": 12, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 6.4}
+{"t": 91.65, "event": "reliability.setup", "run": 13, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 91.68, "event": "check.process", "pids": ["1264"]}
+{"t": 94.42, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 94.49, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 95.1, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 95.41, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 96.87, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 96.87, "event": "input.before", "text": ""}
+{"t": 96.87, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 97.27, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 97.28, "event": "dry_run.cleared", "left": ""}
+{"t": 97.28, "event": "reliability.result", "run": 13, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 5.6}
+{"t": 98.77, "event": "reliability.setup", "run": 14, "condition": "minimized", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 98.79, "event": "check.process", "pids": ["1264"]}
+{"t": 100.67, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 100.77, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 101.41, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 101.74, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 103.14, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 103.14, "event": "input.before", "text": ""}
+{"t": 103.15, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 103.54, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 103.54, "event": "dry_run.cleared", "left": ""}
+{"t": 103.54, "event": "reliability.result", "run": 14, "condition": "minimized", "outcome": "reached-and-cleared", "reason": null, "secs": 4.8}
+{"t": 105.3, "event": "reliability.setup", "run": 15, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 105.33, "event": "check.process", "pids": ["1264"]}
+{"t": 108.02, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 108.09, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 108.84, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 109.15, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 110.69, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 110.69, "event": "input.before", "text": ""}
+{"t": 110.7, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 111.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 111.45, "event": "dry_run.cleared", "left": ""}
+{"t": 111.45, "event": "reliability.result", "run": 15, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 6.1}
+{"t": 113.36, "event": "reliability.setup", "run": 16, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 113.38, "event": "check.process", "pids": ["1264"]}
+{"t": 116.05, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 116.13, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 116.75, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 117.06, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 118.55, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 118.55, "event": "input.before", "text": ""}
+{"t": 118.56, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 118.99, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 118.99, "event": "dry_run.cleared", "left": ""}
+{"t": 118.99, "event": "reliability.result", "run": 16, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 5.6}
+{"t": 120.93, "event": "reliability.setup", "run": 17, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 120.96, "event": "check.process", "pids": ["1264"]}
+{"t": 123.55, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 123.64, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 124.36, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 124.69, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 126.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 126.19, "event": "input.before", "text": ""}
+{"t": 126.19, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 126.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 126.8, "event": "dry_run.cleared", "left": ""}
+{"t": 126.8, "event": "reliability.result", "run": 17, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 128.84, "event": "reliability.setup", "run": 18, "condition": "behind-chrome", "open_chat": ["File Transfer"], "search_text": "", "frame_active": false}
+{"t": 128.91, "event": "check.process", "pids": ["1264"]}
+{"t": 131.61, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 131.67, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 132.29, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 132.6, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 134.23, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 134.23, "event": "input.before", "text": ""}
+{"t": 134.23, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 134.85, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 134.85, "event": "dry_run.cleared", "left": ""}
+{"t": 134.85, "event": "reliability.result", "run": 18, "condition": "behind-chrome", "outcome": "reached-and-cleared", "reason": null, "secs": 6.0}
+{"t": 137.07, "event": "reliability.setup", "run": 19, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 137.11, "event": "check.process", "pids": ["1264"]}
+{"t": 139.44, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 139.51, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 140.26, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 140.57, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 142.06, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 142.06, "event": "input.before", "text": ""}
+{"t": 142.06, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 142.64, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 142.64, "event": "dry_run.cleared", "left": ""}
+{"t": 142.64, "event": "reliability.result", "run": 19, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.6}
+{"t": 144.99, "event": "reliability.setup", "run": 20, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 145.02, "event": "check.process", "pids": ["1264"]}
+{"t": 147.13, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 147.22, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 147.9, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 148.22, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 149.69, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 149.69, "event": "input.before", "text": ""}
+{"t": 149.7, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 150.12, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 150.12, "event": "dry_run.cleared", "left": ""}
+{"t": 150.12, "event": "reliability.result", "run": 20, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.1}
+{"t": 152.51, "event": "reliability.setup", "run": 21, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 152.55, "event": "check.process", "pids": ["1264"]}
+{"t": 155.16, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 155.29, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 156.02, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 156.36, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 157.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 157.79, "event": "input.before", "text": ""}
+{"t": 157.79, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 158.27, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 158.28, "event": "dry_run.cleared", "left": ""}
+{"t": 158.28, "event": "reliability.result", "run": 21, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.8}
+{"t": 160.73, "event": "reliability.setup", "run": 22, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 160.75, "event": "check.process", "pids": ["1264"]}
+{"t": 163.42, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 163.53, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 164.2, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 164.52, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 166.04, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 166.04, "event": "input.before", "text": ""}
+{"t": 166.05, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 166.63, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 166.63, "event": "dry_run.cleared", "left": ""}
+{"t": 166.63, "event": "reliability.result", "run": 22, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 169.09, "event": "reliability.setup", "run": 23, "condition": "leftover-search", "open_chat": ["File Transfer"], "search_text": "zzqx", "frame_active": true}
+{"t": 169.12, "event": "check.process", "pids": ["1264"]}
+{"t": 171.6, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 171.68, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 172.4, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 172.73, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 174.13, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 174.13, "event": "input.before", "text": ""}
+{"t": 174.14, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 174.56, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 174.56, "event": "dry_run.cleared", "left": ""}
+{"t": 174.56, "event": "reliability.result", "run": 23, "condition": "leftover-search", "outcome": "reached-and-cleared", "reason": null, "secs": 5.5}
+{"t": 176.86, "event": "reliability.setup", "run": 24, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 176.89, "event": "check.process", "pids": ["1264"]}
+{"t": 178.79, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 178.85, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 179.3, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 179.61, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 180.88, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 180.88, "event": "input.before", "text": ""}
+{"t": 180.89, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 181.21, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 181.22, "event": "dry_run.cleared", "left": ""}
+{"t": 181.22, "event": "reliability.result", "run": 24, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 183.18, "event": "reliability.setup", "run": 25, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 183.19, "event": "check.process", "pids": ["1264"]}
+{"t": 184.84, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 184.9, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 185.35, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 185.67, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 186.96, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 186.96, "event": "input.before", "text": ""}
+{"t": 186.97, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 187.36, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 187.36, "event": "dry_run.cleared", "left": ""}
+{"t": 187.36, "event": "reliability.result", "run": 25, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 189.4, "event": "reliability.setup", "run": 26, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 189.41, "event": "check.process", "pids": ["1264"]}
+{"t": 191.29, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 191.35, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 191.85, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 192.16, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 193.48, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 193.48, "event": "input.before", "text": ""}
+{"t": 193.48, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 193.86, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 193.86, "event": "dry_run.cleared", "left": ""}
+{"t": 193.86, "event": "reliability.result", "run": 26, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.5}
+{"t": 195.91, "event": "reliability.setup", "run": 27, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 195.92, "event": "check.process", "pids": ["1264"]}
+{"t": 197.7, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 197.76, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 198.27, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 198.58, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 199.88, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 199.88, "event": "input.before", "text": ""}
+{"t": 199.89, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 200.3, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 200.3, "event": "dry_run.cleared", "left": ""}
+{"t": 200.3, "event": "reliability.result", "run": 27, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 202.46, "event": "reliability.setup", "run": 28, "condition": "other-chat", "open_chat": ["<contact A>"], "search_text": "", "frame_active": true}
+{"t": 202.47, "event": "check.process", "pids": ["1264"]}
+{"t": 204.72, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 204.79, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 205.29, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 205.6, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 206.93, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 206.93, "event": "input.before", "text": ""}
+{"t": 206.93, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 207.3, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 207.3, "event": "dry_run.cleared", "left": ""}
+{"t": 207.3, "event": "reliability.result", "run": 28, "condition": "other-chat", "outcome": "reached-and-cleared", "reason": null, "secs": 4.8}
+{"t": 207.32, "event": "reliability.setup", "run": 29, "condition": "focus-steal", "steal_after_s": 4.12}
+{"t": 207.33, "event": "check.process", "pids": ["1264"]}
+{"t": 209.28, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 209.35, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 209.88, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 210.19, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 211.79, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 211.79, "event": "input.before", "text": ""}
+{"t": 211.8, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 212.33, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 212.33, "event": "dry_run.cleared", "left": ""}
+{"t": 212.33, "event": "reliability.result", "run": 29, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 5.0}
+{"t": 212.36, "event": "reliability.setup", "run": 30, "condition": "focus-steal", "steal_after_s": 2.82}
+{"t": 212.37, "event": "check.process", "pids": ["1264"]}
+{"t": 214.64, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 214.7, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 215.23, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 220.37, "event": "search.set", "query": "文件传输助手", "read_back": "文件传输助手", "focused": false}
+{"t": 225.51, "event": "reliability.result", "run": 30, "condition": "focus-steal", "outcome": "stopped", "reason": "no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat", "secs": 13.1}
+{"t": 225.53, "event": "reliability.setup", "run": 31, "condition": "focus-steal", "steal_after_s": 3.65}
+{"t": 225.55, "event": "check.process", "pids": ["1264"]}
+{"t": 227.27, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 227.33, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 227.82, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 228.13, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 229.44, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 229.44, "event": "input.before", "text": ""}
+{"t": 229.44, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 229.81, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 229.81, "event": "dry_run.cleared", "left": ""}
+{"t": 229.81, "event": "reliability.result", "run": 31, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.3}
+{"t": 229.83, "event": "reliability.setup", "run": 32, "condition": "focus-steal", "steal_after_s": 2.9}
+{"t": 229.85, "event": "check.process", "pids": ["1264"]}
+{"t": 231.66, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 231.72, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 232.25, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 232.56, "event": "search.hit", "name": "File Transfer", "extents": [73, 104, 320, 64]}
+{"t": 233.87, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 233.87, "event": "input.before", "text": ""}
+{"t": 233.87, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 234.25, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 234.26, "event": "dry_run.cleared", "left": ""}
+{"t": 234.26, "event": "reliability.result", "run": 32, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 235.92, "event": "reliability.setup", "run": 33, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 235.93, "event": "check.process", "pids": ["1264"]}
+{"t": 236.28, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 236.34, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 236.73, "event": "search.missing", "back_button": true}
+{"t": 237.93, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 238.25, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 239.66, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 239.66, "event": "input.before", "text": ""}
+{"t": 239.66, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 240.03, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 240.04, "event": "dry_run.cleared", "left": ""}
+{"t": 240.04, "event": "reliability.result", "run": 33, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 4.1}
+{"t": 241.59, "event": "reliability.setup", "run": 34, "condition": "size:480,440,600,300", "open_chat": ["File Transfer"], "search_text": null, "frame_active": true}
+{"t": 241.6, "event": "check.process", "pids": ["1264"]}
+{"t": 241.91, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 241.97, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 242.37, "event": "search.missing", "back_button": true}
+{"t": 243.52, "event": "search.set", "query": "Transfer", "read_back": "Transfer", "focused": true}
+{"t": 243.83, "event": "search.hit", "name": "File Transfer", "extents": [673, 404, 392, 64]}
+{"t": 245.02, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 245.02, "event": "input.before", "text": ""}
+{"t": 245.03, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 245.3, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 245.31, "event": "dry_run.cleared", "left": ""}
+{"t": 245.31, "event": "reliability.result", "run": 34, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "reason": null, "secs": 3.7}
+{"t": 245.41, "event": "reliability.summary", "total": 34, "ok": 33, "by_condition": {"size:880,640,200,80": {"runs": 2, "ok": 2, "stops": []}, "size:760,560,40,30": {"runs": 2, "ok": 2, "stops": []}, "size:480,440,600,300": {"runs": 4, "ok": 4, "stops": []}, "size:1100,720,150,60": {"runs": 2, "ok": 2, "stops": []}, "size:1280,770,0,0": {"runs": 2, "ok": 2, "stops": []}, "minimized": {"runs": 4, "ok": 4, "stops": []}, "behind-chrome": {"runs": 4, "ok": 4, "stops": []}, "leftover-search": {"runs": 5, "ok": 5, "stops": []}, "other-chat": {"runs": 5, "ok": 5, "stops": []}, "focus-steal": {"runs": 4, "ok": 3, "stops": ["no search result named ['File Transfer', '文件传输助手']; nothing typed into any chat"]}}}
+{"run": "scenario 3: forced steal after the query is set (3 dry runs, final code)"}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal after query"}
+{"t": 2.15, "event": "probe.stole_focus_after_query"}
+{"t": 2.15, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 2.45, "event": "search.focus_lost", "attempt": 1}
+{"t": 2.72, "event": "search.set", "query": "Transfer", "attempt": 2, "read_back": "Transfer", "focused": true}
+{"t": 3.03, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.31, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.31, "event": "input.before", "text": ""}
+{"t": 4.32, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 4.69, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.69, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal after query"}
+{"t": 2.57, "event": "probe.stole_focus_after_query"}
+{"t": 2.58, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 2.88, "event": "search.focus_lost", "attempt": 1}
+{"t": 3.15, "event": "search.set", "query": "Transfer", "attempt": 2, "read_back": "Transfer", "focused": true}
+{"t": 3.46, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.78, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.78, "event": "input.before", "text": ""}
+{"t": 4.79, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.24, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.25, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"t": 0.0, "event": "start", "mode": "dry-run", "probe": "forced focus steal after query"}
+{"t": 2.26, "event": "probe.stole_focus_after_query"}
+{"t": 2.27, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 2.57, "event": "search.focus_lost", "attempt": 1}
+{"t": 2.84, "event": "search.set", "query": "Transfer", "attempt": 2, "read_back": "Transfer", "focused": true}
+{"t": 3.15, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.5, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.5, "event": "input.before", "text": ""}
+{"t": 4.5, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 4.87, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.87, "event": "dry_run.cleared", "left": ""}
+{'sent': False}
+{"run": "scenario 3: 8 random focus steals (final code)"}
+{"t": 0.04, "event": "reliability.setup", "run": 1, "condition": "focus-steal", "steal_after_s": 2.4}
+{"t": 0.05, "event": "check.process", "pids": ["1264"]}
+{"t": 1.83, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 1.89, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 2.36, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 2.66, "event": "search.focus_lost", "attempt": 1}
+{"t": 2.95, "event": "search.set", "query": "Transfer", "attempt": 2, "read_back": "Transfer", "focused": true}
+{"t": 3.26, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.51, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.51, "event": "input.before", "text": ""}
+{"t": 4.51, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 4.83, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.84, "event": "dry_run.cleared", "left": ""}
+{"t": 4.84, "event": "reliability.result", "run": 1, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.8}
+{"t": 4.85, "event": "reliability.setup", "run": 2, "condition": "focus-steal", "steal_after_s": 2.83}
+{"t": 4.87, "event": "check.process", "pids": ["1264"]}
+{"t": 6.6, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 6.66, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 7.15, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 7.47, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 8.8, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 8.81, "event": "input.before", "text": ""}
+{"t": 8.81, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 9.22, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 9.22, "event": "dry_run.cleared", "left": ""}
+{"t": 9.22, "event": "reliability.result", "run": 2, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.4}
+{"t": 9.24, "event": "reliability.setup", "run": 3, "condition": "focus-steal", "steal_after_s": 2.21}
+{"t": 9.25, "event": "check.process", "pids": ["1264"]}
+{"t": 11.14, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 11.2, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 11.73, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 12.01, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 12.32, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 13.87, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 13.87, "event": "input.before", "text": ""}
+{"t": 13.88, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 14.3, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 14.3, "event": "dry_run.cleared", "left": ""}
+{"t": 14.3, "event": "reliability.result", "run": 3, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 5.1}
+{"t": 14.32, "event": "reliability.setup", "run": 4, "condition": "focus-steal", "steal_after_s": 3.15}
+{"t": 14.34, "event": "check.process", "pids": ["1264"]}
+{"t": 16.1, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 16.19, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 16.61, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 16.92, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 18.19, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 18.19, "event": "input.before", "text": ""}
+{"t": 18.19, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 18.56, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 18.56, "event": "dry_run.cleared", "left": ""}
+{"t": 18.56, "event": "reliability.result", "run": 4, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 18.58, "event": "reliability.setup", "run": 5, "condition": "focus-steal", "steal_after_s": 2.55}
+{"t": 18.59, "event": "check.process", "pids": ["1264"]}
+{"t": 20.21, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 20.27, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 20.76, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 21.07, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 22.36, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.36, "event": "input.before", "text": ""}
+{"t": 22.36, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 22.73, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 22.73, "event": "dry_run.cleared", "left": ""}
+{"t": 22.73, "event": "reliability.result", "run": 5, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 4.2}
+{"t": 22.76, "event": "reliability.setup", "run": 6, "condition": "focus-steal", "steal_after_s": 2.41}
+{"t": 22.77, "event": "check.process", "pids": ["1264"]}
+{"t": 24.38, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 24.46, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 24.93, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 25.25, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 25.3, "event": "reliability.result", "run": 6, "condition": "focus-steal", "outcome": "stopped", "reason": "WeChat's frame is not the active window before clicking the search result; nothing pressed", "secs": 2.5}
+{"t": 25.36, "event": "reliability.setup", "run": 7, "condition": "focus-steal", "steal_after_s": 2.85}
+{"t": 25.38, "event": "check.process", "pids": ["1264"]}
+{"t": 27.78, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 27.92, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 28.76, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 29.19, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 29.52, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 30.96, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 30.96, "event": "input.before", "text": ""}
+{"t": 30.97, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 31.45, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 31.45, "event": "dry_run.cleared", "left": ""}
+{"t": 31.45, "event": "reliability.result", "run": 7, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 6.1}
+{"t": 31.51, "event": "reliability.setup", "run": 8, "condition": "focus-steal", "steal_after_s": 2.77}
+{"t": 31.56, "event": "check.process", "pids": ["1264"]}
+{"t": 33.8, "event": "check.tree", "frame": "Weixin", "chats_list": true, "search_box": true}
+{"t": 33.95, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 34.67, "event": "search.not_focused", "attempt": 1, "frame_active": false}
+{"t": 35.04, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 35.35, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 36.83, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 36.83, "event": "input.before", "text": ""}
+{"t": 36.83, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 37.36, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 37.36, "event": "dry_run.cleared", "left": ""}
+{"t": 37.36, "event": "reliability.result", "run": 8, "condition": "focus-steal", "outcome": "reached-and-cleared", "reason": null, "secs": 5.9}
+{"t": 37.4, "event": "reliability.summary", "total": 8, "ok": 7, "by_condition": {"focus-steal": {"runs": 8, "ok": 7, "stops": ["WeChat's frame is not the active window before clicking the search result; nothing pressed"]}}}
+{"run": "real send #2 (final code, other chat open + minimized)"}
+{'open_chat': ['<contact A>'], 'search_text': '', 'frame_active': True}
+{'open_chat': ['<contact A>'], 'search_text': '', 'frame_active': False}
+{"run": "real send #2"}
+{"t": 0.01, "event": "start", "mode": "send", "body": "rome test", "target": "filehelper"}
+{"t": 0.05, "event": "check.process", "pids": ["1264"]}
+{"t": 2.25, "event": "check.tree", "frame": "", "chats_list": true, "search_box": true}
+{"t": 2.39, "event": "check.store", "exit": 0, "keysReady": true}
+{"t": 3.02, "event": "search.set", "query": "Transfer", "attempt": 1, "read_back": "Transfer", "focused": true}
+{"t": 3.33, "event": "search.hit", "name": "File Transfer", "extents": [273, 184, 320, 64]}
+{"t": 4.86, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 4.86, "event": "input.before", "text": ""}
+{"t": 4.87, "event": "input.after_set", "text": "rome test", "exact": true}
+{"t": 5.29, "event": "check.opened", "input_name": "File Transfer", "header": "File Transfer"}
+{"t": 5.5, "event": "check.focus", "input_focused": true, "frame_active": true}
+{"t": 5.61, "event": "enter.pressed"}
+{"t": 6.22, "event": "input.after_enter", "text": ""}
+{"t": 7.64, "event": "store.poll", "after_s": 2.0, "target": [{"id": "filehelper:3", "isSelf": true, "type": "text", "timestamp": 1790235948}], "elsewhere": []}
+{"t": 7.64, "event": "done", "sent": true, "store_ids": ["filehelper:3"], "elsewhere": []}

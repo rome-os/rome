@@ -1,0 +1,390 @@
+[
+ {
+  "state": "s1a-current",
+  "what": "chat list, File Transfer open (window minimized at the time)",
+  "showing_nodes": 163,
+  "controls": [
+   {
+    "path": "filler[] > filler[] > filler[] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > label[File Transfer] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[File Transfer]",
+    "role": "text",
+    "name": "File Transfer",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "tool bar[] > filler[] > filler[] > push button[Send]",
+    "role": "push button",
+    "name": "Send",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "splitter[] > filler[] > filler[] > list[Messages]",
+    "role": "list",
+    "name": "Messages",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[Search]",
+    "role": "text",
+    "name": "Search",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > list[Chats]",
+    "role": "list",
+    "name": "Chats",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[Chats] > list item[File Transfer]",
+    "role": "list item",
+    "name": "File Transfer\nrome test\n06:58\n",
+    "actions": [],
+    "states": [
+     "showing",
+     "selected"
+    ]
+   }
+  ]
+ },
+ {
+  "state": "s1b-search-open",
+  "what": "search open with query `Transfer`",
+  "showing_nodes": 184,
+  "controls": [
+   {
+    "path": "filler[] > filler[] > filler[] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > label[File Transfer] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[File Transfer]",
+    "role": "text",
+    "name": "File Transfer",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "tool bar[] > filler[] > filler[] > push button[Send]",
+    "role": "push button",
+    "name": "Send",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "splitter[] > filler[] > filler[] > list[Messages]",
+    "role": "list",
+    "name": "Messages",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[Search]",
+    "role": "text",
+    "name": "Search",
+    "text": "Transfer",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "focused",
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > list[Chats]",
+    "role": "list",
+    "name": "Chats",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[Chats] > list item[File Transfer]",
+    "role": "list item",
+    "name": "File Transfer\nrome test\n06:58\n",
+    "actions": [],
+    "states": [
+     "showing",
+     "selected"
+    ]
+   },
+   {
+    "path": "application[wechat] > filler[] > filler[] > list[]",
+    "role": "list",
+    "name": "",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[] > list item[Features]",
+    "role": "list item",
+    "name": "Features",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[] > list item[File Transfer]",
+    "role": "list item",
+    "name": "File Transfer",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[] > list item[More]",
+    "role": "list item",
+    "name": "More",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[] > list item[Search Weixin ID:]",
+    "role": "list item",
+    "name": "Search Weixin ID:",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   }
+  ]
+ },
+ {
+  "state": "s1d-other-chat-open",
+  "what": "another chat open",
+  "showing_nodes": 176,
+  "controls": [
+   {
+    "path": "filler[] > filler[] > filler[] > text[<contact A>]",
+    "role": "text",
+    "name": "<contact A>",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "focused",
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "tool bar[] > filler[] > filler[] > push button[Send]",
+    "role": "push button",
+    "name": "Send",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "splitter[] > filler[] > filler[] > list[Messages]",
+    "role": "list",
+    "name": "Messages",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[Search]",
+    "role": "text",
+    "name": "Search",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > list[Chats]",
+    "role": "list",
+    "name": "Chats",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > list[Chats] > list item[File Transfer]",
+    "role": "list item",
+    "name": "File Transfer\nrome test\n06:58\n",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   }
+  ]
+ },
+ {
+  "state": "s3-narrow-480x440",
+  "what": "window 480x440, single-pane layout",
+  "showing_nodes": 133,
+  "controls": [
+   {
+    "path": "filler[] > filler[] > filler[Back] > push button[Back]",
+    "role": "push button",
+    "name": "Back",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > label[File Transfer] > label[File Transfer]",
+    "role": "label",
+    "name": "File Transfer",
+    "actions": [],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "filler[] > filler[] > filler[] > text[File Transfer]",
+    "role": "text",
+    "name": "File Transfer",
+    "text": "",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "focused",
+     "showing",
+     "editable"
+    ]
+   },
+   {
+    "path": "tool bar[] > filler[] > filler[] > push button[Send]",
+    "role": "push button",
+    "name": "Send",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   },
+   {
+    "path": "splitter[] > filler[] > filler[] > list[Messages]",
+    "role": "list",
+    "name": "Messages",
+    "actions": [
+     "SetFocus"
+    ],
+    "states": [
+     "showing"
+    ]
+   }
+  ]
+ }
+]
