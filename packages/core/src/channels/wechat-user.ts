@@ -43,7 +43,10 @@ export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
  * for the name, so a client that is already running joins live, with no
  * restart. The launcher runs without DISPLAY: with one it would also publish
  * the bus on the X root window, where Rome's browser on the same display would
- * find and join it. The registry is started up front instead of on first use.
+ * find and join it. The name can also be owned by a launcher D-Bus activated on
+ * its own, which takes IsEnabled from GSettings (usually off), so the script
+ * sets IsEnabled on every run rather than trusting ownership. The registry is
+ * started up front instead of on first use.
  */
 const START_ACCESSIBILITY = `
 [ -x "$1" ] || { echo "no accessibility launcher at $1" >&2; exit 1; }
@@ -61,6 +64,8 @@ if ! owned; then
     sleep 0.1
   done
 fi
+call --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.freedesktop.DBus.Properties.Set \\
+  string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null || exit 1
 address=$(call --session --print-reply=literal --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress) || exit 1
 call --bus="$(echo $address)" --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \\
   org.freedesktop.DBus.StartServiceByName string:org.a11y.atspi.Registry uint32:0 >/dev/null

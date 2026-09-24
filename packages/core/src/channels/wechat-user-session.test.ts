@@ -126,10 +126,31 @@ it("starts accessibility on the private session bus once, without the display", 
     expect(registryStarts).toHaveLength(2);
     expect(registryStarts[0]).toContain(`--bus=unix:path=${home}/state.a11y`);
     expect(registryStarts[0]).toContain("string:org.a11y.atspi.Registry");
+    expect(enables(await read("calls"))).toBe(2);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
+
+it("turns accessibility on when another launcher already owns the bus name", async () => {
+  const { home, runtime, read } = await accessibilityRig();
+  try {
+    // Owned by a launcher D-Bus activated on its own, with IsEnabled from GSettings.
+    await writeFile(`${home}/state.owned`, "");
+    await runtime().prepareSession();
+    expect(await read("launched")).toBe("");
+    expect(enables(await read("calls"))).toBe(1);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+function enables(calls: string): number {
+  return calls
+    .split("\n")
+    .filter((call) => call.includes("Properties.Set") && call.includes("variant:boolean:true"))
+    .length;
+}
 
 it("keeps the session usable when the image has no accessibility launcher", async () => {
   const { home, runtime, read } = await accessibilityRig();
