@@ -724,6 +724,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
+            appliedReasoningEffort: "max",
             events: (async function* (): AsyncIterable<AgentMessage> {
               yield { type: "result", content: "Fork answer" };
             })(),
@@ -748,6 +749,8 @@ describe("AgentRunner", () => {
         provider: "mock",
         providerThreadId: "fork-provider-thread",
         model: "mock-model",
+        // The branch header shows the effort its provider reported, not the model alone.
+        reasoningEffort: "max",
         status: "active",
       });
       // A fork never rewrites its parent: the source keeps its own pin.
@@ -2297,6 +2300,58 @@ describe("AgentRunner", () => {
       });
     });
 
+    it("records the effort each successful turn ran with", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "One" }],
+        [{ type: "result", content: "Two" }],
+        [{ type: "result", content: "Three" }],
+      ]);
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:effort-record",
+      });
+      const repo = new SessionsRepository(testDb.db);
+
+      // No per-turn effort falls back to the agent's configured effort.
+      await collectMessages(session.sendTurn({ prompt: "One" }).events);
+      expect((await repo.findById(session.sessionId))?.reasoningEffort).toBe("high");
+
+      await collectMessages(session.sendTurn({ prompt: "Two", reasoningEffort: "xhigh" }).events);
+      expect((await repo.findById(session.sessionId))?.reasoningEffort).toBe("xhigh");
+
+      await collectMessages(session.sendTurn({ prompt: "Three", reasoningEffort: "low" }).events);
+      expect(
+        await sessionManager.findReusableSession("webchat:effort-record", "test-main"),
+      ).toMatchObject({ model: MODEL_MAP.large, reasoningEffort: "low" });
+      await manager.shutdown();
+    });
+
+    it("records the effort the provider reports it applied, in the provider's terms", async () => {
+      // Claude runs a warm session at its open-time effort and calls it `max`.
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const open = provider.openSession.bind(provider);
+      provider.openSession = async (params) =>
+        Object.defineProperty(await open(params), "appliedReasoningEffort", { value: "max" });
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:effort-fixed",
+      });
+
+      await collectMessages(session.sendTurn({ prompt: "Go", reasoningEffort: "xhigh" }).events);
+
+      const row = await new SessionsRepository(testDb.db).findById(session.sessionId);
+      expect(row?.reasoningEffort).toBe("max");
+      await manager.shutdown();
+    });
+
     it("keeps the model pin NULL for a session whose turns never succeed", async () => {
       const failingProvider: MockModelProvider = new MockModelProvider();
       failingProvider.run = async function* () {
@@ -2312,7 +2367,7 @@ describe("AgentRunner", () => {
       if (!start || start.type !== "turn_start") return;
 
       const row = await new SessionsRepository(testDb.db).findById(start.sessionId);
-      expect(row).toMatchObject({ provider: null, model: null });
+      expect(row).toMatchObject({ provider: null, model: null, reasoningEffort: null });
     });
 
     it("ends a user-stopped turn with turn_end status=interrupted", async () => {

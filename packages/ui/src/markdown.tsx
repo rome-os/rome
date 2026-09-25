@@ -3,11 +3,18 @@
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid, type MermaidConfig } from "@streamdown/mermaid";
-import { memo, useEffect, useMemo, useState, type ComponentPropsWithoutRef } from "react";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  type ComponentPropsWithoutRef,
+} from "react";
 import { Streamdown, type Components, type MermaidOptions, type StreamdownProps } from "streamdown";
 import { cn } from "./cn.js";
 
 export type { Components, MermaidConfig, MermaidOptions, StreamdownProps };
+export { defaultUrlTransform } from "streamdown";
 
 export const MARKDOWN_LINK_CLASS = "wrap-anywhere text-primary underline";
 
@@ -94,7 +101,10 @@ export interface MarkdownThemeTokens {
 export interface MarkdownTheme {
   /**
    * Element whose CSS custom properties should seed the generated Mermaid
-   * theme. Defaults to document.documentElement.
+   * theme. Defaults to document.documentElement. Mounted instances re-resolve
+   * the theme when the root's `class`, `data-theme`, or `style` attribute
+   * changes. Changes elsewhere, such as on an ancestor or in a stylesheet, do
+   * not reach them.
    */
   root?: Element | null;
   /**
@@ -122,6 +132,7 @@ export interface MarkdownProps {
   theme?: MarkdownTheme;
   controls?: StreamdownProps["controls"];
   lineNumbers?: StreamdownProps["lineNumbers"];
+  urlTransform?: StreamdownProps["urlTransform"];
 }
 
 const STREAMDOWN_PLUGINS = { code, math, mermaid };
@@ -234,26 +245,99 @@ export function readMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
   };
 }
 
-function useMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
-  const [resolved, setResolved] = useState(() => readMarkdownMermaidTheme(theme));
+const EMPTY_MERMAID_THEME: MermaidTheme = { fontFamily: "", themeVariables: {} };
 
-  useEffect(() => {
-    const root = getThemeRoot(theme);
-    if (!root) {
-      setResolved(readMarkdownMermaidTheme(theme));
-      return;
-    }
+const THEME_ROOT_ATTRIBUTES = ["class", "data-theme", "style"];
 
-    const update = () => setResolved(readMarkdownMermaidTheme(theme));
-    update();
+interface ResolvedMermaidTheme {
+  theme: MermaidTheme;
+  stale: boolean;
+}
 
-    if (typeof MutationObserver === "undefined") return;
-    const observer = new MutationObserver(update);
-    observer.observe(root, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
-    return () => observer.disconnect();
-  }, [theme]);
+interface ThemeRootStore {
+  byTokens: Map<string, ResolvedMermaidTheme>;
+  listeners: Set<() => void>;
+  observer: MutationObserver | null;
+}
 
+// Resolving a theme reads computed style, which forces a document-wide style
+// recalc. Every mounted Markdown shares one resolution per root and token set,
+// so a transcript with N messages pays one recalc on mount instead of 2N, each
+// over a DOM that grows with every message rendered before it.
+const themeRootStores = new WeakMap<Element, ThemeRootStore>();
+
+function themeRootStore(root: Element): ThemeRootStore {
+  let store = themeRootStores.get(root);
+  if (!store) {
+    store = { byTokens: new Map(), listeners: new Set(), observer: null };
+    themeRootStores.set(root, store);
+  }
+  return store;
+}
+
+function subscribeToThemeRoot(root: Element, listener: () => void): () => void {
+  const store = themeRootStore(root);
+  store.listeners.add(listener);
+  if (!store.observer && typeof MutationObserver !== "undefined") {
+    // Entries resolved during render went unwatched until now, and a render
+    // that never committed can leave one behind, so re-validate them once.
+    for (const entry of store.byTokens.values()) entry.stale = true;
+    const observer = new MutationObserver(() => {
+      for (const entry of store.byTokens.values()) entry.stale = true;
+      for (const notify of store.listeners) notify();
+    });
+    observer.observe(root, { attributes: true, attributeFilter: THEME_ROOT_ATTRIBUTES });
+    store.observer = observer;
+  }
+  return () => {
+    store.listeners.delete(listener);
+    if (store.listeners.size > 0) return;
+    // With nothing mounted, nothing watches the root, so the next mount
+    // re-validates. Marking entries stale rather than dropping them keeps the
+    // object for sameMermaidTheme, so instances that replace these in the same
+    // commit are not re-rendered.
+    store.observer?.disconnect();
+    store.observer = null;
+    for (const entry of store.byTokens.values()) entry.stale = true;
+  };
+}
+
+function sameMermaidTheme(a: MermaidTheme, b: MermaidTheme): boolean {
+  if (a.fontFamily !== b.fontFamily) return false;
+  const keys = Object.keys(a.themeVariables);
+  return (
+    keys.length === Object.keys(b.themeVariables).length &&
+    keys.every((key) => a.themeVariables[key] === b.themeVariables[key])
+  );
+}
+
+function readSharedMermaidTheme(
+  root: Element,
+  tokensKey: string,
+  theme: MarkdownTheme | undefined,
+): MermaidTheme {
+  const { byTokens } = themeRootStore(root);
+  const cached = byTokens.get(tokensKey);
+  if (cached && !cached.stale) return cached.theme;
+  const next = readMarkdownMermaidTheme(theme);
+  // A root mutation that leaves the resolved values unchanged keeps the old
+  // object, so Streamdown sees equal props and every mounted block skips a
+  // re-render.
+  const resolved = cached && sameMermaidTheme(cached.theme, next) ? cached.theme : next;
+  byTokens.set(tokensKey, { theme: resolved, stale: false });
   return resolved;
+}
+
+function useMarkdownMermaidTheme(theme?: MarkdownTheme): MermaidTheme {
+  const root = getThemeRoot(theme);
+  const tokensKey = JSON.stringify({ ...DEFAULT_TOKENS, ...theme?.tokens });
+  const subscribe = useCallback(
+    (listener: () => void) => (root ? subscribeToThemeRoot(root, listener) : () => {}),
+    [root],
+  );
+  const getSnapshot = () =>
+    root ? readSharedMermaidTheme(root, tokensKey, theme) : EMPTY_MERMAID_THEME;
+  return useSyncExternalStore(subscribe, getSnapshot, () => EMPTY_MERMAID_THEME);
 }
 
 function mergeMermaidConfig(
@@ -286,6 +370,7 @@ function MarkdownImpl({
   theme,
   controls,
   lineNumbers,
+  urlTransform,
 }: MarkdownProps) {
   const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme);
   const mermaidOptions = useMemo<MermaidOptions>(() => {
@@ -333,6 +418,7 @@ function MarkdownImpl({
       lineNumbers={lineNumbers}
       mermaid={mermaidOptions}
       plugins={STREAMDOWN_PLUGINS}
+      urlTransform={urlTransform}
     >
       {children}
     </Streamdown>

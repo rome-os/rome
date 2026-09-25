@@ -966,6 +966,8 @@ describe("AnthropicProvider", () => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
 
       const session = await provider.openSession(buildParams({ reasoningEffort: configured }));
+      // Claude fixes effort at open and reports it in its own terms.
+      expect(session.appliedReasoningEffort).toBe(expected);
       await collectEvents(session);
       await session.close();
 

@@ -20,6 +20,7 @@
   },
   "navbar": {
     "sessionModel": "Session model: {{model}}",
+    "sessionModelWithEffort": "Session model: {{model}}, reasoning effort: {{effort}}",
     "more": "More actions",
     "pin": "Pin chat",
     "unpin": "Unpin chat",

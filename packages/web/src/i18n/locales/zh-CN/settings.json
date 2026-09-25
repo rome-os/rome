@@ -248,11 +248,30 @@
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
       "saving": "保存中…",
-      "cancel": "取消"
+      "cancel": "取消",
+      "inputMethod": "添加密钥的方式",
+      "singleKey": "单个密钥",
+      "pasteEnv": "粘贴 .env",
+      "envContent": ".env 内容",
+      "envHint": "粘贴 KEY=value 格式的内容，支持注释和带引号的值。同名密钥会被替换，变量引用会按原文保存。",
+      "envEmpty": "请粘贴至少一条 KEY=value 内容",
+      "envError": "第 {{line}} 行：{{reason}}",
+      "envErrors": {
+        "assignment": "应使用 KEY=value 格式",
+        "quote": "引号未闭合，或引号后存在多余内容",
+        "duplicate": "密钥名称重复",
+        "emptyValue": "值不能为空",
+        "longValue": "值超过 32,768 个字符",
+        "name": "密钥名称无效"
+      },
+      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。"
     },
     "saved": "已保存。应用现在可以读取 {{name}}。",
     "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
-    "removed": "已移除 {{name}}。"
+    "removed": "已移除 {{name}}。",
+    "batchSaved_one": "已为所有应用保存 {{count}} 个密钥。",
+    "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
+    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。"
   },
   "trust": {
     "title": "关系层级规则",

@@ -286,7 +286,8 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
+  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
+    useSessionIdentity(chatSessionId);
   // The chat a guardian names is the one they keep a tab on, so the name
   // outranks the route's own title. Claimed here rather than in FreePage so it
   // reads the same identity the header does, and follows a rename with it.
@@ -370,7 +371,7 @@ export function FreeGrid() {
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
                 <div className="flex min-w-0 items-center gap-2">
-                  <SessionModelLabel model={model} />
+                  <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
                   {sessionName?.trim() && pinnedAgentMention && (
                     <span className="truncate text-aux text-muted-foreground">
                       {pinnedAgentMention.appLabel}

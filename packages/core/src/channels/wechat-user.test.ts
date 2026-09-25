@@ -188,7 +188,9 @@ describe("WechatUserRuntime.start", () => {
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
     await Promise.all([runtime.start(), runtime.start()]);
     expect(await readlink(runtime.canonicalPrefix)).toBe(runtime.clientDir);
-    expect(calls.filter((call) => call.some((arg) => arg.includes("setsid")))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.some((arg) => arg.includes('setsid "$1/wechat"'))),
+    ).toHaveLength(1);
     expect(calls).toContainEqual(["pgrep", "-x", "wechat"]);
     expect(calls.some((call) => ["curl", "dpkg-deb", "pkill"].includes(call[0]!))).toBe(false);
   });

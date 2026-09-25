@@ -1349,8 +1349,9 @@ describe("CodexAppServerProvider", () => {
     });
 
     const session = await provider.openSession(buildParams());
+    expect(session.appliedReasoningEffort).toBeUndefined();
     const collected = collectUntilTerminal(session);
-    await session.sendUserInput({ text: "weather?" });
+    await session.sendUserInput({ text: "weather?", reasoningEffort: "xhigh" });
     const msgs = await collected;
 
     expect(msgs.filter((m) => m.type === "text")).toEqual([
@@ -1381,8 +1382,10 @@ describe("CodexAppServerProvider", () => {
 
     expect(requestMock).toHaveBeenCalledWith(
       "turn/start",
-      expect.objectContaining({ threadId: "thr-1", effort: "high" }),
+      expect.objectContaining({ threadId: "thr-1", effort: "xhigh" }),
     );
+    // Codex applies each turn's own effort and reports it in its own terms.
+    expect(session.appliedReasoningEffort).toBe("xhigh");
     await session.close();
   });
 

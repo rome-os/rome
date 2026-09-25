@@ -33,6 +33,44 @@ export const WECHAT_CLI_SOURCE =
 /** Where the deb is unpacked to, and the path the client insists on being at. */
 export const WECHAT_CANONICAL_PREFIX = "/opt/wechat";
 
+/** The image's AT-SPI bus launcher (Debian `at-spi2-core`). */
+export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
+
+/**
+ * Starts accessibility on the client's private session bus: $1 is the launcher.
+ * The launcher owns `org.a11y.Bus` there, answers IsEnabled, and runs the
+ * accessibility bus the client's Qt AT-SPI bridge joins. That bridge watches
+ * for the name, so a client that is already running joins live, with no
+ * restart. The launcher runs without DISPLAY: with one it would also publish
+ * the bus on the X root window, where Rome's browser on the same display would
+ * find and join it. The name can also be owned by a launcher D-Bus activated on
+ * its own, which takes IsEnabled from GSettings (usually off), so the script
+ * sets IsEnabled on every run rather than trusting ownership. The registry is
+ * started up front instead of on first use.
+ */
+const START_ACCESSIBILITY = `
+[ -x "$1" ] || { echo "no accessibility launcher at $1" >&2; exit 1; }
+call() { dbus-send --reply-timeout=2000 "$@"; }
+owned() {
+  call --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \\
+    org.freedesktop.DBus.NameHasOwner string:org.a11y.Bus 2>/dev/null | grep -q 'boolean true'
+}
+if ! owned; then
+  env -u DISPLAY -u WAYLAND_DISPLAY setsid "$1" --launch-immediately --a11y=1 >/dev/null 2>&1 </dev/null &
+  i=0
+  until owned; do
+    i=$((i + 1))
+    [ "$i" -lt 50 ] || { echo "org.a11y.Bus did not appear" >&2; exit 1; }
+    sleep 0.1
+  done
+fi
+call --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.freedesktop.DBus.Properties.Set \\
+  string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null || exit 1
+address=$(call --session --print-reply=literal --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress) || exit 1
+call --bus="$(echo $address)" --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \\
+  org.freedesktop.DBus.StartServiceByName string:org.a11y.atspi.Registry uint32:0 >/dev/null
+`;
+
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 /** Installing downloads and unpacks the better part of a gigabyte. */
@@ -204,6 +242,8 @@ export interface WechatUserRuntimeConfig {
   canonicalPrefix?: string;
   /** Private session directory owned by the runtime user. */
   runtimeDir?: string;
+  /** The AT-SPI bus launcher; injectable so tests need no real one. */
+  accessibilityLauncher?: string;
   run?: RunCommand;
 }
 
@@ -233,6 +273,7 @@ export class WechatUserRuntime {
   readonly display: string;
   readonly canonicalPrefix: string;
   readonly runtimeDir: string;
+  readonly accessibilityLauncher: string;
   private readonly run: RunCommand;
   private starting: Promise<void> | null = null;
 
@@ -242,6 +283,7 @@ export class WechatUserRuntime {
     this.display = config.display ?? process.env.DISPLAY ?? ":99";
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
     this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
+    this.accessibilityLauncher = config.accessibilityLauncher ?? ACCESSIBILITY_LAUNCHER;
     this.run = config.run ?? runCommand;
   }
 
@@ -520,14 +562,21 @@ export class WechatUserRuntime {
     };
   }
 
-  /** Prepare the private session bus before ordinary startup or key capture. */
+  /**
+   * Prepare the private session bus before ordinary startup or key capture, and
+   * keep accessibility on it for the client's lifetime. Idempotent: the
+   * connection's health probe calls it for a client that is already running.
+   */
   async prepareSession(): Promise<void> {
     await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
     const result = await this.run(
       "sh",
       [
         "-c",
-        'test -S "$1/bus" || exec dbus-daemon --session --fork --address="unix:path=$1/bus"',
+        // Without DISPLAY: services this bus activates inherit its environment,
+        // and an activated AT-SPI launcher would publish the accessibility bus
+        // on the X root window.
+        'test -S "$1/bus" || exec env -u DISPLAY dbus-daemon --session --fork --address="unix:path=$1/bus"',
         "wechat-session",
         this.runtimeDir,
       ],
@@ -537,6 +586,25 @@ export class WechatUserRuntime {
       throw new WechatUserRuntimeError(
         `Could not start the WeChat session bus: ${result.stderr.trim()}`,
       );
+    }
+    await this.ensureAccessibility();
+  }
+
+  /** Turn accessibility on for the session bus, which must already exist.
+   *  Reading and login need no accessibility, so this never throws: a failure
+   *  is logged. Sending checks for the tree itself and reports it as not ready. */
+  async ensureAccessibility(): Promise<void> {
+    const started = await this.run(
+      "sh",
+      ["-c", START_ACCESSIBILITY, "wechat-accessibility", this.accessibilityLauncher],
+      { env: this.clientEnv(), timeoutMs: 15_000 },
+    ).catch((error: unknown) => ({
+      code: null,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+    }));
+    if (started.code !== 0) {
+      log.warn("wechat_user.accessibility_unavailable", { stderr: started.stderr.trim() });
     }
   }
 

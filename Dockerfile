@@ -217,6 +217,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # X and GL stack; this is only the remainder.
 #
 # Key recovery launches the client under gdb as the Rome service user.
+# Sending drives the client through its AT-SPI accessibility tree: at-spi2-core
+# runs the accessibility bus beside the client's private session bus, jeepney
+# reads the tree, and xdotool clicks and presses Return where the tree has no
+# action.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -224,7 +228,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb x11-utils imagemagick
+      python3-venv gdb x11-utils imagemagick \
+      at-spi2-core xdotool python3-jeepney
 
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the

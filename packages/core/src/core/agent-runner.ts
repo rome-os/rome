@@ -252,6 +252,13 @@ export interface ModelSessionFork {
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
+  /**
+   * Effort the provider applied to its most recent turn, in the provider's
+   * own terminology (for example Claude's `max`, Codex's `xhigh`). A provider
+   * that fixes effort when the session opens may report it before the first
+   * turn. Unset when the provider reports none.
+   */
+  readonly appliedReasoningEffort?: string;
   /** A disposed provider execution must be reopened before another turn. */
   readonly isClosed?: boolean;
   /** Single, lifetime stream of AgentMessages produced by the provider. */
@@ -331,10 +338,15 @@ export function createSessionFromRun(
     },
   };
 
+  let appliedReasoningEffort: string | undefined;
+
   return {
     providerId,
     model: params.model,
     events,
+    get appliedReasoningEffort(): string | undefined {
+      return appliedReasoningEffort;
+    },
     async sendUserInput(input: ModelUserInput): Promise<void> {
       // ModelRunParams is a per-turn snapshot for legacy `run()`-based mock
       // providers — call the getters here so each turn sees the current view.
@@ -358,6 +370,7 @@ export function createSessionFromRun(
         executeSubagent: params.executeSubagent,
         executeSubmitOutput: params.executeSubmitOutput,
       };
+      appliedReasoningEffort = runParams.reasoningEffort;
       for await (const msg of run(runParams)) {
         emit(msg);
       }

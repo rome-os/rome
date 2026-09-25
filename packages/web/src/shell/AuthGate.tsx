@@ -91,6 +91,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return null;
   }
   if (routeAppId && currentPublicAppProbe?.isPublic) {
+    // A visitor gets the app standalone. The embedded route sits in the
+    // guardian's shell, whose sidebar means nothing to them, and a guardian
+    // copying the address bar shares that route.
+    if (!hasSession(state.bootstrap) && location.pathname.startsWith("/apps/")) {
+      return (
+        <Navigate to={`/full${location.pathname}${location.search}${location.hash}`} replace />
+      );
+    }
     return <>{children}</>;
   }
 

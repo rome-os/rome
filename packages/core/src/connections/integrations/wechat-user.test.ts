@@ -52,6 +52,7 @@ function fakeRuntime(opts: {
     install: rs.fn(async () => {}),
     installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
+    ensureAccessibility: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     start: rs.fn(async () => {}),
     stop: rs.fn(async () => {}),
@@ -331,6 +332,33 @@ describe("the WeChat personal Talker", () => {
       await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
       expect(fault).not.toHaveBeenCalled();
       expect(runtime.installReader).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("turns accessibility on for a client that is already running", async () => {
+    const runtime = fakeRuntime({ statuses: [READY] });
+    rs.mocked(runtime.prepareSession).mockRejectedValue(new Error("dbus-daemon failed"));
+    const { talker, degradation } = buildTalker(runtime);
+    try {
+      await rs.waitFor(() => expect(runtime.ensureAccessibility).toHaveBeenCalledTimes(1));
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      expect(runtime.prepareSession).not.toHaveBeenCalled();
+      expect(runtime.start).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("leaves accessibility to start() for a client the probe restarts", async () => {
+    const runtime = fakeRuntime({ statuses: [{ ...READY, running: false }, READY] });
+    const { talker, degradation } = buildTalker(runtime);
+    try {
+      await rs.waitFor(() => expect(degradation()).toBeNull());
+      expect(runtime.start).toHaveBeenCalledTimes(1);
+      expect(runtime.prepareSession).not.toHaveBeenCalled();
+      expect(runtime.ensureAccessibility).not.toHaveBeenCalled();
     } finally {
       await talker.stop();
     }

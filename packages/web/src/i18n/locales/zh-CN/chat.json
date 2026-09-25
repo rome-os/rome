@@ -20,6 +20,7 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
+    "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",

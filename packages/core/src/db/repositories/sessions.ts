@@ -146,6 +146,10 @@ export class SessionsRepository {
       .where(eq(sessions.id, id));
   }
 
+  async setReasoningEffort(id: string, reasoningEffort: string): Promise<void> {
+    await this.db.update(sessions).set({ reasoningEffort }).where(eq(sessions.id, id));
+  }
+
   async setTurnCheckpoint(input: StoredSessionTurnCheckpoint): Promise<void> {
     await this.db
       .insert(sessionTurnCheckpoints)

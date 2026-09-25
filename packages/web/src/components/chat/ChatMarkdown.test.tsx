@@ -32,6 +32,29 @@ function Message({ text, chat = true }: { text: string; chat?: boolean }) {
   );
 }
 
+describe("ChatMarkdown file images", () => {
+  it("keeps unsafe URL protocols out of rendered images and links", () => {
+    const { container } = render(
+      <Message text={"![Unsafe](javascript:alert%281%29)\n\n[Unsafe](javascript:alert%281%29)"} />,
+    );
+    expect(container.querySelector('[src^="javascript:"], [href^="javascript:"]')).toBeNull();
+  });
+
+  it.each([true, false])("renders file images through the asset API (chat=%s)", (chat) => {
+    const path = "projects/demo/调色版/image one.png";
+    render(<Message chat={chat} text={`![Preview](</${path}>)\n\n[Open file](</${path}>)`} />);
+
+    const image = screen.getByRole("img", { name: "Preview" }) as HTMLImageElement;
+    const source = new URL(image.src);
+    expect(source.pathname).toBe("/api/projects/asset/image%20one.png");
+    expect(source.searchParams.get("path")).toBe(path);
+    expect(screen.getByRole("link", { name: "Open file" }).getAttribute("href")).toBe(
+      "/projects/demo/%E8%B0%83%E8%89%B2%E7%89%88/image%20one.png",
+    );
+    expect(screen.queryByText("Image not available")).toBeNull();
+  });
+});
+
 describe("ChatMarkdown hexadecimal color previews", () => {
   it("previews complete three- and six-digit inline-code colors", () => {
     const { container } = render(<Message text={"Colors: `#fdfcf9`, `#abc`, and `#A1b2C3`."} />);

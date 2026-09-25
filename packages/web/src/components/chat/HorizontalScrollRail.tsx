@@ -12,6 +12,36 @@ export interface HorizontalScrollRailProps {
   id: string;
 }
 
+// Pixels per wheel step in the line delta mode. Chromium reports pixels, and
+// Firefox reports lines for a wheel mouse.
+const LINE_HEIGHT_PX = 16;
+
+// A wheel mouse reports `deltaY` and no `deltaX`, and Chromium and WebKit do
+// not map it onto a horizontal-only scroller, so the wheel scrolls the nearest
+// vertical ancestor while the rail, with its scrollbar hidden, offers a mouse
+// no other way to reach the clipped cards. This maps a dominant-vertical delta
+// onto `scrollLeft` and returns whether the rail consumed the event. A
+// trackpad's horizontal swipe, pinch-zoom (`ctrlKey`), and a wheel at either
+// end of the rail pass through so the page keeps scrolling.
+function scrollRailByWheel(rail: HTMLElement, event: WheelEvent): boolean {
+  if (event.ctrlKey) return false;
+  if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return false;
+  const maxScrollLeft = rail.scrollWidth - rail.clientWidth;
+  if (maxScrollLeft <= 0) return false;
+  const unit =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? LINE_HEIGHT_PX
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? rail.clientWidth
+        : 1;
+  const delta = event.deltaY * unit;
+  const atStart = delta < 0 && rail.scrollLeft <= 0;
+  const atEnd = delta > 0 && rail.scrollLeft >= maxScrollLeft - 1;
+  if (atStart || atEnd) return false;
+  rail.scrollLeft = Math.max(0, Math.min(maxScrollLeft, rail.scrollLeft + delta));
+  return true;
+}
+
 export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -51,6 +81,18 @@ export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps
       window.removeEventListener("resize", updateEdges);
     };
   }, [children, updateEdges]);
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    // React registers `onWheel` as a passive listener, which cannot cancel the
+    // page scroll, so the rail attaches its own non-passive one.
+    const onWheel = (event: WheelEvent) => {
+      if (scrollRailByWheel(rail, event)) event.preventDefault();
+    };
+    rail.addEventListener("wheel", onWheel, { passive: false });
+    return () => rail.removeEventListener("wheel", onWheel);
+  }, []);
 
   return (
     <div className="relative overflow-visible">
