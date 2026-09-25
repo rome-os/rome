@@ -144,6 +144,17 @@ function isResultSuccess(result: SDKResultMessage): result is SDKResultSuccess {
   return result.subtype === "success";
 }
 
+// A result for a turn the SDK started from its own queue consumed no user
+// send, so it echoes no user_message_uuid, and its origin names the injector.
+// On resume the SDK injects a stopped-background-task notification ahead of
+// the host's prompt and answers it with an empty, zero-token result
+// (rome-os/rome#510). A result without an origin gets no such attribution and
+// keeps closing the turn.
+function isSdkInitiatedResult(result: SDKResultMessage): boolean {
+  if (result.user_message_uuid || result.user_message_uuids?.length) return false;
+  return result.origin !== undefined && result.origin.kind !== "human";
+}
+
 function isTextBlock(block: AssistantContentBlock): block is BetaTextBlock {
   return block.type === "text";
 }
@@ -693,6 +704,22 @@ export class AnthropicProvider implements ModelProvider {
               yield toolResult;
             }
           } else if (isResultMessage(message)) {
+            // Rome's prompt is still queued behind this SDK-initiated turn,
+            // and its own result follows. Closing the Rome turn here would
+            // return an empty reply while the prompt runs with no listener.
+            if (running && isSdkInitiatedResult(message)) {
+              log.info("skipping result of an SDK-initiated turn", {
+                subtype: message.subtype,
+                origin: message.origin?.kind,
+                numTurns: message.num_turns,
+              });
+              if (!params.outputSchema && pendingText !== null) {
+                yield { type: "text", content: pendingText, turnPhase: "commentary" };
+                pendingText = null;
+              }
+              partialText = "";
+              continue;
+            }
             running = false;
             // The SDK owns these queued messages already. Rebind them to a
             // new Rome turn before allowing its next UserPromptSubmit hook.

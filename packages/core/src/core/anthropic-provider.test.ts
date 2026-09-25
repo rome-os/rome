@@ -193,6 +193,117 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  describe("SDK-initiated turns", () => {
+    const promptId = "00000000-0000-4000-8000-000000000003";
+    // Shape captured from claude-agent-sdk 0.3.281 on resume of a session
+    // whose previous process left a background Bash command running.
+    const notificationResult = {
+      type: "result",
+      subtype: "success",
+      result: "",
+      num_turns: 0,
+      stop_reason: null,
+      total_cost_usd: 9.26,
+      duration_ms: 1,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      origin: { kind: "task-notification" },
+    };
+
+    function mockResumeWithNotification(sdkTurn: unknown[], promptResult: unknown) {
+      queryMock.mockImplementation(({ prompt }) => ({
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          const first = (await inputs.next()).value;
+          yield {
+            type: "system",
+            subtype: "task_notification",
+            task_id: "bd5i7ugc9",
+            status: "stopped",
+            output_file: "",
+            summary: "Background shell command didn't finish before the previous session ended",
+          };
+          yield* sdkTurn;
+          yield notificationResult;
+          yield { ...first, isReplay: true };
+          yield { type: "assistant", message: { content: [{ type: "text", text: "PONG" }] } };
+          yield promptResult;
+        },
+        close: rs.fn(),
+      }));
+    }
+
+    const pongResult = {
+      type: "result",
+      subtype: "success",
+      result: "PONG",
+      num_turns: 1,
+      stop_reason: "end_turn",
+      total_cost_usd: 9.3,
+      duration_ms: 1,
+      user_message_uuid: promptId,
+      user_message_uuids: [promptId],
+    };
+
+    it("waits past an injected notification's result for the prompt's own result", async () => {
+      mockResumeWithNotification([], pongResult);
+      const session = await new AnthropicProvider().openSession(
+        buildParams({ isNewSession: false, providerThreadId: "thread-1" }),
+      );
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: promptId });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type === "result")).toEqual([
+        expect.objectContaining({ type: "result", content: "PONG" }),
+      ]);
+      expect(messages.at(-1)).toMatchObject({ type: "result", content: "PONG" });
+    });
+
+    it("surfaces an injected turn's closing text as commentary, not the answer", async () => {
+      mockResumeWithNotification(
+        [
+          {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "No response requested." }] },
+          },
+        ],
+        pongResult,
+      );
+      const session = await new AnthropicProvider().openSession(
+        buildParams({ isNewSession: false, providerThreadId: "thread-1" }),
+      );
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: promptId });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type === "text")).toEqual([
+        { type: "text", content: "No response requested.", turnPhase: "commentary" },
+        { type: "text", content: "PONG", turnPhase: "final" },
+      ]);
+    });
+
+    it("closes the turn on a notification-origin result that consumed the prompt", async () => {
+      mockQuery([
+        { ...notificationResult, result: "folded", user_message_uuids: [promptId] },
+        pongResult,
+      ]);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: promptId });
+      const events = session.events[Symbol.asyncIterator]();
+      expect((await events.next()).value).toMatchObject({ type: "result", content: "folded" });
+      await session.close();
+    });
+
+    it("passes an injected turn's result through when no prompt is outstanding", async () => {
+      mockQuery([notificationResult]);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages).toEqual([expect.objectContaining({ type: "result", content: "" })]);
+    });
+  });
+
   beforeEach(() => {
     rs.clearAllMocks();
     markAnthropicAuthRevokedMock.mockResolvedValue(undefined);
