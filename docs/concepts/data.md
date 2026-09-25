@@ -26,7 +26,7 @@ Projects are working directories where the agent does its work — writing code,
 - The first paragraph supplies the summary, capped at 160 Unicode code points including a trailing ellipsis when truncated. Separate this short introduction from detailed notes with a blank line. Consecutive list items without blank lines count as one paragraph.
 - Detailed notes remain available on demand and stay out of the automatic project context.
 - A blocking `summon` starts its agent in the project of the session that called it. The summon can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts. Agents that other actions run start in the default project unless the action names a directory.
-- A resumed agent session reopens in the directory it last ran in, because the model provider keeps its transcript per directory. A caller that names another directory moves the session there. When the recorded directory no longer exists, resuming that session by id fails, and a thread that reuses its session implicitly starts a fresh session in the default project.
+- A resumed agent session reopens in the directory it last ran in, because the model provider keeps its transcript per directory. A caller that names another directory moves the session there. When the recorded directory is missing, resuming that session by id fails, and a thread that reuses its session implicitly starts a fresh session in the default project.
 
 **Not to be confused with:**
 
