@@ -349,6 +349,47 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("returns the gate permit a skipped model-calling notification turn took", async () => {
+      // claude-agent-sdk 0.3.281 runs UserPromptSubmit for a notification turn
+      // that calls the model (a background task that completed while idle).
+      let promptPassedGate = false;
+      queryMock.mockImplementation(({ prompt, options }) => ({
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          const hook = options.hooks.UserPromptSubmit[0].hooks[0];
+          const signal = new AbortController().signal;
+          await hook({}, undefined, { signal });
+          yield { type: "assistant", message: { content: [{ type: "text", text: "FINISHED" }] } };
+          yield { ...notificationResult, result: "FINISHED", num_turns: 1 };
+          const sent = (await inputs.next()).value;
+          await hook({}, undefined, { signal });
+          promptPassedGate = true;
+          yield { ...sent, isReplay: true };
+          yield pongResult;
+        },
+        close: rs.fn(),
+      }));
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: promptId });
+      const events = session.events[Symbol.asyncIterator]();
+      const received: AgentMessage[] = [];
+      for (;;) {
+        const next = await Promise.race([
+          events.next(),
+          new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 500)),
+        ]);
+        if (next === "stalled" || next.done) break;
+        received.push(next.value);
+        if (next.value.type === "result") break;
+      }
+      await session.close();
+
+      expect(promptPassedGate).toBe(true);
+      expect(received.filter((m) => m.type === "result")).toEqual([
+        expect.objectContaining({ type: "result", content: "PONG" }),
+      ]);
+    });
+
     it("passes an injected turn's result through when no prompt is outstanding", async () => {
       mockQuery([notificationResult]);
       const session = await new AnthropicProvider().openSession(buildParams());

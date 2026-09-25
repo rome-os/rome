@@ -734,6 +734,11 @@ export class AnthropicProvider implements ModelProvider {
                 pendingText = null;
               }
               partialText = "";
+              // A model-calling notification turn passes the UserPromptSubmit
+              // gate and takes the permit this turn's prompt was granted. The
+              // prompt has not reached the gate yet (its result would echo its
+              // uuid), so a spent permit was spent by the injected turn.
+              if (promptPermits === 0) permitPrompt();
               continue;
             }
             running = false;
