@@ -114,11 +114,53 @@ describe("initAnalytics with a measurement id", () => {
     trackAppOpen("morning-brief", "inline");
     trackWidgetRender("morning-brief");
     expect(eventsNamed("rome_app_open")).toEqual([
-      ["event", "rome_app_open", { app_id: "morning-brief", surface: "inline" }],
+      [
+        "event",
+        "rome_app_open",
+        { app_id: "morning-brief", surface: "inline", visitor_email: "guest" },
+      ],
     ]);
     expect(eventsNamed("rome_widget_render")).toEqual([
       ["event", "rome_widget_render", { app_id: "morning-brief" }],
     ]);
+  });
+
+  it("records the visitor for each open without carrying identity into the next open", async () => {
+    window.__ROME_RUNTIME_CONFIG__ = { gaMeasurementId: "G-TEST1" };
+    const { initAnalytics, trackAppOpen } = await loadAnalytics();
+    initAnalytics();
+    trackAppOpen("morning-brief", "embedded", "visitor@example.com");
+    trackAppOpen("morning-brief", "full");
+    trackAppOpen("morning-brief", "inline", "another@example.com");
+    expect(eventsNamed("rome_app_open")).toEqual([
+      [
+        "event",
+        "rome_app_open",
+        { app_id: "morning-brief", surface: "embedded", visitor_email: "visitor@example.com" },
+      ],
+      [
+        "event",
+        "rome_app_open",
+        { app_id: "morning-brief", surface: "full", visitor_email: "guest" },
+      ],
+      [
+        "event",
+        "rome_app_open",
+        { app_id: "morning-brief", surface: "inline", visitor_email: "another@example.com" },
+      ],
+    ]);
+  });
+
+  it.each([null, "", "   "])("records guest when the visitor email is %j", async (email) => {
+    window.__ROME_RUNTIME_CONFIG__ = { gaMeasurementId: "G-TEST1" };
+    const { initAnalytics, trackAppOpen } = await loadAnalytics();
+    initAnalytics();
+    trackAppOpen("morning-brief", "full", email);
+    expect(eventsNamed("rome_app_open")[0]?.[2]).toEqual({
+      app_id: "morning-brief",
+      surface: "full",
+      visitor_email: "guest",
+    });
   });
 });
 
