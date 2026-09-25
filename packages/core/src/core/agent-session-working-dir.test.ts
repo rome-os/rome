@@ -180,6 +180,48 @@ describe("AgentSessionManager working dirs", () => {
     );
   });
 
+  it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
+    const firstDir = join(directory, "first");
+    const secondDir = join(directory, "second");
+    const thirdDir = join(directory, "third");
+    await Promise.all([mkdir(firstDir), mkdir(secondDir), mkdir(thirdDir)]);
+    const key = { agentName: AGENT, channelThreadKey: "webchat:moved" };
+    const original = await manager.acquire(key, { workingDir: firstDir });
+    const sessionId = original.sessionId;
+    await original.close("idle");
+
+    const byId = await manager.acquireBySessionId!(sessionId, AGENT, { workingDir: secondDir });
+    await byId.close("idle");
+    expect((await sessionsRepo.findById(sessionId))?.workingDir).toBe(secondDir);
+
+    const byKey = await manager.acquire(key, { workingDir: thirdDir });
+    await byKey.close("idle");
+    expect((await sessionsRepo.findById(sessionId))?.workingDir).toBe(thirdDir);
+
+    await manager.acquireBySessionId!(sessionId, AGENT);
+    expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(thirdDir);
+  });
+
+  it("starts a fresh generation when a keyed reuse finds its recorded dir gone", async () => {
+    const projectDir = join(directory, "deleted-later");
+    await mkdir(projectDir);
+    const key = { agentName: AGENT, channelThreadKey: "inbox:telegram:thread-2" };
+    const original = await manager.acquire(key, { workingDir: projectDir });
+    await original.close("idle");
+    await rm(projectDir, { recursive: true });
+
+    const fresh = await manager.acquire(key);
+
+    expect(fresh.sessionId).not.toBe(original.sessionId);
+    expect(manager.findWorkingDirBySessionId!(fresh.sessionId)).toBe(
+      join(directory, "projects", "default"),
+    );
+    expect((await sessionsRepo.findById(original.sessionId))?.status).toBe("completed");
+    expect((await sessionsRepo.findById(fresh.sessionId))?.workingDir).toBe(
+      join(directory, "projects", "default"),
+    );
+  });
+
   it("resumes a legacy session with no recorded working dir in the default project", async () => {
     await sessionsRepo.create({
       id: "legacy-session",
@@ -190,6 +232,9 @@ describe("AgentSessionManager working dirs", () => {
     await manager.acquireBySessionId!("legacy-session", AGENT);
 
     expect(manager.findWorkingDirBySessionId!("legacy-session")).toBe(
+      join(directory, "projects", "default"),
+    );
+    expect((await sessionsRepo.findById("legacy-session"))?.workingDir).toBe(
       join(directory, "projects", "default"),
     );
   });

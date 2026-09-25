@@ -767,19 +767,14 @@ function resolveSelectionFromChannelThreadKey(
   );
 }
 
-async function reopenRecordedWorkingDir(sessionId: string, recorded: string): Promise<string> {
+/** The recorded dir when it still exists, else undefined. The default project is recreated. */
+async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
   const isDirectory = await stat(recorded).then(
     (entry) => entry.isDirectory(),
     () => false,
   );
-  if (!isDirectory) {
-    throw new Error(
-      `Agent session "${sessionId}" ran in "${recorded}", which no longer exists; ` +
-        "it cannot be resumed there",
-    );
-  }
-  return recorded;
+  return isDirectory ? recorded : undefined;
 }
 
 async function openSession(
@@ -831,14 +826,41 @@ async function openSession(
     );
   }
 
-  const sessionId = init.preparedSessionId ?? resumeResult?.id ?? uuidv4();
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
   // was written unless the caller names a dir. Legacy rows record none.
+  let preparedSessionId = init.preparedSessionId;
+  let recordedWorkingDir: string | undefined;
+  if (init.workingDir === undefined && resumeResult?.workingDir) {
+    recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
+    if (!recordedWorkingDir) {
+      // The transcript is unreachable. An explicit resume names that exact
+      // conversation, so it fails. An implicit reuse by channel-thread key
+      // retires the row and starts a fresh generation, so the thread keeps working.
+      if (init.resumeSessionId) {
+        throw new Error(
+          `Agent session "${resumeResult.id}" ran in "${resumeResult.workingDir}", which no ` +
+            "longer exists; it cannot be resumed there",
+        );
+      }
+      log.warn("agent session working dir is gone; starting a fresh generation", {
+        sessionId: resumeResult.id,
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        workingDir: resumeResult.workingDir,
+      });
+      const replacement = await deps.sessionManager.rotateProviderGeneration({
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        newSessionId: uuidv4(),
+      });
+      preparedSessionId = replacement.id;
+      resumeResult = undefined;
+    }
+  }
+
+  const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv4();
   const workingDir =
-    init.workingDir ??
-    (resumeResult?.workingDir
-      ? await reopenRecordedWorkingDir(sessionId, resumeResult.workingDir)
-      : await ensureDefaultAgentWorkingDir());
+    init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   const romeSessionId = requestedRomeSessionId;
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
@@ -857,7 +879,7 @@ async function openSession(
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
-  if (isNewSession && !init.preparedSessionId) {
+  if (isNewSession && !preparedSessionId) {
     const dbSession: DbAgentSession = {
       id: sessionId,
       agentName: key.agentName,
@@ -868,7 +890,7 @@ async function openSession(
       status: "active",
     };
     await deps.sessionManager.createSession(dbSession);
-  } else if (init.preparedSessionId) {
+  } else if (preparedSessionId) {
     await deps.sessionManager.setWorkingDir(sessionId, workingDir);
   }
 
@@ -1604,6 +1626,11 @@ async function openSession(
       resumeResult?.provider,
       providerThreadId,
     );
+  }
+  // A resume the caller moved to another dir now writes its transcript there,
+  // so the row follows it once the provider has opened.
+  if (resumeResult && resumeResult.workingDir !== workingDir) {
+    await deps.sessionManager.setWorkingDir(sessionId, workingDir);
   }
 
   impl = new AgentSessionImpl({
