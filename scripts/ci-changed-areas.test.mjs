@@ -3,11 +3,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { AREA_PATHS, AREAS, allAreas, areasForFiles } from "./ci-changed-areas.mjs";
 
-/**
- * Repo root, resolved from the module URL. These tests run on whatever node the
- * runner ships, before `setup-node` pins the version the rest of the repo
- * builds against, so they carry no floor beyond ES modules themselves.
- */
+/** Repo root, resolved from the module URL. */
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TEST_CONFIGS = [
   "rstest.config.ts",
@@ -22,6 +18,17 @@ test("a change confined to core's own package leaves the other shards idle", () 
     web: false,
     rest: false,
   });
+});
+
+test("a change to either suite launcher runs every shard", () => {
+  // Both wrappers sit in the execution path of every suite: test-env.sh fixes
+  // the environment a suite runs with, ci-env.sh is the shell CI launches it
+  // from. `scripts/` alone claims only core and rest, so the web shard has to
+  // name them or a wrapper-only change reports a green web check over a suite
+  // that never ran.
+  for (const launcher of ["scripts/test-env.sh", "scripts/ci-env.sh"]) {
+    assert.deepEqual(areasForFiles([launcher]), allAreas(), `${launcher} skips a shard`);
+  }
 });
 
 test("a kit change runs the web shard and the token gates that walk the kit", () => {
@@ -217,12 +224,20 @@ test("each shard job guards its steps on its own detection output", async () => 
       assert.equal(key, shard, `the ${shard} job guards a step on steps.areas.outputs.${key}`);
     }
 
-    // pnpm/action-setup, setup-node, install, and the suite itself. A guard
-    // dropped from any of them runs that step on a shard meant to stay idle.
+    // The flake environment also runs the detector, so only the workspace
+    // install and the suite stay behind the area guard.
     assert.equal(
       runGuards.length,
-      4,
-      `the ${shard} job has ${runGuards.length} guarded steps, want 4`,
+      2,
+      `the ${shard} job has ${runGuards.length} guarded steps, want 2`,
+    );
+
+    const setupIndex = body.findIndex((line) => line.includes("./.github/actions/setup-ci"));
+    const detectorIndex = body.findIndex((line) => line.includes("id: areas"));
+    assert.ok(setupIndex >= 0, `the ${shard} job does not set up the flake environment`);
+    assert.ok(
+      setupIndex < detectorIndex,
+      `the ${shard} job runs detection before setting up the flake environment`,
     );
 
     assert.ok(
@@ -236,6 +251,118 @@ test("each shard job guards its steps on its own detection output", async () => 
     );
   }
 });
+
+// The flake shell is entered per step, not per job, so the invariant "CI runs
+// the toolchain flake.nix declares" is carried by a prefix on every `run:`.
+// A step that omits it still passes — ubuntu-latest ships its own node, npm,
+// and corepack pnpm — and reintroduces the dev/CI divergence silently. Assert
+// the prefix rather than trusting review to catch a missing one.
+//
+// Two things are allowed to run outside the shell: `nix` itself, which is what
+// enters it, and the shell builtins the no-verdict guards use, which need no
+// toolchain at all.
+// Jobs that run outside the flake shell on purpose, with the reason the file
+// itself documents. Checking only the jobs that set the shell up would let the
+// regression this test exists to catch — a job that forgot to — pass it.
+const JOBS_OUTSIDE_THE_SHELL = new Map([
+  ["layout-invariants", "runs in Playwright's image for the browsers, which ships no Nix"],
+]);
+const WRAPPER_PREFIXES = ["scripts/ci-env.sh ", '"$GITHUB_WORKSPACE/scripts/ci-env.sh" '];
+const OUTSIDE_SHELL = [/^nix\s/, /^echo\s/, /^exit\s/, /^set\s/];
+
+/** Strips the single quotes YAML needs around a command that starts with `"`. */
+function unquote(value) {
+  return value.startsWith("'") && value.endsWith("'") ? value.slice(1, -1) : value;
+}
+
+/** Every `run:` command in ci.yml-shaped workflows, grouped by job. */
+async function jobRunCommands(workflow) {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const lines = readFileSync(join(REPO_ROOT, ".github", "workflows", workflow), "utf8").split("\n");
+
+  const jobs = new Map();
+  let current = null;
+  let block = null;
+  // `on:` nests keys at the same indentation jobs use, so only the `jobs:`
+  // mapping counts — otherwise `push:` and `schedule:` read as jobs.
+  let inJobs = false;
+
+  for (const line of lines) {
+    if (block) {
+      // A block scalar runs until the indentation returns to the `run:` key.
+      const indent = line.search(/\S/);
+      if (line.trim() === "" || indent > block.indent) {
+        if (line.trim() !== "" && !line.trim().startsWith("#")) block.commands.push(line.trim());
+        continue;
+      }
+      block = null;
+    }
+
+    if (/^\S/.test(line)) {
+      inJobs = line.startsWith("jobs:");
+      current = null;
+      continue;
+    }
+
+    const header = line.match(/^ {2}([\w-]+):\s*$/);
+    if (header) {
+      current = inJobs ? header[1] : null;
+      if (current) jobs.set(current, { setsUpFlake: false, commands: [] });
+      continue;
+    }
+    if (!current) continue;
+
+    const job = jobs.get(current);
+    if (line.includes("./.github/actions/setup-ci")) job.setsUpFlake = true;
+
+    // Both spellings of the key: `- run:` opens a step, `run:` continues one.
+    const run = line.match(/^(\s*(?:-\s+)?)run: (.*)$/);
+    if (!run) continue;
+    if (run[2].trim() === "|" || run[2].trim() === ">") {
+      block = { indent: run[1].length, commands: job.commands };
+      continue;
+    }
+    job.commands.push(unquote(run[2].trim()));
+  }
+
+  return jobs;
+}
+
+for (const workflow of ["ci.yml", "mobile-ci.yml", "nightly.yml"]) {
+  test(`every ${workflow} step in a flake job runs through scripts/ci-env.sh`, async () => {
+    const jobs = await jobRunCommands(workflow);
+    assert.ok(
+      [...jobs.values()].some((job) => job.setsUpFlake),
+      `${workflow} sets up the flake environment in no job`,
+    );
+
+    for (const [name, job] of jobs) {
+      if (!job.setsUpFlake) {
+        assert.ok(
+          JOBS_OUTSIDE_THE_SHELL.has(name),
+          `${workflow} job ${name} never sets up the flake environment, so every step ` +
+            "in it takes the runner's own toolchain. Add ./.github/actions/setup-ci, or " +
+            "record the job in JOBS_OUTSIDE_THE_SHELL with the reason it cannot.",
+        );
+        continue;
+      }
+      assert.ok(
+        !JOBS_OUTSIDE_THE_SHELL.has(name),
+        `${workflow} job ${name} is recorded as running outside the flake shell but sets it up`,
+      );
+      for (const command of job.commands) {
+        const wrapped = WRAPPER_PREFIXES.some((prefix) => command.startsWith(prefix));
+        const bootstrap = OUTSIDE_SHELL.some((pattern) => pattern.test(command));
+        assert.ok(
+          wrapped || bootstrap,
+          `${workflow} job ${name} runs \`${command}\` outside the flake shell — ` +
+            "prefix it with scripts/ci-env.sh, or it takes the runner's own toolchain",
+        );
+      }
+    }
+  });
+}
 
 /**
  * Trees a shard collects tests from that lie outside the packages it filters

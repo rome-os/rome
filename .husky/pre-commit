@@ -13,4 +13,14 @@ if [ ! -x node_modules/.bin/lint-staged ]; then
   exit 0
 fi
 
+# Biome comes from the Nix shell rather than node_modules, so a commit made
+# where the shell is not on PATH — a GUI git client, a terminal that never ran
+# `direnv allow` — would fail inside lint-staged with a bare "command not
+# found". Name the cause here instead.
+if ! command -v biome >/dev/null 2>&1; then
+  echo "husky/pre-commit: biome not found on PATH. The flake supplies it — commit from" >&2
+  echo "inside 'nix develop', or run 'direnv allow' so your shell enters it. Skipping." >&2
+  exit 0
+fi
+
 exec node_modules/.bin/lint-staged

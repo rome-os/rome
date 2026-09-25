@@ -37,9 +37,12 @@ export const AREA_PATHS = {
     "packages/web-content/",
     "packages/api-types/",
     "packages/app-runtime-sdk/",
-    // Every package launches its suite through this wrapper, so a change to it
-    // changes how the web suites run even though nothing else in scripts/ does.
+    // Every package launches its suite through these wrappers, so a change to
+    // either changes how the web suites run even though nothing else in
+    // scripts/ does: test-env.sh fixes the environment each suite sees, and
+    // ci-env.sh is the flake shell CI launches every step from.
     "scripts/test-env.sh",
+    "scripts/ci-env.sh",
   ],
   rest: [
     "packages/lib/",

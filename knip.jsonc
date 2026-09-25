@@ -25,12 +25,12 @@
     "packages/app-template/workflow/**"
   ],
 
-  // Host tools the runtime shells out to, installed in the container image or
-  // on the operator's machine rather than as npm packages. `expo` is the
-  // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
+  // Scripts invoke these host tools without npm packages. The Nix shell,
+  // container image, or operator's machine installs them. `expo` is the exception:
+  // packages/mobile depends on it, but .github/workflows/mobile-ci.yml
   // invokes it at root scope, where that dependency is out of view. Removing it
   // here on the strength of the mobile dependency reintroduces the finding.
-  "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo", "gofmt"],
+  "ignoreBinaries": ["biome", "tailscale", "composio", "rg", "lipo", "vale", "expo", "gofmt"],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
