@@ -24,6 +24,7 @@ export class SessionManager {
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
+        workingDir?: string | null;
         createdAt: Date;
         lastActiveAt: Date;
       }
@@ -41,6 +42,7 @@ export class SessionManager {
       provider: row.provider,
       providerThreadId: row.providerThreadId,
       model: row.model,
+      workingDir: row.workingDir,
       createdAt: row.createdAt,
       lastActiveAt: row.lastActiveAt,
     };
@@ -69,7 +71,7 @@ export class SessionManager {
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
-        workingDir: string | null;
+        workingDir?: string | null;
       }
     | undefined
   > {

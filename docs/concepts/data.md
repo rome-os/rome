@@ -25,7 +25,8 @@ Projects are working directories where the agent does its work — writing code,
 - Every project can have a one-line memory summary describing what it is. The main agent receives all project summaries, not just the selected project's summary.
 - The first paragraph supplies the summary, capped at 160 Unicode code points including a trailing ellipsis when truncated. Separate this short introduction from detailed notes with a blank line. Consecutive list items without blank lines count as one paragraph.
 - Detailed notes remain available on demand and stay out of the automatic project context.
-- An agent that an action runs, such as a blocking `summon`, works in the project of the session that called the action. The action can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts.
+- A blocking `summon` starts its agent in the project of the session that called it. The summon can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts. Agents that other actions run start in the default project unless the action names a directory.
+- A resumed agent session reopens in the directory it first ran in, because the model provider keeps its transcript per directory. A session whose directory no longer exists cannot be resumed.
 
 **Not to be confused with:**
 

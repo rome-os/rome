@@ -220,6 +220,21 @@ describe("resolveProjectWorkingDirWithinRoot", () => {
     );
   });
 
+  it("accepts the real path of a project when the root is reached through a symlink", async () => {
+    const root = makeRoot();
+    const linkParent = mkdtempSync(join(tmpdir(), "rome-project-link-"));
+    tempDirs.push(linkParent);
+    const linkedRoot = join(linkParent, "projects");
+    symlinkSync(root, linkedRoot);
+    const expected = join(root, "landingpage");
+
+    for (const requested of [expected, join(linkedRoot, "landingpage"), "landingpage"]) {
+      await expect(resolveProjectWorkingDirWithinRoot(requested, linkedRoot)).resolves.toBe(
+        expected,
+      );
+    }
+  });
+
   it("rejects a missing directory and a file", async () => {
     const root = makeRoot();
     writeFileSync(join(root, "notes.txt"), "not a project", "utf-8");

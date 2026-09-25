@@ -1,6 +1,7 @@
 // Long-lived, serialized agent sessions. Session model: docs/concepts/sessions.md.
 
 import { createHash } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { Mutex } from "async-mutex";
 import {
   AgentInputQueue,
@@ -64,7 +65,7 @@ import {
 } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
-import { ensureDefaultAgentWorkingDir } from "../paths.js";
+import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
 import { enterSession } from "../telemetry-context.js";
 import {
   getTracer,
@@ -625,11 +626,9 @@ export function createAgentSessionManager(
     if (!row) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
-    // Reopen where the transcript was written unless the caller names a dir.
-    const workingDir = init?.workingDir ?? row.workingDir ?? undefined;
     return acquire(
       { agentName, channelThreadKey: row.channelThreadKey },
-      { ...(init ?? {}), workingDir, resumeSessionId: sessionId },
+      { ...(init ?? {}), resumeSessionId: sessionId },
     );
   };
 
@@ -768,6 +767,21 @@ function resolveSelectionFromChannelThreadKey(
   );
 }
 
+async function reopenRecordedWorkingDir(sessionId: string, recorded: string): Promise<string> {
+  if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
+  const isDirectory = await stat(recorded).then(
+    (entry) => entry.isDirectory(),
+    () => false,
+  );
+  if (!isDirectory) {
+    throw new Error(
+      `Agent session "${sessionId}" ran in "${recorded}", which no longer exists; ` +
+        "it cannot be resumed there",
+    );
+  }
+  return recorded;
+}
+
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -779,7 +793,6 @@ async function openSession(
     metadata.ownerType === "app" ? deps.appCatalog?.get(metadata.ownerId) : undefined;
   const appStoreListingId =
     owningApp?.source.mode === "appstore" ? owningApp.source.listingId : undefined;
-  const workingDir = init.workingDir ?? (await ensureDefaultAgentWorkingDir());
 
   // Try to resume an existing SDK session through the stable channelThreadKey.
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
@@ -793,6 +806,7 @@ async function openSession(
         provider: string | null;
         providerThreadId: string | null;
         model: string | null;
+        workingDir?: string | null;
       }
     | undefined;
   if (init.preparedSessionId) {
@@ -818,6 +832,13 @@ async function openSession(
   }
 
   const sessionId = init.preparedSessionId ?? resumeResult?.id ?? uuidv4();
+  // The provider keeps a transcript per cwd, so a resumed row reopens where it
+  // was written unless the caller names a dir. Legacy rows record none.
+  const workingDir =
+    init.workingDir ??
+    (resumeResult?.workingDir
+      ? await reopenRecordedWorkingDir(sessionId, resumeResult.workingDir)
+      : await ensureDefaultAgentWorkingDir());
   const romeSessionId = requestedRomeSessionId;
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;

@@ -40,6 +40,9 @@ import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 
 const log = createLogger("agent-session-bridge");
 
+/** The one action whose agent runs inherit the calling session's project. */
+const SUMMON_ACTION = "system:summon";
+
 export interface RunTurnRequest {
   key: AgentSessionKey;
   init?: AgentSessionInit;
@@ -282,18 +285,20 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
   /**
    * The worker names a working dir from app code, so an explicit one must
-   * resolve inside the projects root. Without one, a new run inherits the
-   * working dir of the open agent session whose action asked for it, as
-   * `execute_subagent` inherits its parent's. An explicit resume inherits
-   * nothing: the manager reopens it in the dir its transcript was written in.
-   * Otherwise the manager falls back to the default project.
+   * resolve inside the projects root. Without one, a new `summon` run inherits
+   * the working dir of the open agent session whose action asked for it, as
+   * `execute_subagent` inherits its parent's. Summon sends no channel-thread
+   * key, so a summon run without a `sessionId` always opens a new session.
+   * Every other run, and every resume, gets no dir from here: the manager
+   * reopens a resumed session where its transcript was written, else uses the
+   * default project.
    */
   private async resolveRunWorkingDir(req: RunTurnRequest): Promise<string | undefined> {
     const requested = req.init?.workingDir;
     if (requested !== undefined) {
       return await resolveProjectWorkingDirWithinRoot(requested, this.projectsRoot);
     }
-    if (req.sessionId) return undefined;
+    if (req.sessionId || req.actionContext?.actionName !== SUMMON_ACTION) return undefined;
     const callerSessionId = req.actionContext?.sessionId;
     return callerSessionId ? this.manager.findWorkingDirBySessionId?.(callerSessionId) : undefined;
   }

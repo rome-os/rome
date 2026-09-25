@@ -1,5 +1,5 @@
 import { mkdir, readdir, realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { getProjectsRoot } from "../paths.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "./constants.js";
 
@@ -106,15 +106,9 @@ export async function resolveProjectWorkingDirWithinRoot(
   rootPath: string = getWebchatProjectsRoot(),
 ): Promise<string> {
   const trimmed = requestedPath.trim();
-  let projectPath = trimmed;
-  if (isAbsolute(trimmed)) {
-    const fromRoot = relative(resolve(rootPath), resolve(trimmed));
-    if (!isStrictSubpath(fromRoot)) {
-      throw new Error(`Working directory "${requestedPath}" is not inside the projects root`);
-    }
-    projectPath = fromRoot.split(sep).join("/");
-  }
-  const workingDir = resolveWebchatProjectPath(projectPath, rootPath);
+  // Containment is judged only on real paths, so a root reached through a
+  // symlink still contains the real absolute path of each of its projects.
+  const workingDir = isAbsolute(trimmed) ? trimmed : resolveWebchatProjectPath(trimmed, rootPath);
 
   let realWorkingDir: string;
   let realRoot: string;

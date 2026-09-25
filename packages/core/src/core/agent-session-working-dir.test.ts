@@ -151,6 +151,35 @@ describe("AgentSessionManager working dirs", () => {
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
   });
 
+  it("reuses a session by channel-thread key in the working dir it was created in", async () => {
+    const projectDir = join(directory, "site");
+    await mkdir(projectDir);
+    const key = { agentName: AGENT, channelThreadKey: "inbox:telegram:thread-1" };
+    const original = await manager.acquire(key, { workingDir: projectDir });
+    const sessionId = original.sessionId;
+    await original.close("idle");
+
+    const reused = await manager.acquire(key);
+
+    expect(reused.sessionId).toBe(sessionId);
+    expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
+  });
+
+  it("refuses to resume a session whose recorded working dir is gone", async () => {
+    const projectDir = join(directory, "renamed-later");
+    await mkdir(projectDir);
+    const original = await manager.acquire(
+      { agentName: AGENT, channelThreadKey: "action:gone" },
+      { workingDir: projectDir },
+    );
+    await original.close("idle");
+    await rm(projectDir, { recursive: true });
+
+    await expect(manager.acquireBySessionId!(original.sessionId, AGENT)).rejects.toThrow(
+      "which no longer exists",
+    );
+  });
+
   it("resumes a legacy session with no recorded working dir in the default project", async () => {
     await sessionsRepo.create({
       id: "legacy-session",

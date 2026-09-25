@@ -103,6 +103,7 @@ describe("AgentSessionBridge turn routing", () => {
 });
 
 describe("AgentSessionBridge working dir", () => {
+  const summonCall = { actionName: "system:summon", agentName: "main" };
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -189,11 +190,11 @@ describe("AgentSessionBridge working dir", () => {
     expect(acquired).toEqual([]);
   });
 
-  it("inherits the calling session's working dir when none is requested", async () => {
+  it("inherits the calling session's working dir for a summon run with none requested", async () => {
     const { acquired, runTurn } = setup({ "caller-session": "/profile/projects/site" });
 
-    await runTurn({ actionContext: { sessionId: "caller-session", agentName: "main" } });
-    await runTurn({ actionContext: { sessionId: "closed-session", agentName: "main" } });
+    await runTurn({ actionContext: { ...summonCall, sessionId: "caller-session" } });
+    await runTurn({ actionContext: { ...summonCall, sessionId: "closed-session" } });
     await runTurn({});
 
     expect(acquired.map((init) => init.workingDir)).toEqual([
@@ -210,7 +211,7 @@ describe("AgentSessionBridge working dir", () => {
 
     await runTurn({
       init: { workingDir: "landingpage" },
-      actionContext: { sessionId: "caller-session" },
+      actionContext: { ...summonCall, sessionId: "caller-session" },
     });
 
     expect(acquired.map((init) => init.workingDir)).toEqual([join(projectsRoot, "landingpage")]);
@@ -219,7 +220,20 @@ describe("AgentSessionBridge working dir", () => {
   it("leaves an explicit resume to reopen where its transcript lives", async () => {
     const { acquired, runTurn } = setup({ "caller-session": "/profile/projects/site" });
 
-    await runTurn({ sessionId: "summoned-1", actionContext: { sessionId: "caller-session" } });
+    await runTurn({
+      sessionId: "summoned-1",
+      actionContext: { ...summonCall, sessionId: "caller-session" },
+    });
+
+    expect(acquired.map((init) => init.workingDir)).toEqual([undefined]);
+  });
+
+  it("gives an agent run from any other action no inherited working dir", async () => {
+    const { acquired, runTurn } = setup({ "caller-session": "/profile/projects/site" });
+
+    await runTurn({
+      actionContext: { actionName: "system:generate_image", sessionId: "caller-session" },
+    });
 
     expect(acquired.map((init) => init.workingDir)).toEqual([undefined]);
   });
