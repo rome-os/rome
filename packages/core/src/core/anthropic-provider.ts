@@ -497,6 +497,11 @@ export class AnthropicProvider implements ModelProvider {
     const { sessionId } = params;
     const pendingSteers = new Set<string>();
     const deferredInputs = new Set<string>();
+    // Uuids this provider minted for sends without an inputId. The SDK echoes a
+    // send's uuid on the result that consumed it, which is what keeps a prompt
+    // folded into an SDK-initiated turn from being skipped. Rome issued no id
+    // for them, so their replay reports no input status.
+    const mintedInputIds = new Set<string>();
     let promptPermits = 0;
     let releasePrompt: (() => void) | undefined;
     let gateClosed = false;
@@ -698,7 +703,9 @@ export class AnthropicProvider implements ModelProvider {
           } else if (isUserMessage(message)) {
             if ("isReplay" in message && message.isReplay && message.uuid) {
               pendingSteers.delete(message.uuid);
-              yield { type: "input_status", inputId: message.uuid, state: "consumed" };
+              if (!mintedInputIds.delete(message.uuid)) {
+                yield { type: "input_status", inputId: message.uuid, state: "consumed" };
+              }
             }
             for (const toolResult of extractToolResultMessages(message, toolUseNames)) {
               yield toolResult;
@@ -935,9 +942,11 @@ export class AnthropicProvider implements ModelProvider {
           activeTurnLastAssistantMessageId = undefined;
           running = true;
         }
+        const uuid = input.inputId ?? randomUUID();
+        if (!input.inputId) mintedInputIds.add(uuid);
         const sdkMsg: SDKUserMessage = {
           type: "user",
-          ...(input.inputId ? { uuid: input.inputId as SDKUserMessage["uuid"] } : {}),
+          uuid: uuid as SDKUserMessage["uuid"],
           priority: "next",
           parent_tool_use_id: null,
           session_id: sdkSessionId,

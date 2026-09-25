@@ -294,6 +294,29 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
+    it("closes the turn when an injected turn consumes a send without an inputId", async () => {
+      // Fork runs and conversation titles send without an inputId. The SDK
+      // echoes the client uuid of a prompt folded into an injected turn.
+      queryMock.mockImplementation(({ prompt }) => ({
+        async *[Symbol.asyncIterator]() {
+          const sent = (await prompt[Symbol.asyncIterator]().next()).value;
+          yield { ...sent, isReplay: true };
+          yield {
+            ...notificationResult,
+            result: "folded",
+            ...(sent.uuid ? { user_message_uuid: sent.uuid, user_message_uuids: [sent.uuid] } : {}),
+          };
+        },
+        close: rs.fn(),
+      }));
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Reply with PONG." });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages).toEqual([expect.objectContaining({ type: "result", content: "folded" })]);
+    });
+
     it("passes an injected turn's result through when no prompt is outstanding", async () => {
       mockQuery([notificationResult]);
       const session = await new AnthropicProvider().openSession(buildParams());
