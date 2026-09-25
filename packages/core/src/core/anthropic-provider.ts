@@ -144,15 +144,17 @@ function isResultSuccess(result: SDKResultMessage): result is SDKResultSuccess {
   return result.subtype === "success";
 }
 
-// A result for a turn the SDK started from its own queue consumed no user
-// send, so it echoes no user_message_uuid, and its origin names the injector.
-// On resume the SDK injects a stopped-background-task notification ahead of
-// the host's prompt and answers it with an empty, zero-token result
-// (rome-os/rome#510). A result without an origin gets no such attribution and
-// keeps closing the turn.
-function isSdkInitiatedResult(result: SDKResultMessage): boolean {
-  if (result.user_message_uuid || result.user_message_uuids?.length) return false;
-  return result.origin !== undefined && result.origin.kind !== "human";
+// A turn the SDK started from its own queue carries a non-human origin. On
+// resume the SDK injects a stopped-background-task notification ahead of the
+// host's prompt and answers it with an empty, zero-token result
+// (rome-os/rome#510). Such a result answers the prompt only when it echoes the
+// prompt's uuid, meaning the SDK folded the prompt into the turn. A folded
+// steer's uuid does not count: the prompt is still queued. A result without an
+// origin gets no such attribution and keeps closing the turn.
+function isSdkInitiatedResult(result: SDKResultMessage, promptId: string | undefined): boolean {
+  if (result.origin === undefined || result.origin.kind === "human") return false;
+  const echoed = result.user_message_uuids ?? [];
+  return !(promptId && (result.user_message_uuid === promptId || echoed.includes(promptId)));
 }
 
 function isTextBlock(block: AssistantContentBlock): block is BetaTextBlock {
@@ -502,6 +504,8 @@ export class AnthropicProvider implements ModelProvider {
     // folded into an SDK-initiated turn from being skipped. Rome issued no id
     // for them, so their replay reports no input status.
     const mintedInputIds = new Set<string>();
+    // Uuid of the send that opened the current Rome turn.
+    let activePromptId: string | undefined;
     let promptPermits = 0;
     let releasePrompt: (() => void) | undefined;
     let gateClosed = false;
@@ -714,7 +718,12 @@ export class AnthropicProvider implements ModelProvider {
             // Rome's prompt is still queued behind this SDK-initiated turn,
             // and its own result follows. Closing the Rome turn here would
             // return an empty reply while the prompt runs with no listener.
-            if (running && isSdkInitiatedResult(message)) {
+            // The skip also drops this result's accounting, model-call metrics
+            // and error classification (usage_limit, auth revoked). The
+            // prompt's own result carries the cumulative cost and meets the
+            // same account errors. The tokens of an injected turn that
+            // called the model go unrecorded.
+            if (running && isSdkInitiatedResult(message, activePromptId)) {
               log.info("skipping result of an SDK-initiated turn", {
                 subtype: message.subtype,
                 origin: message.origin?.kind,
@@ -926,6 +935,7 @@ export class AnthropicProvider implements ModelProvider {
         lastCompletedTurnCheckpoint = undefined;
         running = true;
         permitPrompt();
+        activePromptId = input.inputId;
         if (input.inputId && deferredInputs.delete(input.inputId)) return;
         const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
         if (input.injectedToolResult) {
@@ -944,6 +954,7 @@ export class AnthropicProvider implements ModelProvider {
         }
         const uuid = input.inputId ?? randomUUID();
         if (!input.inputId) mintedInputIds.add(uuid);
+        activePromptId = uuid;
         const sdkMsg: SDKUserMessage = {
           type: "user",
           uuid: uuid as SDKUserMessage["uuid"],

@@ -317,6 +317,38 @@ describe("AnthropicProvider", () => {
       expect(messages).toEqual([expect.objectContaining({ type: "result", content: "folded" })]);
     });
 
+    it("waits past an injected turn that folded a steer but not the prompt", async () => {
+      const steerId = "00000000-0000-4000-8000-000000000004";
+      let releaseSteer!: () => void;
+      const steered = new Promise<void>((resolve) => {
+        releaseSteer = resolve;
+      });
+      queryMock.mockImplementation(() => ({
+        async *[Symbol.asyncIterator]() {
+          await steered;
+          yield {
+            ...notificationResult,
+            user_message_uuid: steerId,
+            user_message_uuids: [steerId],
+          };
+          yield pongResult;
+        },
+        close: rs.fn(),
+      }));
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: promptId });
+      expect(await session.steerUserInput!({ text: "and fast", inputId: steerId })).toBe(
+        "accepted",
+      );
+      releaseSteer();
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type === "result")).toEqual([
+        expect.objectContaining({ type: "result", content: "PONG" }),
+      ]);
+    });
+
     it("passes an injected turn's result through when no prompt is outstanding", async () => {
       mockQuery([notificationResult]);
       const session = await new AnthropicProvider().openSession(buildParams());
