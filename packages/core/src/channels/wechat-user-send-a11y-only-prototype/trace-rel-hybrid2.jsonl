@@ -1,0 +1,153 @@
+{"t": 8.319, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 9.833, "event": "reliability.result", "run": 1, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 15.047, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 16.608, "event": "reliability.result", "run": 2, "condition": "size:880,640,200,80", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 21.886, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 23.455, "event": "reliability.result", "run": 3, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 28.769, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 30.307, "event": "reliability.result", "run": 4, "condition": "size:760,560,40,30", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 36.518, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 38.003, "event": "reliability.result", "run": 5, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.7}
+{"t": 44.302, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 45.791, "event": "reliability.result", "run": 6, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.7}
+{"t": 51.978, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 53.472, "event": "reliability.result", "run": 7, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.8}
+{"t": 58.861, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 60.411, "event": "reliability.result", "run": 8, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 65.785, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 67.306, "event": "reliability.result", "run": 9, "condition": "size:1280,770,0,0", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 75.21, "event": "raise", "via": "xdotool windowactivate (X11)"}
+{"t": 77.409, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 78.974, "event": "reliability.result", "run": 10, "condition": "minimized", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 8.3}
+{"t": 86.667, "event": "raise", "via": "xdotool windowactivate (X11)"}
+{"t": 88.865, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 90.393, "event": "reliability.result", "run": 11, "condition": "minimized", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 8.2}
+{"t": 98.198, "event": "raise", "via": "xdotool windowactivate (X11)"}
+{"t": 100.5, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 102.107, "event": "reliability.result", "run": 12, "condition": "minimized", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 8.4}
+{"t": 109.977, "event": "raise", "via": "xdotool windowactivate (X11)"}
+{"t": 112.204, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 113.763, "event": "reliability.result", "run": 13, "condition": "minimized", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 8.3}
+{"t": 117.183, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 119.43, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 121.057, "event": "reliability.result", "run": 14, "condition": "behind-chrome", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.9}
+{"t": 124.389, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 126.652, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 128.218, "event": "reliability.result", "run": 15, "condition": "behind-chrome", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.9}
+{"t": 131.527, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 133.717, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 135.296, "event": "reliability.result", "run": 16, "condition": "behind-chrome", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 138.713, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 140.894, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 142.445, "event": "reliability.result", "run": 17, "condition": "behind-chrome", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 150.281, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 151.841, "event": "reliability.result", "run": 18, "condition": "leftover-search", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 159.94, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 161.468, "event": "reliability.result", "run": 19, "condition": "leftover-search", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 169.57, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 171.086, "event": "reliability.result", "run": 20, "condition": "leftover-search", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 178.967, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 180.537, "event": "reliability.result", "run": 21, "condition": "leftover-search", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8}
+{"t": 185.091, "event": "choose", "current": [[1, "<contact A>"]], "first_header": "Contacts", "exact_rows": [1, 3]}
+{"t": 191.87, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 193.401, "event": "reliability.result", "run": 22, "condition": "other-chat", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.9}
+{"t": 197.811, "event": "choose", "current": [[1, "<contact A>"]], "first_header": "Contacts", "exact_rows": [1, 3]}
+{"t": 204.585, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 206.116, "event": "reliability.result", "run": 23, "condition": "other-chat", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 210.477, "event": "choose", "current": [[1, "<contact A>"]], "first_header": "Contacts", "exact_rows": [1, 3]}
+{"t": 217.044, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 218.565, "event": "reliability.result", "run": 24, "condition": "other-chat", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 223.02, "event": "choose", "current": [[1, "<contact A>"]], "first_header": "Contacts", "exact_rows": [1, 3]}
+{"t": 229.446, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 230.962, "event": "reliability.result", "run": 25, "condition": "other-chat", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7}
+{"t": 235.253, "event": "retry", "attempt": 1, "after": "focus-lost"}
+{"t": 235.618, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 237.848, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 239.456, "event": "reliability.result", "run": 26, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 6.1, "steal_after_s": 4.19}
+{"t": 242.722, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 244.63, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 246.161, "event": "reliability.result", "run": 27, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.3, "steal_after_s": 2.93}
+{"t": 250.452, "event": "retry", "attempt": 1, "after": "focus-lost-after-key"}
+{"t": 250.816, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 252.958, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 254.562, "event": "reliability.result", "run": 28, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 6.2, "steal_after_s": 4.08}
+{"t": 259.294, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 260.248, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 260.614, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 262.752, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 264.292, "event": "reliability.result", "run": 29, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.2, "steal_after_s": 4.9}
+{"t": 266.609, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 268.744, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 270.292, "event": "reliability.result", "run": 30, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7, "steal_after_s": 0.54}
+{"t": 274.717, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 275.672, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 276.041, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 278.233, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 279.759, "event": "reliability.result", "run": 31, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.2, "steal_after_s": 4.64}
+{"t": 283.57, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 285.464, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 287.026, "event": "reliability.result", "run": 32, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.9, "steal_after_s": 3.45}
+{"t": 291.396, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 292.365, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 292.729, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 294.921, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 296.46, "event": "reliability.result", "run": 33, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.2, "steal_after_s": 4.55}
+{"t": 300.695, "event": "retry", "attempt": 1, "after": "focus-lost"}
+{"t": 301.061, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 303.222, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 304.741, "event": "reliability.result", "run": 34, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 5.9, "steal_after_s": 4.09}
+{"t": 309.343, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 310.302, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 310.678, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 313.217, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 314.76, "event": "reliability.result", "run": 35, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.7, "steal_after_s": 4.67}
+{"t": 317.049, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 319.213, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 320.729, "event": "reliability.result", "run": 36, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.7, "steal_after_s": 0.55}
+{"t": 324.574, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 326.52, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 328.093, "event": "reliability.result", "run": 37, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 5.0, "steal_after_s": 3.31}
+{"t": 332.219, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 334.155, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 335.732, "event": "reliability.result", "run": 38, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 5.0, "steal_after_s": 3.83}
+{"t": 339.955, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 341.851, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 343.444, "event": "reliability.result", "run": 39, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 5.3, "steal_after_s": 3.91}
+{"t": 348.176, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 349.13, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 349.497, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 351.688, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 353.24, "event": "reliability.result", "run": 40, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.3, "steal_after_s": 4.88}
+{"t": 357.957, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 358.925, "event": "retry", "attempt": 1, "after": "wrong-chat"}
+{"t": 359.294, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 361.569, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 363.128, "event": "reliability.result", "run": 41, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 7.4, "steal_after_s": 4.92}
+{"t": 365.822, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 368.015, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 369.607, "event": "reliability.result", "run": 42, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.9, "steal_after_s": 2.24}
+{"t": 373.193, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 375.08, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 376.624, "event": "reliability.result", "run": 43, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.6, "steal_after_s": 3.17}
+{"t": 378.991, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 381.225, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 382.744, "event": "reliability.result", "run": 44, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.47}
+{"t": 385.133, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 387.292, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 388.852, "event": "reliability.result", "run": 45, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.58}
+{"t": 392.699, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 394.658, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 396.255, "event": "reliability.result", "run": 46, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 5.1, "steal_after_s": 3.41}
+{"t": 398.689, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 400.932, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 402.471, "event": "reliability.result", "run": 47, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.94}
+{"t": 404.892, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 407.103, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 408.672, "event": "reliability.result", "run": 48, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.65}
+{"t": 411.013, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 413.221, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 414.756, "event": "reliability.result", "run": 49, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.57}
+{"t": 417.186, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 419.401, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 420.944, "event": "reliability.result", "run": 50, "condition": "focus-steal", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["Down", "Up", "Return"], "leaked_bytes": 0, "secs": 3.8, "steal_after_s": 1.67}
+{"t": 421.082, "event": "reliability.summary", "total": 50, "ok": 50, "leaks": 0, "by_condition": {"size:880,640,200,80": {"runs": 2, "ok": 2, "stops": [], "leaks": 0}, "size:760,560,40,30": {"runs": 2, "ok": 2, "stops": [], "leaks": 0}, "size:480,440,600,300": {"runs": 3, "ok": 3, "stops": [], "leaks": 0}, "size:1280,770,0,0": {"runs": 2, "ok": 2, "stops": [], "leaks": 0}, "minimized": {"runs": 4, "ok": 4, "stops": [], "leaks": 0}, "behind-chrome": {"runs": 4, "ok": 4, "stops": [], "leaks": 0}, "leftover-search": {"runs": 4, "ok": 4, "stops": [], "leaks": 0}, "other-chat": {"runs": 4, "ok": 4, "stops": [], "leaks": 0}, "focus-steal": {"runs": 25, "ok": 25, "stops": [], "leaks": 0}}}

@@ -1,0 +1,7 @@
+{"t": 10.052, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 11.536, "event": "reliability.result", "run": 1, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.7}
+{"t": 17.769, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 19.267, "event": "reliability.result", "run": 2, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.8}
+{"t": 25.586, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 27.102, "event": "reliability.result", "run": 3, "condition": "size:480,440,600,300", "outcome": "reached-and-cleared", "code": null, "reason": null, "keys": ["space", "Down", "Up", "Return"], "leaked_bytes": 0, "secs": 4.8}
+{"t": 27.241, "event": "reliability.summary", "total": 3, "ok": 3, "leaks": 0, "by_condition": {"size:480,440,600,300": {"runs": 3, "ok": 3, "stops": [], "leaks": 0}}}

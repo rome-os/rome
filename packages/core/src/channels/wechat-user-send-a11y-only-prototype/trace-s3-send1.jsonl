@@ -1,0 +1,2 @@
+{"t": 5.143, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 7.334, "event": "done", "sent": true, "store_id": "filehelper:4", "keys": ["Down", "Up", "Return", "Return"], "front_lost_after_return": false}

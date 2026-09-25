@@ -1,0 +1,3 @@
+{"t": 2.822, "event": "raise", "via": "registry Alt+Tab"}
+{"t": 4.967, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 7.133, "event": "done", "sent": true, "store_id": "filehelper:5", "keys": ["Down", "Up", "Return", "Return"], "front_lost_after_return": false}

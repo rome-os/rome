@@ -1,0 +1,4 @@
+{"t": 4.347, "event": "choose", "current": [[1, "File Transfer"]], "first_header": "Features", "exact_rows": [1]}
+{"t": 5.595, "event": "done", "reached": "File Transfer", "left": "", "keys": ["Down", "Up", "Return"]}
+{"t": 4.526, "event": "choose", "current": [[1, "<contact A>"]], "first_header": "Contacts", "exact_rows": [1, 3]}
+{"t": 5.755, "event": "done", "reached": "<contact A>", "left": "", "keys": ["Down", "Up", "Return"]}

@@ -1,0 +1,5 @@
+{"t": 9.495, "event": "reliability.result", "run": 1, "condition": "minimized", "outcome": "stopped", "code": "not-raised", "reason": "WeChat is not in front and could not be raised without X11", "keys": [], "leaked_bytes": 0, "secs": 4.4}
+{"t": 17.149, "event": "reliability.result", "run": 2, "condition": "minimized", "outcome": "stopped", "code": "not-raised", "reason": "WeChat is not in front and could not be raised without X11", "keys": [], "leaked_bytes": 0, "secs": 4.4}
+{"t": 24.467, "event": "reliability.result", "run": 3, "condition": "minimized", "outcome": "stopped", "code": "not-raised", "reason": "WeChat is not in front and could not be raised without X11", "keys": [], "leaked_bytes": 0, "secs": 4.4}
+{"t": 31.873, "event": "reliability.result", "run": 4, "condition": "minimized", "outcome": "stopped", "code": "not-raised", "reason": "WeChat is not in front and could not be raised without X11", "keys": [], "leaked_bytes": 0, "secs": 4.4}
+{"t": 31.948, "event": "reliability.summary", "total": 4, "ok": 0, "leaks": 0, "by_condition": {"minimized": {"runs": 4, "ok": 0, "stops": ["not-raised", "not-raised", "not-raised", "not-raised"], "leaks": 0}}}

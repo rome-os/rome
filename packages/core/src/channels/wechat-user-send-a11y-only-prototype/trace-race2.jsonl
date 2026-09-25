@@ -1,0 +1,22 @@
+{"t": 4.716, "event": "race", "guard": "a11y-only", "trial": 0, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 8.014, "event": "race", "guard": "a11y-only", "trial": 1, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 11.765, "event": "race", "guard": "a11y-only", "trial": 2, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 14.963, "event": "race", "guard": "a11y-only", "trial": 3, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 18.183, "event": "race", "guard": "a11y-only", "trial": 4, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 21.959, "event": "race", "guard": "a11y-only", "trial": 5, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 25.272, "event": "race", "guard": "a11y-only", "trial": 6, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 28.183, "event": "race", "guard": "a11y-only", "trial": 7, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 31.504, "event": "race", "guard": "a11y-only", "trial": 8, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 34.624, "event": "race", "guard": "a11y-only", "trial": 9, "atspi_said_active": true, "key_sent": true, "leaked_bytes": 3}
+{"t": 37.641, "event": "race", "guard": "a11y+X", "trial": 0, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 40.653, "event": "race", "guard": "a11y+X", "trial": 1, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 43.942, "event": "race", "guard": "a11y+X", "trial": 2, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 47.185, "event": "race", "guard": "a11y+X", "trial": 3, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 50.297, "event": "race", "guard": "a11y+X", "trial": 4, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 53.395, "event": "race", "guard": "a11y+X", "trial": 5, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 56.457, "event": "race", "guard": "a11y+X", "trial": 6, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 59.516, "event": "race", "guard": "a11y+X", "trial": 7, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 62.764, "event": "race", "guard": "a11y+X", "trial": 8, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 65.827, "event": "race", "guard": "a11y+X", "trial": 9, "atspi_said_active": true, "key_sent": false, "leaked_bytes": 0}
+{"t": 65.827, "event": "race.summary", "guard": "a11y-only", "trials": 10, "keys_sent": 10, "leaked": 10}
+{"t": 65.827, "event": "race.summary", "guard": "a11y+X", "trials": 10, "keys_sent": 0, "leaked": 0}
