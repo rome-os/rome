@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.6.7](https://github.com/rome-os/rome/compare/app-runtime-v0.6.6...app-runtime-v0.6.7) (2026-09-25)
+
+
+### Features
+
+* **app-runtime:** add explicit action visibility ([#451](https://github.com/rome-os/rome/issues/451)) ([768a205](https://github.com/rome-os/rome/commit/768a205e63ae3186d98cd51b7429ad7609a264b7))
+
 ## [0.6.6](https://github.com/rome-os/rome/compare/app-runtime-v0.6.5...app-runtime-v0.6.6) (2026-09-17)
 
 
