@@ -1,0 +1,72 @@
+cases:
+  - name: FILE-01 Search the project tree
+    tags:
+      - files
+      - shard-4
+    steps:
+      - app.open:
+          path: /projects
+      - aiAct: >-
+          Enter "todo.md" in the visible "Search project files..." field, then stop.
+      - aiAssert: >-
+          The project search field contains "todo.md" and the matching todo.md file is visible in
+          the project tree.
+  - name: FILE-02 Open a project file
+    tags:
+      - files
+      - shard-4
+    steps:
+      - app.open:
+          path: /projects
+      - aiAct: >-
+          In the project tree, open the visible todo.md file. Finish when the right-hand file viewer
+          shows todo.md in Preview mode with its rendered content visible.
+      - aiAssert: >-
+          todo.md is open in Preview mode and displays "Mock file content for the dashboard mock
+          mode." rather than a loading or error state.
+  - name: FILE-03 Handle a duplicate project-file rename
+    tags:
+      - files
+      - shard-4
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /projects
+      - aiAct: >-
+          1. Find and click the "demo-app" folder expander in the file tree.
+
+          2. Find the visible control labelled "More actions for notes.txt" and click it.
+
+          3. Find and click Rename.
+
+          4. Find the field identified by "Name", replace its current value with "README.md".
+
+          5. Find and click Rename.
+
+          6. The duplicate-name rejection is the expected successful result of this test. Stop when
+          the UI shows "Already exists." and report the action as complete; do not return a task
+          failure because the rename was rejected.
+      # The duplicate-name toast auto-dismisses before a second model screenshot can inspect it.
+      - app.expectResponse:
+          method: PATCH
+          path: /api/projects/file
+          status: 409
+          requestBodyIncludes:
+            - notes.txt
+            - README.md
+      - aiAssert: >-
+          Both "notes.txt" and the existing "README.md" remain listed in the demo-app tree after
+          the rejected rename.
+  - name: FILE-04 Open a Memory file
+    tags:
+      - files
+      - shard-4
+    steps:
+      - app.open:
+          path: /memory
+      - aiAct: >-
+          In the Memory file tree, expand the relationship folder and open BONDS.md. Finish when
+          the right-hand file viewer shows the rendered file in Preview mode.
+      - aiAssert: >-
+          The file renders in Preview mode with the heading "Relationship Bonds" and an "Inner
+          Circle" section listing ray-oster and nadia-petrova.

@@ -1,0 +1,29 @@
+{
+  "name": "rome-midscene-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Product-flow E2E for rome-web against the MSW mock dev server, driven by Midscene.",
+  "scripts": {
+    "test": "midscene-test",
+    "nodes": "midscene-test nodes",
+    "typecheck": "tsc --noEmit",
+    "collect": "node scripts/collect-cases.mjs",
+    "check:model-vision": "node scripts/check-model-vision.mjs",
+    "test:summary": "node --test scripts/render-ci-summary.test.mjs scripts/prepare-pages-site.test.mjs"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
+  "devDependencies": {
+    "@midscene/test": "1.13.1",
+    "@midscene/web": "1.13.1",
+    "@types/node": "^20.0.0",
+    "dotenv": "^16.4.5",
+    "typescript": "^5.8.3",
+    "playwright": "^1.45.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "sharp@0.34.5": true
+  }
+}

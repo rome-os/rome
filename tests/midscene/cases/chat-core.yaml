@@ -1,0 +1,104 @@
+cases:
+  - name: CHAT-01 Draft and clear a message from the home composer
+    tags:
+      - chat
+      - shard-1
+    steps:
+      - app.open:
+          path: /chat
+      - aiAct: >-
+          On the Chat home, type "draft" in the bottom message composer and then delete it without
+          sending. Keep the current project and reasoning settings unchanged, and finish on the
+          Chat home with the composer empty.
+      - aiAssert: >-
+          The chat home shows the greeting "Welcome," and the headline "What should we create?". The
+          message composer shows the placeholder "How can I help you today?", the current project
+          name "default", and a reasoning effort control that currently reads "Think". A button
+          with an attachment icon is visible, along with the project picker, reasoning control, and
+          arrow-shaped send button. The temporary "draft" text has been cleared and no message was
+          sent.
+  - name: CHAT-02 Exercise composer pickers and the failed-send state
+    tags:
+      - chat
+      - shard-1
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /chat
+      - aiAct: >-
+          Trigger the mock app's expected failed-send state: find the field identified by "How can
+          I help you today?", enter "Book a focus block tomorrow morning", then click the visible
+          control labelled "Send". The standalone mock intentionally returns a proxy error instead
+          of sending; reaching that visible error with the draft preserved completes this task
+          successfully. Enter the text directly into the large rounded composer at the bottom;
+          keyboard focus has no visible indicator, so do not repeatedly tap it or wait for a visual
+          focus change before entering the text.
+      - app.expectUrl:
+          path: /chat
+      - app.expectTexts:
+          scope: body
+          all:
+            - /api/chat/sessions
+      - aiAssert: >-
+          The message is not sent: an error above the composer reports the failed request to
+          "/api/chat/sessions" (the standalone mock has no chat backend, so the dev proxy fails).
+          The typed text remains in the composer and the URL stays on /chat (no new conversation is
+          created).
+      - aiAct: >-
+          In the large rounded composer at the bottom, replace its entire current value "Book a
+          focus block tomorrow morning" with "/". The visible old draft is the field value, not a
+          placeholder. Use the input action to replace it directly; keyboard focus has no visible
+          indicator, so do not repeatedly tap or wait for a visual focus change.
+      - app.expectUrl:
+          path: /chat
+      - app.expectTexts:
+          scope: body
+          all:
+            - Failed to load skills.
+      - aiAssert: >-
+          The composer contains "/" and a visible error notice directly above it reads "Failed to
+          load skills.".
+  - name: CHAT-03 Open the agent mention picker
+    tags:
+      - chat
+      - shard-1
+    steps:
+      - app.open:
+          path: /chat
+      - aiAct: >-
+          Enter "@" directly into the empty message composer on the Chat home. Finish when the agent
+          mention picker opens; do not select an agent.
+      - aiAssert: >-
+          An agent mention picker titled "Pick an agent to chat with" is open, showing a "Built-in
+          agents" section with a "Rome" group and its two agents, "main" and "envoy".
+  - name: CHAT-04 Inspect a successful execution trace
+    tags:
+      - chat
+      - shard-1
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /chat/mock-chat-1
+      - app.scrollTextIntoView:
+          text: 1 app · 1 step · 8.4s
+      - aiAct: >-
+          Click near the upper-middle of the now-centered collapsed trace summary reading "1 app ·
+          1 step · 8.4s" beneath the first assistant response. Avoid the lower edge, click exactly
+          once, and immediately declare the action complete without retrying.
+      - aiAssert: >-
+          The "Trace" drawer is open and shows a successful "settings_get" step for the "briefer"
+          app, including "keys: [2]" and a duration. The header reads "Used 1 app · 1 step · 8.4s".
+  - name: CHAT-05 Draft an answer in an unanswered question card
+    tags:
+      - chat
+      - shard-1
+    steps:
+      - app.open:
+          path: /chat/mock-chat-2
+      - aiAct: >-
+          On the visible question card beginning "Before I rewrite it for that audience, three
+          things:", enter "Avoid jargon" in the optional "Anything to avoid?" text area. Do not
+          send or dismiss the card.
+      - aiAssert: >-
+          The unanswered question card remains open and its optional "Anything to avoid?" field
+          contains the draft "Avoid jargon".

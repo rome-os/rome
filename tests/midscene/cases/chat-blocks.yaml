@@ -1,0 +1,52 @@
+cases:
+  - name: CHAT-06 Collapse the architecture diagram in a built-app reply
+    tags:
+      - chat
+      - shard-2
+    steps:
+      - app.open:
+          path: /chat/mock-chat-build-app
+      - aiAct: >-
+          In the visible "Architecture" section, click the expanded "Mermaid diagram" disclosure
+          to collapse it. Finish with the disclosure closed.
+      - aiAssert: >-
+          The "Architecture" section and "Mermaid diagram" disclosure remain visible, but the
+          diagram content is collapsed. The nearby "Verification" heading is still visible.
+  - name: CHAT-07 Open a linked market report from a recorded conversation
+    tags:
+      - chat
+      - shard-2
+    steps:
+      - app.open:
+          path: /chat/mock-chat-market-brief
+      - aiAct: >-
+          Near the top of the chat conversation, click the underlined "September 11 market recap"
+          link below the first market-summary paragraph. Do not click the nearby September 10 link.
+          Click exactly once and immediately declare the action complete, even if the screen has not
+          visibly changed yet; never retry the click.
+      - aiAssert: >-
+          The Stock Daily report is open in the workspace, marked "Completed", and titled "US Stock
+          Market Daily Close Report | 2026-09-11" rather than showing an error.
+  - name: CHAT-08 Choose a tone on the live question card
+    tags:
+      - chat
+      - shard-2
+    steps:
+      - app.open:
+          path: /chat/mock-chat-2
+      - aiAct: >-
+          Click the "Warm" choice on the visible question card once, then stop.
+      - aiAssert: >-
+          The "Warm" tone is selected on the question card, while "Plain" and "Playful" are not
+          selected.
+  - name: CHAT-09 Reject the plumber approval card
+    tags:
+      - chat
+      - shard-2
+    steps:
+      - app.open:
+          path: /chat/mock-chat-4
+      - aiAct: >-
+          Click "Reject" on the visible "Guardian approval needed" card once, then stop.
+      - aiAssert: >-
+          The approval card visibly shows that the request was rejected.

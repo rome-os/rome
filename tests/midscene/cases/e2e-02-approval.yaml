@@ -1,0 +1,16 @@
+cases:
+  - name: E2E-02 Approve a pending outbound message
+    tags:
+      - poc
+      - story
+      - activity
+      - shard-3
+    steps:
+      - app.open:
+          path: /chat/mock-chat-4
+      - aiAct: >-
+          Click the orange "Approve" button on the visible "Guardian approval needed" card once,
+          then stop.
+      - aiAssert: >-
+          The approval card reads "Approved & done", its Approve and Reject buttons are gone, and
+          the green footer says "✓ Action approved and executed successfully."

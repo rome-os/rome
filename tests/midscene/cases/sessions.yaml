@@ -1,0 +1,38 @@
+cases:
+  - name: SES-01 Search for a missing session
+    tags:
+      - sessions
+      - shard-3
+    steps:
+      - app.open:
+          path: /sessions/all
+      - aiAct: >-
+          Enter "zzz-no-such-session-xyz" in the visible session search field and stop when the
+          empty result state appears.
+      - aiAssert: >-
+          The Sessions table shows "No sessions found" and there are no session rows.
+  - name: SES-02 Open the session filter panel
+    tags:
+      - sessions
+      - shard-3
+    steps:
+      - app.open:
+          path: /sessions/all
+      - aiAct: >-
+          Click the visible "Filter" button and finish with the session filter panel open.
+      - aiAssert: >-
+          A filter panel is open with "Type" and "Source" sections, controls reading "All types"
+          and "All sources", and a "Clear filters" action.
+  - name: SES-03 Open a channel session detail
+    tags:
+      - sessions
+      - shard-3
+    steps:
+      - app.open:
+          path: /sessions/all
+      - aiAct: >-
+          Click the visible "Leak follow-up with Dana" row and finish when its session detail page
+          opens.
+      - aiAssert: >-
+          The detail page title is "Leak follow-up with Dana", it carries a "Channel" badge, and it
+          provides "Back to sessions" and "Details" controls without a chat composer.

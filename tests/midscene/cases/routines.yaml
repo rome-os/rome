@@ -1,0 +1,27 @@
+cases:
+  - name: ROUT-01 Open the routine calendar
+    tags:
+      - routines
+      - shard-3
+    steps:
+      - app.open:
+          path: /routines
+      - aiAct: >-
+          Click the visible "Calendar" view button and finish when the monthly routine calendar is
+          open.
+      - aiAssert: >-
+          The Calendar view is active and shows a monthly grid with weekday headers and routine
+          markers.
+  - name: ROUT-02 Filter the routine list
+    tags:
+      - routines
+      - shard-3
+    steps:
+      - app.open:
+          path: /routines
+      - aiAct: >-
+          Search for "Archive old notes" using the "Filter routines..." field and finish when the
+          routine list is filtered.
+      - aiAssert: >-
+          The filtered list shows the "Archive old notes" on-demand routine and hides unrelated
+          routines such as "Morning brief".

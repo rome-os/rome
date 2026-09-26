@@ -1,0 +1,31 @@
+cases:
+  - name: SHELL-02 Search global chat history
+    tags:
+      - shell
+      - shard-6
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /chat
+      - app.pressKey:
+          key: mod+k
+      - aiAct: >-
+          Type "market recap" into the open "Search chats and messages" field, then stop as soon as
+          the query is visible in the field.
+      - aiAssert: >-
+          A global search dialog is open with "market recap" in its search field and shows at least
+          one relevant chat or message result about the market recap.
+  - name: SHELL-03 Open the mobile navigation drawer
+    tags:
+      - shell
+      - mobile
+      - shard-6
+    steps:
+      - app.open:
+          path: /chat
+          viewport: mobile
+      - aiAct: >-
+          Click the visible "Open sidebar" hamburger button once, then stop.
+      - aiAssert: >-
+          A mobile navigation drawer is open over the page with Chat, Apps, and Activity entries, a
+          "Close sidebar" control, and a dimmed backdrop.

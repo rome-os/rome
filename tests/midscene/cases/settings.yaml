@@ -1,0 +1,56 @@
+cases:
+  - name: SET-01 Open the appearance-mode choices
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/appearance
+      - aiAct: >-
+          Click the visible "Appearance mode" select once, then stop with its choices open.
+      - aiAssert: >-
+          The Appearance mode menu is open and offers System, Light, and Dark choices.
+  - name: SET-02 Open connection details
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/connections
+      - aiAct: >-
+          Click the visible Telegram connection row once. Stop as soon as its connection-detail
+          dialog is open; do not look for an "Open Telegram" button.
+      - aiAssert: >-
+          A Telegram connection detail dialog is open and shows its connected status and account
+          information rather than an error.
+  - name: SET-03 Inspect channel activation settings
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/channels
+      - aiAct: >-
+          Click the visible "Rome / can you see active chats?" conversation card once, then stop.
+      - aiAssert: >-
+          The card's configuration sections are shown, including an "Activation" section ("Rome in
+          this conversation"), a "Respond" policy set to "Only when mentioned", and "Reply
+          placement" options ("Native thread", "Inline").
+  - name: SET-04 Open advanced developer settings
+    tags:
+      - settings
+      - shard-5
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /settings/advanced
+      - app.scrollTextIntoView:
+          text: Developer Settings
+      - aiAct: >-
+          Click the now-centered "Developer Settings" disclosure exactly once, then immediately
+          declare the action complete without inspecting the result or retrying.
+      - app.scrollTextIntoView:
+          text: Show Claude and ChatGPT usage
+      - aiAssert: >-
+          The Developer Settings section is expanded and shows the "Show Claude and ChatGPT usage"
+          switch.

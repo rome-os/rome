@@ -1,0 +1,27 @@
+cases:
+  - name: ACT-03 Review requests and inspect an accepted webhook payload
+    tags:
+      - activity
+      - shard-4
+      - deterministic-assist
+    steps:
+      - app.open:
+          path: /activity
+      - aiAct: >-
+          Click the "Review" action in the pending-approvals banner once, then stop.
+      - aiAssert: >-
+          The feed lists three pending connection requests from "Alex" for the "Telegram",
+          "Discord", and "Feishu" channels, with Approve and Reject actions.
+      - app.clickByLabel:
+          label: All
+          exact: true
+      - app.scrollTextIntoView:
+          text: Webhook received for weather_forecast
+      - app.clickByLabel:
+          label: Payload
+      - app.scrollTextIntoView:
+          text: cabin
+      - app.expectTexts:
+          all:
+            - '"location"'
+            - '"cabin"'

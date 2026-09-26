@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  Placeholder for the desktop workspace's noVNC frame in standalone mock mode.
+  In production @rome/core serves the real noVNC client at this path; the mock
+  server has no VNC backend, so render a blank dark surface instead of letting
+  the SPA fallback boot the whole dashboard inside the iframe (it would
+  redirect to /chat and look like a nested welcome page).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rome desktop</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0b0c;
+      }
+    </style>
+  </head>
+  <body></body>
+</html>
