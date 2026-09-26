@@ -36,8 +36,12 @@ import {
 import { actionExecutionContext } from "../actions/context.js";
 import { replayContext } from "../actions/replay.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 
 const log = createLogger("agent-session-bridge");
+
+/** The one action whose agent runs inherit the calling session's project. */
+const SUMMON_ACTION = "system:summon";
 
 export interface RunTurnRequest {
   key: AgentSessionKey;
@@ -78,6 +82,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private webchatRepo?: WebChatRepository,
     private actionWorkerCoordinator?: ActionWorkerCoordinator,
     private turnStreams?: AgentTurnStreamRegistry,
+    /** Root that worker-requested working dirs must stay inside. Defaults to the profile's projects root. */
+    private projectsRoot?: string,
   ) {}
 
   attach(child: ChildProcess): IpcRpc {
@@ -104,12 +110,25 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         log.info("agent.session.runTurn received", baseLogFields);
 
+        let workingDir: string | undefined;
+        try {
+          workingDir = await this.resolveRunWorkingDir(req);
+        } catch (err) {
+          log.warn("agent.session.runTurn rejected working dir", {
+            ...baseLogFields,
+            requestedWorkingDir: req.init?.workingDir,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
+
         // Every run over this bridge is a forked action worker asking main to
         // run an agent — a nested subagent run (e.g. blocking `summon`) by
         // construction. Mark it so `rome.session.acquire` labels these opens
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
         const init = {
           ...req.init,
+          workingDir,
           isSubagent: true,
           platformMessageId: req.platformMessageId,
         };
@@ -262,6 +281,26 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     );
 
     return rpc;
+  }
+
+  /**
+   * The worker names a working dir from app code, so an explicit one must
+   * resolve inside the projects root. Without one, a new `summon` run inherits
+   * the working dir of the open agent session whose action asked for it, as
+   * `execute_subagent` inherits its parent's. Summon sends no channel-thread
+   * key, so a summon run without a `sessionId` always opens a new session.
+   * Every other run, and every resume, gets no dir from here: the manager
+   * reopens a resumed session where its transcript was written, else uses the
+   * default project.
+   */
+  private async resolveRunWorkingDir(req: RunTurnRequest): Promise<string | undefined> {
+    const requested = req.init?.workingDir;
+    if (requested !== undefined) {
+      return await resolveProjectWorkingDirWithinRoot(requested, this.projectsRoot);
+    }
+    if (req.sessionId || req.actionContext?.actionName !== SUMMON_ACTION) return undefined;
+    const callerSessionId = req.actionContext?.sessionId;
+    return callerSessionId ? this.manager.findWorkingDirBySessionId?.(callerSessionId) : undefined;
   }
 
   private async acquireExplicitSession(

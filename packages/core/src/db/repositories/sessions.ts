@@ -53,6 +53,7 @@ export class SessionsRepository {
     agentName: string;
     channelThreadKey?: string;
     status?: "active" | "completed" | "error";
+    workingDir?: string;
   }) {
     const id = data.id ?? uuid();
     const now = new Date();
@@ -60,6 +61,7 @@ export class SessionsRepository {
       id,
       agentName: data.agentName,
       channelThreadKey: data.channelThreadKey ?? null,
+      workingDir: data.workingDir ?? null,
       createdAt: now,
       lastActiveAt: now,
       status: data.status ?? "active",
@@ -103,6 +105,10 @@ export class SessionsRepository {
       if (!replacement) throw new Error("Failed to rotate provider session generation");
       return replacement;
     });
+  }
+
+  async setWorkingDir(id: string, workingDir: string): Promise<void> {
+    await this.db.update(sessions).set({ workingDir }).where(eq(sessions.id, id));
   }
 
   async touch(id: string) {

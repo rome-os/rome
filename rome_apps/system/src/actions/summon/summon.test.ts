@@ -78,6 +78,70 @@ describe("summon", () => {
     expect(calls[0].sharedContext).toBeUndefined();
   });
 
+  it("runs the subagent in the requested working directory", async () => {
+    const calls: Array<{ workingDir?: string }> = [];
+    const runner = {
+      async *run(params: { workingDir?: string }) {
+        calls.push(params);
+        yield {
+          type: "session_init" as const,
+          sessionId: "s-1",
+          romeSession: { _romeSessionId: "action:exec-1:coder", _type: "action" },
+        };
+        yield { type: "result" as const, content: "done" };
+      },
+    } as unknown as AgentRunner;
+
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+    const result = await tool.execute({
+      agentName: "coder",
+      prompt: "fix bug",
+      workingDir: "landingpage/content",
+    });
+
+    expect(result.status).toBe("ok");
+    expect(calls.map((call) => call.workingDir)).toEqual(["landingpage/content"]);
+  });
+
+  it("rejects a working directory on an interactive summon without running the agent", async () => {
+    const calls: unknown[] = [];
+    const runner = {
+      async *run(params: unknown) {
+        calls.push(params);
+      },
+    } as unknown as AgentRunner;
+
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+    const result = await tool.execute({
+      agentName: "designer",
+      prompt: "Draft the layout.",
+      interactive: true,
+      appId: "workflow-studio",
+      workingDir: "landingpage",
+    });
+
+    expect(result).toMatchObject({ status: "error", error: expect.stringContaining("workingDir") });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reports why the host refused to start the summoned agent", async () => {
+    const runner = {
+      async *run() {
+        yield {
+          type: "error" as const,
+          error: 'Working directory "/etc" is not inside the projects root',
+        };
+      },
+    } as unknown as AgentRunner;
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+
+    await expect(
+      tool.execute({ agentName: "coder", prompt: "fix bug", workingDir: "/etc" }),
+    ).rejects.toThrow(
+      'Summoned agent "coder" failed to start: Working directory "/etc" is not inside the projects root',
+    );
+  });
+
   it("returns session id and result", async () => {
     const runner = createMockRunner();
     const tool = createSummonAction(actionConfig, summonDeps(runner));

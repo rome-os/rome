@@ -56,6 +56,10 @@ export const sessions = sqliteTable("sessions", {
    *  `xhigh`). Display only: it never seeds the next turn's effort. Null for
    *  legacy rows and sessions that never completed a model turn. */
   reasoningEffort: text("reasoning_effort"),
+  /** The cwd the session's provider ran in, so an explicit resume reopens the
+   *  provider where its transcript lives. Null for legacy rows, which resume
+   *  in the default project. */
+  workingDir: text("working_dir"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
   status: text("status", {

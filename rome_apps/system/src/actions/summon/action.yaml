@@ -1,6 +1,6 @@
 name: summon
 type: system
-description: Spawn a subagent in the current project
+description: Spawn a subagent in the calling session's project or a given project directory
 complexity: complex
 speed: slow
 reliability: medium
