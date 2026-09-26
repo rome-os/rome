@@ -17,6 +17,17 @@ scripts/check-pr-title.sh "feat(app-runtime): add IpcRpcTimeoutError"
 
 When the PR touches `packages/app-runtime-sdk/`, `packages/app-web-sdk/`, or `packages/ui/`, the type also decides the published version bump. [releases.md](../releases.md) covers which types move a version and what happens after merge.
 
+## Design-system self-check
+
+Before opening or updating a PR that changes UI sources, the authoring agent must complete this local check. The Oxlint CI job is disabled.
+
+1. Identify changed source files within the [scan scope](../../DEVELOPMENT.md#oxlint).
+2. Run `pnpm exec oxlint <changed-source-files>`, or `pnpm lint:oxlint` for the full scope.
+3. Review findings against [DESIGN.md](../../DESIGN.md) and the [design system](../design-system.md). Fix actionable findings in the changed code and explain accepted exceptions or known false positives.
+4. Record the command, scope, result, and unresolved findings in the PR test plan. Report scan failures or coverage gaps explicitly.
+
+A successful process exit does not mean zero findings. Read the diagnostics. Avoid unrelated styling changes made only to silence the tool.
+
 ## Description
 
 The diff already carries what changed and where. Each section below exists because the diff cannot carry it.
