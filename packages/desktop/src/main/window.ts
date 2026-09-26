@@ -264,6 +264,11 @@ export function createQuittingWindow(): BrowserWindow {
 export function createSettingsWindow(): BrowserWindow {
   const existing = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Rome Settings");
   if (existing) {
+    // focus() alone leaves a minimized window in the Dock, and asked from the
+    // floating icon — while another app is frontmost — it can leave the window
+    // behind that app.
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
     existing.focus();
     return existing;
   }

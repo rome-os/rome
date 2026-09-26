@@ -29,6 +29,7 @@ A session remembers the concrete model that produced its history — the **sessi
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
+- Each successful model turn also records the reasoning effort it ran with, as the provider reports it and in the provider's own terms (for example Claude's `max`, Codex's `xhigh`). Webchat shows that value beside the pinned model, without mapping it to the composer's effort labels. The recorded effort is for display only and never seeds a later turn's effort, which each turn still takes from its own request or the agent's configured effort.
 
 **Not to be confused with:**
 
@@ -101,7 +102,7 @@ The caller also chooses how long the fork's provider branch lives:
 **Contracts:**
 
 - In both modes the source conversation is untouched: its next turn never sees the fork's prompt, output, or tool calls.
-- The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. A fork never writes a [model pin](#model-pin) onto its source. A continuable fork records provider and model on its own agent session, which is what a later turn resumes from.
+- The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. A fork never writes a [model pin](#model-pin) onto its source. A continuable fork records provider and model on its own agent session, which is what a later turn resumes from. It also records the reasoning effort its turn ran with, for display only.
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
 - Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
 - A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.

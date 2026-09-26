@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -7,6 +7,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import i18n from "@/i18n";
 import { useAppLifecycle } from "./use-app-lifecycle";
+
+// jsdom serves the page on localhost, which the dialog treats as unshareable.
+const origin = rs.hoisted(() => ({ value: "https://jessie.romeos.cc" as string | null }));
+rs.mock("@/lib/shareable-origin", () => ({ shareableOrigin: () => origin.value }));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -27,7 +31,7 @@ const APP: InstalledAppCard = {
   phase: "installed",
   hasFrontend: true,
   href: "/apps/@ray/demo",
-  fullHref: "/full/apps/@ray/demo",
+  fullHref: "/full/apps/%40ray%2Fdemo",
   capabilities: [],
   capabilityDetails: { agents: [], actions: [], skills: [], hooks: [] },
   isEnabled: true,
@@ -53,12 +57,12 @@ function Harness({ app = APP }: { app?: InstalledAppCard }) {
   );
 }
 
-async function openDialog() {
+async function openDialog(app: InstalledAppCard = APP) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <Harness />
+        <Harness app={app} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -132,5 +136,70 @@ describe("the app access dialog", () => {
     const card = radio.closest("label");
     expect(card?.className).toContain("has-data-[state=checked]:border-foreground");
     expect(card?.className).toContain("has-focus-visible:outline-ring/50");
+  });
+
+  describe("share link", () => {
+    const SHARE_URL = "https://jessie.romeos.cc/full/apps/%40ray%2Fdemo";
+    const shareLink = () => screen.queryByRole("textbox", { name: "Share link" });
+    // jsdom has no Clipboard API, and the copy button shows only where there is one.
+    beforeEach(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async () => {} },
+        configurable: true,
+      });
+    });
+
+    it("is absent while the app is private", async () => {
+      await openDialog();
+      expect(shareLink()).toBeNull();
+    });
+
+    it("shows the link for a newly picked mode, but holds copy until it is saved", async () => {
+      await openDialog();
+      await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
+
+      expect((shareLink() as HTMLInputElement | null)?.value).toBe(SHARE_URL);
+      expect(screen.getByRole("button", { name: "Copy link" }).hasAttribute("disabled")).toBe(true);
+      expect(screen.getByText("Save access before sharing this link.")).toBeTruthy();
+    });
+
+    it("is absent on a loopback host, whose link opens nowhere else", async () => {
+      origin.value = null;
+      try {
+        await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
+        expect(shareLink()).toBeNull();
+      } finally {
+        origin.value = "https://jessie.romeos.cc";
+      }
+    });
+
+    it("copies the link of an app that is already public", async () => {
+      const writeText = rs.fn(async (_text: string) => {});
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
+
+      await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
+
+      expect(writeText).toHaveBeenCalledWith(SHARE_URL);
+      expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+      expect(screen.queryByText("Save access before sharing this link.")).toBeNull();
+    });
+
+    it("offers no copy button where the browser has no clipboard", async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <Harness app={{ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      // Plain http outside loopback is not a secure context: no Clipboard API.
+      Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+      fireEvent.click(screen.getByRole("button", { name: "open" }));
+
+      expect((shareLink() as HTMLInputElement | null)?.value).toBe(SHARE_URL);
+      expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+    });
   });
 });

@@ -14,14 +14,22 @@
          the manifest for the Home Screen icon — it uses apple-touch-icon.png —
          so both are declared. apple-mobile-web-app-capable launches it as a
          standalone app (no Safari chrome); the standard mobile-web-app-capable
-         covers Android/Chrome. -->
+         covers Android/Chrome.
+
+         For `/apps/<id>` and `/full/apps/<id>` document requests the server
+         swaps the block between the rome:app-identity markers for the app's
+         own manifest, icon and name, so a shortcut saved from an app page
+         opens that app (packages/core/src/lib/social-meta.ts). Keep the
+         markers, and keep each tag on one line. -->
+    <!-- rome:app-identity:start -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Rome" />
+    <meta name="application-name" content="Rome" />
+    <!-- rome:app-identity:end -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Rome" />
-    <meta name="application-name" content="Rome" />
     <meta name="theme-color" content="#f4f3ef" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

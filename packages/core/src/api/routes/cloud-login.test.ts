@@ -342,7 +342,15 @@ describe("/api/auth/cloud — start requests the right scope", () => {
 describe("/api/auth/cloud — vanilla instance", () => {
   it("enrolls, binds the guardian account from the id_token, and signs in", async () => {
     insertGuardian({ accountId: null });
-    const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
+    let provisioned = false;
+    const deps = {
+      ...(await buildTestDeps(testDb.db)),
+      isCloudAuthEnabled: async () => true,
+      provisionNodeCaller: () => {
+        provisioned = true;
+        return new Promise<void>(() => {});
+      },
+    };
     const romeCloud = fakeRomeCloud((nonce) => ({
       id_token: signIdToken({ sub: "A", nonce }),
       instance_token: "romeinst_new",
@@ -360,6 +368,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
     expect(sessionUserId(res)).toBe("A");
 
     expect(await deps.settingsRepo.get<string>(INSTANCE_TOKEN_SETTING_KEY)).toBe("romeinst_new");
+    expect(provisioned).toBe(true);
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBe("A");
   });

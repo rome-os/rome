@@ -505,6 +505,7 @@ export function createWechatUserDescriptor(
                 try {
                   let status = await runtime.status();
                   if (epoch.signal.aborted) return;
+                  const wasRunning = status.running;
                   if (status.installed && !status.running) {
                     degradation = {
                       reason:
@@ -515,6 +516,13 @@ export function createWechatUserDescriptor(
                     status = await runtime.status();
                   }
                   if (epoch.signal.aborted) return;
+                  if (wasRunning) {
+                    // A client that was already running joins accessibility
+                    // live; a restarted one got it from start(). Never throws,
+                    // so it cannot degrade a client that reads fine.
+                    await runtime.ensureAccessibility();
+                    if (epoch.signal.aborted) return;
+                  }
                   if (!status.running) {
                     degradation = {
                       reason:

@@ -68,12 +68,13 @@ handle /${RUNTIME_CONFIG_FILENAME} {
     // from disk via `file_server`, so Hono is reserved for the agent/API.
     // Only the dynamic surfaces below are proxied:
     //
-    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`, `/app-og/*`)
-    //     goes through `forward_auth` — the verify endpoint
-    //     (`/api/auth/verify`) reads `X-Forwarded-Uri` and gates `/api/*` on
-    //     a cookie. Non-`/api/*` paths (webhooks have their own X-API-Key,
-    //     app bundles and social card images are public) get a 204, so this
-    //     is a pass-through for them.
+    //   - `@dynamic` (`/api/*`, `/webhooks/*`, `/app-assets/*`, `/app-og/*`,
+    //     `/app-manifest/*`, `/app-icon/*`) goes through `forward_auth` — the
+    //     verify endpoint (`/api/auth/verify`) reads `X-Forwarded-Uri` and
+    //     gates `/api/*` on a cookie. Non-`/api/*` paths (webhooks have their
+    //     own X-API-Key; app bundles, social card images and home-screen
+    //     manifests/icons are public) get a 204, so this is a pass-through
+    //     for them.
     //   - SPA routes / static assets are public anyway (verify 204s every
     //     non-`/api/*` path), so serving them from Caddy drops a pointless
     //     double round-trip to Hono with zero change to the auth posture.
@@ -99,7 +100,7 @@ root * ${webRoot}
 handle @wsUpgrade {
 \t${proxy}
 }
-@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/*
+@dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
 handle @dynamic {
 ${indent(forwardAuth, 1)}
 \t${proxy}
@@ -158,6 +159,12 @@ handle /app-assets/${appIdSegment}/* {
 handle /app-og/${appIdSegment}.png {
 \t${proxy}
 }
+handle /app-manifest/${appIdSegment}.webmanifest {
+\t${proxy}
+}
+handle /app-icon/${appIdSegment}.png {
+\t${proxy}
+}
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
 \t${proxy}
@@ -207,6 +214,12 @@ ${indent(forwardAuth, 1)}
 \t${proxy}
 }
 handle /app-og/${appIdSegment}.png {
+\t${proxy}
+}
+handle /app-manifest/${appIdSegment}.webmanifest {
+\t${proxy}
+}
+handle /app-icon/${appIdSegment}.png {
 \t${proxy}
 }
 handle ${getEmbeddedAppHref(appId)} {

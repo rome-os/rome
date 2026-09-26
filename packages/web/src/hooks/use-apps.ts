@@ -22,23 +22,27 @@ export interface AppsResult {
 // useInvalidateApps) so lifecycle UX never blocks on the slow probe.
 const LIST_QUERY_KEY = ["apps", "list"] as const;
 const UPDATES_QUERY_KEY = ["apps", "updates"] as const;
+const STORE_LISTING_QUERY_KEY = ["apps", "store-listing"] as const;
 
 export interface AppsListResult {
   apps: InstalledAppCard[] | null;
   error: Error | null;
+  loading: boolean;
+  retry: () => void;
 }
 
 // The authoritative installed list on its own — for surfaces that never read
 // upgrade candidates (e.g. the app details page), so mounting them doesn't
 // kick off the expensive per-app Rome Cloud updates probe. Shares
 // LIST_QUERY_KEY with useApps, so the two stay one cache entry.
-export function useAppsList(): AppsListResult {
+export function useAppsList(options: { enabled?: boolean } = {}): AppsListResult {
   const { t } = useTranslation("apps");
   // staleTime: 0 keeps this page eager — every mount/focus revalidates against
   // the server, so revisiting after a background app transition or an out-of-band
   // change shows current truth rather than a cached snapshot.
   const list = useQuery({
     queryKey: LIST_QUERY_KEY,
+    enabled: options.enabled,
     staleTime: 0,
     queryFn: ({ signal }) =>
       fetchJson<AppListResponse>("/api/apps", {
@@ -51,7 +55,17 @@ export function useAppsList(): AppsListResult {
   // default) rather than blanking the page: a transient failure on a focus
   // refetch shouldn't wipe usable cards. Staleness is signaled by surfacing
   // `error` (consumers show a load-error banner above the still-rendered cards).
-  return { apps: list.data?.apps ?? null, error: list.error };
+  return {
+    apps: list.data?.apps ?? null,
+    error: list.error,
+    // A background refresh must not replace usable app cards with a loading
+    // state. This flag is only for consumers that have no catalog yet (for
+    // example, the command switcher on its first open or while retrying).
+    loading: list.data === undefined && list.isFetching,
+    retry: () => {
+      void list.refetch();
+    },
+  };
 }
 
 // The advisory upgrade probe on its own. The probe is expensive (fans out to
@@ -108,6 +122,39 @@ export function useApps(): AppsResult {
   };
 }
 
+export type StoreListingVersion = { published: true; version: string } | { published: false };
+
+// The version the App Store already holds for an app id (its listing's
+// all-time high-water mark — the bar a publish must strictly exceed), so the
+// publish row can say whether publishing will be accepted. Advisory: an
+// unreachable or unconfigured store, a deleted listing, or any other failure
+// yields null and the row keeps its plain hint; the store still enforces the
+// version policy on publish.
+export function useStoreListingVersion(
+  appId: string,
+  options: { enabled: boolean },
+): StoreListingVersion | null {
+  const listing = useQuery({
+    queryKey: [...STORE_LISTING_QUERY_KEY, appId],
+    enabled: options.enabled,
+    staleTime: 60_000,
+    queryFn: async ({ signal }): Promise<StoreListingVersion | null> => {
+      // Scoped ids (`@handle/slug`) map onto the proxy's two-segment route.
+      const path = appId.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`/api/app-store/listings/${path}`, {
+        cache: "no-store",
+        signal,
+      });
+      if (response.status === 404) return { published: false };
+      if (!response.ok) throw new Error("Listing request failed");
+      const body = (await response.json()) as { listing?: { highestVersion?: unknown } };
+      const version = body.listing?.highestVersion;
+      return typeof version === "string" ? { published: true, version } : null;
+    },
+  });
+  return listing.isError ? null : (listing.data ?? null);
+}
+
 export interface AppInvalidators {
   // The authoritative list. Await this for lifecycle "acting" UX — it settles
   // as soon as the list is back, independent of the upgrade probe.
@@ -116,6 +163,8 @@ export interface AppInvalidators {
   // can change upgrade availability (install / upgrade); skip it for ones that
   // can't (enable-disable, public-access, uninstall).
   updates: () => Promise<void>;
+  // One app's App Store listing version. Fire after a successful publish.
+  storeListing: (appId: string) => Promise<void>;
 }
 
 // Hand back to any mutation so a successful write pulls fresh server truth
@@ -130,5 +179,7 @@ export function useInvalidateApps(): AppInvalidators {
     // app keeps its green "update available" badge and invites a redundant
     // second upgrade until the fresh probe returns.
     updates: () => queryClient.resetQueries({ queryKey: UPDATES_QUERY_KEY }),
+    storeListing: (appId) =>
+      queryClient.invalidateQueries({ queryKey: [...STORE_LISTING_QUERY_KEY, appId] }),
   };
 }

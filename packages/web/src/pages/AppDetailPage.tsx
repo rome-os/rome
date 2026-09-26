@@ -33,7 +33,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { fetchJson } from "@/lib/fetch-json";
-import { useAppsList } from "@/hooks/use-apps";
+import { useAppsList, useStoreListingVersion } from "@/hooks/use-apps";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
@@ -101,6 +101,7 @@ export default function AppDetailPage() {
       }),
   });
   const readme = readmeData?.readme ?? null;
+  const storeListing = useStoreListingVersion(appId, { enabled: app?.canPublish === true });
 
   const startChatWithAgent = (app: InstalledAppCard, agentName: string) => {
     navigate("/chat", {
@@ -198,7 +199,16 @@ export default function AppDetailPage() {
             <ManageRow
               icon={Upload}
               title={t("detail.publishTitle")}
-              description={t("detail.publishHint", { version: app.version })}
+              description={
+                storeListing === null
+                  ? t("detail.publishHint", { version: app.version })
+                  : storeListing.published
+                    ? t("detail.publishHintListed", {
+                        version: app.version,
+                        storeVersion: storeListing.version,
+                      })
+                    : t("detail.publishHintUnlisted", { version: app.version })
+              }
               control={
                 <Button
                   type="button"

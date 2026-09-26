@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/app-web-sdk",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Web runtime and CLI SDK for Rome apps",
   "repository": {
     "type": "git",
@@ -62,7 +62,7 @@
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
-    "@rome-os/ui": "^0.2.2"
+    "@rome-os/ui": "^0.3.0"
   },
   "peerDependenciesMeta": {
     "@rome-os/ui": {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { takeLoginReturn } from "@/lib/login-return";
 import { submitSetupReturn } from "@/lib/setup-api";
 
 interface OAuthRedeemPayload {
@@ -154,7 +155,10 @@ function handleOAuthReturnOnce(
     // Definitive no-match — the sign-in / lost-session fallback.
     if (!handoff) return { error: fallbackError };
     const payload = await redeemOAuthHandoffOnce(handoff, state, fallbackError);
-    return { redirect: payload?.nextPath || "/" };
+    // The server names "/" for a plain sign-in; the page the guardian was
+    // sent to /login from wins over it. /onboard and connection pages stand.
+    const nextPath = payload?.nextPath || "/";
+    return { redirect: nextPath === "/" ? takeLoginReturn() : nextPath };
   })().catch((error) => {
     returnHandlers.delete(key);
     throw error;

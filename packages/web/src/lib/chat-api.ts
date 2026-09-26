@@ -275,14 +275,15 @@ export interface CreateSessionInput {
   personaId?: string;
   projectPath: string;
   largeModelSelection?: string;
-  reasoningEffort: ReasoningEffort;
+  // The turn, not the session, carries reasoning effort; a turn that omits it
+  // gets the guardian's stored preference.
+  reasoningEffort?: ReasoningEffort;
   agentName?: string;
 }
 
 export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
   const res = await fetch("/api/chat/agents", { credentials: "include" });
-  if (!res.ok) return [];
-  return (await res.json()) as AgentCatalogGroup[];
+  return jsonOrThrow<AgentCatalogGroup[]>(res);
 }
 
 export async function listSkills(): Promise<SkillSummary[]> {

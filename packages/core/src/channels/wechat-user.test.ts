@@ -9,7 +9,8 @@
 //   3. The reader parses the helper's JSON and classifies a signed-out account
 //      (exit 3) as terminal, everything else as transient.
 
-import { mkdtemp, mkdir, writeFile, rm, readlink } from "node:fs/promises";
+import { existsSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -19,6 +20,7 @@ import {
   WechatUserRuntime,
   WechatUserRuntimeError,
   WechatUserSessionRejected,
+  WECHAT_CLIENT_SHA256,
   type RunCommand,
   type RunResult,
 } from "./wechat-user.js";
@@ -186,7 +188,9 @@ describe("WechatUserRuntime.start", () => {
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
     await Promise.all([runtime.start(), runtime.start()]);
     expect(await readlink(runtime.canonicalPrefix)).toBe(runtime.clientDir);
-    expect(calls.filter((call) => call.some((arg) => arg.includes("setsid")))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.some((arg) => arg.includes('setsid "$1/wechat"'))),
+    ).toHaveLength(1);
     expect(calls).toContainEqual(["pgrep", "-x", "wechat"]);
     expect(calls.some((call) => ["curl", "dpkg-deb", "pkill"].includes(call[0]!))).toBe(false);
   });
@@ -218,19 +222,84 @@ describe("WechatUserRuntime.captureLoginQr", () => {
   });
 });
 
+/**
+ * `curl` and `mv` that touch the filesystem, so a test can assert what the
+ * download left behind rather than only which commands ran. `digests` answers
+ * `sha256sum` per file name; anything unnamed hashes to the pinned build.
+ */
+function scriptedDownload(digests: Record<string, string> = {}) {
+  return scriptedRun({
+    curl: (args) => {
+      const out = args[args.indexOf("-o") + 1]!;
+      writeFileSync(out, "downloaded bytes");
+      return ok();
+    },
+    mv: (args) => {
+      renameSync(args[0]!, args[1]!);
+      return ok();
+    },
+    sha256sum: (args) => {
+      const path = args[0]!;
+      const name = path.split("/").pop()!;
+      return ok(`${digests[name] ?? WECHAT_CLIENT_SHA256}  ${path}`);
+    },
+  });
+}
+
 describe("WechatUserRuntime.install", () => {
-  it("refuses a client archive that differs from the supported build", async () => {
+  it("re-downloads over a cached archive that is not the supported build", async () => {
     const h = await tempHome();
-    await writeFile(await ensureFile(join(h, ".local/share/wechat/wechat.deb")), "different build");
-    const { run, calls } = scriptedRun({ sha256sum: () => ok(`${"0".repeat(64)}  wechat.deb`) });
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "different build");
+    // The cache is the wrong build; whatever replaces it is the right one.
+    const { run, calls } = scriptedDownload({ "wechat.deb": "0".repeat(64) });
     const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
-    await expect(runtime.install()).rejects.toThrow(/checksum/);
+
+    await runtime.install();
+
+    expect(calls.some((call) => call[0] === "curl")).toBe(true);
+    expect(calls.some((call) => call[0] === "dpkg-deb")).toBe(true);
+    expect(await readFile(deb, "utf8")).toBe("downloaded bytes");
+  });
+
+  it("refuses a downloaded archive that differs from the supported build", async () => {
+    const h = await tempHome();
+    await mkdir(join(h, ".local/share/wechat"), { recursive: true });
+    const { run, calls } = scriptedDownload({ "wechat.deb.part": "0".repeat(64) });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/not the supported 4\.1\.13\.9 build/);
     expect(calls.some((call) => call[0] === "dpkg-deb")).toBe(false);
   });
 
-  it("downloads then unpacks, and unpacking is skipped when already present", async () => {
+  it("leaves no cached archive behind when the download is not the supported build", async () => {
     const h = await tempHome();
-    // Pre-create the unpacked binary so install() only needs the download.
+    await mkdir(join(h, ".local/share/wechat"), { recursive: true });
+    const { run } = scriptedDownload({ "wechat.deb.part": "0".repeat(64) });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(WechatUserRuntimeError);
+
+    // A rejected download that stays on disk would win the cache check forever.
+    expect(existsSync(join(h, ".local/share/wechat/wechat.deb"))).toBe(false);
+    expect(existsSync(join(h, ".local/share/wechat/wechat.deb.part"))).toBe(false);
+  });
+
+  it("keeps a cached archive that is the supported build", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "the supported build");
+    const { run, calls } = scriptedDownload();
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await runtime.install();
+
+    expect(calls.some((call) => call[0] === "curl")).toBe(false);
+    expect(await readFile(deb, "utf8")).toBe("the supported build");
+  });
+
+  it("touches neither the archive nor the digest once the client is unpacked", async () => {
+    const h = await tempHome();
     await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
     await writeFile(join(h, ".local/share/wechat/wechat.deb"), "deb");
 
@@ -242,9 +311,74 @@ describe("WechatUserRuntime.install", () => {
     });
     await runtime.install();
 
-    // Already unpacked and downloaded: no curl, no dpkg-deb.
+    // install() is idempotent: re-entering it with the client unpacked has
+    // nothing to read the archive for, so it neither downloads nor hashes.
     expect(calls.some((c) => c[0] === "curl")).toBe(false);
     expect(calls.some((c) => c[0] === "dpkg-deb")).toBe(false);
+    expect(calls.some((c) => c[0] === "sha256sum")).toBe(false);
+  });
+
+  it("leaves nothing behind when the replacement is also not the supported build", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "different build");
+    // Neither what is cached nor what replaces it is the pinned build.
+    const { run } = scriptedDownload({
+      "wechat.deb": "0".repeat(64),
+      "wechat.deb.part": "1".repeat(64),
+    });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/not the supported 4\.1\.13\.9 build/);
+
+    // A wedged install ends clean rather than holding a second archive it
+    // would reject just as permanently.
+    expect(existsSync(deb)).toBe(false);
+    expect(existsSync(`${deb}.part`)).toBe(false);
+  });
+
+  it("keeps a cached archive that sha256sum could not read", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "the supported build");
+    const { run, calls } = scriptedRun({
+      sha256sum: () => ({ code: 1, stdout: "", stderr: "sha256sum: Input/output error" }),
+    });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/Could not checksum/);
+
+    // A digest that never answered is not a digest that failed to match, so the
+    // archive survives to be hashed again.
+    expect(existsSync(deb)).toBe(true);
+    expect(calls.some((c) => c[0] === "curl")).toBe(false);
+  });
+
+  it("keeps a cached archive that sha256sum answered for unparseably", async () => {
+    const h = await tempHome();
+    const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
+    await writeFile(deb, "the supported build");
+    // Exit 0, but nothing that can be read as a digest.
+    const { run, calls } = scriptedRun({ sha256sum: () => ok("  \n") });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/Could not checksum/);
+
+    expect(existsSync(deb)).toBe(true);
+    expect(calls.some((c) => c[0] === "curl")).toBe(false);
+  });
+
+  it("raises a runtime error when the verified archive cannot be stored", async () => {
+    const h = await tempHome();
+    await mkdir(join(h, ".local/share/wechat"), { recursive: true });
+    const { run } = scriptedRun({
+      curl: () => ok(),
+      sha256sum: (args) => ok(`${WECHAT_CLIENT_SHA256}  ${args[0]}`),
+      mv: () => ({ code: 1, stdout: "", stderr: "mv: No space left on device" }),
+    });
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await expect(runtime.install()).rejects.toThrow(/Could not store/);
   });
 
   it("raises a runtime error when the download fails", async () => {

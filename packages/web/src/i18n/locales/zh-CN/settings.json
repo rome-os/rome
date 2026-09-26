@@ -14,7 +14,8 @@
     "Trust": "信任",
     "Channels": "渠道",
     "AI Tools": "AI 工具",
-    "Advanced": "高级"
+    "Advanced": "高级",
+    "Devices": "设备"
   },
   "appearance": {
     "title": "外观",
@@ -247,11 +248,30 @@
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
       "saving": "保存中…",
-      "cancel": "取消"
+      "cancel": "取消",
+      "inputMethod": "添加密钥的方式",
+      "singleKey": "单个密钥",
+      "pasteEnv": "粘贴 .env",
+      "envContent": ".env 内容",
+      "envHint": "粘贴 KEY=value 格式的内容，支持注释和带引号的值。同名密钥会被替换，变量引用会按原文保存。",
+      "envEmpty": "请粘贴至少一条 KEY=value 内容",
+      "envError": "第 {{line}} 行：{{reason}}",
+      "envErrors": {
+        "assignment": "应使用 KEY=value 格式",
+        "quote": "引号未闭合，或引号后存在多余内容",
+        "duplicate": "密钥名称重复",
+        "emptyValue": "值不能为空",
+        "longValue": "值超过 32,768 个字符",
+        "name": "密钥名称无效"
+      },
+      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。"
     },
     "saved": "已保存。应用现在可以读取 {{name}}。",
     "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
-    "removed": "已移除 {{name}}。"
+    "removed": "已移除 {{name}}。",
+    "batchSaved_one": "已为所有应用保存 {{count}} 个密钥。",
+    "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
+    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。"
   },
   "trust": {
     "title": "关系层级规则",
@@ -789,5 +809,47 @@
     "artLabel": "高级彩蛋",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "设备",
+    "description": "Rome 账户关联的设备。每 15 秒刷新一次连接检查。",
+    "refresh": "刷新",
+    "loading": "正在检查设备连接…",
+    "loadFailed": "设备加载失败",
+    "connectionLabel": "Rome 连接",
+    "checkedAt": "上次检查：{{time}}。",
+    "empty": "尚无已授权设备。在电脑上运行 rome-node connect 并批准访问即可连接。",
+    "connection": {
+      "not_running": "服务未运行",
+      "online": "已连接",
+      "stopped": "未连接",
+      "connecting": "正在连接",
+      "retrying": "正在重连",
+      "revoked": "授权已撤销",
+      "superseded": "连接已被替换",
+      "not_configured": "未配置",
+      "unavailable": "不可用",
+      "incompatible": "需要重启"
+    },
+    "help": {
+      "not_running": "设备服务未运行，暂时无法确认设备连接状态。",
+      "unavailable": "暂时无法获取设备状态，请刷新重试。",
+      "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
+      "incompatible": "运行 rome-node daemon stop，再运行 rome-node daemon start，重启设备服务。"
+    },
+    "status": {
+      "connected": "已连接",
+      "not_connected": "未连接",
+      "unknown": "未知",
+      "revoked": "授权已撤销"
+    },
+    "connectedCount_one": "{{count}} 台设备已连接",
+    "connectedCount_other": "{{count}} 台设备已连接",
+    "connectedAtLeast_one": "至少 {{count}} 台设备已连接",
+    "connectedAtLeast_other": "至少 {{count}} 台设备已连接",
+    "totalCount_one": "共 {{count}} 台已授权设备",
+    "totalCount_other": "共 {{count}} 台已授权设备",
+    "unknownCount_one": "无法确认 {{count}} 台设备的连接状态。",
+    "unknownCount_other": "无法确认 {{count}} 台设备的连接状态。"
   }
 }

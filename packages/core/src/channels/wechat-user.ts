@@ -1,7 +1,7 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, symlink } from "node:fs/promises";
+import { access, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,13 +11,14 @@ import { createLogger } from "../logger.js";
 const log = createLogger("wechat-user");
 
 /**
- * The pinned client build. WeChat ships no stable download for a given version,
- * so the digest is the pin: the key-recovery step locates its breakpoint by
- * scanning this exact binary, and a silently newer client would move it.
+ * The pinned client build. Rome mirrors this exact build because WeChat's own
+ * download URL carries no version and rolls forward. The digest is the pin: the
+ * key-recovery step locates its breakpoint by scanning this exact binary, and a
+ * silently different client would move it.
  */
-export const WECHAT_CLIENT_URL =
-  "https://dldir1v6.qq.com/weixin/Universal/Linux/WeChatLinux_x86_64.deb";
-const WECHAT_CLIENT_SHA256 = "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
+export const WECHAT_CLIENT_URL = "https://packages.romeos.io/wechat-4.1.13.9-amd64.deb";
+export const WECHAT_CLIENT_SHA256 =
+  "096865e050ba0d3c1a23887227e2400bf343037b1d7d658c84c88ff26bfdc17f";
 
 /**
  * The reader's understanding of WeChat's on-disk formats — SQLCipher page
@@ -31,6 +32,44 @@ export const WECHAT_CLI_SOURCE =
 
 /** Where the deb is unpacked to, and the path the client insists on being at. */
 export const WECHAT_CANONICAL_PREFIX = "/opt/wechat";
+
+/** The image's AT-SPI bus launcher (Debian `at-spi2-core`). */
+export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
+
+/**
+ * Starts accessibility on the client's private session bus: $1 is the launcher.
+ * The launcher owns `org.a11y.Bus` there, answers IsEnabled, and runs the
+ * accessibility bus the client's Qt AT-SPI bridge joins. That bridge watches
+ * for the name, so a client that is already running joins live, with no
+ * restart. The launcher runs without DISPLAY: with one it would also publish
+ * the bus on the X root window, where Rome's browser on the same display would
+ * find and join it. The name can also be owned by a launcher D-Bus activated on
+ * its own, which takes IsEnabled from GSettings (usually off), so the script
+ * sets IsEnabled on every run rather than trusting ownership. The registry is
+ * started up front instead of on first use.
+ */
+const START_ACCESSIBILITY = `
+[ -x "$1" ] || { echo "no accessibility launcher at $1" >&2; exit 1; }
+call() { dbus-send --reply-timeout=2000 "$@"; }
+owned() {
+  call --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \\
+    org.freedesktop.DBus.NameHasOwner string:org.a11y.Bus 2>/dev/null | grep -q 'boolean true'
+}
+if ! owned; then
+  env -u DISPLAY -u WAYLAND_DISPLAY setsid "$1" --launch-immediately --a11y=1 >/dev/null 2>&1 </dev/null &
+  i=0
+  until owned; do
+    i=$((i + 1))
+    [ "$i" -lt 50 ] || { echo "org.a11y.Bus did not appear" >&2; exit 1; }
+    sleep 0.1
+  done
+fi
+call --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.freedesktop.DBus.Properties.Set \\
+  string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null || exit 1
+address=$(call --session --print-reply=literal --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress) || exit 1
+call --bus="$(echo $address)" --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \\
+  org.freedesktop.DBus.StartServiceByName string:org.a11y.atspi.Registry uint32:0 >/dev/null
+`;
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -203,6 +242,8 @@ export interface WechatUserRuntimeConfig {
   canonicalPrefix?: string;
   /** Private session directory owned by the runtime user. */
   runtimeDir?: string;
+  /** The AT-SPI bus launcher; injectable so tests need no real one. */
+  accessibilityLauncher?: string;
   run?: RunCommand;
 }
 
@@ -232,6 +273,7 @@ export class WechatUserRuntime {
   readonly display: string;
   readonly canonicalPrefix: string;
   readonly runtimeDir: string;
+  readonly accessibilityLauncher: string;
   private readonly run: RunCommand;
   private starting: Promise<void> | null = null;
 
@@ -241,6 +283,7 @@ export class WechatUserRuntime {
     this.display = config.display ?? process.env.DISPLAY ?? ":99";
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
     this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
+    this.accessibilityLauncher = config.accessibilityLauncher ?? ACCESSIBILITY_LAUNCHER;
     this.run = config.run ?? runCommand;
   }
 
@@ -379,31 +422,8 @@ export class WechatUserRuntime {
     const clientRoot = join(this.prefix, "client");
     await mkdir(this.prefix, { recursive: true });
 
-    if (!(await exists(deb))) {
-      log.info("wechat_user.downloading_client", { url: WECHAT_CLIENT_URL });
-      const downloaded = await this.run(
-        "curl",
-        ["-fsSL", "--retry", "3", "-o", `${deb}.part`, WECHAT_CLIENT_URL],
-        { timeoutMs: INSTALL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
-      );
-      if (downloaded.code !== 0) {
-        throw new WechatUserRuntimeError(
-          `Could not download the WeChat client: ${downloaded.stderr.trim() || "curl failed"}`,
-        );
-      }
-      await this.run("mv", [`${deb}.part`, deb]);
-    }
-
     if (!(await exists(join(this.clientDir, "wechat")))) {
-      const checksum = await this.run("sha256sum", [deb], {
-        ...(signal ? { signal } : {}),
-      });
-      if (checksum.code !== 0 || checksum.stdout.trim().split(/\s+/)[0] !== WECHAT_CLIENT_SHA256) {
-        throw new WechatUserRuntimeError(
-          "The WeChat client checksum does not match the supported 4.1.13.9 build. " +
-            "Install the supported archive or update Rome before connecting.",
-        );
-      }
+      await this.fetchClientArchive(deb, signal);
       log.info("wechat_user.unpacking_client", { prefix: clientRoot });
       await mkdir(clientRoot, { recursive: true });
       const unpacked = await this.run("dpkg-deb", ["-x", deb, clientRoot], {
@@ -418,6 +438,105 @@ export class WechatUserRuntime {
     }
 
     await this.ensureClientLink();
+  }
+
+  /**
+   * Leave a `deb` at `path` that matches the pinned digest, downloading it if
+   * the cache holds nothing or holds the wrong build.
+   *
+   * The digest admits the cached file rather than merely rejecting it, because
+   * `this.prefix` is volume-backed: a rejected file that stays on disk wins the
+   * `exists` check forever and every later install fails on it. Verifying the
+   * `.part` before the `mv` keeps a wrong download from becoming that file.
+   *
+   * Only the unpack path calls this, which is what keeps `install()`
+   * idempotent. Re-entering it with the client already unpacked has nothing to
+   * read the archive for, so it neither downloads a missing one nor hashes the
+   * better part of a gigabyte to prove one it will not open.
+   */
+  private async fetchClientArchive(path: string, signal?: AbortSignal): Promise<void> {
+    if (await exists(path)) {
+      const digest = await this.clientDigest(path, signal);
+      if (digest === WECHAT_CLIENT_SHA256) return;
+      log.warn("wechat_user.cached_client_rejected", {
+        path,
+        digest,
+        expected: WECHAT_CLIENT_SHA256,
+      });
+      await this.discard(path);
+    }
+
+    log.info("wechat_user.downloading_client", { url: WECHAT_CLIENT_URL });
+    const downloaded = await this.run(
+      "curl",
+      ["-fsSL", "--retry", "3", "-o", `${path}.part`, WECHAT_CLIENT_URL],
+      { timeoutMs: INSTALL_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+    );
+    if (downloaded.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not download the WeChat client: ${downloaded.stderr.trim() || "curl failed"}`,
+      );
+    }
+
+    const digest = await this.clientDigest(`${path}.part`, signal);
+    if (digest !== WECHAT_CLIENT_SHA256) {
+      await this.discard(`${path}.part`);
+      throw new WechatUserRuntimeError(
+        `The WeChat client downloaded from ${WECHAT_CLIENT_URL} hashes to ${digest}, not the ` +
+          "supported 4.1.13.9 build. Either the pin is out of date or the host is serving the " +
+          "wrong file.",
+      );
+    }
+
+    const promoted = await this.run("mv", [`${path}.part`, path]);
+    if (promoted.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not store the WeChat client at ${path}: ${promoted.stderr.trim() || "mv failed"}`,
+      );
+    }
+  }
+
+  /**
+   * Remove `path`, best effort.
+   *
+   * Every caller is already on its way to reporting why the file had to go. A
+   * failed unlink must not replace that story with a filesystem one, and it
+   * costs nothing: the cache path is overwritten by the `mv` that follows, and
+   * a stale `.part` is truncated by the next `curl -o`.
+   */
+  private async discard(path: string): Promise<void> {
+    await rm(path, { force: true }).catch((error: unknown) => {
+      log.warn("wechat_user.client_archive_not_removed", { path, error: String(error) });
+    });
+  }
+
+  /**
+   * The sha256 of the file at `path`.
+   *
+   * A digest this cannot read is not a digest that failed to match. Raising
+   * here rather than reporting a mismatch keeps a `sha256sum` that never
+   * answered from evicting a cached archive that was the right build all along.
+   */
+  private async clientDigest(path: string, signal?: AbortSignal): Promise<string> {
+    const checksum = await this.run("sha256sum", [path], {
+      ...(signal ? { signal } : {}),
+    });
+    if (checksum.code !== 0) {
+      throw new WechatUserRuntimeError(
+        `Could not checksum the WeChat client at ${path}: ` +
+          `${checksum.stderr.trim() || "sha256sum failed"}`,
+      );
+    }
+    const digest = checksum.stdout.trim().split(/\s+/)[0] ?? "";
+    // An answer this cannot parse is as unread as one that never came, and
+    // reporting it as a mismatch would evict the archive it failed to measure.
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+      throw new WechatUserRuntimeError(
+        `Could not checksum the WeChat client at ${path}: sha256sum answered ` +
+          `"${checksum.stdout.trim().slice(0, 80)}"`,
+      );
+    }
+    return digest;
   }
 
   private async ensureClientLink(): Promise<void> {
@@ -443,14 +562,21 @@ export class WechatUserRuntime {
     };
   }
 
-  /** Prepare the private session bus before ordinary startup or key capture. */
+  /**
+   * Prepare the private session bus before ordinary startup or key capture, and
+   * keep accessibility on it for the client's lifetime. Idempotent: the
+   * connection's health probe calls it for a client that is already running.
+   */
   async prepareSession(): Promise<void> {
     await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
     const result = await this.run(
       "sh",
       [
         "-c",
-        'test -S "$1/bus" || exec dbus-daemon --session --fork --address="unix:path=$1/bus"',
+        // Without DISPLAY: services this bus activates inherit its environment,
+        // and an activated AT-SPI launcher would publish the accessibility bus
+        // on the X root window.
+        'test -S "$1/bus" || exec env -u DISPLAY dbus-daemon --session --fork --address="unix:path=$1/bus"',
         "wechat-session",
         this.runtimeDir,
       ],
@@ -460,6 +586,25 @@ export class WechatUserRuntime {
       throw new WechatUserRuntimeError(
         `Could not start the WeChat session bus: ${result.stderr.trim()}`,
       );
+    }
+    await this.ensureAccessibility();
+  }
+
+  /** Turn accessibility on for the session bus, which must already exist.
+   *  Reading and login need no accessibility, so this never throws: a failure
+   *  is logged. Sending checks for the tree itself and reports it as not ready. */
+  async ensureAccessibility(): Promise<void> {
+    const started = await this.run(
+      "sh",
+      ["-c", START_ACCESSIBILITY, "wechat-accessibility", this.accessibilityLauncher],
+      { env: this.clientEnv(), timeoutMs: 15_000 },
+    ).catch((error: unknown) => ({
+      code: null,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+    }));
+    if (started.code !== 0) {
+      log.warn("wechat_user.accessibility_unavailable", { stderr: started.stderr.trim() });
     }
   }
 

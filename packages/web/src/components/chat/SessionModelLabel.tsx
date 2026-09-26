@@ -1,16 +1,27 @@
 import { useTranslation } from "react-i18next";
 
-export function SessionModelLabel({ model }: { model: string | null | undefined }) {
+/** The session's model, followed by its last turn's effort in the provider's own terms. */
+export function SessionModelLabel({
+  model,
+  reasoningEffort,
+}: {
+  model: string | null | undefined;
+  reasoningEffort?: string | null;
+}) {
   const { t } = useTranslation("chat");
   if (!model) return null;
 
+  const description = reasoningEffort
+    ? t("navbar.sessionModelWithEffort", { model, effort: reasoningEffort })
+    : t("navbar.sessionModel", { model });
+
   return (
     <span
-      className="min-w-0 max-w-full shrink-0 truncate text-aux text-muted-foreground md:max-w-48"
-      title={t("navbar.sessionModel", { model })}
-      aria-label={t("navbar.sessionModel", { model })}
+      className="min-w-0 max-w-full shrink-0 truncate text-aux text-muted-foreground md:max-w-64"
+      title={description}
+      aria-label={description}
     >
-      {model}
+      {reasoningEffort ? `${model} · ${reasoningEffort}` : model}
     </span>
   );
 }

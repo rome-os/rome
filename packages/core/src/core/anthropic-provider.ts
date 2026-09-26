@@ -869,6 +869,8 @@ export class AnthropicProvider implements ModelProvider {
     const session: ModelSession = {
       providerId,
       model: effectiveModel,
+      // Claude fixes effort at open and ignores a per-turn effort.
+      appliedReasoningEffort: effort,
       get isClosed(): boolean {
         return closed || abortController.signal.aborted;
       },

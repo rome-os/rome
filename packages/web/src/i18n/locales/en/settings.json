@@ -14,7 +14,8 @@
     "Trust": "Trust",
     "Channels": "Channels",
     "AI Tools": "AI Tools",
-    "Advanced": "Advanced"
+    "Advanced": "Advanced",
+    "Devices": "Devices"
   },
   "appearance": {
     "title": "Appearance",
@@ -247,11 +248,30 @@
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
       "saving": "Saving…",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "inputMethod": "How to add keys",
+      "singleKey": "Single key",
+      "pasteEnv": "Paste .env",
+      "envContent": ".env content",
+      "envHint": "Paste KEY=value lines, including comments and quoted values. Matching keys are replaced. Variable references stay literal.",
+      "envEmpty": "Paste at least one KEY=value entry",
+      "envError": "Line {{line}}: {{reason}}",
+      "envErrors": {
+        "assignment": "Expected KEY=value",
+        "quote": "Unclosed quote or unexpected text after a quoted value",
+        "duplicate": "Duplicate key name",
+        "emptyValue": "Enter a non-empty value",
+        "longValue": "Value exceeds 32,768 characters",
+        "name": "Invalid key name"
+      },
+      "batchFailed": "{{saved}} saved, {{count}} failed. Only failed entries remain in the form. Retry to save them."
     },
     "saved": "Saved. Apps can now read {{name}}.",
     "savedOverridden": "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
-    "removed": "Removed {{name}}."
+    "removed": "Removed {{name}}.",
+    "batchSaved_one": "Saved {{count}} key for all apps.",
+    "batchSaved_other": "Saved {{count}} keys for all apps.",
+    "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use."
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -789,5 +809,47 @@
     "artLabel": "Advanced easter egg",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "Devices",
+    "description": "Devices linked to your Rome account. Connection checks refresh every 15 seconds.",
+    "refresh": "Refresh",
+    "loading": "Checking device connections…",
+    "loadFailed": "Failed to load devices",
+    "connectionLabel": "Rome connection",
+    "connectedCount_one": "{{count}} connected device",
+    "connectedCount_other": "{{count}} connected devices",
+    "connectedAtLeast_one": "At least {{count}} connected device",
+    "connectedAtLeast_other": "At least {{count}} connected devices",
+    "totalCount_one": "{{count}} authorized device",
+    "totalCount_other": "{{count}} authorized devices",
+    "unknownCount_one": "The connection status of {{count}} device could not be confirmed.",
+    "unknownCount_other": "The connection status of {{count}} devices could not be confirmed.",
+    "checkedAt": "Last checked at {{time}}.",
+    "empty": "No devices are authorized. Run rome-node connect on a computer and approve access to connect it.",
+    "connection": {
+      "not_running": "Service not running",
+      "online": "Connected",
+      "stopped": "Not connected",
+      "connecting": "Connecting",
+      "retrying": "Reconnecting",
+      "revoked": "Access revoked",
+      "superseded": "Connection replaced",
+      "not_configured": "Not configured",
+      "unavailable": "Unavailable",
+      "incompatible": "Restart required"
+    },
+    "help": {
+      "not_running": "The device service is not running. Device connection status is unknown.",
+      "unavailable": "Device status is unavailable. Try refreshing.",
+      "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
+      "incompatible": "Restart the device service with rome-node daemon stop and rome-node daemon start."
+    },
+    "status": {
+      "connected": "Connected",
+      "not_connected": "Not connected",
+      "unknown": "Unknown",
+      "revoked": "Access revoked"
+    }
   }
 }

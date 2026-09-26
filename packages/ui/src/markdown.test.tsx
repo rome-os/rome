@@ -1,14 +1,34 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
-import { Markdown } from "./markdown.js";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { Suspense } from "react";
+import { Markdown, type MarkdownTheme, readMarkdownMermaidTheme } from "./markdown.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+  document.documentElement.className = "";
+});
 
 function renderMd(md: string, props: { compact?: boolean; className?: string } = {}) {
   return render(<Markdown {...props}>{md}</Markdown>);
 }
 
 describe("Markdown", () => {
+  it("passes a host URL transform through without changing the image renderer", () => {
+    render(
+      <Markdown urlTransform={(url, key) => (key === "src" ? `/assets${url}` : url)}>
+        {"![Preview](/preview.png)\n\n[Open file](/preview.png)"}
+      </Markdown>,
+    );
+
+    expect(screen.getByRole("img", { name: "Preview" }).getAttribute("src")).toBe(
+      "/assets/preview.png",
+    );
+    expect(screen.getByRole("link", { name: "Open file" }).getAttribute("href")).toBe(
+      "/preview.png",
+    );
+  });
+
   it("tags the root with rome-markdown, the hook hosts style prose through", () => {
     const { container } = renderMd("hello");
     const root = container.querySelector(".rome-markdown");
@@ -113,5 +133,101 @@ describe("Markdown", () => {
     expect(screen.getByRole("heading", { level: 1 }).getAttribute("data-streamdown")).toBe(
       "heading-1",
     );
+  });
+});
+
+describe("Markdown Mermaid theme", () => {
+  function countThemeReads(ui: React.ReactElement): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    render(ui);
+    const reads = spy.mock.calls.length;
+    cleanup();
+    spy.mockRestore();
+    return reads;
+  }
+
+  function readsPerResolve(): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    readMarkdownMermaidTheme();
+    const reads = spy.mock.calls.length;
+    spy.mockRestore();
+    return reads;
+  }
+
+  it("resolves the theme once however many instances are mounted", () => {
+    const single = countThemeReads(<Markdown>one</Markdown>);
+    const many = countThemeReads(
+      <>
+        {Array.from({ length: 20 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+
+    expect(single).toBeGreaterThan(0);
+    expect(many).toBe(single);
+  });
+
+  it("resolves the theme again once when the theme root changes", async () => {
+    const single = readsPerResolve();
+    render(
+      <>
+        {Array.from({ length: 5 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    await act(async () => {
+      document.documentElement.classList.add("dark");
+    });
+
+    expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("re-validates a theme resolved by a render that never committed", async () => {
+    const single = readsPerResolve();
+    // The sibling suspends, so React discards the Markdown render after it
+    // resolved the theme, and no instance ever watches the root.
+    const never = new Promise<never>(() => {});
+    function Suspends(): never {
+      throw never;
+    }
+    render(
+      <Suspense fallback={null}>
+        <Markdown>discarded</Markdown>
+        <Suspends />
+      </Suspense>,
+    );
+    cleanup();
+    document.documentElement.classList.add("dark");
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    render(<Markdown>mounted</Markdown>);
+
+    expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("does not re-render new instances when they replace the old ones in one commit", () => {
+    // Every Markdown render reads `theme.mermaid`, so the getter counts renders.
+    let renders = 0;
+    const theme: MarkdownTheme = {
+      get mermaid() {
+        renders++;
+        return undefined;
+      },
+    };
+    const transcript = (id: string) =>
+      Array.from({ length: 3 }, (_, index) => (
+        <Markdown key={`${id}-${index}`} theme={theme}>{`${id} message ${index}`}</Markdown>
+      ));
+    const { rerender } = render(<>{transcript("a")}</>);
+    const mountRenders = renders;
+    renders = 0;
+
+    rerender(<>{transcript("b")}</>);
+
+    expect(renders).toBe(mountRenders);
   });
 });

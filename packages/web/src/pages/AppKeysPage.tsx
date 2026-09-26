@@ -13,6 +13,8 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -30,6 +32,7 @@ import {
   fetchAppKeys,
   saveAppKey,
 } from "@/lib/app-keys-api";
+import { type EnvAppKey, parseAppKeysEnv } from "@/lib/parse-app-keys-env";
 import {
   Page,
   PageHeader,
@@ -68,6 +71,8 @@ export default function AppKeysPage() {
   const [label, setLabel] = useState("");
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
+  const [inputMode, setInputMode] = useState("single");
+  const [envContent, setEnvContent] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<AppKeyDto | null>(null);
 
@@ -76,11 +81,14 @@ export default function AppKeysPage() {
     setLabel(next.mode === "replace" ? next.label : "");
     setName(next.mode === "replace" ? next.name : "");
     setValue("");
+    setInputMode("single");
+    setEnvContent("");
     setFormError(null);
   };
   const closeForm = () => {
     setForm(null);
     setValue("");
+    setEnvContent("");
     setFormError(null);
   };
 
@@ -98,6 +106,46 @@ export default function AppKeysPage() {
     onError: (error: Error) => setFormError(error.message),
   });
 
+  const batchMutation = useMutation({
+    mutationFn: async (entries: EnvAppKey[]) => {
+      const existingKeys = await queryClient.fetchQuery({
+        queryKey: APP_KEYS_QUERY_KEY,
+        queryFn: fetchAppKeys,
+        staleTime: 0,
+        retry: false,
+      });
+      const failed: EnvAppKey[] = [];
+      let overridden = false;
+      for (const entry of entries) {
+        try {
+          const result = await saveAppKey({
+            name: entry.name,
+            value: entry.value,
+            label: existingKeys.find((key) => key.name === entry.name)?.label ?? entry.name,
+          });
+          overridden ||= result.overridden;
+        } catch {
+          failed.push(entry);
+        }
+      }
+      return { failed, saved: entries.length - failed.length, overridden };
+    },
+    onSuccess: async ({ failed, saved, overridden }) => {
+      if (failed.length > 0) {
+        setEnvContent(failed.map((entry) => entry.source).join("\n"));
+        setFormError(t("appKeys.form.batchFailed", { saved, count: failed.length }));
+      } else {
+        closeForm();
+      }
+      if (saved > 0) toast.success(t("appKeys.batchSaved", { count: saved }));
+      if (overridden) toast.warning(t("appKeys.batchOverridden"));
+      await queryClient.invalidateQueries({ queryKey: APP_KEYS_QUERY_KEY });
+    },
+    onError: (error: Error) => setFormError(error.message),
+  });
+
+  const isSaving = saveMutation.isPending || batchMutation.isPending;
+
   const removeMutation = useMutation({
     mutationFn: deleteAppKey,
     onSuccess: async (_result, removedName) => {
@@ -112,6 +160,27 @@ export default function AppKeysPage() {
   });
 
   const submit = () => {
+    if (isSaving) return;
+    setFormError(null);
+    if (form?.mode === "add" && inputMode === "env") {
+      const parsed = parseAppKeysEnv(envContent);
+      if (parsed.error) {
+        const { line, reason, detail } = parsed.error;
+        setFormError(
+          t("appKeys.form.envError", {
+            line,
+            reason: detail ?? t(`appKeys.form.envErrors.${reason}`),
+          }),
+        );
+        return;
+      }
+      if (parsed.entries.length === 0) {
+        setFormError(t("appKeys.form.envEmpty"));
+        return;
+      }
+      batchMutation.mutate(parsed.entries);
+      return;
+    }
     const trimmedName = name.trim();
     const nameError = appKeyNameError(trimmedName);
     if (nameError) {
@@ -175,68 +244,122 @@ export default function AppKeysPage() {
                   label={t("appKeys.form.close")}
                   icon={<X />}
                   onClick={closeForm}
+                  disabled={isSaving}
                 />
               </div>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-app-key-label`}>
-                  {t("appKeys.form.labelField")}
-                </FieldLabel>
-                <Input
-                  id={`${uid}-app-key-label`}
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder={t("appKeys.form.labelPlaceholder")}
-                  className="w-full"
-                  autoFocus={form.mode === "add"}
-                />
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-app-key-name`}>
-                    {t("appKeys.form.nameField")}
-                  </FieldLabel>
-                  <Input
-                    id={`${uid}-app-key-name`}
-                    value={name}
-                    onChange={(e) => setName(e.target.value.toUpperCase())}
-                    placeholder={t("appKeys.form.namePlaceholder")}
-                    disabled={form.mode === "replace"}
-                    className="w-full font-mono"
-                  />
-                  <p className="mt-1 text-aux text-muted-foreground">
-                    {t("appKeys.form.nameHint")}
+              <fieldset disabled={isSaving} className="min-w-0 space-y-4">
+                <Tabs
+                  value={inputMode}
+                  onValueChange={(mode) => {
+                    setInputMode(mode);
+                    setFormError(null);
+                  }}
+                >
+                  {form.mode === "add" && (
+                    <TabsList aria-label={t("appKeys.form.inputMethod")}>
+                      <TabsTrigger value="single" disabled={isSaving}>
+                        {t("appKeys.form.singleKey")}
+                      </TabsTrigger>
+                      <TabsTrigger value="env" disabled={isSaving}>
+                        {t("appKeys.form.pasteEnv")}
+                      </TabsTrigger>
+                    </TabsList>
+                  )}
+                  <TabsContent value="single" className="space-y-4">
+                    <Field>
+                      <FieldLabel htmlFor={`${uid}-app-key-label`}>
+                        {t("appKeys.form.labelField")}
+                      </FieldLabel>
+                      <Input
+                        id={`${uid}-app-key-label`}
+                        value={label}
+                        onChange={(e) => setLabel(e.target.value)}
+                        placeholder={t("appKeys.form.labelPlaceholder")}
+                        className="w-full"
+                        autoFocus={form.mode === "add"}
+                      />
+                    </Field>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field>
+                        <FieldLabel htmlFor={`${uid}-app-key-name`}>
+                          {t("appKeys.form.nameField")}
+                        </FieldLabel>
+                        <Input
+                          id={`${uid}-app-key-name`}
+                          value={name}
+                          onChange={(e) => setName(e.target.value.toUpperCase())}
+                          placeholder={t("appKeys.form.namePlaceholder")}
+                          disabled={form.mode === "replace"}
+                          className="w-full font-mono"
+                        />
+                        <p className="mt-1 text-aux text-muted-foreground">
+                          {t("appKeys.form.nameHint")}
+                        </p>
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor={`${uid}-app-key-value`}>
+                          {t("appKeys.form.valueField")}
+                        </FieldLabel>
+                        <Input
+                          id={`${uid}-app-key-value`}
+                          type="password"
+                          value={value}
+                          onChange={(e) => setValue(e.target.value)}
+                          autoComplete="off"
+                          className="w-full"
+                          autoFocus={form.mode === "replace"}
+                        />
+                        <p className="mt-1 text-aux text-muted-foreground">
+                          {t("appKeys.form.valueHint")}
+                        </p>
+                      </Field>
+                    </div>
+                  </TabsContent>
+                  {form.mode === "add" && (
+                    <TabsContent value="env">
+                      <Field>
+                        <FieldLabel htmlFor={`${uid}-app-keys-env`}>
+                          {t("appKeys.form.envContent")}
+                        </FieldLabel>
+                        <Textarea
+                          id={`${uid}-app-keys-env`}
+                          value={envContent}
+                          onChange={(event) => setEnvContent(event.target.value)}
+                          placeholder={"ENV_VAR_1=value1\nENV_VAR_2=value2"}
+                          rows={8}
+                          autoComplete="off"
+                          autoCapitalize="off"
+                          spellCheck={false}
+                          className="w-full font-mono"
+                          aria-describedby={`${uid}-app-keys-env-hint`}
+                        />
+                        <p
+                          id={`${uid}-app-keys-env-hint`}
+                          className="mt-1 text-aux text-muted-foreground"
+                        >
+                          {t("appKeys.form.envHint")}
+                        </p>
+                      </Field>
+                    </TabsContent>
+                  )}
+                </Tabs>
+                {formError && (
+                  <p role="alert" className="text-ui text-destructive">
+                    {formError}
                   </p>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-app-key-value`}>
-                    {t("appKeys.form.valueField")}
-                  </FieldLabel>
-                  <Input
-                    id={`${uid}-app-key-value`}
-                    type="password"
-                    value={value}
-                    onChange={(e) => setValue(e.target.value)}
-                    autoComplete="off"
-                    className="w-full"
-                    autoFocus={form.mode === "replace"}
-                  />
-                  <p className="mt-1 text-aux text-muted-foreground">
-                    {t("appKeys.form.valueHint")}
-                  </p>
-                </Field>
-              </div>
-              {formError && <p className="text-ui text-destructive">{formError}</p>}
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-ui text-muted-foreground">{t("appKeys.form.consent")}</p>
-                <div className="flex shrink-0 gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={closeForm}>
-                    {t("appKeys.form.cancel")}
-                  </Button>
-                  <Button type="submit" size="sm" disabled={saveMutation.isPending}>
-                    {saveMutation.isPending ? t("appKeys.form.saving") : t("appKeys.form.save")}
-                  </Button>
+                )}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-ui text-muted-foreground">{t("appKeys.form.consent")}</p>
+                  <div className="flex shrink-0 gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={closeForm}>
+                      {t("appKeys.form.cancel")}
+                    </Button>
+                    <Button type="submit" size="sm" disabled={isSaving}>
+                      {isSaving ? t("appKeys.form.saving") : t("appKeys.form.save")}
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              </fieldset>
             </form>
           )}
 
@@ -327,6 +450,7 @@ export default function AppKeysPage() {
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={isSaving}
                             onClick={() =>
                               openForm({ mode: "replace", name: key.name, label: key.label })
                             }
@@ -337,6 +461,7 @@ export default function AppKeysPage() {
                             type="button"
                             variant="outline"
                             size="sm"
+                            disabled={isSaving}
                             onClick={() => setRemoving(key)}
                           >
                             {t("appKeys.remove")}

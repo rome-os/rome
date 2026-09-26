@@ -325,13 +325,16 @@ class UpdateManager {
    * dialog is the honest answer when everything is in the tray.
    */
   private getDialogWindow(): BrowserWindow | undefined {
+    // The floating pill and the quitting notice are always-on-top slivers, and
+    // with the main window in the tray the pill is the only visible window. A
+    // sheet hung off either is unreadable, so they fall through to the
+    // windowless dialog like everything else in the tray.
+    const canHostDialog = (window: BrowserWindow): boolean =>
+      !window.isDestroyed() && window.isVisible() && !window.isAlwaysOnTop();
+
     const focused = BrowserWindow.getFocusedWindow();
-    if (focused && !focused.isDestroyed() && focused.isVisible()) {
-      return focused;
-    }
-    return BrowserWindow.getAllWindows().find(
-      (window) => !window.isDestroyed() && window.isVisible(),
-    );
+    if (focused && canHostDialog(focused)) return focused;
+    return BrowserWindow.getAllWindows().find(canHostDialog);
   }
 
   private showDialog(options: MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {

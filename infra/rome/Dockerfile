@@ -58,7 +58,7 @@ RUN mkdir -p /rome-home && chmod 0777 /rome-home
 # terminal-server (claude /login, codex login, opencli usage) finds them on
 # PATH inside the dev container.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g @anthropic-ai/claude-code@2.1.251 @openai/codex@0.153.4 @yunfanye/opencli@1.8.8
+    npm install -g @anthropic-ai/claude-code@2.1.281 @openai/codex@0.156.1 @yunfanye/opencli@1.8.8
 
 # The container's browser is the server-side Chrome (the `chrome` sidecar,
 # which shares this container's network namespace — compose.dev.yml): BROWSER
@@ -126,3 +126,4 @@ WORKDIR /workspace
 # The source workspace is volume-populated at runtime. Keep a stable PATH entry
 # whose target appears as soon as the sync sidecar seeds /workspace.
 RUN ln -sf /workspace/packages/discord-cli/bin/discord.js /usr/local/bin/discord
+RUN ln -sf /workspace/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node

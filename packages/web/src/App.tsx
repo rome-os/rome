@@ -6,6 +6,7 @@ import { AuthGate } from "./shell/AuthGate";
 import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
+import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import FreePage from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
@@ -60,8 +61,10 @@ export default function App() {
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
   const resumeRemix = useAppRemixResume();
+  const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
   if (resumeRemix) return <Navigate to={resumeRemix} replace />;
+  if (cloudLoginReturn) return <Navigate to={cloudLoginReturn} replace />;
 
   return (
     <SlotProvider>

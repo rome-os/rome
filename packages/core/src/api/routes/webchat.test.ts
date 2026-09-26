@@ -1397,22 +1397,23 @@ describe("Webchat API", () => {
       });
       const session = (await response.json()) as { id: string };
       const read = async () => (await app.request(`/chat/sessions/${session.id}`)).json();
-      expect(await read()).toMatchObject({ model: null });
+      expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
 
       const runtimeId = await deps.sessionsRepo.create({
         agentName: "main",
         channelThreadKey: `webchat:${session.id}`,
       });
       await deps.sessionsRepo.setProviderInfo(runtimeId, "codex", "thread-1", "gpt-5.5");
+      await deps.sessionsRepo.setReasoningEffort(runtimeId, "xhigh");
       const otherAgentId = await deps.sessionsRepo.create({
         agentName: "other-agent",
         channelThreadKey: `webchat:${session.id}`,
       });
       await deps.sessionsRepo.setProviderInfo(otherAgentId, "claude", "thread-2", "other-model");
-      expect(await read()).toMatchObject({ model: "gpt-5.5" });
+      expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
       await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol");
-      expect(await read()).toMatchObject({ model: null });
+      expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
       const selectedRuntimeId = await deps.sessionsRepo.create({
         agentName: "main",
         channelThreadKey: `webchat:${session.id}:large-model:gpt-5-6-sol`,
@@ -3714,6 +3715,7 @@ describe("Webchat API", () => {
         provider: "anthropic",
         providerThreadId: "fork-provider-thread",
         model: "claude",
+        reasoningEffort: null,
         createdAt: new Date(),
         lastActiveAt: new Date(),
       });
@@ -3761,6 +3763,7 @@ describe("Webchat API", () => {
       provider: "anthropic",
       providerThreadId: "fork-provider-thread",
       model: "claude",
+      reasoningEffort: null,
       createdAt: new Date(),
       lastActiveAt: new Date(),
     });
@@ -4061,6 +4064,7 @@ describe("Webchat API", () => {
         provider: "anthropic",
         providerThreadId: "fork-provider-thread",
         model: "claude",
+        reasoningEffort: null,
         createdAt: new Date(),
         lastActiveAt: new Date(),
       });

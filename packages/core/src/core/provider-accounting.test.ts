@@ -182,6 +182,31 @@ describe("provider-accounting", () => {
     expect(calculateImpliedCostUsd("openai", "gpt-5.6-luna", usage)).toBeCloseTo(8.35);
   });
 
+  it("calculates GPT-6 Sol and Luna costs using their published rates", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6-sol", usage)).toBeCloseTo(14.7);
+    expect(calculateImpliedCostUsd("openai", "gpt-6-luna", usage)).toBeCloseTo(0.735);
+  });
+
+  it("applies long-context pricing to GPT-6 Sol and Luna", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+    const rawUsage = { input_tokens: 272_001 };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6-sol", usage, rawUsage)).toBeCloseTo(24.4);
+    expect(calculateImpliedCostUsd("openai", "gpt-6-luna", usage, rawUsage)).toBeCloseTo(1.22);
+  });
+
   it("applies GPT-5.6 long-context input and output multipliers", () => {
     const impliedCostUsd = calculateImpliedCostUsd(
       "openai",

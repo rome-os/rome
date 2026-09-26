@@ -1,3 +1,4 @@
+import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission } from "./channels/pairing.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -16,6 +17,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin } from "./lib/rome-cloud-origin.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
@@ -273,6 +275,8 @@ async function main() {
     log.info("Seeded instance token from environment into database");
   }
   await hydrateInstanceToken(settingsRepo);
+  const nodeDevices = createNodeDevicesService();
+  const provisionNodeCaller = createNodeCallerProvisioner();
 
   // App keys: guardian-entered values go live in process.env before any app
   // code, action worker, or route can read them. Operator-set env always wins;
@@ -1280,6 +1284,8 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      provisionNodeCaller,
+      nodeDevices,
       talkRouter,
       conversationSettings,
       actionEngine,
@@ -1515,6 +1521,7 @@ async function main() {
   // full-TTL drain key on every boot, and no-ops when the instance is not
   // enrolled (leaving any manually-pasted relay setting untouched).
   void provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer });
+  void provisionNodeCaller();
 
   process.on("unhandledRejection", (reason) => {
     const shutdownLog = createLogger("shutdown");
@@ -1543,6 +1550,7 @@ async function main() {
     shuttingDown = true;
     const shutdownLog = createLogger("shutdown");
     shutdownLog.info("shutting down", { signal });
+    nodeDevices.close();
 
     if (internalApi) {
       try {

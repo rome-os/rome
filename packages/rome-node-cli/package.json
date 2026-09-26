@@ -1,0 +1,45 @@
+{
+  "name": "@rome-os/node",
+  "version": "0.1.1",
+  "description": "Standalone CLI for Rome remote devices",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "rome-node": "./bin/rome-node.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm --filter @rome-os/node-core build && node -e \"require('node:fs').rmSync('dist', {recursive:true, force:true})\" && tsc -p tsconfig.build.json",
+    "prepare": "pnpm --filter @rome-os/node-core build && node -e \"require('node:fs').rmSync('dist', {recursive:true, force:true})\" && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && ../../scripts/test-env.sh rstest"
+  },
+  "dependencies": {
+    "@rome-os/node-core": "workspace:^"
+  },
+  "devDependencies": {
+    "@rstest/core": "^0.11.11",
+    "@types/node": "25.2.3",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/rome-node-cli"
+  }
+}

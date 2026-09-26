@@ -91,6 +91,8 @@
     "chatHint": "在此应用的源码项目中打开对话。",
     "publishTitle": "发布到应用商店",
     "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
+    "publishHintListed": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
+    "publishHintUnlisted": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。尚未发布到商店。",
     "uninstallHint": "移除应用，数据会保留以便日后重装。",
     "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
@@ -99,6 +101,7 @@
     "openLabelAria": "在完整视图中打开 {{name}}",
     "openFullTitle": "打开完整视图",
     "openSplitTitle": "在分屏视图中打开",
+    "openNewTabTitle": "在新标签页中打开",
     "openButton": "打开",
     "upgradeButton": "升级 → v{{version}}",
     "upgradeTitle": "将 {{name}} 升级到 v{{version}}",
@@ -167,6 +170,10 @@
       "removeEmail": "移除 {{email}}",
       "emptyEmails": "请至少添加一个 Rome Cloud 邮箱。",
       "invalidEmails": "这些邮箱格式不正确：{{emails}}",
+      "linkLabel": "分享链接",
+      "copyLink": "复制链接",
+      "linkCopied": "已复制",
+      "linkSaveFirst": "保存访问权限后再分享此链接。",
       "cancel": "取消",
       "save": "保存访问权限",
       "saving": "保存中..."

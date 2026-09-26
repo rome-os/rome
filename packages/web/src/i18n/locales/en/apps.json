@@ -91,6 +91,8 @@
     "chatHint": "Opens a chat in this app's source project.",
     "publishTitle": "Publish to App Store",
     "publishHint": "Uploads the installed bundle (v{{version}}) to the Rome App Store.",
+    "publishHintListed": "Uploads the installed bundle (v{{version}}) to the Rome App Store. Latest published: v{{storeVersion}}.",
+    "publishHintUnlisted": "Uploads the installed bundle (v{{version}}) to the Rome App Store. Not published yet.",
     "uninstallHint": "Remove the app. Its data is preserved for a later reinstall.",
     "uninstallPurgeHint": "The app's data is deleted permanently and cannot be recovered."
   },
@@ -99,6 +101,7 @@
     "openLabelAria": "Open {{name}} in full view",
     "openFullTitle": "Open full view",
     "openSplitTitle": "Open in split view",
+    "openNewTabTitle": "Open in new tab",
     "openButton": "Open",
     "upgradeButton": "Upgrade → v{{version}}",
     "upgradeTitle": "Upgrade {{name}} to v{{version}}",
@@ -167,6 +170,10 @@
       "removeEmail": "Remove {{email}}",
       "emptyEmails": "Add at least one Rome Cloud email.",
       "invalidEmails": "These emails look invalid: {{emails}}",
+      "linkLabel": "Share link",
+      "copyLink": "Copy link",
+      "linkCopied": "Copied",
+      "linkSaveFirst": "Save access before sharing this link.",
       "cancel": "Cancel",
       "save": "Save access",
       "saving": "Saving..."

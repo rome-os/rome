@@ -1864,6 +1864,8 @@ class AgentSessionImpl implements AgentSession {
    * this model (never a tier re-map) once a pin exists.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
+  /** Last effort written to the session row, so an unchanged effort skips the write. */
+  private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
@@ -2134,6 +2136,7 @@ class AgentSessionImpl implements AgentSession {
               sink.lifecycleInterrupted || outbound.accounting?.stopReason === "interrupted";
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
+            await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2336,6 +2339,19 @@ class AgentSessionImpl implements AgentSession {
 
   private providerInfoStored = false;
 
+  private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
+    if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
+    try {
+      await this.deps.sessionManager.setReasoningEffort(this.sessionId, reasoningEffort);
+      this.storedReasoningEffort = reasoningEffort;
+    } catch (err) {
+      log.warn("failed to persist session reasoning effort", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private async maybePersistTurnCheckpoint(session: ModelSession, turnId: string): Promise<void> {
     const checkpointId = session.lastCompletedTurnCheckpoint;
     const providerThreadId = session.providerThreadId;
@@ -2402,6 +2418,18 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         forkSessionId,
         channelThreadKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const reasoningEffort = forkSession.appliedReasoningEffort;
+    if (!reasoningEffort) return;
+    try {
+      await this.deps.sessionManager.setReasoningEffort(forkSessionId, reasoningEffort);
+    } catch (err) {
+      log.warn("failed to persist fork reasoning effort", {
+        sessionId: this.sessionId,
+        forkSessionId,
         error: err instanceof Error ? err.message : String(err),
       });
     }

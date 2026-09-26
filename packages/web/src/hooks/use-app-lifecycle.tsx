@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { Globe, Lock, Mail, X } from "lucide-react";
+import { Globe, Link2, Lock, Mail, X } from "lucide-react";
 import type {
   AppAccessMode,
   AppInstallResponse,
@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { parseEmailTextarea } from "@/lib/email-list";
+import { shareableOrigin } from "@/lib/shareable-origin";
 import { fetchJson } from "@/lib/fetch-json";
 import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "@/hooks/use-apps";
 
@@ -114,6 +115,7 @@ export function useAppLifecycle(
   const [accessEmailsDraft, setAccessEmailsDraft] = useState<string[]>([]);
   const [accessEmailInput, setAccessEmailInput] = useState("");
   const [accessDialogError, setAccessDialogError] = useState("");
+  const [accessLinkCopied, setAccessLinkCopied] = useState(false);
 
   // Every lifecycle write follows the same shape: mark the app as acting, run
   // the request, toast any error, then invalidate the apps query so consumers
@@ -189,8 +191,9 @@ export function useAppLifecycle(
 
   // POST /apps/:id/publish — repack the installed bundle and push it to the
   // App Store. Nothing changes locally on success (the published version equals
-  // the installed one, so it can't become an upgrade candidate either) — no
-  // query invalidation, just the acting state and toasts.
+  // the installed one, so it can't become an upgrade candidate either) — only
+  // the app's store listing version is refetched, so the details page stops
+  // showing the pre-publish version.
   const publishMutation = useMutation({
     mutationFn: (vars: { id: string; fallback: string }) =>
       fetchJson<AppPublishResponse>(`/api/apps/${encodeURIComponent(vars.id)}/publish`, {
@@ -199,6 +202,9 @@ export function useAppLifecycle(
       }),
     onMutate: ({ id }) => markActing(id, t("installed.publishing")),
     onError: (err) => toastError(err),
+    onSuccess: (_result, { id }) => {
+      void invalidateApps.storeListing(id);
+    },
     onSettled: clearActing,
   });
 
@@ -422,6 +428,7 @@ export function useAppLifecycle(
     setAccessEmailsDraft(app.cloudAllowedEmails ?? []);
     setAccessEmailInput("");
     setAccessDialogError("");
+    setAccessLinkCopied(false);
   };
 
   const cancelAccessDialog = () => {
@@ -517,6 +524,31 @@ export function useAppLifecycle(
     ? t("installed.accessDialog.title", { name: accessTarget.displayName })
     : "";
   const accessSaving = accessMutation.isPending;
+  // The link to share is the standalone route: it is what a visitor lands on
+  // anyway, and it opens without the guardian's shell around the app. None is
+  // offered on a loopback host, whose links open nowhere else.
+  const shareOrigin = shareableOrigin();
+  const accessShareUrl =
+    accessTarget?.fullHref && shareOrigin ? `${shareOrigin}${accessTarget.fullHref}` : null;
+  // The link only opens once the picked mode is saved, and saving closes the
+  // dialog, so copy waits for a saved shared mode. The Clipboard API exists in
+  // secure contexts only; elsewhere the field, which selects on focus, is the
+  // way to copy.
+  const accessSavedMode: AppAccessMode | null = accessTarget
+    ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
+    : null;
+  const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
+  const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
+  const copyAccessShareUrl = () => {
+    if (!accessShareUrl) return;
+    void navigator.clipboard?.writeText(accessShareUrl).then(
+      () => {
+        setAccessLinkCopied(true);
+        setTimeout(() => setAccessLinkCopied(false), 1500);
+      },
+      () => {},
+    );
+  };
 
   const dialogs = (
     <>
@@ -695,6 +727,42 @@ export function useAppLifecycle(
                   {t("installed.accessDialog.emptyEmails")}
                 </p>
               )}
+            </div>
+          ) : null}
+
+          {accessModeDraft !== "private" && accessShareUrl ? (
+            <div className="space-y-2">
+              <FieldLabel htmlFor="app-access-link">
+                {t("installed.accessDialog.linkLabel")}
+              </FieldLabel>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input
+                    id="app-access-link"
+                    size="md"
+                    icon={<Link2 />}
+                    value={accessShareUrl}
+                    readOnly
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </div>
+                {canCopyAccessLink ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    onClick={copyAccessShareUrl}
+                    disabled={accessLinkUnsaved}
+                  >
+                    {accessLinkCopied
+                      ? t("installed.accessDialog.linkCopied")
+                      : t("installed.accessDialog.copyLink")}
+                  </Button>
+                ) : null}
+              </div>
+              {accessLinkUnsaved ? (
+                <FieldDescription>{t("installed.accessDialog.linkSaveFirst")}</FieldDescription>
+              ) : null}
             </div>
           ) : null}
 

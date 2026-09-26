@@ -20,6 +20,7 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
+    "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",
@@ -261,12 +262,15 @@
     "options": {
       "auto": "自动",
       "claudeOpus": "Claude Opus",
+      "opus55": "Opus 5.5",
       "opus5": "Opus 5",
       "opus46": "Opus 4.6",
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt6Sol": "GPT-6 Sol",
+      "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"

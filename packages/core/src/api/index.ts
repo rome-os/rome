@@ -1,3 +1,4 @@
+import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -5,7 +6,8 @@ import { type Context, Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger } from "../logger.js";
-import { renderSocialMeta } from "../lib/social-meta.js";
+import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
+import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
@@ -63,6 +65,7 @@ import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
 import { desktopProxyRoutes } from "./routes/desktop-proxy.js";
 import { appAssetsRoutes } from "./routes/app-assets.js";
+import { appHomeScreenRoutes } from "./routes/app-home-screen.js";
 import { appOgRoutes } from "./routes/app-og.js";
 import { appStoreRoutes } from "./routes/app-store.js";
 import { showcasePresetRoutes } from "./routes/showcase-presets.js";
@@ -103,6 +106,9 @@ export function buildApp(
 
   // Social card image per installed app, at /app-og/<appId>.png (public).
   app.route("/", appOgRoutes(deps));
+
+  // Home-screen manifest and icon per installed app (public).
+  app.route("/", appHomeScreenRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
   // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
@@ -159,6 +165,7 @@ export function buildApp(
   api.route("/", conversationSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", devicesRoutes(deps));
   api.route("/", appKeysRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
@@ -214,13 +221,16 @@ function mountSpa(
   webRoot: string,
   deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
 ): void {
-  // App document routes get the shell with per-app social meta. Registered
-  // before `serveStatic` so the static handler never answers them, and
-  // `no-cache` because Caddy set that on the shell before this path existed —
-  // a cached shell points at bundle hashes the next image upgrade removes.
+  // App document routes get the shell with per-app social meta and
+  // home-screen identity. Registered before `serveStatic` so the static
+  // handler never answers them, and `no-cache` because Caddy set that on the
+  // shell before this path existed — a cached shell points at bundle hashes
+  // the next image upgrade removes.
   const appDocument = async (c: Context) => {
     const card = await buildAppSocialCard(deps, c.req.raw);
-    return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
+    const identity = buildAppIdentity(deps, c.req.raw);
+    const html = renderAppIdentity(renderSocialMeta(readIndexHtml(webRoot), card), identity);
+    return c.html(html, 200, {
       "Cache-Control": "no-cache",
     });
   };

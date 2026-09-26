@@ -60,6 +60,16 @@ After a restart, check both stored history and live reception:
 
 A running process and no visible login window are local readiness checks. Only receipt of a new message verifies live synchronization.
 
+## Accessibility
+
+Rome runs an accessibility bus for the client, so it can later reply from the guardian's account by driving the client through its accessibility tree.
+
+- The image carries `at-spi2-core`, `xdotool`, and `python3-jeepney`.
+- Rome starts the AT-SPI launcher on the client's private session bus whenever it prepares the client's session. The launcher reports accessibility as enabled and starts the AT-SPI registry.
+- The client's Qt AT-SPI bridge watches that bus. A client that is already running and signed in joins at the next desktop check, with no restart and no sign-in.
+- Nothing outside the WeChat session joins. The launcher and the session bus run without `DISPLAY`, so the accessibility bus is never published on the X display that Rome's browser shares.
+- Reading and login do not depend on accessibility. When the launcher is missing or fails, Rome logs `wechat_user.accessibility_unavailable` and the connection keeps reading.
+
 ## Clean-login verification
 
 Use a separate instance with a new home volume. Keep existing account stores intact. Complete one login, then check a direct conversation that contains messages.

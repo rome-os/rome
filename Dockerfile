@@ -100,6 +100,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm fetch \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
     --filter @rome-os/app-runtime... \
@@ -126,6 +127,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prefer-offline --frozen-lockfile \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
     --filter @rome-os/app-runtime... \
@@ -215,6 +217,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # X and GL stack; this is only the remainder.
 #
 # Key recovery launches the client under gdb as the Rome service user.
+# Sending drives the client through its AT-SPI accessibility tree: at-spi2-core
+# runs the accessibility bus beside the client's private session bus, jeepney
+# reads the tree, and xdotool clicks and presses Return where the tree has no
+# action.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -222,7 +228,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb x11-utils imagemagick
+      python3-venv gdb x11-utils imagemagick \
+      at-spi2-core xdotool python3-jeepney
 
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
@@ -230,7 +237,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # does NOT work: npm's replace-registry-host rewrites the npmjs tarball host to the
 # top-level --registry (the mirror), producing a 404.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.251 @openai/codex@0.153.4 && \
+    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.281 @openai/codex@0.156.1 && \
     npm install -g @yunfanye/opencli@1.8.8
 
 RUN curl -fsSL --retry 5 --retry-delay 2 https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" && \
@@ -340,6 +347,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Agent-facing Discord REST CLI. /app is populated from /opt/rome by the
 # entrypoint; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
+RUN ln -sf /app/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node
 
 # Chrome/CDP launcher assets
 RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/rome-apply-cdp-stealth.sh

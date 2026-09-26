@@ -1,3 +1,4 @@
+import type { DevicesStatus } from "@rome/api-types/devices";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   listAnthropicCompatibleProviderSummaries,
@@ -262,6 +263,17 @@ const favorPacks: FavorRechargePackView[] = [
 ];
 
 export const settingsHandlers = [
+  http.get("/api/devices", () =>
+    HttpResponse.json({
+      connection: "online",
+      checkedAt: new Date().toISOString(),
+      devices: [
+        { id: "mac", name: "MacBook Pro", platform: "macos", status: "connected" },
+        { id: "linux", name: "Development workstation", platform: "linux", status: "connected" },
+        { id: "windows", name: "Windows PC", platform: "windows", status: "not_connected" },
+      ],
+    } satisfies DevicesStatus),
+  ),
   http.get("/api/computer-use", () =>
     HttpResponse.json({
       daemon: { status: "running", version: "1.8.8" },

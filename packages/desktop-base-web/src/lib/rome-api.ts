@@ -123,9 +123,19 @@ export interface RomeApi {
     check(): Promise<ImageUpdateStatus>;
     setAutoUpdateEnabled(enabled: boolean): Promise<ImageUpdateStatus>;
   };
+  pill: {
+    ready(): void;
+    setSize(width: number, height: number): void;
+    click(): void;
+    dragStart(grabX: number, grabY: number): void;
+    dragMove(): void;
+    dragEnd(): void;
+    contextMenu(): void;
+  };
   on(channel: "runtime:status", callback: (status: RuntimeStatus) => void): () => void;
   on(channel: "updater:status", callback: (status: UpdateStatus) => void): () => void;
   on(channel: "rome-image:status", callback: (status: ImageUpdateStatus) => void): () => void;
+  on(channel: "pill:name", callback: (name: string) => void): () => void;
   on(channel: string, callback: (...args: unknown[]) => void): () => void;
 }
 
@@ -258,6 +268,15 @@ function createMockRomeApi(): RomeApi {
         log("romeImage.setAutoUpdateEnabled", enabled);
         return { ...MOCK_IMAGE_UPDATE_STATUS, autoUpdateEnabled: enabled };
       },
+    },
+    pill: {
+      ready: () => log("pill.ready"),
+      setSize: (width, height) => log("pill.setSize", width, height),
+      click: () => log("pill.click"),
+      dragStart: (grabX, grabY) => log("pill.dragStart", grabX, grabY),
+      dragMove: () => {},
+      dragEnd: () => log("pill.dragEnd"),
+      contextMenu: () => log("pill.contextMenu"),
     },
     on: () => () => {},
   };

@@ -11,6 +11,7 @@ import {
 } from "@rome-os/ui/markdown";
 import { useTheme } from "../hooks/use-theme";
 import { isInternalHref, toInternalPath } from "../lib/internal-href";
+import { transformMarkdownUrl } from "../lib/markdown-url";
 import type { ResolvedTheme, ThemeName } from "../lib/theme";
 
 export { MARKDOWN_LINK_CLASS };
@@ -127,13 +128,19 @@ export function MarkdownLink({
   );
 }
 
-function MarkdownImpl({ linkComponent, theme: themeOverride, ...props }: MarkdownProps) {
+function MarkdownImpl({
+  linkComponent,
+  theme: themeOverride,
+  urlTransform,
+  ...props
+}: MarkdownProps) {
   const { theme, resolved } = useTheme();
   return (
     <BaseMarkdown
       {...props}
       linkComponent={linkComponent ?? MarkdownLink}
       theme={themeOverride ?? getBuiltinMermaidTheme(theme, resolved)}
+      urlTransform={urlTransform ?? transformMarkdownUrl}
     />
   );
 }

@@ -100,13 +100,14 @@ afterEach(() => {
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
+  delete window.rome;
 });
 
 describe.each([
   ["expanded sidebar", false],
   ["collapsed rail", true],
 ] as const)("pinned app context menu in the %s", (_name, collapsed) => {
-  it("offers normal, split-view, and unpin actions", async () => {
+  it("offers new-tab, split-view, and unpin actions", async () => {
     renderSidebar(collapsed);
 
     fireEvent.contextMenu(await findPinnedAppLink());
@@ -116,8 +117,49 @@ describe.each([
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open", "Open in split view", "Unpin from sidebar"]);
+    ).toEqual(["Open in new tab", "Open in split view", "Unpin from sidebar"]);
   });
+});
+
+it("opens a pinned app in a new tab, since a plain click already opens it here", async () => {
+  renderSidebar(false);
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open in new tab" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBe("_blank");
+});
+
+it("keeps a plain Open on a touch device, where the mobile app's WebView has no tabs to open", async () => {
+  // Same query `useCoarsePointer` asks; every other query keeps jsdom's answer
+  // of "no match", so nothing else about the layout changes.
+  rs.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(hover: none) and (pointer: coarse)",
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  renderSidebar(false);
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
+});
+
+it("keeps a plain Open in the Mac app, where a new tab lands in a browser with no Rome session", async () => {
+  window.rome = {};
+  renderSidebar(false);
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+
+  const item = await screen.findByRole("menuitem", { name: "Open" });
+  expect(item.getAttribute("href")).toBe("/apps/recipe-box");
+  expect(item.getAttribute("target")).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
 });
 
 it("opens a pinned app beside a new chat from another page", async () => {

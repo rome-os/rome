@@ -1,3 +1,4 @@
+import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
   Section,
@@ -174,6 +175,7 @@ interface TailscaleState {
 export const TABS = [
   "Appearance",
   "Connections",
+  "Devices",
   "Channels",
   "AI Tools",
   "Favors",
@@ -185,9 +187,9 @@ type Tab = (typeof TABS)[number];
 export const VISIBLE_TABS = TABS;
 
 // Only these tabs read what `loadAll` fetches (/api/settings plus the tailscale
-// device list). Connections, Channels and Favors own their requests, and
+// device list). Connections, Devices, Channels and Favors own their requests, and
 // Appearance reads the theme/i18n context, so neither the initial settings load
-// nor a settings failure has anything to say about them — gating all six on one
+// nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
 
@@ -412,6 +414,7 @@ export default function SettingsPage() {
               onFlash={(message) => toast.error(message)}
             />
           )}
+          {activeTab === "Devices" && <DevicesSection />}
           {activeTab === "Channels" && (
             <div className="max-w-3xl">
               <ChannelsSettingsPage />
@@ -444,7 +447,7 @@ export default function SettingsPage() {
  * The Appearance tab, on the kit's Form layout. The tab's body fills Form's
  * rows slot — `FormRows` caps the reading measure and each `FormRow` carries
  * one setting, label left and control right — while the Settings title and tab
- * strip above stay the shared frame all six tabs render into.
+ * strip above stay the shared frame all tabs render into.
  *
  * Rows rather than stacked fields, because a guardian returns here to change
  * one setting at a time, and every row saves itself the moment it changes.

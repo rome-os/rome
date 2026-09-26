@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.5](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.4...app-web-sdk-v0.3.5) (2026-09-25)
+
+
+### Features
+
+* **node:** add remote computer CLI ([#459](https://github.com/rome-os/rome/issues/459)) ([79ae0c2](https://github.com/rome-os/rome/commit/79ae0c27a47da6d009ffcd91f14c996042cb234f))
+* **ui:** split chat and app canvas tokens ([#447](https://github.com/rome-os/rome/issues/447)) ([d9a491f](https://github.com/rome-os/rome/commit/d9a491f4a2bf8be5dabfb50824d976f19d0fc7f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * peerDependencies
+    * @rome-os/ui bumped from ^0.3.0 to ^0.3.3
+
 ## [0.3.4](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.3...app-web-sdk-v0.3.4) (2026-09-15)
 
 

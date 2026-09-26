@@ -215,6 +215,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
       }
 
       await persistInstanceToken(deps.settingsRepo, token);
+      void deps.provisionNodeCaller?.();
       log.info("instance enrolled via in-app OAuth", { instanceId });
       void (seams.ensureRelayMailbox ?? ensureRelayMailbox)({
         settingsRepo: deps.settingsRepo,
