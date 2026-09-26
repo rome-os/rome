@@ -818,11 +818,11 @@
     "loadFailed": "设备加载失败",
     "connectionLabel": "Rome 连接",
     "checkedAt": "上次检查：{{time}}。",
-    "empty": "尚无已授权设备。在电脑上运行 rome-node connect 并批准访问即可连接。",
+    "empty": "此账户尚未关联电脑。",
     "connection": {
       "not_running": "服务未运行",
       "online": "已连接",
-      "stopped": "未连接",
+      "stopped": "空闲",
       "connecting": "正在连接",
       "retrying": "正在重连",
       "revoked": "授权已撤销",
@@ -832,10 +832,11 @@
       "incompatible": "需要重启"
     },
     "help": {
-      "not_running": "设备服务未运行，暂时无法确认设备连接状态。",
+      "not_running": "启动此 Rome 实例上的服务后，即可检查已关联的电脑。刷新只检查状态，不会启动服务。",
       "unavailable": "暂时无法获取设备状态，请刷新重试。",
       "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
-      "incompatible": "运行 rome-node daemon stop，再运行 rome-node daemon start，重启设备服务。"
+      "incompatible": "在 Rome 实例上先运行 rome-node daemon stop，再运行 rome-node daemon start。这会重启共享服务，并中断正在进行的设备请求。",
+      "stopped": "设备服务正在运行。在需要检查或使用已关联的电脑之前，连接会保持空闲。"
     },
     "status": {
       "connected": "已连接",
@@ -850,6 +851,16 @@
     "totalCount_one": "共 {{count}} 台已授权设备",
     "totalCount_other": "共 {{count}} 台已授权设备",
     "unknownCount_one": "无法确认 {{count}} 台设备的连接状态。",
-    "unknownCount_other": "无法确认 {{count}} 台设备的连接状态。"
+    "unknownCount_other": "无法确认 {{count}} 台设备的连接状态。",
+    "start": "启动服务",
+    "starting": "正在启动…",
+    "startFailed": "设备服务启动失败",
+    "setup": {
+      "title": "连接电脑",
+      "description": "设备服务运行在 Rome 实例上。每台需要使用的电脑都要单独建立连接。",
+      "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
+      "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
+      "instructions": "安装与连接指南"
+    }
   }
 }
