@@ -17,8 +17,8 @@ export interface ConnectionPortsDeps {
     ConnectionRegistry,
     "find" | "getDescriptor" | "onUnlocked" | "registeredServices"
   >;
-  /** The router admits every inbound message before a subscriber hears it
-   *  (pairing), which is what gives these ports rule R1. */
+  /** The router runs the channel's admission (pairing) before a subscriber
+   *  hears a message, which is what gives these ports rule R1. */
   router: Pick<TalkRouter, "send" | "subscribe" | "feature">;
 }
 
@@ -72,13 +72,17 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
     const event: InboundEvent = { kind: "message", message };
     await Promise.all(
       [...handlers].map((handler) =>
-        handler(event).catch((err) => {
-          log.error("inbound handler threw", {
-            channel: service,
-            messageId: message.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }),
+        // Through a promise so a handler that throws before returning one
+        // still leaves the others running (R4).
+        Promise.resolve()
+          .then(() => handler(event))
+          .catch((err) => {
+            log.error("inbound handler threw", {
+              channel: service,
+              messageId: message.messageId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }),
       ),
     );
   };

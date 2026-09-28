@@ -159,4 +159,30 @@ describe("channelList", () => {
       expect(heard.map((e) => e.message.messageId)).toEqual(["first", "second"]),
     );
   });
+
+  it("lets no slow or synchronously throwing handler hold up another subscriber", async () => {
+    const service = talkService("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+
+    // Never settles: a subscriber stuck on the first event.
+    inbound.subscribe(() => new Promise<void>(() => {}));
+    // Throws before it returns a promise.
+    inbound.subscribe((() => {
+      throw new Error("sync boom");
+    }) as unknown as (event: InboundEvent) => Promise<void>);
+    const heard: string[] = [];
+    inbound.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "first" }));
+    service.epochs[0]!.deliver?.(message({ messageId: "second" }));
+    await rs.waitFor(() => expect(heard).toEqual(["first", "second"]));
+  });
 });

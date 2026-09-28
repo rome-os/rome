@@ -41,8 +41,11 @@ export type InboundEvent = { kind: "message"; message: InboundMessage };
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
  *
- * - **R1 Admitted only.** An account the guardian has not approved never
- *   reaches a subscriber, and neither does a pairing code.
+ * - **R1 Admitted only.** The channel's admission runs before any subscriber
+ *   hears an event. On a channel that pairs accounts (Telegram, Discord,
+ *   Feishu), an account the guardian has not approved never reaches a
+ *   subscriber, and neither does a pairing code. Any other channel delivers
+ *   every sender, and a subscriber decides what a stranger gets.
  * - **R2 Answerable only.** An event is something a subscriber may answer: not
  *   Rome's own sends, not the guardian's own messages from another device, not
  *   reactions, edits or frames with no text and no attachments. The complete

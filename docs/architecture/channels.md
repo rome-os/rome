@@ -11,7 +11,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - The name is the identity. Every stored row, link and message spells the channel by it.
 - Every port may be null, and callers read null as the answer. A present port is what the channel can do, not a promise that it is doing it now: a send nothing currently backs rejects, and an inbound subscription taken before anything backs it hears the first event once something does.
 - A channel's lifecycle is not part of the channel. Connecting, disconnecting and degradation belong to whatever backs a port.
-- Inbound delivers only accounts the guardian has approved. Pairing codes and messages from accounts that are not approved never reach a subscriber.
+- Inbound runs the channel's admission before any subscriber hears an event. On a channel that pairs accounts ([Account pairing](#account-pairing)), pairing codes and messages from accounts the guardian has not approved never reach a subscriber. Any other channel delivers every sender, and the subscriber decides what a stranger gets.
 - Inbound delivers only what a subscriber may answer. Rome's own sends, the guardian's messages from another device, reactions, edits and frames with no text or attachments stay out of it. The complete record is `messages`.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
 - Every subscriber hears every event. One slow or failing handler holds up no other.
