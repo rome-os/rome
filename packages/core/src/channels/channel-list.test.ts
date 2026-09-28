@@ -70,17 +70,29 @@ describe("channelList", () => {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     for (const descriptor of descriptors) registry.register(descriptor);
-    const router = createTalkRouter(
+    const talkRouter = createTalkRouter(
       registry,
       async (_id, _service, inbound) => inbound.senderId === "guardian",
     );
+    // The Connection ids the channel ports hold a router subscription on.
+    const subscribed: string[] = [];
+    const router: typeof talkRouter = Object.assign(Object.create(talkRouter), {
+      subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>) {
+        subscribed.push(connectionId);
+        const detach = talkRouter.subscribe(connectionId, handler);
+        return () => {
+          subscribed.splice(subscribed.indexOf(connectionId), 1);
+          detach();
+        };
+      },
+    });
     const channels = channelList({
       db: testDb.db,
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
       connections: { registry, router },
     });
-    return { registry, channels };
+    return { registry, channels, subscribed };
   }
 
   it("gives every service with a Talk a channel, beside the read-backed ones", () => {
@@ -158,6 +170,51 @@ describe("channelList", () => {
     await rs.waitFor(() =>
       expect(heard.map((e) => e.message.messageId)).toEqual(["first", "second"]),
     );
+  });
+
+  it("keeps two subscriptions of one handler independent", async () => {
+    const service = talkService("telegram");
+    const { registry, channels } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const heard: string[] = [];
+    const handler = async (event: InboundEvent) => {
+      heard.push(event.message.messageId);
+    };
+    const first = inbound.subscribe(handler);
+    inbound.subscribe(handler);
+
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    service.epochs[0]!.deliver?.(message({ messageId: "both" }));
+    await rs.waitFor(() => expect(heard).toEqual(["both", "both"]));
+
+    first();
+    service.epochs[0]!.deliver?.(message({ messageId: "second only" }));
+    await rs.waitFor(() => expect(heard).toEqual(["both", "both", "second only"]));
+  });
+
+  it("follows a Connection removed and connected again, holding only the live one", async () => {
+    const service = talkService("telegram");
+    const { registry, channels, subscribed } = setup([service.descriptor]);
+    const inbound = channels.find((channel) => channel.name === "telegram")!.inbound!;
+    const heard: string[] = [];
+    inbound.subscribe(async (event) => {
+      heard.push(event.message.messageId);
+    });
+    const grant = { material: { token: "t" }, expiresAt: "never" as const };
+
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", grant);
+    await registry.remove(first.id);
+    const second = await registry.connect("telegram");
+    await registry.importCredential(second.id, "bot", grant);
+    service.epochs[1]!.deliver?.(message({ messageId: "after reconnect" }));
+
+    await rs.waitFor(() => expect(heard).toEqual(["after reconnect"]));
+    expect(subscribed).toEqual([second.id]);
   });
 
   it("lets no slow or synchronously throwing handler hold up another subscriber", async () => {

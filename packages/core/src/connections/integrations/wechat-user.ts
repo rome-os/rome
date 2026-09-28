@@ -42,6 +42,7 @@ import {
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
+import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
@@ -59,7 +60,9 @@ import { directoryPage, historyQueryLimit } from "./talk-features.js";
 
 const log = createLogger("wechat-user");
 
-export const WECHAT_USER_SERVICE = "wechat_user";
+// The channel's name is the service's: one constant, so the channel its reads
+// back and the channel its Connection backs cannot drift into two.
+export const WECHAT_USER_SERVICE = WECHAT_USER_CHANNEL;
 
 /** How long a setup step waits for the guardian's phone actions. Scanning and
  *  confirming on a phone that may be in another room: generous on purpose. */

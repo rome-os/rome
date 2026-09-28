@@ -62,48 +62,57 @@ function isAnswerable(message: InboundMessage): boolean {
 }
 
 function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound {
-  const handlers = new Set<(event: InboundEvent) => Promise<void>>();
+  // One entry per subscription, so two subscriptions of one handler stay two.
+  const subscriptions = new Set<{ handler: (event: InboundEvent) => Promise<void> }>();
   // One router subscription per Connection, fanned out to every handler. The
   // router re-attaches it across that Connection's epochs (R5).
   const attached = new Map<string, () => void>();
 
+  // Nothing upstream waits on delivery, so each handler starts on its own and
+  // none is awaited: a handler that never settles holds nothing alive (R3, R4).
   const dispatch = async (message: InboundMessage): Promise<void> => {
     if (!isAnswerable(message)) return;
     const event: InboundEvent = { kind: "message", message };
-    await Promise.all(
-      [...handlers].map((handler) =>
-        // Through a promise so a handler that throws before returning one
-        // still leaves the others running (R4).
-        Promise.resolve()
-          .then(() => handler(event))
-          .catch((err) => {
-            log.error("inbound handler threw", {
-              channel: service,
-              messageId: message.messageId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }),
-      ),
-    );
+    for (const { handler } of subscriptions) {
+      // Through a promise so a handler that throws before returning one still
+      // leaves the others running (R4).
+      void Promise.resolve()
+        .then(() => handler(event))
+        .catch((err) => {
+          log.error("inbound handler threw", {
+            channel: service,
+            messageId: message.messageId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
   };
 
   const attach = (connectionId: string): void => {
     if (attached.has(connectionId)) return;
+    // A removed Connection's subscription goes when its successor attaches.
+    const live = new Set(deps.registry.find(service).map((connection) => connection.id));
+    for (const [id, detach] of attached) {
+      if (live.has(id)) continue;
+      detach();
+      attached.delete(id);
+    }
     attached.set(connectionId, deps.router.subscribe(connectionId, dispatch));
   };
 
   // A Connection that unlocks after the first subscription still reaches it.
   deps.registry.onUnlocked("talk", (connection) => {
-    if (connection.service === service && handlers.size > 0) attach(connection.id);
+    if (connection.service === service && subscriptions.size > 0) attach(connection.id);
   });
 
   return {
     subscribe(handler) {
-      handlers.add(handler);
+      const subscription = { handler };
+      subscriptions.add(subscription);
       for (const connection of deps.registry.find(service)) attach(connection.id);
       return () => {
-        handlers.delete(handler);
-        if (handlers.size > 0) return;
+        subscriptions.delete(subscription);
+        if (subscriptions.size > 0) return;
         for (const detach of attached.values()) detach();
         attached.clear();
       };
