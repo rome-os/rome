@@ -255,6 +255,12 @@ export interface ConnectionDescriptor {
       needs: readonly GrantName[];
       build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
+      /** False when the talker can never send, so the channel it backs has no
+       *  `send` port. Absent means it can. */
+      sends?: boolean;
+      /** False when the talker never delivers inbound, so the channel it backs
+       *  has no `inbound` port. Absent means it can. */
+      receives?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

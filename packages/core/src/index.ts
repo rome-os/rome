@@ -255,13 +255,6 @@ async function main() {
   const wechatUserReader = config.wechatUserEnabled
     ? new WechatUserReader(new WechatUserRuntime())
     : undefined;
-  const channels = channelList({
-    db,
-    whatsAppAccounts,
-    linkedInAccounts,
-    ...(wechatUserReader ? { wechatUserReader } : {}),
-  });
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -1042,6 +1035,16 @@ async function main() {
     // debugger in this container, needing no host execution.
     wechatUserEnabled: config.wechatUserEnabled,
   });
+  // Built after every descriptor is registered: each service with a Talk backs
+  // its channel's send and inbound ports.
+  const channels = channelList({
+    db,
+    whatsAppAccounts,
+    linkedInAccounts,
+    ...(wechatUserReader ? { wechatUserReader } : {}),
+    connections: { registry: connectionRegistry, router: talkRouter },
+  });
+  const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog

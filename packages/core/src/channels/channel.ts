@@ -1,23 +1,70 @@
 /**
- * A channel as the rest of Rome reads one: its name bound to the two ports that
- * answer for it — who it can reach (`Accounts`, accounts.ts) and what was said
- * to them (`Messages`, messages.ts). So a caller reads one list of channels
- * rather than naming each provider's address book and message store one at a time.
- * Vocabulary: docs/concepts/messaging.md.
+ * A channel as the rest of Rome uses one: its name bound to the four ports that
+ * answer for it — sending (`send`), hearing what arrives (`inbound`), who it can
+ * reach (`Accounts`, accounts.ts) and what was said to them (`Messages`,
+ * messages.ts). So a caller reads one list of channels rather than naming each
+ * provider's transport, address book and message store one at a time.
+ * Vocabulary: docs/concepts/messaging.md. Invariants:
+ * docs/architecture/channels.md#channel-ports.
  *
- * Read-side. Moving a message belongs to `ProviderAdapter` (adapter.ts) and to
- * the connection registry that owns its lifecycle. The two are apart because a
- * directory read answers with no transport connected: a channel that had to be
- * live to be asked about would make every People read depend on whether the
- * guardian's phone is reachable.
+ * A channel is not a Connection. A Connection may back a channel's `send` and
+ * `inbound`, and Rome's own synced tables may back its `accounts` and
+ * `messages`, but what backs a port is the channel's business and no caller
+ * can tell. The read ports answer with no transport connected: a channel that
+ * had to be live to be asked about would make every People read depend on
+ * whether the guardian's phone is reachable.
  */
 
+import type {
+  ConversationId,
+  InboundMessage,
+  MessageReceipt,
+  OutgoingMessage,
+  TalkInboundMedia,
+} from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
 import type { Messages } from "./messages.js";
 
+/** Sending on a channel. */
+export interface ChannelSend {
+  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+}
+
 /**
- * A channel Rome reads.
+ * What a subscriber hears from a channel. One kind today; a new kind (an
+ * interaction, an edit) joins this union so it passes the same admission as a
+ * message, and a handler switching on `kind` keeps compiling.
+ */
+export type InboundEvent = { kind: "message"; message: InboundMessage };
+
+/**
+ * Hearing what arrives on a channel. Every implementation owes all five:
+ *
+ * - **R1 Admitted only.** An account the guardian has not approved never
+ *   reaches a subscriber, and neither does a pairing code.
+ * - **R2 Answerable only.** An event is something a subscriber may answer: not
+ *   Rome's own sends, not the guardian's own messages from another device, not
+ *   reactions, edits or frames with no text and no attachments. The complete
+ *   record is the channel's `messages`.
+ * - **R3 Live, at most once.** Nothing is acknowledged or replayed. An event
+ *   that arrives with no subscriber, or while the channel is not receiving, is
+ *   not delivered later; a subscriber catches up by reading `messages`.
+ * - **R4 Fan-out.** Every subscriber hears every event. Events are dispatched
+ *   in arrival order and handlers run concurrently, so one slow or failing
+ *   handler holds up no other.
+ * - **R5 Durable subscription.** A subscription outlives a reconnect of
+ *   whatever backs the channel.
+ */
+export interface Inbound {
+  subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
+  /** Materializes a message's attachments, or null when the channel cannot
+   *  now. A consumer without it uses the attachments as delivered. */
+  readonly media: TalkInboundMedia | null;
+}
+
+/**
+ * A channel Rome uses.
  *
  * The two contracts below are the whole of it. Every channel owes both:
  *
@@ -25,18 +72,25 @@ import type { Messages } from "./messages.js";
  *   channel, stable for the life of the deployment. It is the `channel` written
  *   on every link, every stored message and every sentinel row, so the name is
  *   not a label a channel can restyle — changing it reassigns history.
- * - **C2 What a channel carries is the channel's.** Neither port reaches past
- *   the accounts and the messages of this channel, so a caller can attribute
- *   anything either one answers to the channel it read it from.
+ * - **C2 What a channel carries is the channel's.** No port reaches past this
+ *   channel's conversations, accounts and messages, so a caller can attribute
+ *   anything a port answers to the channel it came from.
  *
- * Channel adds no verb of its own. What a caller asks is what {@link Accounts}
- * and {@link Messages} already take, and a third way to ask who a channel
- * reaches or what was said to them is a third answer to disagree with.
+ * Channel adds no verb of its own, and every port may be null. A present
+ * port is what the channel can do, not a promise it is doing it now: a `send`
+ * on a channel nothing currently backs rejects, and an `inbound` subscription
+ * taken before anything backs it hears the first event once something does.
  */
 export interface Channel {
   /** The channel's name, as every stored row spells it — `whatsapp`,
    *  `linkedin`, `telegram`. */
   readonly name: string;
+
+  /** Sending on the channel, or null where it cannot send at all. */
+  readonly send: ChannelSend | null;
+
+  /** What arrives on the channel, or null where nothing ever arrives. */
+  readonly inbound: Inbound | null;
 
   /**
    * The channel's address book, or null where the platform gives Rome no way
@@ -73,7 +127,7 @@ export interface Channel {
  * there is: channels are open — a Rome App brings its own — so no list
  * enumerates them, and the one Rome reads is `channelList` (channel-list.ts).
  *
- * A channel the list does not hold answers nothing, and so does one holding two
+ * A channel the list does not hold answers nothing, and so does one holding four
  * null ports. A caller reads either as the answer and works from what it
  * already has, rather than skipping the channel or waiting for a better list.
  *

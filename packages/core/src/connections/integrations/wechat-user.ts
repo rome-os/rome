@@ -455,6 +455,10 @@ export function createWechatUserDescriptor(
     capabilities: {
       talker: {
         needs: ["session"] as const,
+        // Read-only: the personal account is consulted, never written to or
+        // answered (docs/architecture/channels.md#wechat-personal-account).
+        sends: false,
+        receives: false,
         build(_creds, kit): Talker {
           let degradation: CapabilityDegradation | null = null;
           let probe: ReturnType<typeof setTimeout> | null = null;

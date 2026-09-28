@@ -315,6 +315,9 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     capabilities: {
       talker: {
         needs: ["session"] as const,
+        // The inbox is mirrored into the store by the poller; nothing is
+        // delivered as an inbound turn.
+        receives: false,
         build(): Talker {
           const poller = new LinkedInInboxPoller({
             sink: deps.syncSink,

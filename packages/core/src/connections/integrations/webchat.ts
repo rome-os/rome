@@ -44,6 +44,9 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
     capabilities: {
       talker: {
         needs: [] as const,
+        // Webchat turns start from its own HTTP route, so its channel has no
+        // inbound port for the channel-message hook to answer a second time.
+        receives: false,
         build(): Talker {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 
