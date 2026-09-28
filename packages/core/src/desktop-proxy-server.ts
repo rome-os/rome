@@ -10,9 +10,12 @@ const PREFIX = "/desktop-proxy";
  *  mount, same auth posture as the shared desktop: only the upstream differs. */
 const WECHAT_PREFIX = `${PREFIX}/wechat`;
 
-/** The websockify port and the path it sees, for a request under `/desktop-proxy`. */
-export function desktopUpstream(pathname: string): { port: number; path: string } {
+/** The websockify port and the path it sees, for a request under `/desktop-proxy`.
+ *  Null for WeChat's view while no WeChat display is configured: nothing of ours
+ *  listens on its port then, and the shared websockify ignores the path. */
+export function desktopUpstream(pathname: string): { port: number; path: string } | null {
   if (pathname === WECHAT_PREFIX || pathname.startsWith(`${WECHAT_PREFIX}/`)) {
+    if (!process.env.WECHAT_USER_DISPLAY) return null;
     return {
       port: Number(process.env.ROME_WECHAT_NOVNC_PORT ?? 6081),
       path: pathname.slice(WECHAT_PREFIX.length) || "/",
@@ -54,7 +57,12 @@ export function attachDesktopProxy(httpServer: Server): { close(): void } {
     const rawUrl = req.url ?? "/";
     if (!rawUrl.startsWith(`${PREFIX}/`) && rawUrl !== PREFIX) return;
 
-    const { port, path: targetPath } = desktopUpstream(rawUrl);
+    const target = desktopUpstream(rawUrl);
+    if (!target) {
+      socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
+      return;
+    }
+    const { port, path: targetPath } = target;
     const upstreamHost = `${host}:${port}`;
 
     const upstream = net.connect(port, host, () => {
@@ -94,7 +102,9 @@ export function attachDesktopProxy(httpServer: Server): { close(): void } {
 
 export async function proxyDesktopHttp(req: Request): Promise<Response> {
   const incoming = new URL(req.url);
-  const { port, path: targetPath } = desktopUpstream(incoming.pathname);
+  const target = desktopUpstream(incoming.pathname);
+  if (!target) return new Response("Not Found", { status: 404 });
+  const { port, path: targetPath } = target;
   const upstreamUrl = `http://127.0.0.1:${port}${targetPath}${incoming.search}`;
 
   const headers = new Headers(req.headers);

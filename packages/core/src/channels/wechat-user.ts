@@ -235,7 +235,8 @@ export interface WechatUserRuntimeConfig {
   prefix?: string;
   /** The container's own home, where the client writes its store. */
   home?: string;
-  /** The X display Rome already serves at /desktop. */
+  /** The X display the client runs on: WeChat's own display (`WECHAT_USER_DISPLAY`)
+   *  when set, else the shared desktop. */
   display?: string;
   /** The path the client is exposed at. Defaults to its canonical /opt/wechat;
    *  injectable so tests need no writable /opt. */
@@ -271,6 +272,8 @@ export class WechatUserRuntime {
   readonly prefix: string;
   readonly home: string;
   readonly display: string;
+  /** The page that shows `display` to the guardian, for sign-in links. */
+  readonly desktopPath: string;
   readonly canonicalPrefix: string;
   readonly runtimeDir: string;
   readonly accessibilityLauncher: string;
@@ -285,6 +288,8 @@ export class WechatUserRuntime {
     // live on this display.
     this.display =
       config.display ?? (process.env.WECHAT_USER_DISPLAY || process.env.DISPLAY || ":99");
+    const own = process.env.WECHAT_USER_DISPLAY;
+    this.desktopPath = own && this.display === own ? "/desktop/wechat" : "/desktop";
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
     this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
     this.accessibilityLauncher = config.accessibilityLauncher ?? ACCESSIBILITY_LAUNCHER;

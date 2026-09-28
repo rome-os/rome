@@ -155,7 +155,7 @@ function installingView(): SetupView {
   };
 }
 
-function scanView(qr?: string): SetupView {
+function scanView(desktop: string, qr?: string): SetupView {
   if (qr) {
     return {
       title: "Scan with WeChat",
@@ -175,7 +175,7 @@ function scanView(qr?: string): SetupView {
     body: [
       "Rome is bringing up the WeChat login on your instance. The QR code will appear here in a moment — if it does not, open Rome's desktop and sign in there.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       { text: "Wait for the WeChat login QR to appear" },
       { text: "Scan the QR code with WeChat on your phone" },
@@ -187,13 +187,13 @@ function scanView(qr?: string): SetupView {
 
 /** A cached account opens a sign-in button, not a QR. A screenshot of that
  *  button cannot be clicked from here, so the guardian signs in on the desktop. */
-function rememberedView(): SetupView {
+function rememberedView(desktop: string): SetupView {
   return {
     title: "Sign in to WeChat",
     body: [
       "WeChat remembers this account on your instance, so it asks you to sign in instead of showing a QR code. Open Rome's desktop, select the sign-in button in the WeChat window, then confirm on your phone.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       { text: "Open Rome's desktop" },
       { text: "Select the sign-in button in the WeChat window" },
@@ -203,14 +203,14 @@ function rememberedView(): SetupView {
   };
 }
 
-function keysView(remembered: boolean): SetupView {
+function keysView(remembered: boolean, desktop: string): SetupView {
   return {
     title: "Unlocking your message history",
     body: [
       "WeChat keeps your history encrypted and only unlocks it while it signs in. Rome is recovering that key now — this can take a minute.",
       "If the desktop shows a sign-in confirmation, approve it on your phone.",
     ],
-    links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+    links: [{ label: "Open Rome's desktop", url: desktop }],
     steps: [
       {
         text: remembered ? "Sign in on Rome's desktop" : "Scan the QR code with WeChat",
@@ -286,7 +286,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           body: [
             "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
           ],
-          links: [{ label: "Open Rome's desktop", url: "/desktop" }],
+          links: [{ label: "Open Rome's desktop", url: runtime.desktopPath }],
           progress: true,
         });
         await runtime.start(signal);
@@ -316,7 +316,9 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         // A cached account store makes the client show a sign-in button, which
         // needs the desktop, so that case skips the QR stream.
         const remembered = (await runtime.status()).loggedIn;
-        interact.show(remembered ? rememberedView() : scanView());
+        interact.show(
+          remembered ? rememberedView(runtime.desktopPath) : scanView(runtime.desktopPath),
+        );
         const recovery = deps.recoverPassphrase(signal);
         const qr = { stop: remembered };
         const qrLoop = (async () => {
@@ -325,7 +327,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             const shot = await runtime.captureLoginQr().catch(() => null);
             if (shot && shot !== last) {
               last = shot;
-              interact.show(scanView(shot));
+              interact.show(scanView(runtime.desktopPath, shot));
             }
             await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
           }
@@ -334,7 +336,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           const passphrase = await recovery;
           qr.stop = true;
           await qrLoop;
-          interact.show(keysView(remembered));
+          interact.show(keysView(remembered, runtime.desktopPath));
           await waitFor(signal, (s) => s.loggedIn);
           // Derive and verify the per-database keys from the captured passphrase.
           const deadline = Date.now() + loginTimeoutMs;

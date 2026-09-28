@@ -217,6 +217,15 @@ describe("WechatUserRuntime display", () => {
     expect(new WechatUserRuntime().display).toBe(":99");
   });
 
+  it("links sign-in to the desktop page that shows its display", () => {
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    expect(new WechatUserRuntime().desktopPath).toBe("/desktop/wechat");
+    expect(new WechatUserRuntime({ display: ":99" }).desktopPath).toBe("/desktop");
+    rs.stubEnv("WECHAT_USER_DISPLAY", "");
+    expect(new WechatUserRuntime().desktopPath).toBe("/desktop");
+  });
+
   it("looks for the login window and starts the client on that display", async () => {
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     const h = await tempHome();
