@@ -258,8 +258,10 @@ export interface ConnectionDescriptor {
       /** False when the talker can never send, so the channel it backs has no
        *  `send` port. Absent means it can. */
       sends?: boolean;
-      /** False when the talker never delivers inbound, so the channel it backs
-       *  has no `inbound` port. Absent means it can. */
+      /** False when this Talk's deliveries do not back the channel's `inbound`
+       *  port, so that channel has none. It says what the Talk backs, not what
+       *  the talker does: webchat's talker is wired to `deliver`, but its turns
+       *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
     };
     actor: {
