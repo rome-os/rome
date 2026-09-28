@@ -58,6 +58,8 @@ import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Channel } from "../channels/channel.js";
+import { connectionPorts, type ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -217,26 +219,28 @@ export class MockProviderAdapter implements ProviderAdapter {
   }
 }
 
-/** The channel a mock Talk router backs, by name: its `send` goes through the
- *  router's `test:<name>` connection, the way the real channel list backs it.
- *  A name with no mock adapter has no channel, as in `channelList`. */
+/** The channel a mock Talk router backs, by name, built by the production
+ *  `connectionPorts` over a registry holding one `test:<name>` Connection with
+ *  a Talk per mock adapter. A name with no mock adapter has no channel, as in
+ *  `channelList`. */
 export function mockChannelLookup(
   talkRouter: TalkRouter,
   adapters: ReadonlyMap<string, unknown>,
 ): (name: string) => Channel | null {
-  return (name) =>
-    adapters.has(name)
-      ? {
-          name,
-          send: {
-            send: (conversationId, message) =>
-              talkRouter.send(`test:${name}`, conversationId, message),
-          },
-          inbound: null,
-          accounts: null,
-          messages: null,
-        }
-      : null;
+  const registry: ConnectionPortsDeps["registry"] = {
+    find: (service) =>
+      adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
+    getDescriptor: (service) =>
+      adapters.has(service)
+        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+        : null,
+    onUnlocked: () => {},
+    registeredServices: () => [...adapters.keys()],
+  };
+  return (name) => {
+    const ports = connectionPorts({ registry, router: talkRouter }, name);
+    return ports ? { name, ...ports, accounts: null, messages: null } : null;
+  };
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
