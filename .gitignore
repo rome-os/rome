@@ -28,6 +28,9 @@ coverage/
 logs/
 *.log
 .direnv/
+.devenv/
+/result
+/result-*
 .omx
 .docker/
 .DS_Store

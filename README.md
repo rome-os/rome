@@ -95,17 +95,20 @@ forwards.
 
 To run this repository from source, you need:
 
-- Node.js 24 or newer
-- Corepack and pnpm 11.6
+- Nix with flakes enabled
 - Docker with Docker Compose
 
 From a checkout of this repository:
 
 ```bash
-corepack enable
+nix develop
 pnpm install
 pnpm dev:all
 ```
+
+The Nix flake pins Node, pnpm, native build tools, linters, and repository
+utilities. CI uses the same package definitions. See
+[`DEVELOPMENT.md`](DEVELOPMENT.md) for direnv setup and the toolchain contract.
 
 `pnpm dev:all` starts the production-shaped local stack: Rome, observability,
 routing, and the web development server. It connects to `https://romeos.cc` by
@@ -113,7 +116,7 @@ default; set `ROME_DEV_PANTHEON_ORIGIN` to use another Rome Cloud deployment.
 The script prints the local URLs and development credentials when startup completes.
 
 This is the contributor development path, not the final production self-hosting
-distribution. See [`CLAUDE.md`](CLAUDE.md) for the complete development loop,
+distribution. See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the complete development loop,
 container commands, and validation requirements.
 
 ## Rome Apps

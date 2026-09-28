@@ -1,0 +1,109 @@
+name: Set up Rome CI environment
+description: Install Nix, restore the Nix and pnpm stores, and realize the flake CI shell
+
+inputs:
+  pnpm-store-cache:
+    description: >-
+      `read-write` saves the pnpm store at post-job, `read-only` only restores
+      it. The entry is keyed on the lockfile alone and is immutable
+      first-writer-wins, so only a job that runs an unfiltered
+      `pnpm install --frozen-lockfile` may write: a partial store saved from a
+      job that skipped or filtered its install would be what every other job
+      restores for that lockfile.
+    required: false
+    default: read-only
+  nix-store-cache:
+    description: >-
+      `read-write` saves the Nix store at post-job. One job per run is enough:
+      every job realizes the same `.#ci` closure, and a GitHub cache entry is
+      immutable, so further writers would upload ~1 GiB each to lose the
+      race. The writer is the job that also builds the toolchain check, whose
+      closure is the superset the others restore.
+    required: false
+    default: read-only
+
+runs:
+  using: composite
+  steps:
+    # Both inputs are compared against 'read-write' below, so a typo would
+    # read as 'read-only' and quietly stop saving the entry it was set to save.
+    - name: Check the cache inputs
+      shell: bash
+      env:
+        PNPM_STORE_CACHE: ${{ inputs.pnpm-store-cache }}
+        NIX_STORE_CACHE: ${{ inputs.nix-store-cache }}
+      run: |
+        for value in "$PNPM_STORE_CACHE" "$NIX_STORE_CACHE"; do
+          case "$value" in
+            read-only | read-write) ;;
+            *)
+              echo "setup-ci: cache inputs take read-only or read-write, got '$value'" >&2
+              exit 1
+              ;;
+          esac
+        done
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa
+
+    # Without this every job downloads the whole CI closure from
+    # cache.nixos.org and rebuilds the fetchurl derivations in nix/, which no
+    # binary cache carries. The key covers everything that decides the
+    # closure, so a toolchain bump gets a new entry and the old one is purged
+    # rather than left to sit against the repository's cache budget.
+    - name: Cache the Nix store
+      uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      with:
+        primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**') }}
+        restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+        save: ${{ inputs.nix-store-cache == 'read-write' }}
+        # The shell's closure measures just over 1 GiB. Collect above that so
+        # a job that pulled in anything else does not save it.
+        gc-max-store-size-linux: 2147483648
+        purge: ${{ inputs.nix-store-cache == 'read-write' }}
+        purge-prefixes: nix-${{ runner.os }}-${{ runner.arch }}-
+        purge-created: 0
+        purge-primary-key: never
+
+    # Realize the shell here rather than letting the next step do it as a side
+    # effect, so a failed evaluation or download fails on a step that names it.
+    - name: Realize the CI shell
+      shell: bash
+      run: '"$GITHUB_WORKSPACE/scripts/ci-env.sh" true'
+
+    - name: Locate pnpm store
+      id: pnpm-store
+      shell: bash
+      # A composite `run:` is `bash -e`, not `bash -eo pipefail`, so without
+      # `pipefail` the substitution below takes `tail`'s exit status: a failed
+      # shell realization would leave `path` empty and surface later as
+      # actions/cache's opaque "Path Validation Error".
+      run: |
+        set -o pipefail
+        path="$("$GITHUB_WORKSPACE/scripts/ci-env.sh" pnpm store path | tail -n 1)"
+        case "$path" in
+          /*) ;;
+          *)
+            echo "pnpm store path did not print an absolute path: '$path'" >&2
+            exit 1
+            ;;
+        esac
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pnpm store
+      if: inputs.pnpm-store-cache == 'read-only'
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore and save pnpm store
+      if: inputs.pnpm-store-cache == 'read-write'
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-${{ runner.os }}-${{ runner.arch }}-
