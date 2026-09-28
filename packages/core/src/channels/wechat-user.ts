@@ -208,7 +208,6 @@ export class WechatUserSessionRejected extends Error {
   }
 }
 
-/** The client or its reader could not be run. Transient by assumption. */
 /**
  * WeChat's own X display (docs/wechat-personal.md): the one rule the runtime,
  * the desktop proxy and startup validation share. Null while WeChat is disabled
@@ -226,6 +225,7 @@ export function wechatUserDisplay(env: NodeJS.ProcessEnv = process.env): string 
   return display;
 }
 
+/** The client or its reader could not be run. Transient by assumption. */
 export class WechatUserRuntimeError extends Error {
   constructor(message: string) {
     super(message);

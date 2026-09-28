@@ -503,12 +503,13 @@ if [ "${WECHAT_USER_ENABLED:-false}" = "true" ] && [ -n "${WECHAT_USER_DISPLAY:-
     WECHAT_OPENBOX_PID=$!
     wait_for_background_process "$WECHAT_OPENBOX_PID" "WeChat's Openbox" /tmp/openbox-wechat.log
   fi
-  if ! process_cmdline_contains_all websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}"; then
+  # Loopback only: the authenticated /desktop-proxy mount is its one client.
+  if ! process_cmdline_contains_all websockify "127.0.0.1:${WECHAT_NOVNC_PORT}" "localhost:${WECHAT_VNC_PORT}"; then
     if tcp_port_listening "$WECHAT_NOVNC_PORT"; then
       echo "Error: TCP port ${WECHAT_NOVNC_PORT} is already in use by another process."
       exit 1
     fi
-    run_as_rome websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}" >/tmp/novnc-wechat.log 2>&1 &
+    run_as_rome websockify "127.0.0.1:${WECHAT_NOVNC_PORT}" "localhost:${WECHAT_VNC_PORT}" >/tmp/novnc-wechat.log 2>&1 &
     WECHAT_NOVNC_PID=$!
   fi
   wait_for_tcp_port "$WECHAT_NOVNC_PORT" "WeChat's noVNC" "$WECHAT_NOVNC_PID" /tmp/novnc-wechat.log
