@@ -561,7 +561,8 @@ export function useAppLifecycle(
     (accessModeDraft === "cloud-email" &&
       (accessEmailInput.trim() !== "" ||
         accessEmailsDraft.length !== accessSavedEmails.length ||
-        accessEmailsDraft.some((email, i) => email !== accessSavedEmails[i])));
+        // The server stores the list as a sorted set, so order is no change.
+        accessEmailsDraft.some((email) => !accessSavedEmails.includes(email))));
   const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const copyAccessShareUrl = () => {
     if (!accessShareUrl) return;

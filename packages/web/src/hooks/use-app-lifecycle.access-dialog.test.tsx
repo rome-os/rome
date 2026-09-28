@@ -11,9 +11,6 @@ import { useAppLifecycle } from "./use-app-lifecycle";
 // jsdom serves the page on localhost, which the dialog treats as unshareable.
 const origin = rs.hoisted(() => ({ value: "https://jessie.romeos.cc" as string | null }));
 rs.mock("@/lib/shareable-origin", () => ({ shareableOrigin: () => origin.value }));
-// Saving reads then writes /api/public-access; both succeed with an empty config.
-const fetchJson = rs.hoisted(() => rs.fn(async (_url: string, _init?: unknown) => ({})));
-rs.mock("@/lib/fetch-json", () => ({ fetchJson }));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -21,12 +18,6 @@ beforeAll(async () => {
   Element.prototype.setPointerCapture = () => {};
   Element.prototype.releasePointerCapture = () => {};
   Element.prototype.scrollIntoView = () => {};
-});
-
-// A fresh mock per test: no call history or implementation leaks across tests.
-beforeEach(() => {
-  fetchJson.mockReset();
-  fetchJson.mockImplementation(async () => ({}));
 });
 
 afterEach(cleanup);
@@ -150,12 +141,32 @@ describe("the app access dialog", () => {
   describe("share link", () => {
     const SHARE_URL = "https://jessie.romeos.cc/full/apps/%40ray%2Fdemo";
     const shareLink = () => screen.queryByRole("textbox", { name: "Share link" });
+    // Saving reads then writes /api/public-access; both succeed with an empty
+    // config unless a test says otherwise.
+    let putAccess: (body: unknown) => Response;
+    let puts: unknown[] = [];
     // jsdom has no Clipboard API, and the copy button shows only where there is one.
     beforeEach(() => {
+      puts = [];
+      putAccess = () => new Response("{}", { status: 200 });
+      rs.stubGlobal(
+        "fetch",
+        rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input) !== "/api/public-access") return new Response("{}", { status: 404 });
+          if (init?.method !== "PUT") return new Response("{}", { status: 200 });
+          const body = JSON.parse(String(init.body));
+          puts.push(body);
+          return putAccess(body);
+        }),
+      );
       Object.defineProperty(navigator, "clipboard", {
         value: { writeText: async () => {} },
         configurable: true,
       });
+    });
+
+    afterEach(() => {
+      rs.unstubAllGlobals();
     });
 
     it("is absent while the app is private", async () => {
@@ -201,13 +212,7 @@ describe("the app access dialog", () => {
 
       const copy = await screen.findByRole("button", { name: "Copy link" });
       await waitFor(() => expect(copy.hasAttribute("disabled")).toBe(false));
-      expect(fetchJson).toHaveBeenCalledWith(
-        "/api/public-access",
-        expect.objectContaining({
-          method: "PUT",
-          json: expect.objectContaining({ allowedApps: ["@ray/demo"] }),
-        }),
-      );
+      expect(puts).toEqual([expect.objectContaining({ allowedApps: ["@ray/demo"] })]);
       expect(screen.getByRole("radiogroup")).toBeTruthy();
       expect(screen.queryByText("Save access before sharing this link.")).toBeNull();
       expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
@@ -217,12 +222,11 @@ describe("the app access dialog", () => {
     });
 
     it("clears a failed save's error once a retry succeeds", async () => {
-      // The first save's GET succeeds and its PUT fails; the retry succeeds.
-      fetchJson
-        .mockImplementationOnce(async () => ({}))
-        .mockImplementationOnce(async () => {
-          throw new Error("Network down");
-        });
+      // The first save's PUT fails; the retry succeeds.
+      putAccess = () => {
+        putAccess = () => new Response("{}", { status: 200 });
+        throw new Error("Network down");
+      };
       await openDialog();
       await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
       await userEvent.click(screen.getByRole("button", { name: "Save access" }));
@@ -232,6 +236,26 @@ describe("the app access dialog", () => {
 
       expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
       expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("treats the saved email list in a new order as nothing to save", async () => {
+      await openDialog({
+        ...APP,
+        accessMode: "cloud-email",
+        cloudAllowedEmails: ["ada@example.com", "bob@example.com"],
+      } as InstalledAppCard);
+      await userEvent.click(screen.getByRole("button", { name: "Remove ada@example.com" }));
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+
+      const input = screen.getByLabelText(
+        i18n.t("installed.accessDialog.emailLabel", { ns: "apps" }),
+      );
+      await userEvent.type(input, "ada@example.com{Enter}");
+
+      expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Save access" }).hasAttribute("disabled")).toBe(
+        true,
+      );
     });
 
     it("closes after saving private, which has no link to copy", async () => {
