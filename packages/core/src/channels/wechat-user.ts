@@ -208,6 +208,23 @@ export class WechatUserSessionRejected extends Error {
   }
 }
 
+/**
+ * WeChat's own X display (docs/wechat-personal.md): the one rule the runtime,
+ * the desktop proxy and startup validation share. Null while WeChat is disabled
+ * or WECHAT_USER_DISPLAY is unset; the entrypoint starts no such display then.
+ * Like the entrypoint, a value that is not `:<number>`, or that names the shared
+ * display, is an error.
+ */
+export function wechatUserDisplay(env: NodeJS.ProcessEnv = process.env): string | null {
+  const display = env.WECHAT_USER_DISPLAY;
+  if (env.WECHAT_USER_ENABLED !== "true" || !display) return null;
+  const shared = env.DISPLAY || ":99";
+  if (!/^:\d+$/.test(display) || display === shared) {
+    throw new Error(`WECHAT_USER_DISPLAY must be a display like :100, other than ${shared}`);
+  }
+  return display;
+}
+
 /** The client or its reader could not be run. Transient by assumption. */
 export class WechatUserRuntimeError extends Error {
   constructor(message: string) {
@@ -235,7 +252,8 @@ export interface WechatUserRuntimeConfig {
   prefix?: string;
   /** The container's own home, where the client writes its store. */
   home?: string;
-  /** The X display Rome already serves at /desktop. */
+  /** The X display the client runs on: WeChat's own display (`WECHAT_USER_DISPLAY`)
+   *  when set, else the shared desktop. */
   display?: string;
   /** The path the client is exposed at. Defaults to its canonical /opt/wechat;
    *  injectable so tests need no writable /opt. */
@@ -271,6 +289,8 @@ export class WechatUserRuntime {
   readonly prefix: string;
   readonly home: string;
   readonly display: string;
+  /** The page that shows `display` to the guardian, for sign-in links. */
+  readonly desktopPath: string;
   readonly canonicalPrefix: string;
   readonly runtimeDir: string;
   readonly accessibilityLauncher: string;
@@ -280,7 +300,12 @@ export class WechatUserRuntime {
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
     this.prefix = config.prefix ?? join(this.home, ".local", "share", "wechat");
-    this.display = config.display ?? process.env.DISPLAY ?? ":99";
+    // WeChat's own display when one is configured (docs/wechat-personal.md), else
+    // the shared desktop. The client, its login window and the health check all
+    // live on this display.
+    const own = wechatUserDisplay();
+    this.display = config.display ?? (own || process.env.DISPLAY || ":99");
+    this.desktopPath = own && this.display === own ? "/desktop/wechat" : "/desktop";
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
     this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
     this.accessibilityLauncher = config.accessibilityLauncher ?? ACCESSIBILITY_LAUNCHER;

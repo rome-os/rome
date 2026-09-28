@@ -2366,7 +2366,8 @@ export interface BackendTurnParams {
   agentName: string;
   /** Exact runtime session resume handle. */
   sessionId: string;
-  /** Connection that owns the provider conversation. Required for non-webchat delivery. */
+  /** Connection that owns the provider conversation, passed to the resumed
+   * turn's thread context. Delivery finds the channel by `channel`, not by this. */
   connectionId?: string;
   channel: string;
   threadId: string;

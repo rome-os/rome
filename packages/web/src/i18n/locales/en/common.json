@@ -184,7 +184,8 @@
     "retrying": "Retrying every {{seconds}}s…"
   },
   "desktop": {
-    "iframeTitle": "Rome Desktop"
+    "iframeTitle": "Rome Desktop",
+    "wechatIframeTitle": "WeChat desktop"
   },
   "chat": {
     "add": "Open an app",

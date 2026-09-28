@@ -15,8 +15,9 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function renderDevices(load: () => unknown) {
-  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+function renderDevices(load: () => unknown, start?: () => Response | Promise<Response>) {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input) === "/api/devices/start" && init?.method === "POST" && start) return start();
     if (String(input) === "/api/devices")
       return new Response(JSON.stringify(load()), {
         headers: { "Content-Type": "application/json" },
@@ -115,12 +116,18 @@ it("clears device counts when the service stops and keeps refresh passive", asyn
   await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
   expect(await screen.findByText("Service not running")).toBeTruthy();
   expect(
-    screen.getByText("The device service is not running. Device connection status is unknown."),
+    screen.getByText(
+      "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
+    ),
   ).toBeTruthy();
   expect(screen.queryByText("1 connected device")).toBeNull();
   expect(screen.queryByText("0 connected devices")).toBeNull();
   expect(screen.queryByText("0 authorized devices")).toBeNull();
   expect(screen.queryByText("Mac")).toBeNull();
+  expect(screen.getByRole("button", { name: "Start service" })).toBeTruthy();
+  expect(
+    rs.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET"),
+  ).toBe(true);
 });
 
 it("does not present zero as the connected count when every check is unknown", async () => {
@@ -132,4 +139,100 @@ it("does not present zero as the connected count when every check is unknown", a
   expect(await screen.findByText("Reconnecting")).toBeTruthy();
   expect(screen.queryByText("At least 0 connected devices")).toBeNull();
   expect(screen.getByText("1 authorized device")).toBeTruthy();
+});
+
+it("explains an idle running service and offers computer setup without an error", async () => {
+  renderDevices(() => ({
+    connection: "stopped",
+    checkedAt: new Date().toISOString(),
+    devices: [],
+  }));
+  expect(await screen.findByText("Idle")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "The device service is running. Its connection stays idle until a linked computer needs to be checked or used.",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("No computers are linked to this account.")).toBeTruthy();
+  expect(screen.getByText("0 connected devices")).toBeTruthy();
+  expect(screen.getByText("rome-node connect")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("starts only on explicit click and refreshes server truth after success", async () => {
+  let running = false;
+  let finish!: () => void;
+  const start = rs.fn(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = () => {
+          running = true;
+          resolve(new Response(null, { status: 204 }));
+        };
+      }),
+  );
+  renderDevices(
+    () => ({
+      connection: running ? "stopped" : "not_running",
+      checkedAt: new Date().toISOString(),
+      devices: [],
+    }),
+    start,
+  );
+  const button = await screen.findByRole("button", { name: "Start service" });
+  expect(screen.getByRole("heading", { name: "Connect a computer" })).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(start).not.toHaveBeenCalled();
+  await userEvent.click(button);
+  const pending = await screen.findByRole("button", { name: "Starting…" });
+  expect((pending as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.click(pending);
+  expect(start).toHaveBeenCalledTimes(1);
+  finish();
+  expect(await screen.findByText("Idle")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
+});
+
+it.each([
+  ["start_failed", "Could not start the device service"],
+  [
+    "not_configured",
+    "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
+  ],
+  [
+    "incompatible",
+    "On the Rome instance, run rome-node daemon stop, then rome-node daemon start. This restarts the shared service and interrupts device requests in progress.",
+  ],
+])("shows actionable startup errors without automatic retries (%s)", async (error, message) => {
+  const start = rs.fn(() => new Response(JSON.stringify({ error }), { status: 503 }));
+  renderDevices(
+    () => ({
+      connection: "not_running",
+      checkedAt: new Date().toISOString(),
+      devices: [],
+    }),
+    start,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Start service" }));
+  expect((await screen.findByRole("alert")).textContent).toBe(message);
+  expect(start).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("0 connected devices")).toBeNull();
+});
+
+it("localizes the service recovery and computer setup in Chinese", async () => {
+  await i18n.changeLanguage("zh-CN");
+  try {
+    renderDevices(() => ({
+      connection: "not_running",
+      checkedAt: new Date().toISOString(),
+      devices: [],
+    }));
+    expect(await screen.findByRole("button", { name: "启动服务" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "连接电脑" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
+  } finally {
+    cleanup();
+    await i18n.changeLanguage("en");
+  }
 });

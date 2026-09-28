@@ -94,11 +94,10 @@ export default defineConfig({
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
-      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true },
-      // Route /desktop-proxy through the backend. The backend's
-      // desktopProxyRoutes forwards to noVNC using its own ROME_NOVNC_PORT;
-      // a containerized dev server can't reach the host's noVNC directly.
-      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true },
+      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
+      // Route /desktop-proxy through the backend so its WebSocket upgrade
+      // handler can authorize the connection before reaching noVNC.
+      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
     },
   },
   output: {

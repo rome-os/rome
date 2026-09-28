@@ -46,9 +46,11 @@ function fakeRuntime(opts: {
   readerJson?: unknown;
   onDerive?: (passphrase: string) => void;
   qr?: string | null;
+  desktopPath?: string;
 }): WechatUserRuntime {
   const statuses = [...opts.statuses];
   const runtime = {
+    desktopPath: opts.desktopPath ?? "/desktop",
     install: rs.fn(async () => {}),
     installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
@@ -236,11 +238,34 @@ describe("makeWechatUserSetup", () => {
     expect(commit).toHaveBeenCalledTimes(1);
   });
 
+  it("links a resuming client to the desktop that shows it", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, state: "stopped", running: false }, READY],
+      desktopPath: "/desktop/wechat",
+    });
+    let started!: () => void;
+    rs.mocked(runtime.start).mockImplementation(
+      () => new Promise<void>((resolve) => (started = resolve)),
+    );
+    const { fn } = setupWith(runtime);
+    const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
+    await session.started();
+
+    await rs.waitFor(() => expect(runtime.start).toHaveBeenCalled());
+    const state = session.state;
+    expect(state.status === "presenting" && state.view.title).toBe("Resuming WeChat");
+    expect(state.status === "presenting" && state.view.links?.[0]?.url).toBe("/desktop/wechat");
+
+    started();
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+  });
+
   it("sends a remembered account to the desktop instead of streaming a QR", async () => {
     const signedOut = { ...READY, state: "awaiting-scan" as const, keysReady: false };
     const runtime = fakeRuntime({
       statuses: [signedOut, signedOut, READY],
       qr: "data:image/png;base64,button",
+      desktopPath: "/desktop/wechat",
     });
     let finishLogin!: (passphrase: string) => void;
     const recoverPassphrase = rs.fn(
@@ -254,6 +279,8 @@ describe("makeWechatUserSetup", () => {
     const state = session.state;
     expect(state.status === "presenting" && state.view.title).toBe("Sign in to WeChat");
     expect(state.status === "presenting" && state.view.qr).toBeUndefined();
+    // The sign-in button is on WeChat's own display, so the link goes there.
+    expect(state.status === "presenting" && state.view.links?.[0]?.url).toBe("/desktop/wechat");
     expect(runtime.captureLoginQr).not.toHaveBeenCalled();
 
     finishLogin("a".repeat(64));

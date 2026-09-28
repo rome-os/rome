@@ -57,6 +57,9 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
+import type { Channel } from "../channels/channel.js";
+import { connectionPorts, type ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -214,6 +217,30 @@ export class MockProviderAdapter implements ProviderAdapter {
   async simulateMessage(msg: NormalizedMessage): Promise<void> {
     await this.handler?.(msg);
   }
+}
+
+/** The channel a mock Talk router backs, by name, built by the production
+ *  `connectionPorts` over a registry holding one `test:<name>` Connection with
+ *  a Talk per mock adapter. A name with no mock adapter has no channel, as in
+ *  `channelList`. */
+export function mockChannelLookup(
+  talkRouter: TalkRouter,
+  adapters: ReadonlyMap<string, unknown>,
+): (name: string) => Channel | null {
+  const registry: ConnectionPortsDeps["registry"] = {
+    find: (service) =>
+      adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
+    getDescriptor: (service) =>
+      adapters.has(service)
+        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+        : null,
+    onUnlocked: () => {},
+    registeredServices: () => [...adapters.keys()],
+  };
+  return (name) => {
+    const ports = connectionPorts({ registry, router: talkRouter }, name);
+    return ports ? { name, ...ports, accounts: null, messages: null } : null;
+  };
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
@@ -558,7 +585,7 @@ export async function buildTestDeps(
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter,
+    channel: mockChannelLookup(talkRouter, channelPortMap),
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -650,6 +677,7 @@ export async function buildTestDeps(
     dashboardAccessState,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
+      start: async () => {},
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

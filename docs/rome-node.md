@@ -41,7 +41,21 @@ while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
 It only connects to an existing daemon and returns `null` if none is running.
 Opening the page, polling, and refreshing never start or restart the daemon.
 The HTTP API reports `not_running` in that case, and the page shows an unknown
-device count. Explicit daemon startup and device commands can start it again.
+device count. **Start service** explicitly starts the daemon on the Rome instance
+through `POST /api/devices/start`. It does not authorize a computer, replace
+credentials, or restart an incompatible service. Device commands can also start it.
+Rome starts the daemon at instance startup or enrollment when caller credentials
+are available.
+After an explicit stop, the next startup or enrollment starts it again.
+
+A running daemon without a Gateway connection appears as **Idle**, not as a
+stopped service. The connection opens when a linked computer needs a reachability
+check or a remote action. An empty authorized-device list does not require it.
+
+The **Connect a computer** section stays visible even when the service is stopped.
+It directs users to run `rome-node connect` on the target computer, approve access
+with the same Cloud account, and keep the terminal open. Programs run as that
+computer's OS user. This is separate from starting the service on the Rome instance.
 
 Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,
@@ -117,11 +131,16 @@ The CLI invokes the same library API for `auth --server`.
 
 Existing caller credentials for the configured Cloud origin are reused without
 a network check or a new token. A different Cloud origin requires manual
-configuration. Provisioning does not start the daemon or block startup or login.
+configuration.
 Transient failures get up to three attempts, with delays of one and five seconds.
 An issued token is reused across validation retries. After retries fail, the library
 returns an error. Rome logs the failure and retries on the next
 startup or enrollment.
+
+After authorization succeeds, Rome starts the caller daemon without blocking
+startup or login. Without instance enrollment, Rome starts the daemon when valid
+caller credentials were configured manually. A startup failure is logged and can
+be retried by the next startup or enrollment, or with **Start service** in Settings.
 
 When the server environment already supplies `ROME_INSTANCE_TOKEN`, run:
 

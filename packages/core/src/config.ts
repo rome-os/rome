@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
+import { wechatUserDisplay } from "./channels/wechat-user.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**
@@ -237,6 +238,13 @@ export function loadConfig(): Config {
   if (!result.success) {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
+  }
+  // WeChat's own display has one rule, shared with the runtime and the desktop
+  // proxy; a bad value fails boot here rather than when WeChat first starts.
+  try {
+    wechatUserDisplay(process.env);
+  } catch (error) {
+    throw new Error(`Invalid configuration:\n${(error as Error).message}`);
   }
 
   return result.data;

@@ -260,6 +260,35 @@ describe("Accounts API", () => {
     expect(byPerson.accounts.map(accountRef)).toEqual([`whatsapp:${LINKED_JID}`]);
   });
 
+  it("narrows the listing and its counts to one channel, and 400s a channel that is not one", async () => {
+    const telegram = await fetchPage("?channel=telegram");
+    expect(telegram.accounts.every((account) => account.channel === "telegram")).toBe(true);
+    expect(find(telegram, `telegram:${DISMISSED_SENDER}`)).toBeDefined();
+    expect(find(telegram, `whatsapp:${SILENT_JID}`)).toBeUndefined();
+    // The channel scopes what the listing admits, so its counts are that
+    // channel's, the way a query's are.
+    const tally = { unlinked: 0, linked: 0, dismissed: 0 };
+    for (const account of telegram.accounts) tally[account.state] += 1;
+    expect(telegram.counts).toEqual(tally);
+    expect(telegram.counts).not.toEqual((await fetchPage()).counts);
+
+    const whatsapp = await fetchPage("?channel=whatsapp");
+    expect(whatsapp.accounts.length).toBeGreaterThan(0);
+    expect(whatsapp.accounts.every((account) => account.channel === "whatsapp")).toBe(true);
+
+    expect((await app.request("/accounts?channel=tele:gram")).status).toBe(400);
+  });
+
+  it("matches no row on the channel's own name once the channel is fixed", async () => {
+    // Unfixed, a term finds every account on the channel it names.
+    expect(find(await fetchPage("?q=tele"), `telegram:${DISMISSED_SENDER}`)).toBeDefined();
+    // Fixed, every row shares that name, so matching it would answer every row.
+    expect((await fetchPage("?channel=telegram&q=tele")).accounts).toEqual([]);
+    expect((await fetchPage("?channel=telegram&q=spam")).accounts.map(accountRef)).toEqual([
+      `telegram:${DISMISSED_SENDER}`,
+    ]);
+  });
+
   it("excludes group chats — a group is not an account", async () => {
     const page = await fetchPage();
     expect(page.accounts.some((account) => account.channelUserId.includes(GROUP_JID))).toBe(false);

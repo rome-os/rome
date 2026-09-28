@@ -179,6 +179,7 @@ export default function App() {
             <Route path="/app-details/:appId" element={<AppDetailPage />} />
             <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
             <Route path="/desktop" element={<DesktopPage />} />
+            <Route path="/desktop/wechat" element={<DesktopPage view="wechat" />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
             <Route path="/settings" element={<SettingsPage />} />

@@ -56,7 +56,7 @@ echo "Starting Openbox ..."
 openbox >/tmp/openbox.log 2>&1 &
 
 echo "Starting noVNC on :${NOVNC_PORT} ..."
-websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
+websockify --web=/usr/share/novnc/ "127.0.0.1:${NOVNC_PORT}" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
 
 # The supervisor's own traps handle Chrome/socat/stealth teardown; the X
 # stack above dies with the container.

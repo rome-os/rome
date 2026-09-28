@@ -3,6 +3,7 @@ import {
   nodeConfigFromEnvironment,
   CallerConfigurationError,
   DaemonVersionError,
+  startDaemon,
 } from "@rome-os/node-core/client";
 import { devicesStatusSchema, type DevicesStatus } from "@rome/api-types/devices";
 
@@ -11,9 +12,13 @@ export function createNodeDevicesService(
     ReturnType<typeof createNodeClient>,
     "getDevicesStatus" | "disconnect"
   > = () => createNodeClient(nodeConfigFromEnvironment(process.env)),
+  start: () => Promise<unknown> = () => startDaemon(nodeConfigFromEnvironment(process.env)),
 ) {
   let client: ReturnType<typeof createClient> | undefined;
   return {
+    async start(): Promise<void> {
+      await start();
+    },
     async getStatus(): Promise<DevicesStatus> {
       try {
         client ??= createClient();

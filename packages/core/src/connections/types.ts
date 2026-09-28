@@ -255,6 +255,14 @@ export interface ConnectionDescriptor {
       needs: readonly GrantName[];
       build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
+      /** False when the talker can never send, so the channel it backs has no
+       *  `send` port. Absent means it can. */
+      sends?: boolean;
+      /** False when this Talk's deliveries do not back the channel's `inbound`
+       *  port, so that channel has none. It says what the Talk backs, not what
+       *  the talker does: webchat's talker is wired to `deliver`, but its turns
+       *  start from its own route. Absent means the deliveries back it. */
+      receives?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

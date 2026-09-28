@@ -65,7 +65,13 @@ describe("rome-start-chrome-cdp.sh", () => {
     writeFileSync(countFile, "0\n");
     writeFileSync(stealthFile, "0\n");
     writeFileSync(scriptPath, readFileSync(resolve(PROJECT_ROOT, SCRIPT_PATH)));
-    makeExecutable(join(binDir, "curl"), "#!/usr/bin/env bash\necho cdp-ready\n");
+    makeExecutable(
+      join(binDir, "curl"),
+      `#!/usr/bin/env bash
+[[ "$(cat "$FAKE_CHROME_COUNT_FILE")" == "1" ]] || exit 1
+echo cdp-ready
+`,
+    );
     makeExecutable(join(binDir, "socat"), "#!/usr/bin/env bash\nexec sleep 30\n");
     makeExecutable(
       join(tempDir, "rome-apply-cdp-stealth.sh"),

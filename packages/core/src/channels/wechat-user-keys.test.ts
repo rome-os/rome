@@ -37,6 +37,18 @@ it("runs the staged driver in-process and parses the passphrase", async () => {
   expect(args[0]).toBe("/private/capture/launch-driver.py");
   expect(env).toEqual({ HOME: "/home/rome", XDG_RUNTIME_DIR: "/run/user/999" });
 });
+it("launches the captured client on WeChat's display", async () => {
+  let env: Record<string, string> | undefined;
+  await recoverWechatPassphrase(
+    { driverDir: "/private/capture", runtimeDir: "/run/user/999", display: ":100" },
+    undefined,
+    async (_f, _a, opts) => {
+      env = opts?.env;
+      return { code: 0, stdout: `PASSPHRASE ${"ab".repeat(32)}`, stderr: "" };
+    },
+  );
+  expect(env?.DISPLAY).toBe(":100");
+});
 it("rejects a capture that exits non-zero or yields no passphrase", async () => {
   await expect(
     recoverWechatPassphrase({ driverDir: "/private/capture" }, undefined, async () => ({

@@ -443,12 +443,20 @@ export function accountRef(account: { channel: string; channelUserId: string }):
 
 /** What `?q=` matches: the display name, the linked person's name, and every
  *  address — so a phone number finds an account the platform named something
- *  else, and a person's name finds the accounts they were placed on. */
-export function accountMatchesQuery(account: DirectoryAccount, query: string): boolean {
+ *  else, and a person's name finds the accounts they were placed on.
+ *
+ *  The channel's name too, unless the caller has already fixed the channel:
+ *  then every row shares it, and a term that happens to fall inside it
+ *  ("mail", "ai") would answer every row instead of the ones it names. */
+export function accountMatchesQuery(
+  account: DirectoryAccount,
+  query: string,
+  options: { matchChannel?: boolean } = {},
+): boolean {
   return matchesQuery(query, [
     account.displayName,
     account.personName ?? "",
-    account.channel,
+    ...(options.matchChannel === false ? [] : [account.channel]),
     ...account.addresses,
   ]);
 }
@@ -638,7 +646,8 @@ export function accountPageLimit(raw: string | number | null | undefined): numbe
  * Takes every account there is, in any order: the order is this function's, so
  * a producer cannot page one order while a client renders another.
  *
- * `query` scopes everything, including the counts. `state` and the cursor scope
+ * `query` and `channel` scope everything, including the counts — a listing
+ * fixed to one channel is that channel's directory. `state` and the cursor scope
  * the page alone, so a client filtered to one chip still reads every chip's
  * number, and a client on page four reads the same numbers it read on page one.
  *
@@ -651,13 +660,18 @@ export function sliceAccountDirectory(
   directory: readonly DirectoryAccount[],
   options: {
     query?: string | null;
+    channel?: string | null;
     state?: AccountState | null;
     cursor?: AccountCursor | null;
     limit?: number | null;
   } = {},
 ): AccountDirectory {
   const query = options.query?.trim() ?? "";
-  const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
+  const channel = options.channel || null;
+  const onChannel = channel ? directory.filter((a) => a.channel === channel) : directory;
+  const matching = query
+    ? onChannel.filter((a) => accountMatchesQuery(a, query, { matchChannel: !channel }))
+    : onChannel;
 
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
   for (const account of matching) counts[account.state] += 1;

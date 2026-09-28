@@ -213,19 +213,23 @@ export type PeopleRoster = ReturnType<typeof usePeopleRoster>;
  *
  * Server-side, because the directory is an address book rather than a curated
  * listing: a filter over the page that happened to load would answer "no such
- * account" for a contact the mirror holds.
+ * account" for a contact the mirror holds. For the same reason a picker that
+ * only offers one channel's accounts names the channel here, rather than
+ * filtering a page other channels may have filled.
  */
-export function useAccountSearch(search: string, options: { enabled: boolean }) {
+export function useAccountSearch(search: string, options: { enabled: boolean; channel?: string }) {
   const { t } = useTranslation("people");
   const fallback = t("errors.loadFailedFallback");
   const term = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS);
+  const channel = options.channel ?? null;
   return useQuery<AccountDirectory>({
-    queryKey: [ACCOUNTS_KEY, "picker", term],
+    queryKey: [ACCOUNTS_KEY, "picker", channel, term],
     enabled: options.enabled,
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
       const query = new URLSearchParams();
       if (term) query.set("q", term);
+      if (channel) query.set("channel", channel);
       const suffix = query.toString();
       return fetchJson<AccountDirectory>(`/api/accounts${suffix ? `?${suffix}` : ""}`, {
         signal,

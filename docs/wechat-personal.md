@@ -28,6 +28,23 @@ The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_siz
 
 The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
 
+## WeChat's own display
+
+By default the client runs on the shared desktop, `:99`, beside Rome's Chrome, and the guardian watches it at `/desktop`. Set `WECHAT_USER_DISPLAY` to give it a display of its own instead:
+
+```sh
+WECHAT_USER_DISPLAY=:100
+```
+
+With it set, the entrypoint starts that display as a second TigerVNC server at 1280x800 on `localhost:5901` (`ROME_WECHAT_VNC_PORT`). It also starts:
+
+- An Openbox with no key bindings (`scripts/docker/wechat-openbox-rc.xml`), which keeps the client's main window maximized without a title bar.
+- A second websockify on `6081` (`ROME_WECHAT_NOVNC_PORT`).
+
+The guardian watches and signs in at `/desktop/wechat`, which is served the way `/desktop` is. The runtime starts the client, captures keys, detects the login window and runs its health check on that display. `/desktop` then shows no WeChat window.
+
+Moving a signed-in client to its own display needs one client restart and a sign-in confirmed on the phone. Open `/desktop/wechat` before restarting, so the login window is visible when it appears.
+
 ## Connect
 
 1. Open Settings → Connections → WeChat.

@@ -489,6 +489,7 @@ export const peopleHandlers = [
     return HttpResponse.json(
       sliceAccountDirectory(observedAccounts().map(directoryRow), {
         query: params.get("q"),
+        channel: params.get("channel"),
         state: state.state,
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
