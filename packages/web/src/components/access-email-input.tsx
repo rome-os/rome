@@ -5,6 +5,7 @@ import { accountMatchesQuery } from "@rome/api-types/people";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { contactEmailSuggestions, EMAIL_CHANNEL } from "@/lib/contact-emails";
+import { parseEmailTextarea } from "@/lib/email-list";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
@@ -88,7 +89,10 @@ export function AccessEmailInput({
             id={id}
             size="md"
             icon={<Mail />}
-            type="email"
+            // Text, not email: an email field strips its value's surrounding
+            // whitespace, which eats the space between two words of a name.
+            type="text"
+            inputMode="email"
             value={value}
             onChange={(event) => {
               onChange(event.target.value);
@@ -111,7 +115,10 @@ export function AccessEmailInput({
               }
               if (event.key !== "Enter") return;
               event.preventDefault();
-              const chosen = suggestions[active];
+              // A typed name is a search, not an address: Enter takes the top
+              // match for it. A typed address commits as typed, as it always has.
+              const typedEmail = parseEmailTextarea(value).emails.length > 0;
+              const chosen = suggestions[active] ?? (typedEmail ? undefined : suggestions[0]);
               if (chosen) pick(chosen.email);
               else onCommit(value);
             }}

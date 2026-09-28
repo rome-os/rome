@@ -369,6 +369,43 @@ describe("contact autocomplete in the email list", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("adds the first suggestion when Enter lands on a typed name", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "adam smith");
+    await screen.findAllByRole("option");
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Aadam@example.com",
+    ]);
+    expect(input.value).toBe("");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("commits a typed address as typed, even while a suggestion shows", async () => {
+    const input = await openCloudEmail();
+    // "adam@example.co" is a valid address of its own, and a prefix of Adam's.
+    await userEvent.type(input, "adam@example.co");
+    await screen.findAllByRole("option");
+
+    await userEvent.keyboard("{Enter}");
+
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Aadam@example.co",
+    ]);
+  });
+
+  it("is a text field, so a name keeps its spaces while typed", async () => {
+    const input = await openCloudEmail();
+    // An email field strips a value's surrounding whitespace, which eats the
+    // space between two words of a name as it is typed.
+    expect(input.type).toBe("text");
+    expect(input.inputMode).toBe("email");
+    await userEvent.type(input, "adam ");
+    expect(input.value).toBe("adam ");
+  });
+
   it("never offers an address the list already holds", async () => {
     const input = await openCloudEmail({
       ...APP,
