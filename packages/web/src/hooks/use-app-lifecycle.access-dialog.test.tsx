@@ -23,6 +23,12 @@ beforeAll(async () => {
   Element.prototype.scrollIntoView = () => {};
 });
 
+// A fresh mock per test: no call history or implementation leaks across tests.
+beforeEach(() => {
+  fetchJson.mockReset();
+  fetchJson.mockImplementation(async () => ({}));
+});
+
 afterEach(cleanup);
 
 const APP: InstalledAppCard = {
@@ -205,17 +211,18 @@ describe("the app access dialog", () => {
       expect(screen.getByRole("radiogroup")).toBeTruthy();
       expect(screen.queryByText("Save access before sharing this link.")).toBeNull();
       expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Save access" }).hasAttribute("disabled")).toBe(
+        true,
+      );
     });
 
     it("clears a failed save's error once a retry succeeds", async () => {
-      // The first PUT fails; the retry, like every other call, succeeds.
-      fetchJson.mockImplementation(async (_url: string, init?: unknown) => {
-        if ((init as { method?: string } | undefined)?.method === "PUT") {
-          fetchJson.mockImplementation(async () => ({}));
+      // The first save's GET succeeds and its PUT fails; the retry succeeds.
+      fetchJson
+        .mockImplementationOnce(async () => ({}))
+        .mockImplementationOnce(async () => {
           throw new Error("Network down");
-        }
-        return {};
-      });
+        });
       await openDialog();
       await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
       await userEvent.click(screen.getByRole("button", { name: "Save access" }));
