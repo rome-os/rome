@@ -12,6 +12,28 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 - **The dashboard renders setups generically.** The connect UI is a single standard renderer plus a small set of registered custom components for the few steps that need bespoke presentation (e.g. rendering a QR image). Adding a channel adds neither a connect route nor a per-service connect card.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.
 
+## Guardian reply delivery
+
+Guardian direct messages on Telegram, Discord, Feishu, and WeChat use one main-process delivery owner per provider run. Group replies and other recipients retain their approval path.
+
+Telegram, Discord, and Feishu create and edit each physical text part as assistant text arrives. WeChat sends bounded text blocks at a paced interval. Completed answers do not replay as artificial frames. Reasoning and tool events never enter this text delivery path.
+
+The shared assembler tracks source text and block identity. WebChat uses the same text assembly while keeping its own SSE, cards, and replay. New guardian inputs enter `AgentInputQueue`, which applies provider-native steering or retains the input for a later run.
+
+Each adapter supplies a text codec and a validated delivery profile. `ROME_DELIVERY_PROFILE` accepts JSON defaults. The settings row `connection_delivery:<connectionId>` accepts per-connection overrides. Unknown fields, invalid bounds, unsupported formatting, and limits above the adapter's maximum fail validation.
+
+Profiles select `edit`, `blocks`, or `final`, with a fallback mode when editing is unavailable. They also set create/update spacing, conversation spacing, account budgets, burst capacity, part size, coalescing, pending age, and queue bounds. Initial streaming codecs use plain text. Native-format overrides are rejected. Feishu streaming uses single plain-text API calls. Ordinary Feishu sends retain the SDK Markdown-post path.
+
+The scheduler rotates conversations within a shared account budget. Ordinary `send_message` calls share that scheduler for every physical split and attachment. Each call resolves after transport completion and preserves the provider receipts for accepted parts.
+
+Stop closes output admission immediately. An accepted in-flight operation still records its receipt. Every delayed operation checks the captured connection authority before sending. An ambiguous create is not retried. An ambiguous edit stops unless the transport can establish its ordering.
+
+The `reply_delivery_parts` table records the latest attempt and receipt for each physical part. It is delivery evidence, not a conversation transcript. Startup marks interrupted attempts as unknown without replaying them. Receipt-recording failures never repeat accepted sends.
+
+People sends also retain their aggregate physical receipts in this evidence repository, including accepted parts before a later failure. Each explicit retry has a separate attempt identity. The existing outbox keeps its primary message ID and timeline behavior.
+
+Backend turns and approval continuations use the same delivery owner when the recipient qualifies for guardian streaming. Append-only final corrections use an explicit correction message.
+
 ## LinkedIn replies
 
 LinkedIn replies use the shared [People outbox](../concepts/people.md#outbox) and the browser session that reads the inbox.

@@ -29,6 +29,31 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     return this.ipc ?? getWorkerIpc();
   }
 
+  async admitConversationInput(params: RunParams): Promise<{ turnId: string } | null> {
+    if (!params.channelThreadKey || !params.platformMessageId) return null;
+    const response = await this.getIpc().call<RunTurnRequest, RunTurnResponse>(
+      "agent.session.runTurn",
+      {
+        admissionOnly: true,
+        key: { agentName: params.agentName, channelThreadKey: params.channelThreadKey },
+        init: {
+          workingDir: params.workingDir,
+          threadContext: params.threadContext,
+          romeSessionId: params.romeSessionId,
+          sharedContext: params.sharedContext,
+          contextSuffix: params.contextSuffix,
+        },
+        input: { prompt: params.prompt, images: params.images },
+        platformMessageId: params.platformMessageId,
+        replyTo: params.replyTo,
+        hookInvocationContext: getCurrentHookInvocationContext(),
+        actionContext: getCurrentActionContext(),
+      },
+      { timeoutMs: AGENT_SESSION_RUN_TURN_TIMEOUT_MS },
+    );
+    return response.admitted ? { turnId: response.turnId } : null;
+  }
+
   /**
    * Catalog membership check, bridged to main via worker RPC. The worker has no
    * local `AgentLoader`, so this answers truthfully or throws — a transport

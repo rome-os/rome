@@ -29,6 +29,12 @@ export type DevRoute = {
 export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
   ? [
       {
+        path: "/dev/im",
+        title: "IM delivery playground",
+        description: "Exercise conversation delivery against stateful platform fixtures.",
+        Component: lazy(() => import("./ImPlaygroundPage")),
+      },
+      {
         path: "/dev/styleguide",
         title: "Style guide",
         description:

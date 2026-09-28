@@ -8,7 +8,7 @@ const conversation = {
 };
 
 describe("AgentTurnStreamRegistry conversation routing", () => {
-  it("resolves the active turn for a provider conversation", () => {
+  it("resolves the active turn for a provider conversation", async () => {
     const registry = createAgentTurnStreamRegistry();
     const interrupt = rs.fn(async () => undefined);
     const stream = registry.register({
@@ -22,10 +22,33 @@ describe("AgentTurnStreamRegistry conversation routing", () => {
 
     expect(registry.getActiveByConversation(conversation)).toBe(stream);
     expect(stream.initiatorId).toBe("user-1");
-    expect(stream.interrupt).toBe(interrupt);
+    await stream.interrupt?.("stop");
+    expect(interrupt).toHaveBeenCalledWith("stop");
 
     stream.finish();
     expect(registry.getActiveByConversation(conversation)).toBeUndefined();
+  });
+
+  it("closes output before interrupting and also stops an owner attached during interruption", async () => {
+    const registry = createAgentTurnStreamRegistry();
+    const calls: string[] = [];
+    const stream = registry.register({
+      sessionId: "session",
+      turnId: "run",
+      agentName: "main",
+      async interrupt() {
+        calls.push("provider");
+      },
+    });
+    stream.onInterrupt?.(() => {
+      calls.push("output");
+    });
+    await stream.interrupt?.();
+    stream.onInterrupt?.(() => {
+      calls.push("late-output");
+    });
+    expect(calls).toEqual(["output", "provider", "late-output"]);
+    stream.finish();
   });
 
   it("does not let an older turn clear a newer conversation route", () => {

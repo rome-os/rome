@@ -118,6 +118,7 @@ export async function readSendStates(
  *  entry this becomes on the timeline can be recognized when it lands. */
 export interface SendReceipt {
   messageId: string | null;
+  parts?: Array<{ messageId: string; kind: string }>;
 }
 
 /**
@@ -132,5 +133,8 @@ export async function sendToTarget(
   text: string,
 ): Promise<SendReceipt> {
   const receipt = await deps.talkRouter.send(target.connectionId, target.conversationId, { text });
-  return { messageId: receipt.messageId ?? null };
+  return {
+    messageId: receipt.messageId ?? null,
+    ...(receipt.parts ? { parts: receipt.parts } : {}),
+  };
 }

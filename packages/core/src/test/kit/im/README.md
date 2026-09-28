@@ -12,6 +12,30 @@ pnpm test:im
 
 The files use `.integration.test.ts`, so `pnpm test:integration` and its CI job include them. Fast unit tests remain in the unit suite.
 
+## Delivery playground
+
+Run `pnpm dev:all`, then `./r pnpm dev:im` in another terminal. Open `/dev/im`
+on the dashboard development origin. The dev server proxies `/__im` to the
+loopback fixture service on port 3211 in the same container. For host-only
+frontend debugging, run `pnpm dev:im` on the host alongside the web dev server.
+Production builds omit the page and do not start or load the fixture service.
+
+The page configures one shared, temporary conversation per service process.
+Applying a configuration closes its connections and resets its database and
+message state. Incoming messages travel through the real adapter, connection
+registry and TalkRouter subscriber into the conversation repository. Ordinary
+sends use TalkRouter.send. Scripted model deltas use RunDelivery, its scheduler
+and SQLite receipt repository. Platform pacing stays at the production profile
+defaults. The delta interval controls generation, not the platform request rate.
+Inject an incoming message first on WeChat to establish its context token.
+
+The same text can be delivered as edited previews, complete chunks or final-only
+output. Faults affect the next create request at the fixture HTTP boundary.
+Stop cancels the active run while retaining already accepted messages and
+receipts. The timeline shows the last 200 redacted requests. Reset after 1,000
+requests. This surface scripts text generation; it does not invoke a live model
+or prove live-account permissions and provider quotas.
+
 ## Supported contracts
 
 | Fixture | Real client | Modeled protocol |
@@ -30,6 +54,12 @@ Protocol references: [Discord Gateway](https://discord.com/developers/docs/topic
 `feishu-text.capture.json` contains reviewed responses from a real Feishu bot private chat recorded on 2026-09-18 with SDK 1.68.0. The capture uses `traceLarkHttp` in the local Rome container and credentials from its connection ledger. The five operations create, read, update, read and reply to a test message. Identifiers, tenant keys, timestamps and message positions use synthetic values. Message text is a dedicated test payload. Authentication exchanges and headers are excluded.
 
 `feishu-capture.integration.test.ts` runs the sequence through the real SDK against both recorded responses and the modeled routes. It checks sender fields, message identity, edited content and reply ancestry. Times and message positions vary between runs, so the comparison checks their numeric-string shape. This capture does not cover inbound WebSocket frames, cards, reactions or failures.
+
+## Feishu conversation coverage
+
+`feishu-conversation.integration.test.ts` connects `createLarkServerStub()` to the production SDK, connection registry, pairing admission, inbox hook, action engine, agent runner and SQLite repositories. Only the remote model and Feishu endpoints are replaced. It covers final-only rich-text replies, provider message ids and reply ancestry, consecutive turns, backend continuation, chat isolation, empty/error model results and rejected sends. Tests wait for persisted action completion before asserting delivery and history.
+
+The inbox tests exercise the final-send fallback and assert that drafts are not sent or edited. Backend continuation uses `textDelivery`. The IPC streaming tests below cover incremental output, cancellation and model failure. Pairing approval remains covered by `scenarios.integration.test.ts`.
 
 ## Recorded Feishu rich text and threads
 
@@ -55,7 +85,7 @@ The sequence uses returned message objects from send/edit and the reply snapshot
 
 `wechat-text.capture.json` contains three HTTP exchanges from the production ilink adapter recorded on 2026-09-18: a context-bound text send, a send with a substituted context token, and a send to an invalid recipient. The first two returned HTTP 200 with a numeric `message_id`. The invalid recipient returned HTTP 200 with `ret: -3` and `errmsg: "invalid arguments"`. API acceptance does not prove recipient delivery. Context validation cannot be inferred from these samples.
 
-`wechat-capture.integration.test.ts` replays successful responses through the real adapter and the API error at the HTTP boundary. It checks serialized requests. The foundation adapter does not reject HTTP 200 business errors. Adapter rejection belongs to the stacked delivery change, which checks `ret` and `errcode`. The captures replace recipients, context tokens, client IDs and message IDs with synthetic values and exclude authentication headers. The adapter discards the returned message ID. The local model's context rejection is a synthetic fault, not a verified provider rule. This capture does not cover inbound polling, read/edit operations, media or end-user delivery receipts.
+`wechat-capture.integration.test.ts` replays successful responses through the real adapter and the API error at the HTTP boundary. It checks serialized requests. `wechat-delivery-capture.integration.test.ts` runs the captured HTTP 200 business error through the registry, router, scheduler and SQLite delivery repository. The test requires a failed attempt with no accepted receipt and no automatic retry. The captures replace recipients, context tokens, client IDs and message IDs with synthetic values and exclude authentication headers. The adapter discards the returned message ID. The local model's context rejection is a synthetic fault, not a verified provider rule. This capture does not cover inbound polling, read/edit operations, media or end-user delivery receipts.
 
 ## Script a scenario
 
@@ -131,8 +161,18 @@ Lark uses real Feishu/Lark domains when constructing SDK requests, then rewrites
 
 Telegram's HTTP fixture exercises grammy's multipart serialization, unlike the faster existing `FakeTelegramApi` transformer fixture. Its fetch bridge adapts grammy's Node AbortSignal and streaming bodies to native fetch.
 
+## Agent streaming acceptance
+
+`streaming-conversation.integration.test.ts` drives the real AgentSession manager through the IPC bridge, registry, scheduler and local Discord, Telegram, Feishu and WeChat peers. Only the model and worker process boundary are scripted. Every platform/configuration row receives the same five deltas, message size limit and event barriers. Handwritten stage expectations distinguish edits across three physical messages, append-only blocks and final-only delivery. The matrix checks completion, cancellation, model failure and duplicate follow-up admission during generation. It asserts intermediate content, stable message IDs, physical create/edit counts, persisted receipts and completed conversation replies. Platform-specific branches only wire peers and normalize their protocol responses. WeChat records acceptance without inventing a provider message ID.
+
+Physical acceptance and generation completion are separate facts. A cancelled or failed turn can retain accepted receipts, including settled append-only parts. Those receipts do not establish successful generation or a completed conversation reply.
+
+`delivery-config.integration.test.ts` covers Feishu and WeChat mode selection, global and connection overrides, coalescing, create spacing and immediate final flush. It checks Unicode and code content around Rome's configured transport bounds, Feishu edits to existing parts and explicit WeChat corrections. Fault scenarios verify Retry-After, replacement of pending snapshots, rejected parts and accepted parts whose responses are lost. These length checks establish Rome's splitting behavior, not the remote platforms' maximum accepted payload sizes.
+
+`delivery-recovery.integration.test.ts` kills a sender process after its second physical send is accepted but before the receipt is committed. Reopening SQLite and recovering interrupted attempts twice preserves the first receipt, marks the second attempt unknown and does not replay either send. This checks process loss and durable delivery evidence, not a full daemon restart. Delivery unit tests cover memory and queue bounds, burst budgets, runtime editing fallback and corrections whose final boundaries change.
+
 ## Acceptance and limits
 
-The suite covers SDK serialization, polling, gateway input, message identity, edits, multipart uploads, fault barriers, API trace redaction and Feishu capture replay. Discord, Telegram and Lark tests apply multiple incremental edits through the real SDK and verify stable message identity and current content. The peers support streaming sends and edits independently of Rome’s delivery scheduler. Rome conversation, scheduling and receipt-persistence scenarios belong to the dependent PR.
+The suite covers SDK serialization, polling, gateway input, message identity, edits, multipart uploads, fault barriers, API trace redaction and Feishu capture replay. Discord, Telegram and Lark tests apply multiple incremental edits through the real SDK and verify stable message identity and current content. The peers support streaming sends and edits independently of Rome’s delivery scheduler. `scenarios.integration.test.ts` covers Rome delivery scheduling, pairing admission and receipt persistence. `delivery-apis.integration.test.ts` checks adapter delivery outcomes through these peers.
 
-This is a protocol subset, not an emulator for every platform feature. Unknown APIs must be added explicitly. Full gateway resume replay, complete card schemas, arbitrary CDN downloads, and vendor-wide quota policies are not modeled. The fixtures do not add Lark streaming delivery. Live-account checks remain necessary to verify real permissions and platform behavior.
+This is a protocol subset, not an emulator for every platform feature. Unknown APIs must be added explicitly. Full gateway resume replay, complete card schemas, arbitrary CDN downloads, and vendor-wide quota policies are not modeled. Feishu streaming uses plain-text create/reply/update calls so the scheduler owns splitting and retries; ordinary sends retain SDK-rendered Markdown posts. Live-account checks remain necessary to verify real permissions and platform behavior.

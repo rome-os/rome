@@ -14,6 +14,8 @@ import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 import { OutboxRepository } from "../../db/repositories/outbox.js";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
+import { MessageDeliveryError, type ConversationId } from "@rome-os/app-runtime";
+import { replyDeliveryParts } from "../../db/schema.js";
 
 // Sending to a person, and the outbox a send lives in until it arrives.
 //
@@ -88,6 +90,33 @@ describe("People send API", () => {
     expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([
       { channelUserId: TG, threadId: TG, message: { text: "on my way" } },
     ]);
+  });
+
+  it("retains all physical receipts and an ambiguous later failure", async () => {
+    const known = {
+      conversationId: TG as ConversationId,
+      messageId: "first",
+      parts: [
+        { messageId: "first", kind: "text" },
+        { messageId: "second", kind: "text" },
+      ],
+    };
+    const provider = rs.spyOn(deps.talkRouter!, "send");
+    provider.mockResolvedValueOnce(known);
+    await send({ channel: "telegram", channelUserId: TG, text: "split success" });
+    provider.mockRejectedValueOnce(new MessageDeliveryError("unknown", "timeout", [known]));
+    const response = await send({
+      channel: "telegram",
+      channelUserId: TG,
+      text: "partial failure",
+    });
+    expect(await response.json()).toMatchObject({ error: "Delivery outcome unknown: timeout" });
+    const evidence = await testDb.db.select().from(replyDeliveryParts);
+    expect(
+      evidence.filter((part) => part.outcome === "accepted").map((part) => part.receipt),
+    ).toEqual([known, known]);
+    expect(evidence.filter((part) => part.outcome === "unknown")).toHaveLength(1);
+    expect(provider).toHaveBeenCalledTimes(2);
   });
 
   it("refuses an account the person does not hold", async () => {

@@ -197,7 +197,7 @@ export class ApprovalHandler {
           payload.channelContext?.channel ?? "",
           payload.channelContext?.threadId ?? "",
         );
-        for await (const message of this.agentRunner.run({
+        const messages = this.agentRunner.run({
           agentName,
           prompt: resultText,
           sessionId: payload.sessionId,
@@ -207,9 +207,8 @@ export class ApprovalHandler {
           workingDir,
           threadContext: payload.channelContext,
           initiatedBy: "system",
-        })) {
-          if (emit) emit({ ...message, agent: agentName });
-        }
+        });
+        await this.observeContinuation(payload, resultText, messages, emit);
       }
 
       await this.approvalsRepo.markExecuted(approvalId);
@@ -260,9 +259,7 @@ export class ApprovalHandler {
           threadContext: payload.channelContext,
           initiatedBy: "system" as const,
         };
-        for await (const message of this.agentRunner.run(params)) {
-          void message;
-        }
+        await this.observeContinuation(payload, params.prompt, this.agentRunner.run(params));
       } catch (err) {
         log.error("failed to notify agent of rejection", {
           approvalId,
@@ -275,5 +272,37 @@ export class ApprovalHandler {
       approvalId,
       rootExecutionId: payload?.rootExecutionId,
     });
+  }
+
+  private async observeContinuation(
+    payload: ApprovalPayload,
+    prompt: string,
+    messages: AsyncIterable<AgentMessage>,
+    emit?: (message: AgentMessage & { agent?: string }) => void,
+  ): Promise<void> {
+    const context = payload.channelContext;
+    const agentName = payload.agentName ?? "main";
+    const forward = emit
+      ? (message: AgentMessage) => emit({ ...message, agent: agentName })
+      : undefined;
+    if (
+      context &&
+      context.channel !== "webchat" &&
+      payload.sessionId &&
+      this.backendTurnRunner.observeContinuation
+    ) {
+      await this.backendTurnRunner.observeContinuation(
+        {
+          ...context,
+          agentName,
+          sessionId: payload.sessionId,
+          prompt,
+        },
+        messages,
+        forward,
+      );
+      return;
+    }
+    for await (const message of messages) forward?.(message);
   }
 }

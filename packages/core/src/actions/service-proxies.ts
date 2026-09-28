@@ -21,6 +21,7 @@ import {
   WorkerRpcSendError,
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
+import { DeliveryFailure } from "../connections/delivery/transport.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -213,11 +214,26 @@ export class TalkRouterProxy implements TalkRouter {
     conversationId: ConversationId,
     message: OutgoingMessage,
   ): Promise<MessageReceipt> {
-    return getWorkerRpc().call<MessageReceipt>("talk.send", {
-      connectionId,
-      conversationId,
-      message,
-    });
+    try {
+      return await getWorkerRpc().call<MessageReceipt>(
+        "talk.send",
+        {
+          connectionId,
+          conversationId,
+          message,
+        },
+        { timeoutMs: 30 * 60_000 },
+      );
+    } catch (error) {
+      if (
+        error instanceof WorkerRpcTimeoutError ||
+        error instanceof WorkerRpcDisconnectError ||
+        error instanceof WorkerRpcSendError
+      ) {
+        throw new DeliveryFailure("unknown", error.message);
+      }
+      throw error;
+    }
   }
 
   feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null {

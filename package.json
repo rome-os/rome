@@ -8,6 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "dev:im": "pnpm --filter @rome/core dev:im",
     "start": "pnpm build:apps && pnpm --filter @rome/core start",
     "dev": "pnpm build:apps && pnpm --filter @rome/core dev",
     "start:web": "pnpm --filter rome-web dev",

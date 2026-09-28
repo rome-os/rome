@@ -91,6 +91,12 @@ export default defineConfig({
     port: Number(process.env.WEB_PORT ?? 3000),
     strictPort: true,
     proxy: {
+      "/__im": {
+        target: "http://127.0.0.1:3211",
+        changeOrigin: true,
+        pathRewrite: { "^/__im": "" },
+        headers: { origin: "http://127.0.0.1:3211" },
+      },
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },

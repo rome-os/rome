@@ -30,6 +30,7 @@ import type {
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { AgentMessage } from "../types.js";
 import { createLogger } from "../logger.js";
+import type { RunDelivery } from "../connections/delivery/run-delivery.js";
 
 const log = createLogger("backend-turn");
 
@@ -57,6 +58,11 @@ export type BackendSessionTask = (helpers: {
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
 export interface MainBackendTurnRunner extends BackendTurnRunner {
+  observeContinuation?(
+    params: BackendTurnParams,
+    messages: AsyncIterable<AgentMessage>,
+    emit?: (message: AgentMessage) => void,
+  ): Promise<void>;
   setWebchatRuntime(runtime: WebchatSessionStreamHost): void;
   /** Run `task` in the session for (channel, threadId). For webchat it queues
    * behind any in-flight browser turn and its emitted reply rides the SSE push;
@@ -66,6 +72,7 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
 }
 
 export interface BackendTurnRunnerDeps {
+  createRunDelivery?(params: BackendTurnParams, turnId: string): Promise<RunDelivery | null>;
   agentRunner: AgentRunnerInterface;
   talkRouter: TalkRouter;
   /** Resolve the working dir for the continued session from its (channel,
@@ -127,7 +134,71 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     await task({ emit: () => {} });
   };
 
+  const recordReply = async (
+    params: BackendTurnParams,
+    reply: string,
+    turnId?: string,
+    delivery?: { messageId?: string },
+  ) => {
+    if (deps.conversations) {
+      try {
+        const conversation = await deps.conversations.ensureChannelConversation({
+          channel: params.channel,
+          threadId: params.threadId,
+          agentName: params.agentName,
+        });
+        await deps.conversations.recordOutboundMessage({
+          sessionId: conversation.id,
+          content: JSON.stringify([{ type: "text", content: reply }]),
+          platformMessageId: delivery?.messageId,
+          senderId: "rome",
+          senderName: "Rome",
+          ...(turnId ? { turnId } : {}),
+          knownToProvider: true,
+        });
+      } catch (err) {
+        // Delivery already succeeded. A persistence failure must not make the
+        // continuation retry and send the same provider message twice.
+        log.warn("backend reply delivered but conversation recording failed", {
+          channel: params.channel,
+          threadId: params.threadId,
+          messageId: delivery?.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  };
+
   return {
+    async observeContinuation(params, messages, emit) {
+      let owner: RunDelivery | null = null;
+      let result = "";
+      let turnId: string | undefined;
+      let stopped = false;
+      try {
+        for await (const message of messages) {
+          emit?.(message);
+          if (message.type === "turn_start") {
+            turnId = message.turnId;
+            owner = (await deps.createRunDelivery?.(params, turnId)) ?? null;
+          }
+          if (message.type === "text_delta") owner?.append(message.content, message.blockId);
+          if (message.type === "text")
+            owner?.complete(message.content, message.turnPhase, message.blockId);
+          if (message.type === "result") result = message.content;
+          if (message.type === "turn_end" && message.status !== "completed") {
+            stopped = true;
+            await owner?.stop();
+          }
+        }
+        if (!stopped && owner) {
+          const receipts = await owner.finish(result);
+          if (result.trim()) await recordReply(params, result, turnId, receipts.at(-1));
+        }
+      } finally {
+        await owner?.stop();
+      }
+    },
     setWebchatRuntime(runtime: WebchatSessionStreamHost): void {
       webchatRuntime = runtime;
     },
@@ -154,10 +225,28 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // through the channel adapter (its `sendMessage` reaches the channel API).
       let reply = "";
       let turnId: string | undefined;
-      for await (const msg of runTurn(params, workingDir)) {
-        if (msg.type === "turn_start") turnId = msg.turnId;
-        if (msg.type === "result") reply = msg.content;
+      let runDelivery: RunDelivery | null = null;
+      let stopped = false;
+      try {
+        for await (const msg of runTurn(params, workingDir)) {
+          if (msg.type === "turn_start") {
+            turnId = msg.turnId;
+            runDelivery = (await deps.createRunDelivery?.(params, turnId)) ?? null;
+          }
+          if (msg.type === "text_delta") runDelivery?.append(msg.content, msg.blockId);
+          if (msg.type === "text") runDelivery?.complete(msg.content, msg.turnPhase, msg.blockId);
+          if (msg.type === "turn_end" && msg.status !== "completed") {
+            stopped = true;
+            await runDelivery?.stop();
+          }
+          if (msg.type === "result") reply = msg.content;
+        }
+      } catch (error) {
+        await runDelivery?.stop();
+        throw error;
       }
+      if (runDelivery && stopped) return;
+      const streamedReceipts = runDelivery ? await runDelivery.finish(reply) : undefined;
       if (!reply.trim()) {
         log.info("backend turn produced no reply; nothing to deliver", {
           channel: params.channel,
@@ -174,37 +263,13 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       if (!connectionId) {
         throw new Error(`Cannot resolve a unique Talk connection for channel "${params.channel}"`);
       }
-      const delivery = await deps.talkRouter.send(connectionId, params.threadId as ConversationId, {
-        text: reply,
-        ...(turnId ? { turnId } : {}),
-      });
-      if (deps.conversations) {
-        try {
-          const conversation = await deps.conversations.ensureChannelConversation({
-            channel: params.channel,
-            threadId: params.threadId,
-            agentName: params.agentName,
-          });
-          await deps.conversations.recordOutboundMessage({
-            sessionId: conversation.id,
-            content: JSON.stringify([{ type: "text", content: reply }]),
-            platformMessageId: delivery?.messageId,
-            senderId: "rome",
-            senderName: "Rome",
+      const delivery = runDelivery
+        ? streamedReceipts?.at(-1)
+        : await deps.talkRouter.send(connectionId, params.threadId as ConversationId, {
+            text: reply,
             ...(turnId ? { turnId } : {}),
-            knownToProvider: true,
           });
-        } catch (err) {
-          // Delivery already succeeded. A persistence failure must not make the
-          // continuation retry and send the same provider message twice.
-          log.warn("backend reply delivered but conversation recording failed", {
-            channel: params.channel,
-            threadId: params.threadId,
-            messageId: delivery?.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      await recordReply(params, reply, turnId, delivery);
     },
   };
 }

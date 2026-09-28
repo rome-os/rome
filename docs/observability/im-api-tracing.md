@@ -51,4 +51,4 @@ Message content and platform identifiers remain visible. Enable recording only f
 
 Captures are evidence for fixture changes, not executable scripts. A future simulation UI can use the same event envelope for a request timeline and read the fixture's message state for conversation rendering. Scenario controls can call the existing event injection and fault barriers. Keep platform payloads available alongside the conversation view so the UI does not hide protocol differences.
 
-The UI is not implemented here. Raw Gateway/WebSocket frames, full reconnect replay, a capture importer, and a browser control API remain separate work. These API records alone cannot reconstruct every incoming Lark or Discord event.
+The delivery playground at `/dev/im` uses the real IM routing and delivery abstractions. See the [fixture guide](../../packages/core/src/test/kit/im/README.md#delivery-playground) for startup and scope. Raw Gateway/WebSocket frames, full reconnect replay, a capture importer, and a browser control API remain separate work. These API records alone cannot reconstruct every incoming Lark or Discord event.

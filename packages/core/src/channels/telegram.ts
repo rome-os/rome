@@ -1,5 +1,9 @@
 import { traceImApi } from "./diagnostics/api-trace.js";
-import { Bot, type Context, InputFile } from "grammy";
+import { Bot, type Context, InputFile, GrammyError } from "grammy";
+import { physicalOperation as schedulePhysicalOperation } from "../connections/delivery/physical-operation.js";
+import { DeliveryFailure } from "../connections/delivery/transport.js";
+import { plainTextCodec } from "../connections/delivery/transport.js";
+import { partBoundary } from "../connections/delivery/parts.js";
 import { Marked, Renderer, type Token } from "marked";
 import type { ProviderAdapter } from "./adapter.js";
 import type {
@@ -226,11 +230,51 @@ export class TelegramAdapter implements ProviderAdapter {
     await this.bot.stop();
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async sendMessage(
+    _channelUserId: string,
+    threadId: string,
+    message: OutgoingMessage,
+  ): Promise<{
+    messageId?: string;
+    threadId: string;
+    parts: Array<{ messageId: string; kind: string }>;
+  }> {
+    if (message.text && message.text.length > 4000) {
+      let remaining = message.text;
+      const parts: Array<{ messageId: string; kind: string }> = [];
+      try {
+        while (remaining) {
+          const end = partBoundary(remaining, 4000, plainTextCodec);
+          const result = await this.sendMessage(_channelUserId, threadId, {
+            ...message,
+            text: remaining.slice(0, end),
+            attachments: end === remaining.length ? message.attachments : undefined,
+          });
+          parts.push(...result.parts);
+          remaining = remaining.slice(end);
+        }
+      } catch (error) {
+        const failure = telegramDeliveryFailure(error);
+        throw new DeliveryFailure(failure.kind, failure.message, [
+          ...(parts.length
+            ? [
+                {
+                  conversationId: threadId as import("@rome-os/app-runtime").ConversationId,
+                  messageId: parts[0].messageId,
+                  parts,
+                },
+              ]
+            : []),
+          ...failure.receipts,
+        ]);
+      }
+      return { messageId: parts[0]?.messageId, threadId, parts };
+    }
     const replyParams = message.replyToMessageId
       ? { reply_parameters: { message_id: Number(message.replyToMessageId) } }
       : {};
 
+    const parts: Array<{ messageId: string; kind: string }> = [];
     try {
       let messageId: string | undefined;
       if (message.text) {
@@ -251,38 +295,95 @@ export class TelegramAdapter implements ProviderAdapter {
             output: html.slice(0, 500),
           });
           try {
-            const sent = await this.bot.api.sendMessage(threadId, html, {
-              parse_mode: "HTML",
-              ...replyParams,
-            });
+            const sent = await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendMessage(threadId, html!, {
+                parse_mode: "HTML",
+                ...replyParams,
+              }),
+            );
             messageId = String(sent.message_id);
           } catch (parseErr) {
+            if (
+              !(parseErr instanceof GrammyError) ||
+              parseErr.error_code !== 400 ||
+              !/parse entities|unsupported start tag|can't find end tag/i.test(parseErr.description)
+            )
+              throw parseErr;
             log.warn("HTML parse failed, sending as plain text", {
               threadId,
               error: parseErr instanceof Error ? parseErr.message : String(parseErr),
               html: html.slice(0, 500),
             });
-            const sent = await this.bot.api.sendMessage(threadId, message.text, replyParams);
+            const sent = await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendMessage(threadId, message.text!, replyParams),
+            );
             messageId = String(sent.message_id);
           }
         } else {
-          const sent = await this.bot.api.sendMessage(threadId, message.text, replyParams);
+          const sent = await physicalOperation(threadId, "create", () =>
+            this.bot.api.sendMessage(threadId, message.text!, replyParams),
+          );
           messageId = String(sent.message_id);
         }
       }
 
+      if (messageId) parts.push({ messageId, kind: "text" });
       for (const att of message.attachments ?? []) {
-        await this.sendAttachment(threadId, att);
+        const attachmentId = await this.sendAttachment(threadId, att);
+        if (attachmentId) {
+          messageId ??= attachmentId;
+          parts.push({ messageId: attachmentId, kind: att.type });
+        }
       }
 
       log.info("message sent", { threadId });
-      return { messageId, threadId };
+      return { messageId, threadId, parts };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
         error: err instanceof Error ? err.message : String(err),
       });
+      if (parts.length) {
+        const failure = telegramDeliveryFailure(err);
+        throw new DeliveryFailure(failure.kind, failure.message, [
+          {
+            conversationId: threadId as import("@rome-os/app-runtime").ConversationId,
+            messageId: parts[0].messageId,
+            parts,
+          },
+        ]);
+      }
       throw err;
+    }
+  }
+
+  async createText(threadId: string, text: string, replyToMessageId?: string) {
+    try {
+      const sent = await physicalOperation(threadId, "create", () =>
+        this.bot.api.sendMessage(threadId, text, {
+          ...(replyToMessageId
+            ? { reply_parameters: { message_id: Number(replyToMessageId) } }
+            : {}),
+          link_preview_options: { is_disabled: true },
+        }),
+      );
+      return { messageId: String(sent.message_id), threadId: String(sent.chat.id) };
+    } catch (error) {
+      throw telegramDeliveryFailure(error);
+    }
+  }
+
+  async updateText(threadId: string, messageId: string, text: string): Promise<void> {
+    try {
+      await physicalOperation(threadId, "update", () =>
+        this.bot.api.editMessageText(threadId, Number(messageId), text, {
+          link_preview_options: { is_disabled: true },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof GrammyError && /message is not modified/i.test(error.description))
+        return;
+      throw telegramDeliveryFailure(error);
     }
   }
 
@@ -377,23 +478,80 @@ export class TelegramAdapter implements ProviderAdapter {
     return attachments;
   }
 
-  private async sendAttachment(threadId: string, att: OutgoingAttachment): Promise<void> {
+  private async sendAttachment(
+    threadId: string,
+    att: OutgoingAttachment,
+  ): Promise<string | undefined> {
     const source = att.source.startsWith("http") ? att.source : new InputFile(att.source);
     const options = att.caption ? { caption: att.caption } : {};
 
     switch (att.type) {
       case "image":
-        await this.bot.api.sendPhoto(threadId, source, options);
-        break;
+        return String(
+          (
+            await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendPhoto(threadId, source, options),
+            )
+          ).message_id,
+        );
       case "video":
-        await this.bot.api.sendVideo(threadId, source, options);
-        break;
+        return String(
+          (
+            await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendVideo(threadId, source, options),
+            )
+          ).message_id,
+        );
       case "audio":
-        await this.bot.api.sendAudio(threadId, source, options);
-        break;
+        return String(
+          (
+            await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendAudio(threadId, source, options),
+            )
+          ).message_id,
+        );
       case "document":
-        await this.bot.api.sendDocument(threadId, source, options);
-        break;
+        return String(
+          (
+            await physicalOperation(threadId, "create", () =>
+              this.bot.api.sendDocument(threadId, source, options),
+            )
+          ).message_id,
+        );
     }
   }
+}
+
+function telegramDeliveryFailure(error: unknown): DeliveryFailure {
+  if (error instanceof DeliveryFailure) return error;
+  if (!(error instanceof GrammyError))
+    return new DeliveryFailure("unknown", error instanceof Error ? error.message : String(error));
+  if (error.error_code === 429)
+    return new DeliveryFailure(
+      "rate-limit",
+      error.description,
+      [],
+      (error.parameters.retry_after ?? 1) * 1000,
+    );
+  if (error.error_code === 401 || error.error_code === 403)
+    return new DeliveryFailure("authorization", error.description);
+  if (error.error_code === 400 && /can't be edited/i.test(error.description))
+    return new DeliveryFailure("unsupported", error.description);
+  return new DeliveryFailure("failed", error.description);
+}
+
+function physicalOperation<T>(
+  conversation: string,
+  kind: "create" | "update",
+  operation: () => Promise<T>,
+): Promise<T> {
+  return schedulePhysicalOperation(conversation, kind, async () => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof GrammyError && error.error_code === 429)
+        throw telegramDeliveryFailure(error);
+      throw error;
+    }
+  });
 }

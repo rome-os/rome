@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { discordDeliveryProfile } from "./delivery-profiles.js";
+import { textDeliveryFeature } from "./text-delivery-feature.js";
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
@@ -24,7 +27,7 @@ import type {
   TalkHistory,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
-import { DiscordAdapter } from "../../channels/discord.js";
+import { DiscordAdapter, discordPlainTextCodec } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
@@ -383,6 +386,13 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                       userId,
                     )) as import("@rome-os/app-runtime").ConversationId,
                 },
+                textDelivery: textDeliveryFeature(
+                  discordDeliveryProfile(
+                    "discord:" + createHash("sha256").update(token.token).digest("hex"),
+                  ),
+                  adapter,
+                  discordPlainTextCodec,
+                ),
                 history,
                 inboundMedia,
                 activity,

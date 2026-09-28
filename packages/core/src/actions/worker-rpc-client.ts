@@ -5,6 +5,8 @@
 // IPC channel via this client.
 
 import { randomUUID } from "node:crypto";
+import type { MessageReceipt, MessageDeliveryFailureKind } from "@rome-os/app-runtime";
+import { DeliveryFailure } from "../connections/delivery/transport.js";
 
 interface RpcRequestMessage {
   type: "rpc_request";
@@ -20,6 +22,11 @@ export interface RpcResponseMessage {
   id: number;
   result?: unknown;
   error?: string;
+  deliveryError?: {
+    kind: MessageDeliveryFailureKind;
+    receipts: MessageReceipt[];
+    retryAfterMs?: number;
+  };
 }
 
 export class WorkerRpcTimeoutError extends Error {
@@ -134,7 +141,16 @@ class WorkerRpcClient {
     clearTimeout(pending.timeout);
     this.pending.delete(message.id);
     if (message.error !== undefined) {
-      pending.reject(new Error(message.error));
+      pending.reject(
+        message.deliveryError
+          ? new DeliveryFailure(
+              message.deliveryError.kind,
+              message.error,
+              message.deliveryError.receipts,
+              message.deliveryError.retryAfterMs,
+            )
+          : new Error(message.error),
+      );
     } else {
       pending.resolve(message.result);
     }

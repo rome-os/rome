@@ -1,4 +1,6 @@
 import { traceImFetch } from "./diagnostics/api-trace.js";
+import { DeliveryFailure } from "../connections/delivery/transport.js";
+import { physicalOperation } from "../connections/delivery/physical-operation.js";
 import crypto from "node:crypto";
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -340,7 +342,32 @@ async function apiFetch(params: {
         : controller.signal,
     });
     const text = await res.text();
+    if (res.status === 429) {
+      const delay = Number(res.headers.get("retry-after"));
+      throw new DeliveryFailure(
+        "rate-limit",
+        "WeChat rate limit",
+        [],
+        Number.isFinite(delay) && delay > 0 ? delay * 1000 : 1000,
+      );
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
+    if (params.endpoint !== "ilink/bot/sendmessage") return text;
+    let response: { ret?: number; errcode?: number; errmsg?: string };
+    try {
+      response = JSON.parse(text);
+    } catch {
+      throw new DeliveryFailure("unknown", "WeChat returned an unreadable send outcome");
+    }
+    if (
+      (response.ret !== undefined && response.ret !== 0) ||
+      (response.errcode !== undefined && response.errcode !== 0)
+    ) {
+      throw new DeliveryFailure(
+        "failed",
+        response.errmsg ?? `WeChat rejected the message (${response.errcode ?? response.ret})`,
+      );
+    }
     return text;
   } finally {
     clearTimeout(timer);
@@ -1198,13 +1225,15 @@ export class WechatAdapter implements ProviderAdapter {
     const target = this.resolveSendTarget(channelUserId, threadId);
 
     if (message.text) {
-      await sendTextMessage(
-        this.config.baseUrl,
-        this.config.token,
-        target.to,
-        message.text,
-        target.contextToken,
-        this.request,
+      await physicalOperation(target.to, "create", () =>
+        sendTextMessage(
+          this.config.baseUrl,
+          this.config.token,
+          target.to,
+          message.text!,
+          target.contextToken,
+          this.request,
+        ),
       );
     }
 
@@ -1222,15 +1251,29 @@ export class WechatAdapter implements ProviderAdapter {
         attachment.type === "document" || attachment.type === "audio"
           ? basename(attachment.source)
           : undefined;
-      await sendMediaMessage(
-        this.config.baseUrl,
-        this.config.token,
-        target.to,
-        data,
-        target.contextToken,
-        mediaType,
-        fileName,
-        this.request,
+      await physicalOperation(target.to, "create", () =>
+        sendMediaMessage(
+          this.config.baseUrl,
+          this.config.token,
+          target.to,
+          data,
+          target.contextToken,
+          mediaType,
+          fileName,
+          this.request,
+        ),
+      );
+    }
+  }
+
+  async createText(threadId: string, text: string): Promise<void> {
+    try {
+      await this.sendMessage(threadId, threadId, { text });
+    } catch (error) {
+      if (error instanceof DeliveryFailure) throw error;
+      throw new DeliveryFailure(
+        isWechatAuthError(error) ? "authorization" : "unknown",
+        error instanceof Error ? error.message : String(error),
       );
     }
   }

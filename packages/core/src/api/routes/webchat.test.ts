@@ -1781,6 +1781,32 @@ describe("Webchat API", () => {
     });
   });
 
+  it("projects interleaved identified blocks from a registered turn independently", async () => {
+    const turn = deps.agentTurnStreamRegistry.register({
+      turnId: "identified",
+      sessionId: "session",
+      agentName: "main",
+    });
+    turn.publish({ type: "text_delta", blockId: "a", content: "A" });
+    turn.publish({ type: "text_delta", blockId: "b", content: "B" });
+    turn.publish({ type: "text_delta", blockId: "a", content: "1" });
+    turn.publish({ type: "text", blockId: "b", content: "B2", turnPhase: "final" });
+    turn.finish();
+    const response = await createWebchatRuntime(deps).routes.request(
+      "/chat/turns/identified/stream",
+    );
+    const events = (await response.text())
+      .split("\n\n")
+      .filter((event) => event.startsWith("event: assistant_text"))
+      .map((event) => JSON.parse(event.split("data: ")[1]));
+    expect(events).toEqual([
+      { turnId: "identified", blockIx: 0, text: "A" },
+      { turnId: "identified", blockIx: 1, text: "B" },
+      { turnId: "identified", blockIx: 0, text: "A1" },
+      { turnId: "identified", blockIx: 1, text: "B2" },
+    ]);
+  });
+
   describe("assistant text streaming (text_delta)", () => {
     // Drive a scripted turn through the drain loop and collect every SSE
     // event until `done`. `script` may await a gate the caller releases from
