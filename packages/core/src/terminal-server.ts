@@ -83,9 +83,11 @@ export function attachTerminalServer(
       return;
     }
 
+    socket.on("error", () => socket.destroy());
+
     void gateGuardianUpgrade(req, socket, db)
       .then((allowed) => {
-        if (!allowed) return;
+        if (!allowed || socket.destroyed) return;
         const preset = url.searchParams.get("preset");
         if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
           rejectUpgrade(socket, 400, "Bad Request");

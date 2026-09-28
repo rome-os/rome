@@ -36,12 +36,13 @@ export function readCookie(header: string | undefined, name: string): string | n
 export function rejectUpgrade(socket: Duplex, status: number, message: string): void {
   if (socket.destroyed) return;
   const body = `${status} ${message}`;
-  // end() flushes the response before closing; destroy() can truncate it.
+  // Flush the response before releasing the raw socket.
   socket.end(
     `HTTP/1.1 ${status} ${message}\r\n` +
       "Connection: close\r\n" +
       "Content-Type: text/plain\r\n" +
       `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n` +
       body,
+    () => socket.destroy(),
   );
 }

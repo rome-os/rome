@@ -71,9 +71,20 @@ export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close()
     const rawUrl = req.url ?? "/";
     if (!rawUrl.startsWith(`${PREFIX}/`) && rawUrl !== PREFIX) return;
 
+    let upstream: net.Socket | undefined;
+    const teardown = () => {
+      if (upstream) {
+        upstreams.delete(upstream);
+        upstream.destroy();
+      }
+      if (!socket.destroyed) socket.destroy();
+    };
+    socket.on("error", teardown);
+    socket.on("close", teardown);
+
     void gateGuardianUpgrade(req, socket, db)
       .then((allowed) => {
-        if (!allowed) return;
+        if (!allowed || socket.destroyed) return;
         const target = desktopUpstream(rawUrl);
         if (!target) {
           rejectUpgrade(socket, 404, "Not Found");
@@ -81,29 +92,23 @@ export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close()
         }
         const { port, path: targetPath } = target;
         const upstreamHost = `${host}:${port}`;
-        const upstream = net.connect(port, host, () => {
-          upstream.write(buildUpstreamUpgradeRequest(req, targetPath, upstreamHost));
-          if (head.length > 0) upstream.write(head);
-          socket.pipe(upstream);
-          upstream.pipe(socket);
+        const connected = net.connect(port, host);
+        upstream = connected;
+        upstreams.add(connected);
+        connected.on("connect", () => {
+          if (socket.destroyed) return teardown();
+          connected.write(buildUpstreamUpgradeRequest(req, targetPath, upstreamHost));
+          if (head.length > 0) connected.write(head);
+          socket.pipe(connected);
+          connected.pipe(socket);
         });
 
-        upstreams.add(upstream);
-
-        const teardown = () => {
-          upstreams.delete(upstream);
-          upstream.destroy();
-          if (!socket.destroyed) socket.destroy();
-        };
-
-        upstream.on("error", (err) => {
+        connected.on("error", (err) => {
           log.warn("upstream websockify error", { error: err.message });
           if (!socket.destroyed) socket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           teardown();
         });
-        upstream.on("close", teardown);
-        socket.on("error", teardown);
-        socket.on("close", teardown);
+        connected.on("close", teardown);
       })
       .catch((err) => {
         log.error("desktop upgrade failed", {

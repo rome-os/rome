@@ -1,5 +1,6 @@
-import { createServer, request } from "node:http";
+import { createServer, request, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "@rstest/core";
 import { attachDesktopProxy } from "./desktop-proxy-server.js";
 import { attachTerminalServer } from "./terminal-server.js";
@@ -47,6 +48,34 @@ function upgrade(port: number, path: string, headers: Record<string, string>): P
 }
 
 describe("guardian WebSocket upgrade handlers", () => {
+  it.each([
+    "/desktop-proxy/websockify",
+    "/ws/terminal?preset=claude-login",
+  ])("owns socket errors before checking %s", async (path) => {
+    const testDb = createTestDb();
+    const server = createServer();
+    const desktop = attachDesktopProxy(server, testDb.db);
+    const terminal = attachTerminalServer(server, testDb.db);
+    const socket = new PassThrough();
+    const req = {
+      url: path,
+      headers: { host: "rome.example", "x-forwarded-for": "203.0.113.1" },
+      socket,
+    } as unknown as IncomingMessage;
+
+    try {
+      server.emit("upgrade", req, socket, Buffer.alloc(0));
+      expect(socket.listenerCount("error")).toBeGreaterThan(0);
+      const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      socket.destroy(new Error("read ECONNRESET"));
+      await closed;
+    } finally {
+      desktop.close();
+      terminal.close();
+      testDb.close();
+    }
+  });
+
   it("blocks anonymous and cross-origin requests before reaching websockify or the terminal", async () => {
     const testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({

@@ -94,10 +94,10 @@ export default defineConfig({
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
-      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true },
+      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
       // Route /desktop-proxy through the backend so its WebSocket upgrade
       // handler can authorize the connection before reaching noVNC.
-      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true },
+      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
     },
   },
   output: {
