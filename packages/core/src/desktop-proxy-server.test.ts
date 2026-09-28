@@ -10,6 +10,8 @@ afterEach(() => {
 
 describe("desktopUpstream", () => {
   it("sends /desktop-proxy/wechat to WeChat's websockify and the rest to the shared one", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     rs.stubEnv("ROME_NOVNC_PORT", "6080");
     rs.stubEnv("ROME_WECHAT_NOVNC_PORT", "6081");
@@ -24,6 +26,20 @@ describe("desktopUpstream", () => {
     });
     expect(desktopUpstream("/desktop-proxy/wechat")).toEqual({ port: 6081, path: "/" });
     expect(desktopUpstream("/desktop-proxy/wechatty")).toEqual({ port: 6080, path: "/wechatty" });
+  });
+
+  it("has no WeChat upstream while WeChat is disabled, even with a display set", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    expect(desktopUpstream("/desktop-proxy/wechat/websockify")).toBeNull();
+  });
+
+  it("has no WeChat upstream for a display the shared rule rejects", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":99");
+    expect(desktopUpstream("/desktop-proxy/wechat/websockify")).toBeNull();
   });
 
   it("has no WeChat upstream while no WeChat display is configured", () => {
@@ -44,6 +60,8 @@ describe("proxyDesktopHttp", () => {
     upstream.listen(0, "127.0.0.1");
     await once(upstream, "listening");
     try {
+      rs.stubEnv("WECHAT_USER_ENABLED", "true");
+      rs.stubEnv("DISPLAY", ":99");
       rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
       rs.stubEnv("ROME_WECHAT_NOVNC_PORT", String((upstream.address() as AddressInfo).port));
       const res = await proxyDesktopHttp(

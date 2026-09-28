@@ -474,8 +474,22 @@ if [ "${WECHAT_USER_ENABLED:-false}" = "true" ] && [ -n "${WECHAT_USER_DISPLAY:-
   if process_cmdline_contains_all Xtigervnc "$WECHAT_USER_DISPLAY" -rfbport "$WECHAT_VNC_PORT"; then
     echo "Reusing TigerVNC on ${WECHAT_USER_DISPLAY}."
   else
+    # The shared block's guards: a live X server on this display that is not ours,
+    # or a port another process holds, would put something else behind
+    # /desktop/wechat. The shared block's own REUSED_X_SERVER result is kept.
+    SHARED_REUSED_X_SERVER="$REUSED_X_SERVER"
     REUSED_X_SERVER="0"
     cleanup_stale_x11_state "$WECHAT_DISPLAY_NUM"
+    WECHAT_REUSED_X_SERVER="$REUSED_X_SERVER"
+    REUSED_X_SERVER="$SHARED_REUSED_X_SERVER"
+    if [ "$WECHAT_REUSED_X_SERVER" = "1" ]; then
+      echo "Error: the existing X server on ${WECHAT_USER_DISPLAY} is not Rome's TigerVNC process."
+      exit 1
+    fi
+    if tcp_port_listening "$WECHAT_VNC_PORT"; then
+      echo "Error: TCP port ${WECHAT_VNC_PORT} is already in use by another process."
+      exit 1
+    fi
     echo "Starting TigerVNC for WeChat on ${WECHAT_USER_DISPLAY}, RFB :${WECHAT_VNC_PORT} ..."
     run_as_rome Xtigervnc "$WECHAT_USER_DISPLAY" -geometry 1280x800 -depth 24 \
       -SecurityTypes None -localhost yes -rfbport "$WECHAT_VNC_PORT" \
@@ -490,6 +504,10 @@ if [ "${WECHAT_USER_ENABLED:-false}" = "true" ] && [ -n "${WECHAT_USER_DISPLAY:-
     wait_for_background_process "$WECHAT_OPENBOX_PID" "WeChat's Openbox" /tmp/openbox-wechat.log
   fi
   if ! process_cmdline_contains_all websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}"; then
+    if tcp_port_listening "$WECHAT_NOVNC_PORT"; then
+      echo "Error: TCP port ${WECHAT_NOVNC_PORT} is already in use by another process."
+      exit 1
+    fi
     run_as_rome websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}" >/tmp/novnc-wechat.log 2>&1 &
     WECHAT_NOVNC_PID=$!
   fi

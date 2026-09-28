@@ -1,6 +1,7 @@
 import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import net from "node:net";
+import { wechatUserDisplay } from "./channels/wechat-user.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("desktop-proxy");
@@ -11,11 +12,12 @@ const PREFIX = "/desktop-proxy";
 const WECHAT_PREFIX = `${PREFIX}/wechat`;
 
 /** The websockify port and the path it sees, for a request under `/desktop-proxy`.
- *  Null for WeChat's view while no WeChat display is configured: nothing of ours
- *  listens on its port then, and the shared websockify ignores the path. */
+ *  Null for WeChat's view unless WeChat is enabled with its own display, the only
+ *  case in which the entrypoint starts its websockify: nothing of ours listens on
+ *  that port otherwise, and the shared websockify ignores the path. */
 export function desktopUpstream(pathname: string): { port: number; path: string } | null {
   if (pathname === WECHAT_PREFIX || pathname.startsWith(`${WECHAT_PREFIX}/`)) {
-    if (!process.env.WECHAT_USER_DISPLAY) return null;
+    if (!ownDisplayActive()) return null;
     return {
       port: Number(process.env.ROME_WECHAT_NOVNC_PORT ?? 6081),
       path: pathname.slice(WECHAT_PREFIX.length) || "/",
@@ -25,6 +27,15 @@ export function desktopUpstream(pathname: string): { port: number; path: string 
     port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
     path: pathname.slice(PREFIX.length) || "/",
   };
+}
+
+/** Fail closed: a value the shared rule rejects has no display of ours either. */
+function ownDisplayActive(): boolean {
+  try {
+    return wechatUserDisplay() !== null;
+  } catch {
+    return false;
+  }
 }
 
 function buildUpstreamUpgradeRequest(

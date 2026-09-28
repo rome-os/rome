@@ -52,14 +52,27 @@ describe("loadConfig()", () => {
     rs.stubEnv("WECHAT_USER_ENABLED", value);
     expect(() => loadConfig()).toThrow("Invalid configuration");
   });
-  it("keeps WeChat on the shared desktop unless WECHAT_USER_DISPLAY names one", () => {
-    expect(loadConfig().wechatUserDisplay).toBeUndefined();
+  it("accepts WeChat's own display", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
-    expect(loadConfig().wechatUserDisplay).toBe(":100");
+    expect(() => loadConfig()).not.toThrow();
   });
-  it.each(["100", "localhost:100", ":1a"])("rejects WECHAT_USER_DISPLAY=%s", (value) => {
+  it.each([
+    "100",
+    "localhost:100",
+    ":1a",
+    ":99",
+  ])("rejects WECHAT_USER_DISPLAY=%s at boot", (value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", value);
     expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled, like the entrypoint", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("WECHAT_USER_DISPLAY", "not-a-display");
+    expect(() => loadConfig()).not.toThrow();
   });
   it("disables CDP automation by default", () => {
     expect(loadConfig().cdpAutomationEnabled).toBe(false);

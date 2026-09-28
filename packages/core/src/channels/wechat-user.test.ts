@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  wechatUserDisplay,
   loginWindowId,
   WechatUserReader,
   WechatUserRuntime,
@@ -203,12 +204,36 @@ describe("WechatUserRuntime.start", () => {
   });
 });
 
+describe("wechatUserDisplay", () => {
+  it("names WeChat's own display only while WeChat is enabled with one set", () => {
+    expect(wechatUserDisplay({ WECHAT_USER_ENABLED: "true", WECHAT_USER_DISPLAY: ":100" })).toBe(
+      ":100",
+    );
+    expect(
+      wechatUserDisplay({ WECHAT_USER_ENABLED: "false", WECHAT_USER_DISPLAY: ":100" }),
+    ).toBeNull();
+    expect(wechatUserDisplay({ WECHAT_USER_DISPLAY: ":100" })).toBeNull();
+    expect(wechatUserDisplay({ WECHAT_USER_ENABLED: "true", WECHAT_USER_DISPLAY: "" })).toBeNull();
+  });
+
+  it.each(["100", "localhost:100", ":1a", ":99"])("rejects WECHAT_USER_DISPLAY=%s", (value) => {
+    expect(() =>
+      wechatUserDisplay({
+        WECHAT_USER_ENABLED: "true",
+        DISPLAY: ":99",
+        WECHAT_USER_DISPLAY: value,
+      }),
+    ).toThrow("WECHAT_USER_DISPLAY must be a display like :100, other than :99");
+  });
+});
+
 describe("WechatUserRuntime display", () => {
   afterEach(() => {
     rs.unstubAllEnvs();
   });
 
   it("prefers WeChat's own display, and ignores it when empty", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
     rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     expect(new WechatUserRuntime().display).toBe(":100");
@@ -217,7 +242,16 @@ describe("WechatUserRuntime display", () => {
     expect(new WechatUserRuntime().display).toBe(":99");
   });
 
+  it("stays on the shared desktop while WeChat is disabled", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    const runtime = new WechatUserRuntime();
+    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
+  });
+
   it("links sign-in to the desktop page that shows its display", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
     rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     expect(new WechatUserRuntime().desktopPath).toBe("/desktop/wechat");
@@ -227,6 +261,8 @@ describe("WechatUserRuntime display", () => {
   });
 
   it("looks for the login window and starts the client on that display", async () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     const h = await tempHome();
     const envs: Array<[string, string | undefined]> = [];
