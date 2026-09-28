@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Mail } from "lucide-react";
+import { accountMatchesQuery } from "@rome/api-types/people";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { contactEmailSuggestions } from "@/lib/contact-emails";
@@ -49,14 +50,12 @@ export function AccessEmailInput({
   const searchable = term.length > 0 && !/[\s,;]/.test(term);
   const search = useAccountSearch(searchable ? term : "", { enabled: searchable && !disabled });
   // The page lags the typed term by the debounce, so an answer to an older
-  // prefix can still name addresses that match what is typed now; filter it
-  // again here rather than flash suggestions that no longer fit.
+  // prefix is narrowed to what is typed now — by the server's own rule, so the
+  // current answer is never cut down to less than the server returned.
   const suggestions = useMemo(() => {
     if (!searchable || !search.data) return [];
-    const lower = term.toLowerCase();
-    return contactEmailSuggestions(search.data.accounts, { exclude, limit: 20 })
-      .filter((s) => s.email.includes(lower) || s.name?.toLowerCase().includes(lower))
-      .slice(0, 6);
+    const matching = search.data.accounts.filter((account) => accountMatchesQuery(account, term));
+    return contactEmailSuggestions(matching, { exclude, limit: 6 });
   }, [searchable, search.data, term, exclude]);
 
   const open = !dismissed && !disabled && suggestions.length > 0;

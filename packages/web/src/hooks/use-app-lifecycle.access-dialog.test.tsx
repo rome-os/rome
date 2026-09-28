@@ -225,6 +225,18 @@ describe("contact autocomplete in the email list", () => {
       personName: null,
     },
     {
+      // Found on the server by its own name, which is not the linked person's:
+      // the sender's name on the email channel and the guardian's name for them
+      // differ, and either one finds the account.
+      channel: "email",
+      channelUserId: "countess@example.org",
+      addresses: ["countess@example.org"],
+      displayName: "Augusta King",
+      state: "linked",
+      personId: "byron",
+      personName: "Lady Byron",
+    },
+    {
       // A WhatsApp JID passes an email pattern, and is never offered.
       channel: "whatsapp",
       channelUserId: "14155550142@s.whatsapp.net",
@@ -249,7 +261,7 @@ describe("contact autocomplete in the email list", () => {
             JSON.stringify({
               accounts: ACCOUNTS,
               nextCursor: null,
-              counts: { unlinked: 2, linked: 1, dismissed: 0 },
+              counts: { unlinked: 2, linked: 2, dismissed: 0 },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -309,6 +321,14 @@ describe("contact autocomplete in the email list", () => {
       "Aada@example.com",
       "Zzoe@example.org",
     ]);
+  });
+
+  it("offers an account the server matched on a name other than the one it shows", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "augusta");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Lady Byroncountess@example.org"]);
   });
 
   it("never offers an address the list already holds", async () => {
