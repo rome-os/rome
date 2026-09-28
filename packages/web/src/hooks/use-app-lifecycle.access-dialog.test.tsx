@@ -207,6 +207,26 @@ describe("the app access dialog", () => {
       expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
     });
 
+    it("clears a failed save's error once a retry succeeds", async () => {
+      // The first PUT fails; the retry, like every other call, succeeds.
+      fetchJson.mockImplementation(async (_url: string, init?: unknown) => {
+        if ((init as { method?: string } | undefined)?.method === "PUT") {
+          fetchJson.mockImplementation(async () => ({}));
+          throw new Error("Network down");
+        }
+        return {};
+      });
+      await openDialog();
+      await userEvent.click(screen.getByRole("radio", { name: /Public/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Save access" }));
+      expect((await screen.findByRole("alert")).textContent).toBe("Network down");
+
+      await userEvent.click(screen.getByRole("button", { name: "Save access" }));
+
+      expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
     it("closes after saving private, which has no link to copy", async () => {
       await openDialog({ ...APP, accessMode: "public", isPublic: true } as InstalledAppCard);
       await userEvent.click(screen.getByRole("radio", { name: /Private/ }));

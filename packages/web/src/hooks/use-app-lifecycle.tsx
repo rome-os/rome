@@ -499,6 +499,7 @@ export function useAppLifecycle(
             setAccessTarget(null);
             return;
           }
+          setAccessDialogError("");
           setAccessTarget({
             ...app,
             accessMode: mode,
