@@ -11,6 +11,7 @@ import type {
   InstalledAppCard,
   SpecSource,
 } from "@rome/api-types/apps";
+import { AccessEmailInput } from "@/components/access-email-input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -662,27 +663,21 @@ export function useAppLifecycle(
               </FieldLabel>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <Input
+                  <AccessEmailInput
                     id="app-access-emails"
-                    size="md"
-                    icon={<Mail />}
-                    type="email"
                     value={accessEmailInput}
-                    onChange={(event) => {
-                      setAccessEmailInput(event.target.value);
+                    onChange={(value) => {
+                      setAccessEmailInput(value);
                       if (accessDialogError) setAccessDialogError("");
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      commitAccessEmails(accessEmailInput);
+                    onCommit={(raw) => {
+                      commitAccessEmails(raw);
                     }}
                     onPaste={handleAccessEmailPaste}
+                    exclude={accessEmailsDraft}
                     disabled={accessSaving}
+                    invalid={Boolean(accessDialogError)}
                     placeholder={t("installed.accessDialog.emailPlaceholder")}
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-invalid={accessDialogError ? true : undefined}
                   />
                 </div>
                 <Button

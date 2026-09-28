@@ -203,3 +203,134 @@ describe("the app access dialog", () => {
     });
   });
 });
+
+describe("contact autocomplete in the email list", () => {
+  const ACCOUNTS = [
+    {
+      channel: "email",
+      channelUserId: "ada@example.com",
+      addresses: ["ada@example.com"],
+      displayName: "ada@example.com",
+      state: "linked",
+      personId: "ada",
+      personName: "Ada Lovelace",
+    },
+    {
+      channel: "email",
+      channelUserId: "adam@example.com",
+      addresses: ["adam@example.com"],
+      displayName: "Adam Smith",
+      state: "unlinked",
+      personId: null,
+      personName: null,
+    },
+    {
+      // A WhatsApp JID passes an email pattern, and is never offered.
+      channel: "whatsapp",
+      channelUserId: "14155550142@s.whatsapp.net",
+      addresses: ["14155550142@s.whatsapp.net"],
+      displayName: "Ada on WhatsApp",
+      state: "unlinked",
+      personId: null,
+      personName: null,
+    },
+  ];
+  let requested: string[] = [];
+
+  beforeEach(() => {
+    requested = [];
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requested.push(url);
+        if (url.startsWith("/api/accounts")) {
+          return new Response(
+            JSON.stringify({
+              accounts: ACCOUNTS,
+              nextCursor: null,
+              counts: { unlinked: 2, linked: 1, dismissed: 0 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+  });
+
+  afterEach(() => {
+    rs.unstubAllGlobals();
+  });
+
+  const emailLabel = () => i18n.t("installed.accessDialog.emailLabel", { ns: "apps" });
+
+  async function openCloudEmail(app: InstalledAppCard = APP) {
+    await openDialog(app);
+    await userEvent.click(screen.getByRole("radio", { name: /Rome Cloud email list/ }));
+    return screen.getByLabelText(emailLabel()) as HTMLInputElement;
+  }
+
+  it("offers matching contacts' emails as the guardian types, and adds the one picked", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "ada");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "Ada Lovelaceada@example.com",
+      "Adam Smithadam@example.com",
+    ]);
+    // The server is asked with the term typed, once the debounce settles.
+    await waitFor(() => expect(requested.some((url) => url.includes("q=ada"))).toBe(true));
+
+    await userEvent.click(options[1] as HTMLElement);
+
+    const list = screen.getAllByRole("listitem");
+    expect(list.map((li) => li.textContent)).toContain("Aadam@example.com");
+    expect(input.value).toBe("");
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("picks with the arrow keys and Enter, and still commits typed text with no pick", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "ada");
+    await screen.findAllByRole("option");
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(input.getAttribute("aria-activedescendant")).toBeTruthy();
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Aada@example.com",
+    ]);
+
+    // An address no contact holds goes in exactly as before.
+    await userEvent.type(input, "zoe@example.org{Enter}");
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Aada@example.com",
+      "Zzoe@example.org",
+    ]);
+  });
+
+  it("never offers an address the list already holds", async () => {
+    const input = await openCloudEmail({
+      ...APP,
+      accessMode: "cloud-email",
+      cloudAllowedEmails: ["ada@example.com"],
+    } as InstalledAppCard);
+    await userEvent.type(input, "ada");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Adam Smithadam@example.com"]);
+  });
+
+  it("closes the suggestions on Escape without closing the dialog", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "ada");
+    await screen.findAllByRole("option");
+
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+    expect(screen.getByLabelText(emailLabel())).toBe(input);
+  });
+});

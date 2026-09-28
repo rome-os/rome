@@ -184,7 +184,12 @@ export const persons: PersonFixture[] = [
     id: "mira-chen",
     displayName: "Mira Chen",
     bondLevel: "acquaintance",
-    channelMappings: [{ channel: "whatsapp", channelUserId: MIRA_JID }],
+    // The email account is the contact an app's access dialog offers when the
+    // guardian types "mira" into its Rome Cloud email list.
+    channelMappings: [
+      { channel: "whatsapp", channelUserId: MIRA_JID },
+      { channel: "email", channelUserId: "mira.chen@example.com" },
+    ],
   },
   {
     // Reachable on LinkedIn and nowhere else. LinkedIn used to be a section of
