@@ -96,9 +96,8 @@ export function buildApp(
   // actor (the router also enforces this itself via withoutSessionActor).
   app.route("/", webhookRoutes(deps, config.webhookApiKey));
 
-  // noVNC reverse proxy — mounted at root so the dashboard iframe can embed
-  // the desktop on the same origin. WebSocket upgrades are handled separately
-  // via attachDesktopProxy() on the raw HTTP server.
+  // Reject ordinary HTTP on the desktop-proxy path before the SPA fallback.
+  // WebSocket upgrades are handled by attachDesktopProxy() on the raw server.
   app.route("/", desktopProxyRoutes());
 
   // Built web assets for installed apps, served at /app-assets/:appId/:version/*.
@@ -283,12 +282,12 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, {
+      const terminalServer = attachTerminalServer(server as Server, deps.db, {
         onAuthCommandExit: () => {
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
-      const desktopProxy = attachDesktopProxy(server as Server);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });

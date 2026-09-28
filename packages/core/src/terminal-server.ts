@@ -2,6 +2,9 @@ import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import * as pty from "node-pty";
+import type { DrizzleDb } from "./db/index.js";
+import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
+import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./claude-login-code.js";
 import { createClaudeLoginWatcher } from "./claude-login-watch.js";
@@ -67,6 +70,7 @@ export interface TerminalServerOptions {
 
 export function attachTerminalServer(
   httpServer: Server,
+  db: DrizzleDb,
   options: TerminalServerOptions = {},
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
@@ -79,16 +83,25 @@ export function attachTerminalServer(
       return;
     }
 
-    const preset = url.searchParams.get("preset");
-    if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
-      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
-      socket.destroy();
-      return;
-    }
+    void gateGuardianUpgrade(req, socket, db)
+      .then((allowed) => {
+        if (!allowed) return;
+        const preset = url.searchParams.get("preset");
+        if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
+          rejectUpgrade(socket, 400, "Bad Request");
+          return;
+        }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit("connection", ws, req, preset);
-    });
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req, preset);
+        });
+      })
+      .catch((err) => {
+        log.error("terminal upgrade failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        rejectUpgrade(socket, 500, "Internal Server Error");
+      });
   });
 
   wss.on("connection", (ws: WebSocket, _req: IncomingMessage, preset: string) => {

@@ -26,7 +26,9 @@ browser ──every request──► edge proxy ──consults──► verify p
                        backend route ──app-API dispatch──► app handler (caller re-derived)
 ```
 
-The edge consults the probe on every proxied request and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
+The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
+
+`/desktop-proxy/*` and `/ws/terminal` bypass the edge probe. Rome checks guardian identity and browser origin before accepting either WebSocket upgrade, including requests that arrive through Tailnet Serve. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

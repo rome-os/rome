@@ -443,7 +443,7 @@ else
 fi
 
 NOVNC_PID=""
-if process_cmdline_contains_all websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}"; then
+if process_cmdline_contains_all websockify --web=/usr/share/novnc/ "127.0.0.1:${NOVNC_PORT}" "localhost:${VNC_PORT}"; then
   echo "Reusing noVNC on :${NOVNC_PORT}."
 else
   if tcp_port_listening "$NOVNC_PORT"; then
@@ -452,7 +452,7 @@ else
   fi
 
   echo "Starting noVNC on :${NOVNC_PORT} ..."
-  run_as_rome websockify --web=/usr/share/novnc/ "$NOVNC_PORT" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
+  run_as_rome websockify --web=/usr/share/novnc/ "127.0.0.1:${NOVNC_PORT}" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
   NOVNC_PID=$!
 fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
