@@ -10,7 +10,7 @@ export interface ContactEmailSuggestion {
 }
 
 /** The channel whose accounts are keyed by email address. */
-const EMAIL_CHANNEL = "email";
+export const EMAIL_CHANNEL = "email";
 
 /**
  * The email addresses in a page of the contacts list, in the page's order,

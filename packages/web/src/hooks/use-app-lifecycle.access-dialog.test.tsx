@@ -331,6 +331,44 @@ describe("contact autocomplete in the email list", () => {
     expect(options.map((o) => o.textContent)).toEqual(["Lady Byroncountess@example.org"]);
   });
 
+  it("asks the server for email accounts alone", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "ada");
+    await screen.findAllByRole("option");
+    await waitFor(() =>
+      expect(requested.some((url) => url.includes("q=ada") && url.includes("channel=email"))).toBe(
+        true,
+      ),
+    );
+  });
+
+  it("searches a whole name, space and all", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "adam smith");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Adam Smithadam@example.com"]);
+  });
+
+  it("offers nothing for a term that only names the channel", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "mail");
+    await waitFor(() => expect(requested.some((url) => url.includes("q=mail"))).toBe(true));
+
+    expect(screen.queryByRole("option")).toBeNull();
+  });
+
+  it("leaves the Enter that confirms an input-method candidate to the input method", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "lu");
+
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+
+    expect(input.value).toBe("lu");
+    expect(screen.queryAllByRole("listitem")).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("never offers an address the list already holds", async () => {
     const input = await openCloudEmail({
       ...APP,

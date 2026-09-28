@@ -4,7 +4,8 @@ import { Mail } from "lucide-react";
 import { accountMatchesQuery } from "@rome/api-types/people";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { contactEmailSuggestions } from "@/lib/contact-emails";
+import { contactEmailSuggestions, EMAIL_CHANNEL } from "@/lib/contact-emails";
+import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
 
@@ -47,14 +48,22 @@ export function AccessEmailInput({
   const [highlight, setHighlight] = useState(-1);
 
   const term = value.trim();
-  const searchable = term.length > 0 && !/[\s,;]/.test(term);
-  const search = useAccountSearch(searchable ? term : "", { enabled: searchable && !disabled });
+  // A space can sit inside a name ("Mira Chen"), so only a comma or semicolon
+  // says a list is being typed. A pasted list takes the paste path anyway.
+  const searchable = term.length > 0 && !/[,;]/.test(term);
+  const search = useAccountSearch(searchable ? term : "", {
+    enabled: searchable && !disabled,
+    channel: EMAIL_CHANNEL,
+  });
   // The page lags the typed term by the debounce, so an answer to an older
-  // prefix is narrowed to what is typed now — by the server's own rule, so the
-  // current answer is never cut down to less than the server returned.
+  // prefix is narrowed to what is typed now — by the server's own rule for a
+  // fixed channel, so the current answer is never cut down to less than the
+  // server returned.
   const suggestions = useMemo(() => {
     if (!searchable || !search.data) return [];
-    const matching = search.data.accounts.filter((account) => accountMatchesQuery(account, term));
+    const matching = search.data.accounts.filter((account) =>
+      accountMatchesQuery(account, term, { matchChannel: false }),
+    );
     return contactEmailSuggestions(matching, { exclude, limit: 6 });
   }, [searchable, search.data, term, exclude]);
 
@@ -87,6 +96,9 @@ export function AccessEmailInput({
               setHighlight(-1);
             }}
             onKeyDown={(event) => {
+              // Keys that drive an input method's candidate list belong to it,
+              // Enter included: that Enter confirms a candidate, not the field.
+              if (isImeCompositionEvent(event)) return;
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 if (!open) return;
                 event.preventDefault();
@@ -137,7 +149,7 @@ export function AccessEmailInput({
               role="option"
               aria-selected={index === active}
               className={cn(
-                "flex cursor-pointer flex-col rounded-4 px-2 py-1.5 text-left",
+                "flex cursor-pointer flex-col rounded-4 px-2 py-1 text-left",
                 index === active ? "bg-surface-muted" : "hover:bg-surface-muted",
               )}
               // Keep focus in the field; a click lands on the option anyway.
