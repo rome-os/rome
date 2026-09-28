@@ -216,8 +216,9 @@ describe("the app access dialog", () => {
       expect(screen.getByRole("radiogroup")).toBeTruthy();
       expect(screen.queryByText("Save access before sharing this link.")).toBeNull();
       expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+      // Re-saving stays possible: it is the retry for a half-applied save.
       expect(screen.getByRole("button", { name: "Save access" }).hasAttribute("disabled")).toBe(
-        true,
+        false,
       );
     });
 
@@ -253,9 +254,6 @@ describe("the app access dialog", () => {
       await userEvent.type(input, "ada@example.com{Enter}");
 
       expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Save access" }).hasAttribute("disabled")).toBe(
-        true,
-      );
     });
 
     it("closes after saving private, which has no link to copy", async () => {
