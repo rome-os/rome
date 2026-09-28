@@ -2,12 +2,19 @@
 """Sends one text from the guardian's own WeChat account by driving the desktop
 client through its accessibility tree, for channels/wechat-user.ts.
 
-    send --chat <wxid> --name <display name> --text <body>
+    send [--dry-run] --chat <wxid> --name <display name> --text <body>
     check
 
 `send` prints one JSON object: {"ok": true, "conversationId", "messageId"} or
 {"ok": false, "code", "typed", "reason"}. `typed` says whether any text reached
-a chat input. `check` prints {"ready", "reason"} and does not touch the client.
+a chat input. `ambiguous` means the name does not lead to exactly one chat: a
+second result has that name, or the settled results put the target below
+another one or in a section that holds no chat. `not-ready` covers a client or
+store that is not ready and results that never settled, which may pass.
+`--dry-run` does every step but the Return in the chat input, then clears the
+input, and answers {"ok": true, "dryRun": true, "conversationId"}.
+`check` prints {"ready", "reason"} and does not touch the client. It is not
+ready unless the interface is English, the only language verified live.
 Every error after argument parsing is such a JSON answer with exit 0; argparse's
 own errors (a missing flag, an unknown command) exit 2.
 
@@ -197,7 +204,7 @@ class Driver:
     def __init__(self, app, desktop, store, clock=time):
         self.app, self.desk, self.store, self.clock = app, desktop, store, clock
         self.frame = main_frame(app)
-        self.typed, self.returned, self.box = False, False, None
+        self.typed, self.returned, self.box, self.dry_run = False, False, None, False
 
     def active(self):
         return ACTIVE in self.frame.states() and self.desk.x_active()
@@ -263,27 +270,32 @@ class Driver:
         """The real results (not the recent searches shown first) once they have
         stopped changing: at once when they hold a local row named after the query,
         else at the deadline, since local sections can load after the web one.
-        None when they never settled."""
-        seen, stable, steady, deadline = None, 0, None, self.clock.time() + 6
+        Returns (rows or None when they never settled, whether a results panel showed)."""
+        seen, stable, steady, panel, deadline = None, 0, None, False, self.clock.time() + 6
         while self.clock.time() < deadline and FOCUSED in box.states():
             self.clock.sleep(0.3)
             rows = self.rows()
             names = [r[2] for r in rows]
+            panel = panel or self.are_results(rows, name)
             stable = stable + 1 if self.are_results(rows, name) and names == seen else 0
             seen = names
             steady = rows if stable >= 2 else None
             if steady and self.local_hits(rows, name):
-                return rows
-        return steady
+                return rows, True
+        return steady, panel
 
     def choose(self, box, name):
         """Leave current the one local result named `name`: index 1, under a first
         header that is not a web or "More" section."""
-        rows = self.settle(box, name)
+        rows, panel = self.settle(box, name)
         if rows is None:
             if FOCUSED not in box.states():
                 raise Failure("focus-lost", "the search lost focus before its results settled")
-            raise Failure("not-ready", f"the search results for {name!r} never settled")
+            if not panel:
+                raise Failure("not-ready", f"no search results panel appeared for {name!r}: WeChat shows "
+                              '"Internet search results" only when online and in English, the one '
+                              "interface language verified live")
+            raise Failure("not-ready", f"the search results for {name!r} kept changing and never settled")
         if not self.local_hits(rows, name):  # settled, and truly absent
             raise Failure("not-found", f"no search result is named {name!r}")
         if len(self.local_hits(rows, name)) > 1:
@@ -297,9 +309,13 @@ class Driver:
             raise Failure("ambiguous", f"more than one search result is named {name!r}")
         current = [r for r in rows if FOCUSED in r[3]]
         header = rows[0][2] if rows else None
-        if len(current) != 1 or current[0][0] != 1 or current[0][2] != name or header in NONLOCAL_HEADERS:
-            raise Failure("not-ready", f"the result named {name!r} is not the first local one (top: "
-                          f"{current[0][2] if current else None!r} under {header!r})")
+        if len(current) != 1:
+            raise Failure("not-ready", f"the search results for {name!r} did not mark one current result")
+        if current[0][0] != 1 or current[0][2] != name or header in NONLOCAL_HEADERS:
+            # Settled results that put the target below another one, or in a section that
+            # holds no chat, stay that way: the name does not lead to this one chat.
+            raise Failure("ambiguous", f"the result named {name!r} is not the first local one (top: "
+                          f"{current[0][2]!r} under {header!r})")
 
     def open_chat(self, name):
         self.bring_forward()
@@ -345,6 +361,8 @@ class Driver:
             raise Failure("not-ready", "the input did not take the text exactly", True)
 
     def press(self, name, body):
+        if self.dry_run:
+            raise AssertionError("a dry run never presses Return in a chat input")
         box = self.target_input(name)
         box.grab_focus()
         self.clock.sleep(0.2)
@@ -358,12 +376,14 @@ class Driver:
 
     def clear_leftover(self, name, body):
         """After Return, a copy of the body still in the target's input, read name
-        last, is cleared, so the guardian cannot send it again by accident."""
+        last, is cleared, so the guardian cannot send it again by accident. With
+        Ctrl+Enter to send, Return only adds a line break to it."""
         with contextlib.suppress(Exception):
-            if self.box and self.box.text() == body and self.box.name == name:
+            if self.box and self.box.text() in (body, body + "\n") and self.box.name == name:
                 self.box.set_text("")
 
     def send(self, chat_id, name, body, press_return=True):
+        self.dry_run = not press_return
         try:
             return self._send(chat_id, name, body, press_return)
         except Exception as e:  # noqa: BLE001 — any failure is a coded Failure with `typed`
@@ -401,8 +421,10 @@ class Driver:
                 if e.code != "focus-lost" or attempt == 2:
                     raise
         self.type_body(name, body)
-        if not press_return:  # dry run, for live checks: every step but Return
+        if self.dry_run:  # every step but the Return in the chat input
             self.box.set_text("")
+            if self.box.text():
+                raise Failure("not-ready", "the dry run could not clear the input", True)
             return None
         self.press(name, body)
         deadline = self.clock.time() + ECHO_TIMEOUT_S
@@ -438,7 +460,10 @@ def ready_client():
     if subprocess.run(["pgrep", "-x", "wechat"], capture_output=True).returncode != 0:
         raise Failure("not-ready", "the WeChat client is not running")
     app, desktop = wechat_app(), Desktop()
-    main_frame(app)
+    if not find(main_frame(app), lambda n, st: (n.role == "list" and n.name == CHATS[0])
+                or (n.role == "text" and n.name == SEARCH[0] and EDITABLE in st)):
+        raise Failure("not-ready", "WeChat's interface language is not English, the only one this "
+                      "driver is verified on: set the client's language to English")
     if desktop.window() is None:
         raise Failure("not-ready", "the WeChat main window is not on the display")
     return app, desktop
@@ -450,6 +475,7 @@ def main():
     send = sub.add_parser("send")
     for flag in ("--chat", "--name", "--text"):
         send.add_argument(flag, required=True)
+    send.add_argument("--dry-run", action="store_true", help="every step but the Return that sends")
     sub.add_parser("check")
     args = parser.parse_args()
 
@@ -463,8 +489,9 @@ def main():
             raise Failure("invalid", "--chat and --name must be set; "
                           f"--text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
         app, desktop = ready_client()
-        message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text)
-        print(json.dumps({"ok": True, "conversationId": args.chat, "messageId": message_id}, ensure_ascii=False))
+        message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text, not args.dry_run)
+        done = {"dryRun": True} if args.dry_run else {"messageId": message_id}
+        print(json.dumps({"ok": True, **done, "conversationId": args.chat}, ensure_ascii=False))
     except Exception as e:  # noqa: BLE001 — every answer is one JSON object; Driver.send sets typed
         e = e if isinstance(e, Failure) else Failure("not-ready", f"{type(e).__name__}: {e}")
         answer = {"ready": False} if args.command == "check" else {"ok": False, "code": e.code, "typed": e.typed}

@@ -406,9 +406,31 @@ class SendTests(unittest.TestCase):
                 client.pending[1] = [r for r in client.pending[1]
                                      if r[1] != "web" and r[0] != "Internet search results"]
         client.on_text = offline
-        self.assertFails("not-ready", False, lambda: send(client, desk, store, clock))
+        with self.assertRaises(d.Failure) as caught:
+            send(client, desk, store, clock)
+        self.assertEqual((caught.exception.code, caught.exception.typed), ("not-ready", False))
+        self.assertIn("no search results panel appeared", caught.exception.reason)
+        self.assertIn("interface language", caught.exception.reason)
         self.assertEqual((client.sent, client.search.value), ([], ""))
         self.assertFalse({"Down", "Up", "Return"} & set(desk.events))
+
+    def test_results_that_keep_changing_say_so(self):
+        client, desk, store, clock = rig()
+        children, polls = client.list.children, [0]
+
+        def churning():  # a real results panel whose rows never stop changing
+            kids = children()
+            if client.rows and client.rows[0][0] != "Search Results":
+                polls[0] += 1
+                client.set_rows(client.rows[:-1] + [(f"File Transfer {polls[0]}", "web")])
+            return kids
+        client.list.children = churning
+        with self.assertRaises(d.Failure) as caught:
+            send(client, desk, store, clock)
+        self.assertEqual(caught.exception.code, "not-ready")
+        self.assertIn("kept changing", caught.exception.reason)
+        self.assertNotIn("no search results panel", caught.exception.reason)
+        self.assertEqual(client.sent, [])
 
     def test_any_error_while_choosing_leaves_no_query_behind(self):
         client, desk, store, clock = rig()
@@ -681,6 +703,72 @@ class SendTests(unittest.TestCase):
         self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
         self.assertLessEqual(clock.now - returned_at[0], d.ECHO_TIMEOUT_S + 5)
 
+    def test_a_settled_target_below_another_result_is_ambiguous(self):
+        client, desk, store, clock = rig(open_chat="File Transfer")
+        client.results["Li Wei"] = ["Li Wei Zhang", "Li Wei"]  # ranked above the target, for good
+        self.assertFails("ambiguous", False, lambda: send(client, desk, store, clock, "wxid_li", "Li Wei"))
+        self.assertEqual((client.sent, client.search.value, desk.events), ([], "", ["Down", "Up"]))
+
+    def test_a_settled_target_in_a_nonlocal_section_is_ambiguous(self):
+        client, desk, store, clock = rig(open_chat="File Transfer")
+        client.headers["Li Wei"] = "More"  # listed, but in a section that holds no chat of ours
+        self.assertFails("ambiguous", False, lambda: send(client, desk, store, clock, "wxid_li", "Li Wei"))
+        self.assertEqual((client.sent, client.search.value), ([], ""))
+        self.assertNotIn("Return", desk.events)
+
+    def test_results_that_change_under_the_keys_are_still_not_ready(self):
+        client, desk, store, clock = rig()
+        key = client.key
+
+        def reshuffle(name):
+            key(name)
+            if name == "Up":  # the list is rebuilt without the web section
+                client.set_rows([r for r in client.rows if r[1] != "web"])
+        client.key = reshuffle
+        self.assertFails("not-ready", False, lambda: send(client, desk, store, clock))
+        self.assertNotIn("Return", desk.events)
+
+    def test_a_leftover_with_the_newline_return_added_is_cleared(self):
+        client, desk, store, clock = rig()
+        client_key = client.key
+
+        def ctrl_enter_to_send(name):  # Return adds a line break instead of sending
+            if name == "Return" and client.focus is client.input:
+                client.input.value += "\n"
+                return
+            client_key(name)
+        client.key = ctrl_enter_to_send
+        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+        self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
+
+    def test_a_longer_leftover_is_not_cleared(self):
+        client, desk, store, clock = rig()
+        client_key = client.key
+
+        def guardian_kept_typing(name):
+            if name == "Return" and client.focus is client.input:
+                client.input.value += "\nand more"
+                return
+            client_key(name)
+        client.key = guardian_kept_typing
+        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+        self.assertEqual(client.all_inputs()["File Transfer"], "rome test\nand more")
+
+    def test_a_dry_run_never_presses_return_in_the_input(self):
+        client, desk, store, clock = rig()
+        driver = d.Driver(client.app, desk, store, clock)
+        self.assertIsNone(driver.send("filehelper", "File Transfer", "rome test", press_return=False))
+        with self.assertRaises(AssertionError):
+            driver.press("File Transfer", "rome test")  # the dry run refuses the one Return that sends
+        self.assertEqual((desk.events, client.sent), (["Down", "Up", "Return"], []))
+
+    def test_a_dry_run_that_cannot_clear_the_input_says_so(self):
+        client, desk, store, clock = rig()
+        set_text = client.input.set_text
+        client.input.set_text = lambda s: None if s == "" else set_text(s)  # the clear is lost
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock, press_return=False))
+        self.assertEqual(client.sent, [])
+
     def test_dry_run_reaches_the_input_and_clears_it(self):
         client, desk, store, clock = rig()
         self.assertIsNone(send(client, desk, store, clock, press_return=False))
@@ -758,6 +846,39 @@ class ReadinessTests(unittest.TestCase):
         out = self.run_driver("send", "--chat", "filehelper")
         self.assertEqual((out.returncode, out.stdout), (2, ""))
         self.assertIn("exit 2", d.__doc__)
+
+    def main_with(self, client, desk, store, *argv):
+        out = io.StringIO()
+        ok = subprocess.CompletedProcess(["pgrep"], 0, "", "")
+        with patch.object(d, "wechat_app", return_value=client.app), patch.object(d, "Desktop", return_value=desk), \
+                patch.object(d, "Store", return_value=store), patch.object(d.subprocess, "run", return_value=ok), \
+                patch.object(d, "time", FakeClock()), patch.object(sys, "argv", ["driver", *argv]), \
+                redirect_stdout(out):
+            d.main()
+        return json.loads(out.getvalue())
+
+    def test_check_is_ready_on_the_verified_english_interface(self):
+        client, desk, store, _ = rig()
+        self.assertEqual(self.main_with(client, desk, store, "check"), {"ready": True, "reason": "ready"})
+
+    def test_check_is_not_ready_on_an_unverified_interface_language(self):
+        client, desk, store, _ = rig()
+        client.search.name, client.chats.name = "搜索", "聊天"  # the Chinese interface
+        answer = self.main_with(client, desk, store, "check")
+        self.assertFalse(answer["ready"])
+        self.assertIn("interface language", answer["reason"])
+        send_answer = self.main_with(client, desk, store, "send", "--chat", "filehelper",
+                                     "--name", "File Transfer", "--text", "rome test")
+        self.assertEqual((send_answer["ok"], send_answer["code"]), (False, "not-ready"))
+        self.assertEqual((desk.events, client.sent), ([], []))
+
+    def test_send_dry_run_flag_types_and_clears_without_sending(self):
+        client, desk, store, clock = rig()
+        answer = self.main_with(client, desk, store, "send", "--dry-run", "--chat", "filehelper",
+                                "--name", "File Transfer", "--text", "rome test")
+        self.assertEqual(answer, {"ok": True, "dryRun": True, "conversationId": "filehelper"})
+        self.assertEqual((desk.events, client.sent, client.all_inputs()["File Transfer"]),
+                         (["Down", "Up", "Return"], [], ""))
 
     def test_main_answers_an_unexpected_error_as_json(self):
         for argv, answer in ((["send", "--chat", "filehelper", "--name", "File Transfer", "--text", "hi"],
