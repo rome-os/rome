@@ -217,18 +217,26 @@ export class MockProviderAdapter implements ProviderAdapter {
   }
 }
 
-/** A channel by name whose `send` goes through a mock Talk router's
- *  `test:<name>` connection, the way the real channel list backs it. */
-export function mockChannelLookup(talkRouter: TalkRouter): (name: string) => Channel {
-  return (name) => ({
-    name,
-    send: {
-      send: (conversationId, message) => talkRouter.send(`test:${name}`, conversationId, message),
-    },
-    inbound: null,
-    accounts: null,
-    messages: null,
-  });
+/** The channel a mock Talk router backs, by name: its `send` goes through the
+ *  router's `test:<name>` connection, the way the real channel list backs it.
+ *  A name with no mock adapter has no channel, as in `channelList`. */
+export function mockChannelLookup(
+  talkRouter: TalkRouter,
+  adapters: ReadonlyMap<string, unknown>,
+): (name: string) => Channel | null {
+  return (name) =>
+    adapters.has(name)
+      ? {
+          name,
+          send: {
+            send: (conversationId, message) =>
+              talkRouter.send(`test:${name}`, conversationId, message),
+          },
+          inbound: null,
+          accounts: null,
+          messages: null,
+        }
+      : null;
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
@@ -573,7 +581,7 @@ export async function buildTestDeps(
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter),
+    channel: mockChannelLookup(talkRouter, channelPortMap),
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,

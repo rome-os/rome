@@ -288,7 +288,7 @@ async function buildHarness(
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter),
+    channel: mockChannelLookup(talkRouter, channelEndpoints),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
