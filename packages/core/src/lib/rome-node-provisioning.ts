@@ -1,5 +1,9 @@
 import { authorizeServer } from "@rome-os/node-core/auth";
-import { nodeConfigFromEnvironment } from "@rome-os/node-core/client";
+import {
+  nodeConfigFromEnvironment,
+  readOptionalCallerCredential,
+  startDaemon,
+} from "@rome-os/node-core/client";
 import { createLogger } from "../logger.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
@@ -13,15 +17,27 @@ export function createNodeCallerProvisioner(): () => Promise<void> {
     if (pending) return pending;
     const token = getInstanceToken();
     const origin = getRomeCloudOrigin();
-    if (!token || !origin) return Promise.resolve();
     // Deferring setup also catches synchronous configuration failures without blocking startup.
     pending = Promise.resolve()
-      .then(() => authorizeServer(origin, token, nodeConfigFromEnvironment(process.env)))
-      .then(() => {
-        log.info("Node caller authorization ready");
+      .then(async () => {
+        const config = nodeConfigFromEnvironment(process.env);
+        if (token && origin) {
+          await authorizeServer(origin, token, config);
+          log.info("Node caller authorization ready");
+        } else if (!(await readOptionalCallerCredential(config))) {
+          return;
+        }
+        try {
+          await startDaemon(config);
+          log.info("Node caller daemon started");
+        } catch (error) {
+          log.warn("Node caller daemon failed to start", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       })
       .catch(() => {
-        log.warn("Node caller authorization failed. Check rome-node auth --server.");
+        log.warn("Node caller setup failed. Check rome-node auth status.");
       })
       .finally(() => {
         pending = undefined;
