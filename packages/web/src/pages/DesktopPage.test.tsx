@@ -31,4 +31,14 @@ describe("DesktopPage", () => {
     );
     expect(setProperty).toHaveBeenCalledWith("--rome-safe-area-bottom", "34px");
   });
+
+  it("shows WeChat's own display through its own proxy path", async () => {
+    await i18n.changeLanguage("en");
+
+    render(<DesktopPage view="wechat" />);
+
+    expect(screen.getByTitle("WeChat desktop").getAttribute("src")).toBe(
+      "/desktop-vnc.html?resize=scale&path=desktop-proxy/wechat/websockify",
+    );
+  });
 });

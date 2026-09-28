@@ -430,7 +430,7 @@ export function createWechatUserDescriptor(
     const driverDir = await stageCaptureDriver(runtime.runtimeDir);
     try {
       return await recoverWechatPassphrase(
-        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir },
+        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir, display: runtime.display },
         signal,
       );
     } finally {

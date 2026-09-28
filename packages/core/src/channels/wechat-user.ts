@@ -280,7 +280,11 @@ export class WechatUserRuntime {
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
     this.prefix = config.prefix ?? join(this.home, ".local", "share", "wechat");
-    this.display = config.display ?? process.env.DISPLAY ?? ":99";
+    // WeChat's own display when one is configured (docs/wechat-personal.md), else
+    // the shared desktop. The client, its login window and the health check all
+    // live on this display.
+    this.display =
+      config.display ?? (process.env.WECHAT_USER_DISPLAY || process.env.DISPLAY || ":99");
     this.canonicalPrefix = config.canonicalPrefix ?? WECHAT_CANONICAL_PREFIX;
     this.runtimeDir = config.runtimeDir ?? wechatRuntimeDir();
     this.accessibilityLauncher = config.accessibilityLauncher ?? ACCESSIBILITY_LAUNCHER;

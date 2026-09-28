@@ -18,6 +18,7 @@ const CONFIG_ENV_KEYS = [
   "ROME_HOST_EXECUTION_SOCKET",
   "ROME_HOST_EXECUTION_ENABLED",
   "WECHAT_USER_ENABLED",
+  "WECHAT_USER_DISPLAY",
   "ROME_ENABLE_CDP_AUTOMATION",
   "WEB_PORT",
   "WEB_HOST",
@@ -49,6 +50,15 @@ describe("loadConfig()", () => {
   });
   it.each(["0", "1", "no", "yes", ""])("rejects an ambiguous WeChat flag: %s", (value) => {
     rs.stubEnv("WECHAT_USER_ENABLED", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+  it("keeps WeChat on the shared desktop unless WECHAT_USER_DISPLAY names one", () => {
+    expect(loadConfig().wechatUserDisplay).toBeUndefined();
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    expect(loadConfig().wechatUserDisplay).toBe(":100");
+  });
+  it.each(["100", "localhost:100", ":1a"])("rejects WECHAT_USER_DISPLAY=%s", (value) => {
+    rs.stubEnv("WECHAT_USER_DISPLAY", value);
     expect(() => loadConfig()).toThrow("Invalid configuration");
   });
   it("disables CDP automation by default", () => {

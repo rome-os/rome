@@ -203,6 +203,42 @@ describe("WechatUserRuntime.start", () => {
   });
 });
 
+describe("WechatUserRuntime display", () => {
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+
+  it("prefers WeChat's own display, and ignores it when empty", () => {
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    expect(new WechatUserRuntime().display).toBe(":100");
+    expect(new WechatUserRuntime({ display: ":7" }).display).toBe(":7");
+    rs.stubEnv("WECHAT_USER_DISPLAY", "");
+    expect(new WechatUserRuntime().display).toBe(":99");
+  });
+
+  it("looks for the login window and starts the client on that display", async () => {
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    const h = await tempHome();
+    const envs: Array<[string, string | undefined]> = [];
+    const tree = '  0x1000007 "Weixin": ("wechat" "wechat")  280x380+0+0  +500+210\n';
+    const runtime = new WechatUserRuntime({
+      home: h,
+      runtimeDir: join(h, "run"),
+      canonicalPrefix: join(h, "opt-wechat"),
+      run: async (file, args, opts) => {
+        envs.push([`${file} ${args[0] ?? ""}`, opts?.env?.DISPLAY]);
+        return file === "xwininfo" ? ok(tree) : ok();
+      },
+    });
+    await runtime.captureLoginQr();
+    await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
+    await runtime.start();
+    expect(envs.find(([cmd]) => cmd.startsWith("xwininfo"))?.[1]).toBe(":100");
+    expect(envs.filter(([cmd]) => cmd === "sh -c").map(([, d]) => d)).toContain(":100");
+  });
+});
+
 describe("WechatUserRuntime.captureLoginQr", () => {
   it("screenshots the login window as a PNG data URL", async () => {
     const tree = '  0x1000007 "Weixin": ("wechat" "wechat")  280x380+0+0  +500+210\n';

@@ -41,6 +41,9 @@ services:
       # The default multi mode keeps Rome and WeChat running as rome; the
       # SYS_ADMIN cap and 1 GB shared memory below are already in place.
       - WECHAT_USER_ENABLED=${WECHAT_USER_ENABLED:-false}
+      # Optional: run the client on its own display (e.g. :100), watched at
+      # /desktop/wechat. Unset keeps it on the shared desktop.
+      - WECHAT_USER_DISPLAY=${WECHAT_USER_DISPLAY:-}
       - ROME_HOST_EXECUTION_ENABLED=${ROME_HOST_EXECUTION_ENABLED:-false}
       - ROME_HOST_EXECUTION_SOCKET=${ROME_HOST_EXECUTION_SOCKET:-/run/rome-host/control.sock}
       # Backend → in-stack OTEL collector (otlp/http). The collector forwards

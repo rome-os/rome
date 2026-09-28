@@ -44,6 +44,12 @@ const configSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  // The X display the WeChat client runs on, e.g. ":100". Unset keeps it on the
+  // shared desktop. The entrypoint starts that display; the runtime reads it.
+  wechatUserDisplay: z
+    .string()
+    .regex(/^:\d+$/, "WECHAT_USER_DISPLAY must look like :100")
+    .optional(),
 
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
@@ -168,6 +174,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.WECHAT_USER_ENABLED !== undefined) {
     raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;
+  }
+  if (env.WECHAT_USER_DISPLAY) {
+    raw.wechatUserDisplay = env.WECHAT_USER_DISPLAY;
   }
   if (env.ROME_ACTION_MAX_WORKERS) {
     raw.actionWorkerMaxProcesses = env.ROME_ACTION_MAX_WORKERS;

@@ -184,7 +184,8 @@
     "retrying": "每 {{seconds}} 秒重试一次…"
   },
   "desktop": {
-    "iframeTitle": "Rome 桌面"
+    "iframeTitle": "Rome 桌面",
+    "wechatIframeTitle": "微信桌面"
   },
   "chat": {
     "add": "打开一个应用",

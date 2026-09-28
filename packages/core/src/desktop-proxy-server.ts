@@ -6,6 +6,23 @@ import { createLogger } from "./logger.js";
 const log = createLogger("desktop-proxy");
 
 const PREFIX = "/desktop-proxy";
+/** WeChat's own display (`WECHAT_USER_DISPLAY`), shown at /desktop/wechat. Same
+ *  mount, same auth posture as the shared desktop: only the upstream differs. */
+const WECHAT_PREFIX = `${PREFIX}/wechat`;
+
+/** The websockify port and the path it sees, for a request under `/desktop-proxy`. */
+export function desktopUpstream(pathname: string): { port: number; path: string } {
+  if (pathname === WECHAT_PREFIX || pathname.startsWith(`${WECHAT_PREFIX}/`)) {
+    return {
+      port: Number(process.env.ROME_WECHAT_NOVNC_PORT ?? 6081),
+      path: pathname.slice(WECHAT_PREFIX.length) || "/",
+    };
+  }
+  return {
+    port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
+    path: pathname.slice(PREFIX.length) || "/",
+  };
+}
 
 function buildUpstreamUpgradeRequest(
   req: IncomingMessage,
@@ -30,7 +47,6 @@ function buildUpstreamUpgradeRequest(
 }
 
 export function attachDesktopProxy(httpServer: Server): { close(): void } {
-  const port = Number(process.env.ROME_NOVNC_PORT ?? 6080);
   const host = "127.0.0.1";
   const upstreams = new Set<net.Socket>();
 
@@ -38,7 +54,7 @@ export function attachDesktopProxy(httpServer: Server): { close(): void } {
     const rawUrl = req.url ?? "/";
     if (!rawUrl.startsWith(`${PREFIX}/`) && rawUrl !== PREFIX) return;
 
-    const targetPath = rawUrl === PREFIX ? "/" : rawUrl.slice(PREFIX.length);
+    const { port, path: targetPath } = desktopUpstream(rawUrl);
     const upstreamHost = `${host}:${port}`;
 
     const upstream = net.connect(port, host, () => {
@@ -77,9 +93,8 @@ export function attachDesktopProxy(httpServer: Server): { close(): void } {
 }
 
 export async function proxyDesktopHttp(req: Request): Promise<Response> {
-  const port = Number(process.env.ROME_NOVNC_PORT ?? 6080);
   const incoming = new URL(req.url);
-  const targetPath = incoming.pathname.slice(PREFIX.length) || "/";
+  const { port, path: targetPath } = desktopUpstream(incoming.pathname);
   const upstreamUrl = `http://127.0.0.1:${port}${targetPath}${incoming.search}`;
 
   const headers = new Headers(req.headers);

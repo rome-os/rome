@@ -457,6 +457,45 @@ else
 fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
 
+# WeChat's own display, shown at /desktop/wechat. Only with WECHAT_USER_DISPLAY:
+# unset, the client stays on the shared desktop above. The display is fixed at
+# 1280x800, the largest size the client's main window accepts.
+WECHAT_TIGERVNC_PID=""
+WECHAT_OPENBOX_PID=""
+WECHAT_NOVNC_PID=""
+if [ "${WECHAT_USER_ENABLED:-false}" = "true" ] && [ -n "${WECHAT_USER_DISPLAY:-}" ]; then
+  if ! [[ "$WECHAT_USER_DISPLAY" =~ ^:[0-9]+$ ]] || [ "$WECHAT_USER_DISPLAY" = "$DISPLAY" ]; then
+    echo "Error: WECHAT_USER_DISPLAY must be a display like :100, other than ${DISPLAY}."
+    exit 1
+  fi
+  WECHAT_DISPLAY_NUM="${WECHAT_USER_DISPLAY#:}"
+  WECHAT_VNC_PORT="${ROME_WECHAT_VNC_PORT:-5901}"
+  WECHAT_NOVNC_PORT="${ROME_WECHAT_NOVNC_PORT:-6081}"
+  if process_cmdline_contains_all Xtigervnc "$WECHAT_USER_DISPLAY" -rfbport "$WECHAT_VNC_PORT"; then
+    echo "Reusing TigerVNC on ${WECHAT_USER_DISPLAY}."
+  else
+    REUSED_X_SERVER="0"
+    cleanup_stale_x11_state "$WECHAT_DISPLAY_NUM"
+    echo "Starting TigerVNC for WeChat on ${WECHAT_USER_DISPLAY}, RFB :${WECHAT_VNC_PORT} ..."
+    run_as_rome Xtigervnc "$WECHAT_USER_DISPLAY" -geometry 1280x800 -depth 24 \
+      -SecurityTypes None -localhost yes -rfbport "$WECHAT_VNC_PORT" \
+      -AlwaysShared -AcceptCutText -SendCutText -ac >/tmp/xtigervnc-wechat.log 2>&1 &
+    WECHAT_TIGERVNC_PID=$!
+  fi
+  wait_for_tcp_port "$WECHAT_VNC_PORT" "WeChat's TigerVNC" "$WECHAT_TIGERVNC_PID" /tmp/xtigervnc-wechat.log
+  if ! process_env_contains openbox "DISPLAY=${WECHAT_USER_DISPLAY}"; then
+    run_as_rome env DISPLAY="$WECHAT_USER_DISPLAY" openbox \
+      --config-file /opt/rome/scripts/docker/wechat-openbox-rc.xml >/tmp/openbox-wechat.log 2>&1 &
+    WECHAT_OPENBOX_PID=$!
+    wait_for_background_process "$WECHAT_OPENBOX_PID" "WeChat's Openbox" /tmp/openbox-wechat.log
+  fi
+  if ! process_cmdline_contains_all websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}"; then
+    run_as_rome websockify "$WECHAT_NOVNC_PORT" "localhost:${WECHAT_VNC_PORT}" >/tmp/novnc-wechat.log 2>&1 &
+    WECHAT_NOVNC_PID=$!
+  fi
+  wait_for_tcp_port "$WECHAT_NOVNC_PORT" "WeChat's noVNC" "$WECHAT_NOVNC_PID" /tmp/novnc-wechat.log
+fi
+
 CHROME_WRAPPER_PID=""
 if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
   echo "Warning: OpenCLI could not start. Browser connections are unavailable."
@@ -841,6 +880,7 @@ cleanup() {
     wait "$CHROME_WRAPPER_PID" 2>/dev/null || true
   fi
   kill "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
+  kill "$WECHAT_NOVNC_PID" "$WECHAT_OPENBOX_PID" "$WECHAT_TIGERVNC_PID" 2>/dev/null || true
   wait "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" 2>/dev/null || true
   exit 0
 }

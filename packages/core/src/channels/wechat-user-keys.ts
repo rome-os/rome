@@ -72,6 +72,9 @@ export interface WechatKeyRecoveryOptions {
   /** Override the capture window (seconds). Defaults to CAPTURE_TIMEOUT_SECONDS. */
   timeoutSeconds?: number;
   runtimeDir?: string;
+  /** The X display the client runs on, so its login window appears where the
+   *  guardian watches. Defaults to the driver's own DISPLAY. */
+  display?: string;
 }
 
 /**
@@ -99,6 +102,7 @@ export async function recoverWechatPassphrase(
     // where the reader looks; the driver reads HOME from its environment.
     env: {
       ...(options.home ? { HOME: options.home } : {}),
+      ...(options.display ? { DISPLAY: options.display } : {}),
       XDG_RUNTIME_DIR: options.runtimeDir ?? wechatRuntimeDir(),
     },
     ...(signal ? { signal } : {}),
