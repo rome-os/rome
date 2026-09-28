@@ -383,6 +383,20 @@ describe("contact autocomplete in the email list", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("adds no contact the guardian can no longer see once the list is dismissed", async () => {
+    const input = await openCloudEmail();
+    await userEvent.type(input, "ada");
+    await screen.findAllByRole("option");
+
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+    await userEvent.keyboard("{Enter}");
+
+    // With no list showing, Enter commits the typed text, which is no address.
+    expect(screen.queryAllByRole("listitem")).toEqual([]);
+    expect(screen.getByRole("alert").textContent).toContain("ada");
+  });
+
   it("commits a typed address as typed, even while a suggestion shows", async () => {
     const input = await openCloudEmail();
     // "adam@example.co" is a valid address of its own, and a prefix of Adam's.

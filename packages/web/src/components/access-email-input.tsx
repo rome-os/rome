@@ -14,10 +14,12 @@ import { useAccountSearch } from "@/pages/people/use-roster";
  * The email field of an access allow-list, completing from the contacts list
  * as the guardian types.
  *
- * Suggestions are an aid, never a gate: Enter still commits whatever was typed,
- * so an address Rome has never seen is as easy to add as before. Only one
- * address at a time is completed — a typed separator means a list is being
- * entered, and the list path owns it.
+ * Suggestions are an aid, never a gate: a typed address commits as typed, so
+ * an address Rome has never seen is as easy to add as before. While the list
+ * shows, Enter picks from it — the highlighted row, or the top one when a name
+ * rather than an address was typed. With no list showing, Enter commits the
+ * typed text, the same as Add. Only one address at a time is completed — a
+ * comma or semicolon means a list is being entered, and the list path owns it.
  */
 export function AccessEmailInput({
   id,
@@ -115,10 +117,13 @@ export function AccessEmailInput({
               }
               if (event.key !== "Enter") return;
               event.preventDefault();
-              // A typed name is a search, not an address: Enter takes the top
-              // match for it. A typed address commits as typed, as it always has.
+              // A typed name is a search, not an address: while the list shows,
+              // Enter takes its top match. Once the list is dismissed, Enter
+              // commits the typed text like Add does, so it never adds an
+              // address the guardian cannot see. A typed address commits as typed.
               const typedEmail = parseEmailTextarea(value).emails.length > 0;
-              const chosen = suggestions[active] ?? (typedEmail ? undefined : suggestions[0]);
+              const chosen =
+                suggestions[active] ?? (open && !typedEmail ? suggestions[0] : undefined);
               if (chosen) pick(chosen.email);
               else onCommit(value);
             }}
