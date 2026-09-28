@@ -57,6 +57,7 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
+import type { Channel } from "../channels/channel.js";
 import { channelList } from "../channels/channel-list.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -214,6 +215,20 @@ export class MockProviderAdapter implements ProviderAdapter {
   async simulateMessage(msg: NormalizedMessage): Promise<void> {
     await this.handler?.(msg);
   }
+}
+
+/** A channel by name whose `send` goes through a mock Talk router's
+ *  `test:<name>` connection, the way the real channel list backs it. */
+export function mockChannelLookup(talkRouter: TalkRouter): (name: string) => Channel {
+  return (name) => ({
+    name,
+    send: {
+      send: (conversationId, message) => talkRouter.send(`test:${name}`, conversationId, message),
+    },
+    inbound: null,
+    accounts: null,
+    messages: null,
+  });
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
@@ -558,7 +573,7 @@ export async function buildTestDeps(
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter,
+    channel: mockChannelLookup(talkRouter),
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,

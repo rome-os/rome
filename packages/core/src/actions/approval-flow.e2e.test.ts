@@ -109,14 +109,7 @@ function buildHarness() {
   // orchestrator runs backend session tasks bare — same as the old no-streamHost.
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter: {
-      list: async () => [],
-      subscribe: () => () => {},
-      send: async () => {
-        throw new Error("Talk is unavailable in this test");
-      },
-      feature: () => null,
-    },
+    channel: () => null,
   });
   const handler = new ApprovalHandler(
     approvalsRepo,

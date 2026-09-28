@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationRepository, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationRepository } from "@rome-os/app-runtime";
+import type { Channel } from "../channels/channel.js";
 import { createMockAgentRunner } from "../test/helpers.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 
@@ -16,15 +17,16 @@ describe("backend turn delivery", () => {
         { type: "result", content: "The deferred check is complete." },
       ],
     ]);
-    const send = rs.fn(async (_connectionId, conversationId) => ({
+    const send = rs.fn(async (conversationId) => ({
       messageId: "wechat-message-1",
       conversationId,
     }));
-    const talkRouter: TalkRouter = {
-      list: async () => [{ connectionId: "wechat-test", service: "wechat" }],
-      send,
-      subscribe: () => () => {},
-      feature: () => null,
+    const wechat: Channel = {
+      name: "wechat",
+      send: { send },
+      inbound: null,
+      accounts: null,
+      messages: null,
     };
     const ensureChannelConversation = rs.fn(async () => ({
       id: "channel:wechat:wechat-thread-1",
@@ -37,7 +39,7 @@ describe("backend turn delivery", () => {
     } as unknown as ConversationRepository;
     const runner = createBackendTurnRunner({
       agentRunner,
-      talkRouter,
+      channel: (name) => (name === "wechat" ? wechat : null),
       conversations,
     });
 
@@ -50,7 +52,7 @@ describe("backend turn delivery", () => {
       prompt: "⏰ Time's up: check deployment",
     });
 
-    expect(send).toHaveBeenCalledWith("wechat-test", "wechat-thread-1", {
+    expect(send).toHaveBeenCalledWith("wechat-thread-1", {
       text: "The deferred check is complete.",
       turnId: "turn-1",
     });
@@ -68,5 +70,22 @@ describe("backend turn delivery", () => {
       turnId: "turn-1",
       knownToProvider: true,
     });
+  });
+  it("refuses to deliver on a channel that cannot send", async () => {
+    const agentRunner = createMockAgentRunner([[{ type: "result", content: "Done." }]]);
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: (name) => ({ name, send: null, inbound: null, accounts: null, messages: null }),
+    });
+
+    await expect(
+      runner.runAndDeliver({
+        agentName: "main",
+        sessionId: "agent-session-1",
+        channel: "wechat_user",
+        threadId: "thread-1",
+        prompt: "continue",
+      }),
+    ).rejects.toThrow('Channel "wechat_user" cannot send');
   });
 });

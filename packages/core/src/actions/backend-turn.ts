@@ -13,8 +13,8 @@
 //     in-flight browser turn and the reply rides the session's SSE push
 //     (`addBackendReplyMessage`). That push path is main-process-only, which is
 //     why this lives here and the worker reaches it over one RPC.
-//   - other channels: run the turn, then hand the reply to the channel adapter
-//     (`sendMessage` → the channel's API).
+//   - other channels: run the turn, then hand the reply to the channel's `send`
+//     port (channels/channel.ts).
 //
 // The AgentSession stays channel-agnostic: it produces the turn; this
 // orchestrator, sitting above it, owns delivery — exactly as message_handler and
@@ -25,8 +25,8 @@ import type {
   BackendTurnRunner,
   ConversationId,
   ConversationRepository,
-  TalkRouter,
 } from "@rome-os/app-runtime";
+import type { Channel } from "../channels/channel.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { AgentMessage } from "../types.js";
 import { createLogger } from "../logger.js";
@@ -67,7 +67,8 @@ export interface MainBackendTurnRunner extends BackendTurnRunner {
 
 export interface BackendTurnRunnerDeps {
   agentRunner: AgentRunnerInterface;
-  talkRouter: TalkRouter;
+  /** The channel a reply is delivered on, by name, or null when there is none. */
+  channel: (name: string) => Channel | null;
   /** Resolve the working dir for the continued session from its (channel,
    * thread), so the resumed turn runs in the SAME project the conversation
    * started in — the SDK transcript is stored per cwd, so a wrong dir makes the
@@ -151,7 +152,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       }
 
       // Messaging channels: run the turn here in main, then deliver the reply
-      // through the channel adapter (its `sendMessage` reaches the channel API).
+      // on the channel's `send` port.
       let reply = "";
       let turnId: string | undefined;
       for await (const msg of runTurn(params, workingDir)) {
@@ -165,16 +166,9 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         });
         return;
       }
-      const matchingConnections = (await deps.talkRouter.list()).filter(
-        (connection) => connection.service === params.channel,
-      );
-      const connectionId =
-        params.connectionId ??
-        (matchingConnections.length === 1 ? matchingConnections[0]!.connectionId : undefined);
-      if (!connectionId) {
-        throw new Error(`Cannot resolve a unique Talk connection for channel "${params.channel}"`);
-      }
-      const delivery = await deps.talkRouter.send(connectionId, params.threadId as ConversationId, {
+      const send = deps.channel(params.channel)?.send;
+      if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
+      const delivery = await send.send(params.threadId as ConversationId, {
         text: reply,
         ...(turnId ? { turnId } : {}),
       });

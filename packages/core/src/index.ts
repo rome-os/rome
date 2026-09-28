@@ -748,7 +748,9 @@ async function main() {
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter,
+    // `channels` is built once every descriptor is registered, further down;
+    // no backend turn runs before boot completes.
+    channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
     conversations: appRuntimeRepositories.conversations!,
   });

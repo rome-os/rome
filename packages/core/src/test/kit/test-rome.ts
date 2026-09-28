@@ -7,7 +7,12 @@ import { stringify as stringifyYaml } from "yaml";
 
 import type { Tracer } from "@opentelemetry/api";
 
-import { createTestDb, buildAgentConfig, createMockTalkRouter } from "../helpers.js";
+import {
+  createTestDb,
+  buildAgentConfig,
+  createMockTalkRouter,
+  mockChannelLookup,
+} from "../helpers.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -283,7 +288,7 @@ async function buildHarness(
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter,
+    channel: mockChannelLookup(talkRouter),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
