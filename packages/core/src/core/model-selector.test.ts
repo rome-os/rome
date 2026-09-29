@@ -31,7 +31,7 @@ describe("webchat model selector", () => {
     });
     expect(resolveWebchatLargeModelSelection("claude-sonnet")).toMatchObject({
       providerId: "anthropic",
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     });
     expect(resolveWebchatLargeModelSelection("claude-haiku")).toMatchObject({
       providerId: "anthropic",
