@@ -51,9 +51,9 @@ function connectionIdFor(deps: ConnectionPortsDeps, service: string): string | n
 }
 
 function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend {
-  // What `direct` answers while nothing backs the channel: the lookup itself
-  // says so, the way `send` does, rather than passing for a channel that
-  // cannot reach an account directly.
+  // What `direct` answers while no Connection exists for the channel: the
+  // lookup itself says so, the way `send` does, rather than passing for a
+  // channel that cannot reach an account directly.
   const unbacked: TalkDirectMessaging = {
     conversationFor: () => Promise.reject(new ChannelNotConnected(service)),
   };

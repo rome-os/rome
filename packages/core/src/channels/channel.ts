@@ -32,9 +32,10 @@ export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
   /**
    * Reaching one account directly rather than replying in a conversation that
-   * exists, or null (or absent) where the channel cannot. When nothing backs
-   * the channel, `conversationFor` rejects with {@link ChannelNotConnected},
-   * as `send` does.
+   * exists, or null (or absent) where the channel cannot. When no Connection
+   * exists for the channel, `conversationFor` rejects with
+   * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
+   * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
   readonly direct?: TalkDirectMessaging | null;
 }

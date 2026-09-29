@@ -32,7 +32,10 @@ export interface SendDeps {
 }
 
 /** A resolved target: the channel's send port, and the conversation on it
- *  that reaches this account. */
+ *  that reaches this account. It names the channel, not the Connection: the
+ *  port finds the channel's Connection again when it sends. A service holds at
+ *  most one Connection, so that is the one the conversation was resolved on,
+ *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
   send: ChannelSend;
   conversationId: ConversationId;
@@ -48,8 +51,8 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
  *
  * Whether the channel does direct messaging is a synchronous read of its send
  * port. Only asking for the thread that reaches this account can reach a
- * provider, and it is also what says nothing backs the channel: the port
- * rejects with {@link ChannelNotConnected} then, as a send would.
+ * provider, and it is also what says no Connection exists for the channel:
+ * the port rejects with {@link ChannelNotConnected} then, as a send would.
  */
 async function sendStateOf(
   deps: SendDeps,
