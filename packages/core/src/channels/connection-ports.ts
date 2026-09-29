@@ -7,9 +7,9 @@
 
 import type { InboundMessage, TalkRouter } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";
 import type { ChannelSend, Inbound, InboundEvent } from "./channel.js";
+import { ConversationBuffers } from "./conversation-buffer.js";
 
 const log = createLogger("channel-ports");
 
@@ -63,44 +63,23 @@ function isAnswerable(message: InboundMessage): boolean {
 }
 
 function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound {
-  // One entry per subscription, so two subscriptions of one handler stay two.
-  // Each has its own queue per conversation (R4).
-  const subscriptions = new Set<{
-    handler: (event: InboundEvent) => Promise<void>;
-    conversations: KeyedMutex;
-  }>();
+  // One buffer set per subscription, so two subscriptions of one handler stay
+  // two, and each subscription's conversations wait only on themselves (R4).
+  const subscriptions = new Set<ConversationBuffers<InboundEvent>>();
   // One router subscription per Connection, fanned out to every handler. The
   // router re-attaches it across that Connection's epochs (R5).
   const attached = new Map<string, () => void>();
 
-  // Each subscription hears one conversation's events one at a time, in the
-  // order they are dispatched here, which the router keeps as arrival order:
-  // an event waits for that subscription's previous event in the same
-  // conversation, and for nothing else (R4). Nothing upstream waits on
-  // delivery, so dispatch returns once every event is queued. An event still
-  // queued when its subscription ends is dropped (R3), so a replaced subscriber
-  // starts nothing new after it unsubscribes; a handler already running keeps
-  // running, and its subscriber owns stopping it.
+  // Each subscription's buffer hears one conversation's events one at a time,
+  // in the order they are pushed here, which the router keeps as arrival
+  // order (R4). Nothing upstream waits on delivery, so dispatch returns once
+  // every event is buffered. A subscription's waiting events are dropped when
+  // it ends (R3); a handler already running keeps running, and its subscriber
+  // owns stopping it.
   const dispatch = async (message: InboundMessage): Promise<void> => {
     if (!isAnswerable(message)) return;
     const event: InboundEvent = { kind: "message", message };
-    const conversation = message.conversationId;
-    for (const subscription of subscriptions) {
-      // Queued in dispatch order; a failed handler is logged and the next
-      // event in the conversation still runs.
-      subscription.conversations
-        .runExclusive(conversation, async () => {
-          if (!subscriptions.has(subscription)) return;
-          await subscription.handler(event);
-        })
-        .catch((err) => {
-          log.error("inbound handler threw", {
-            channel: service,
-            messageId: message.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-    }
+    for (const buffers of subscriptions) buffers.push(message.conversationId, event);
   };
 
   const attach = (connectionId: string): void => {
@@ -122,11 +101,15 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
 
   return {
     subscribe(handler) {
-      const subscription = { handler, conversations: new KeyedMutex() };
+      const subscription = new ConversationBuffers<InboundEvent>(handler, {
+        log,
+        describe: (event) => ({ channel: service, messageId: event.message.messageId }),
+      });
       subscriptions.add(subscription);
       for (const connection of deps.registry.find(service)) attach(connection.id);
       return () => {
         subscriptions.delete(subscription);
+        subscription.close();
         if (subscriptions.size > 0) return;
         for (const detach of attached.values()) detach();
         attached.clear();

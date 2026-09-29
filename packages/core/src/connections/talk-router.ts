@@ -22,6 +22,10 @@ type Admission = (
   router: TalkRouter,
 ) => Promise<boolean>;
 
+/** How long one admission may hold its conversation. Pairing admission is a
+ *  few database reads, so fifteen seconds means the database is stuck. */
+export const ADMISSION_TIMEOUT_MS = 15_000;
+
 export class ConnectionTalkRouter implements TalkRouter {
   private readonly handlers = new Map<
     ConnectionId,
@@ -36,6 +40,7 @@ export class ConnectionTalkRouter implements TalkRouter {
   constructor(
     private readonly registry: ConnectionRegistry,
     private readonly admit?: Admission,
+    private readonly options: { admissionTimeoutMs?: number } = {},
   ) {
     registry.onUnlocked("talk", (connection) => this.attach(connection));
   }
@@ -119,9 +124,10 @@ export class ConnectionTalkRouter implements TalkRouter {
    *  admission begins, so handlers hear a conversation in arrival order.
    *  An admission therefore holds up its conversation's next message for as
    *  long as it runs; pairing admission waits only on its reads and sends its
-   *  replies in the background. The handlers' completion is returned inside an
-   *  object so the conversation is released once they start, not once they
-   *  finish. */
+   *  replies in the background. An admission that runs past the timeout fails
+   *  closed: the message is not admitted, and the next one proceeds in order.
+   *  The handlers' completion is returned inside an object so the conversation
+   *  is released once they start, not once they finish. */
   private admitInOrder(
     connection: Connection,
     message: InboundMessage,
@@ -129,9 +135,37 @@ export class ConnectionTalkRouter implements TalkRouter {
   ): Promise<{ handled: Promise<unknown> } | null> {
     const key = `${connection.id}\0${message.conversationId}`;
     return this.admissions.runExclusive(key, async () => {
-      if (!(await admit(connection.id, connection.service, message, this))) return null;
+      if (!(await this.admitWithin(connection, message, admit))) return null;
       return { handled: this.startHandlers(connection.id, message) };
     });
+  }
+
+  private async admitWithin(
+    connection: Connection,
+    message: InboundMessage,
+    admit: Admission,
+  ): Promise<boolean> {
+    const timeoutMs = this.options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => {
+        log.warn("admission timed out; message not admitted", {
+          connectionId: connection.id,
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          timeoutMs,
+        });
+        resolve(false);
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        admit(connection.id, connection.service, message, this),
+        timedOut,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private startHandlers(connectionId: ConnectionId, message: InboundMessage): Promise<unknown> {
@@ -151,6 +185,7 @@ export class ConnectionTalkRouter implements TalkRouter {
 export function createTalkRouter(
   registry: ConnectionRegistry,
   admit?: ConstructorParameters<typeof ConnectionTalkRouter>[1],
+  options?: ConstructorParameters<typeof ConnectionTalkRouter>[2],
 ): ConnectionTalkRouter {
-  return new ConnectionTalkRouter(registry, admit);
+  return new ConnectionTalkRouter(registry, admit, options);
 }

@@ -59,6 +59,10 @@ export function createPairingAdmission(deps: {
     // Replies go out in the background: the decision never depends on them,
     // and the router admits a conversation's messages one at a time, so a send
     // that hangs must not hold up the next message.
+    // Accepted trade-off: the "paired" confirmation is not ordered against the
+    // conversation's next reply, so on a slow provider it can arrive after the
+    // agent's first answer. Approval is recorded before the send, so only the
+    // order of the two bot messages is at stake.
     const reply = (text: string): void => {
       router.send(connectionId, message.conversationId, { text }).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
