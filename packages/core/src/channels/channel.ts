@@ -20,6 +20,7 @@ import type {
   InboundMessage,
   MessageReceipt,
   OutgoingMessage,
+  TalkDirectMessaging,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
@@ -29,6 +30,21 @@ import type { Messages } from "./messages.js";
 /** Sending on a channel. */
 export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  /**
+   * Reaching one account directly rather than replying in a conversation that
+   * exists, or null (or absent) where the channel cannot. When nothing backs
+   * the channel, `conversationFor` rejects with {@link ChannelNotConnected},
+   * as `send` does.
+   */
+  readonly direct?: TalkDirectMessaging | null;
+}
+
+/** A send, or a direct-conversation lookup, on a channel nothing backs now. */
+export class ChannelNotConnected extends Error {
+  constructor(readonly channel: string) {
+    super(`No connection backs channel "${channel}"`);
+    this.name = "ChannelNotConnected";
+  }
 }
 
 /**

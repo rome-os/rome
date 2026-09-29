@@ -105,7 +105,7 @@ The outbox holds messages Rome has been asked to send and has not yet seen arriv
 **Contracts:**
 
 - A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
-- A channel can be sent to only if it says so. `talk.feature("directMessaging")` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
+- A channel can be sent to only if it says so. Its `send` port's `direct` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
 - An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
 - A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
 - A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.

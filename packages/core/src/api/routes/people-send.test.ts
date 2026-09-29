@@ -10,7 +10,13 @@ import type {
   TimelinePage,
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
-import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  createTestDb,
+  buildTestDeps,
+  testChannels,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { OutboxRepository } from "../../db/repositories/outbox.js";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
@@ -147,7 +153,8 @@ describe("People send API", () => {
   });
 
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
-    const readOnly = { ...deps, talkRouter: { ...deps.talkRouter, feature: () => null } };
+    const talkRouter = { ...deps.talkRouter, feature: () => null };
+    const readOnly = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));
 
     const res = await readOnlyApp.request(`/people/${personId}/messages`, {
@@ -603,20 +610,18 @@ describe("People send API — delivery bookkeeping", () => {
     // What a thread-keyed channel does when it cannot open a DM. The person
     // read already calls this account `no-conversation`; the send path has to
     // agree rather than answering with a stack trace.
-    const throwing = {
-      ...deps,
-      talkRouter: {
-        ...deps.talkRouter,
-        feature: (_connectionId: string, name: string) =>
-          name === "directMessaging"
-            ? {
-                conversationFor: async () => {
-                  throw new Error("provider is down");
-                },
-              }
-            : null,
-      },
-    } as unknown as TestDeps;
+    const talkRouter = {
+      ...deps.talkRouter,
+      feature: (_connectionId: string, name: string) =>
+        name === "directMessaging"
+          ? {
+              conversationFor: async () => {
+                throw new Error("provider is down");
+              },
+            }
+          : null,
+    } as unknown as TestDeps["talkRouter"];
+    const throwing = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
 
     const res = await new Hono()
       .route("/", peopleRoutes(throwing))

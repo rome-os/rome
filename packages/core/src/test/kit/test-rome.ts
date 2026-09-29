@@ -10,9 +10,12 @@ import type { Tracer } from "@opentelemetry/api";
 import {
   createTestDb,
   buildAgentConfig,
+  channelNamed,
   createMockTalkRouter,
-  mockChannelLookup,
+  mockConnections,
 } from "../helpers.js";
+import type { Accounts } from "../../channels/accounts.js";
+import { channelList } from "../../channels/channel-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -49,6 +52,11 @@ import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js"
 // approval handler are all the production classes, so tests assert outcomes
 // (DB rows, outbound messages, prompts the model saw) instead of stub calls.
 
+/** An address book with nobody in it: this kit reads no People. */
+const noAccounts: Accounts = {
+  listAccounts: async () => ({ accounts: [] }),
+  resolve: async () => null,
+};
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
@@ -288,7 +296,14 @@ async function buildHarness(
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter, channelEndpoints),
+    channel: channelNamed(
+      channelList({
+        db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+        connections: mockConnections(talkRouter, channelEndpoints),
+      }),
+    ),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
