@@ -33,7 +33,7 @@ interface Answer {
 const MULTI_SEP = ", ";
 
 /**
- * A stacked option wraps, so it takes the `sm` step as a floor rather than as a
+ * An option can wrap, so it takes the `sm` step as a floor rather than as a
  * fixed height. One line sits under that floor, so the box is the step exactly
  * and the Button's own `items-center` centres the label; two lines outgrow it
  * and the box follows the text. Vertical padding is deliberately absent — any
@@ -41,7 +41,8 @@ const MULTI_SEP = ", ";
  * scale, and the line box's half-leading already separates a wrapped label from
  * the border.
  */
-const STACKED_OPTION = "h-auto min-h-[var(--control-h-sm)] w-full whitespace-normal text-left";
+const OPTION =
+  "h-auto min-h-[var(--control-h-sm)] min-w-0 max-w-full whitespace-normal wrap-anywhere";
 
 /** Split a stored multi answer back into its parts (used to rehydrate a resolved card). */
 function splitMulti(value: string): string[] {
@@ -163,12 +164,13 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
   }
 
   return (
-    <div className="mb-4 rounded-12 border border-border bg-surface">
-      <fieldset disabled={locked} className="p-4">
+    <div className="mb-4 min-w-0 max-w-full rounded-12 border border-border bg-surface">
+      {/* A fieldset defaults to min-width: min-content, which can widen the card. */}
+      <fieldset disabled={locked} className="min-w-0 p-4">
         <FieldGroup className="space-y-5">
           {questions.map((q) => (
             <Field key={q.id} className="space-y-2">
-              <FieldLabel>
+              <FieldLabel className="wrap-anywhere">
                 {q.question}
                 {q.optional ? (
                   <span className="ml-2 text-aux text-muted-foreground">
@@ -177,11 +179,9 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                 ) : null}
               </FieldLabel>
               {q.type === "single" || q.type === "multi" ? (
-                // Long option labels can't share a row as compact pills — they
-                // wrap raggedly and read as broken. When any option is long,
-                // stack every option as a full-width, left-aligned, wrapping
-                // row; otherwise keep the compact horizontal chips. multi lets
-                // any number of options stay pressed at once.
+                // Long labels read better as left-aligned rows. The length
+                // heuristic chooses that layout, not whether text may wrap:
+                // even a short label can exceed a narrow column's width.
                 (() => {
                   const multi = q.type === "multi";
                   const options = q.options ?? [];
@@ -209,7 +209,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                                 ? togglePick(q.id, opt)
                                 : setDrafts((d) => ({ ...d, [q.id]: opt }))
                             }
-                            className={stacked ? STACKED_OPTION : undefined}
+                            className={cn(OPTION, stacked && "w-full text-left")}
                           >
                             {opt}
                           </Button>
@@ -230,7 +230,10 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                           }
                           onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
                           placeholder={multi ? t("questionCard.addOwn") : t("questionCard.typeOwn")}
-                          className={cn("text-ui", stacked ? "w-full" : "min-w-[10rem] flex-1")}
+                          className={cn(
+                            "max-w-full text-ui",
+                            stacked ? "w-full" : "min-w-0 flex-1 basis-40",
+                          )}
                         />
                       ) : null}
                     </div>
@@ -250,7 +253,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
         </FieldGroup>
       </fieldset>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <span className="text-aux text-muted-foreground">
           {locked
             ? dismissed

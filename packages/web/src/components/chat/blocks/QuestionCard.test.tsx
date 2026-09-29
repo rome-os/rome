@@ -36,6 +36,62 @@ function renderCard(props: Record<string, unknown>, onSubmit = rs.fn()) {
   return onSubmit;
 }
 
+describe("QuestionCard — long answers", () => {
+  for (const type of ["single", "multi"]) {
+    for (const option of [
+      "按当前语言只显示对应的那一半（中文取「/」前，英文取后）",
+      "W".repeat(33),
+    ]) {
+      it(`submits a complete ${type} answer with length ${option.length}`, async () => {
+        const user = userEvent.setup();
+        const onSubmit = renderCard({
+          questions: [
+            { id: "language", question: "Which label?", type, options: [option, "Short"] },
+          ],
+        });
+
+        optionButton(option).focus();
+        await user.keyboard(" ");
+        expect(pressed(option)).toBe("true");
+        await user.click(optionButton("Send"));
+
+        expect(onSubmit).toHaveBeenCalledWith(
+          "t-1",
+          { answers: [{ questionId: "language", value: option }] },
+          option,
+        );
+        expect(optionButton(option).closest("fieldset")?.disabled).toBe(true);
+      });
+    }
+  }
+
+  it("submits a custom single-choice answer instead of a selected long option", async () => {
+    const user = userEvent.setup();
+    const option = "按当前语言只显示对应的那一半（中文取「/」前，英文取后）";
+    const onSubmit = renderCard({
+      questions: [
+        {
+          id: "language",
+          question: "Which label?",
+          type: "single",
+          options: [option],
+          freeText: true,
+        },
+      ],
+    });
+
+    await user.click(optionButton(option));
+    await user.type(screen.getByPlaceholderText("Or type your own…"), "Keep both languages");
+    expect(pressed(option)).toBe("false");
+    await user.click(optionButton("Send"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      "t-1",
+      { answers: [{ questionId: "language", value: "Keep both languages" }] },
+      "Keep both languages",
+    );
+  });
+});
+
 describe("QuestionCard — multi-choice", () => {
   it("keeps multiple options pressed at once and submits them joined", async () => {
     const user = userEvent.setup();

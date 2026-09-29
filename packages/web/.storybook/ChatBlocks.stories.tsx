@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-react-rsbuild";
+import { expect, fn, userEvent } from "storybook/test";
 import { ChatBlockPreview, CHAT_BLOCK_SPECIMENS } from "../src/pages/dev/ChatBlocksPage";
 
 const meta = {
@@ -15,17 +16,70 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function specimen(id: string) {
+  const found = CHAT_BLOCK_SPECIMENS.find((item) => item.id === id);
+  if (!found) throw new Error(`Missing chat block specimen: ${id}`);
+  return found;
+}
+
 export const CompactQuestion: Story = {
-  args: { block: CHAT_BLOCK_SPECIMENS[0].block },
+  args: { block: specimen("question-card-compact").block },
 };
 
 export const StackedQuestion: Story = {
-  args: { block: CHAT_BLOCK_SPECIMENS[1].block },
+  args: { block: specimen("question-card-stacked").block },
 };
 
 export const ResolvedQuestion: Story = {
   args: {
-    block: CHAT_BLOCK_SPECIMENS[4].block,
-    result: CHAT_BLOCK_SPECIMENS[4].result,
+    block: specimen("question-card-resolved").block,
+    result: specimen("question-card-resolved").result,
+  },
+};
+
+export const WideCompactQuestion: Story = {
+  args: { block: specimen("question-card-cjk").block },
+  decorators: [
+    (Story) => (
+      <div className="max-w-2xl">
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+export const NarrowQuestion: Story = {
+  ...WideCompactQuestion,
+  decorators: [
+    (Story) => (
+      <div className="w-64 max-w-full">
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+export const UnbrokenLabels: Story = {
+  args: { block: specimen("question-card-unbroken").block },
+  decorators: NarrowQuestion.decorators,
+};
+
+export const WrappedSubmission: Story = {
+  ...NarrowQuestion,
+  args: { ...NarrowQuestion.args, onSubmitAppComponent: fn() },
+  play: async ({ canvas, args }) => {
+    const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
+    const option = canvas.getByRole("button", { name: answer });
+    option.focus();
+    await userEvent.keyboard(" ");
+    await expect(option).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
+    await expect(args.onSubmitAppComponent).toHaveBeenCalledWith(
+      "storybook-chat-blocks",
+      "dev-ask-cjk",
+      { answers: [{ questionId: "i18n", value: answer }] },
+      answer,
+    );
+    await expect(option).toBeDisabled();
   },
 };

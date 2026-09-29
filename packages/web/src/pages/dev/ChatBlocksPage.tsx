@@ -82,7 +82,7 @@ export const CHAT_BLOCK_SPECIMENS: Specimen[] = [
   {
     id: "question-card-wrapped",
     title: "QuestionCard — wrapped option",
-    note: "An option long enough to take two lines. The card's only control that is not a fixed step: it holds the sm floor on one line and grows past it here.",
+    note: "An option long enough to take two lines. Options hold the sm floor on one line and grow with their labels when they wrap.",
     block: askQuestion("dev-ask-wrapped", [
       {
         id: "opening",
@@ -92,6 +92,54 @@ export const CHAT_BLOCK_SPECIMENS: Specimen[] = [
           "Open on what the reader stops doing once Rome is running, rather than on anything we shipped this quarter",
           "Open on the waitlist itself",
         ],
+      },
+    ]),
+  },
+  {
+    id: "question-card-cjk",
+    title: "QuestionCard — wide compact options",
+    note: "Chinese labels below the 32-character threshold must fit narrow chat columns without losing their text.",
+    block: askQuestion("dev-ask-cjk", [
+      {
+        id: "i18n",
+        question: "要给 TikHub app 加 i18n 吗？",
+        type: "single",
+        options: [
+          "要，中文 + 英文，默认跟随 Rome 界面语言",
+          "要，中文 + 英文，并在设置页加手动切换",
+          "先不做，保持纯中文",
+        ],
+        freeText: true,
+      },
+      {
+        id: "titles",
+        question: "TikHub 接口本身的标题/说明（来自上游文档）怎么处理？",
+        type: "multi",
+        options: ["按当前语言只显示对应的那一半（中文取「/」前，英文取后）", "保持原样双语显示"],
+        freeText: true,
+        optional: true,
+      },
+    ]),
+  },
+  {
+    id: "question-card-unbroken",
+    title: "QuestionCard — unbroken labels",
+    note: "The 32/33-character boundary changes the layout, but neither branch may overflow on a token or URL without spaces.",
+    block: askQuestion("dev-ask-unbroken", [
+      {
+        id: "compact-token",
+        question: "Which identifier?",
+        type: "single",
+        options: ["W".repeat(32), "Short"],
+        freeText: true,
+      },
+      {
+        id: "stacked-token",
+        question: `https://example.com/${"long-path".repeat(12)}`,
+        type: "single",
+        options: ["W".repeat(33), `https://example.com/${"long-path".repeat(12)}`],
+        freeText: true,
+        optional: true,
       },
     ]),
   },
@@ -180,7 +228,7 @@ export function ChatBlockPreview({
 
 function SpecimenFrame({ specimen }: { specimen: Specimen }) {
   return (
-    <section className="space-y-2">
+    <section id={specimen.id} className="space-y-2">
       <div>
         <h2 className="text-section text-foreground">{specimen.title}</h2>
         <p className="max-w-2xl text-ui text-muted-foreground">{specimen.note}</p>
