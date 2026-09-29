@@ -1485,6 +1485,12 @@ export interface TalkDirectory {
  * The two are separate answers because they fail differently — a channel that
  * does not do direct messaging at all is a different thing from one that does
  * but has no thread with this person yet.
+ *
+ * A talker offering this must return a `messageId` from `send`. Rome recognizes
+ * a sent message when it comes back — from the provider's own mirror, or from
+ * Rome's transcript of the exchange — and the provider's id is the only thing
+ * both spellings of that entry share. A send accepted anonymously cannot be
+ * followed, and is reported as delivered the moment the channel takes it.
  */
 export interface TalkDirectMessaging {
   /**
@@ -1498,15 +1504,6 @@ export interface TalkDirectMessaging {
    */
   conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
-
-/**
- * A talker offering {@link TalkDirectMessaging} must return a `messageId` from
- * `send`. Rome recognizes a sent message when it comes back — from the
- * provider's own mirror, or from Rome's transcript of the exchange — and the
- * provider's id is the only thing both spellings of that entry share. A send
- * accepted anonymously cannot be followed, and is reported as delivered the
- * moment the channel takes it.
- */
 
 export interface TalkFeatureMap {
   history: TalkHistory;
