@@ -133,7 +133,7 @@ export { compareCodePoints };
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
   const normalizedB = b.normalize("NFC");
-  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  const byFolded = compareCodePoints(caseFold(normalizedA), caseFold(normalizedB));
   return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
 }
 
@@ -148,9 +148,21 @@ export function compareDisplayNames(a: string, b: string): number {
  * should find a row that stored it decomposed, and the reverse.
  */
 export function matchesQuery(query: string, haystack: readonly string[]): boolean {
-  const q = query.normalize("NFC").trim().toLowerCase();
+  const q = caseFold(query.normalize("NFC").trim());
   if (!q) return true;
-  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+  return caseFold(haystack.join(" ").normalize("NFC")).includes(q);
+}
+
+/**
+ * Unicode case folding, which JavaScript has no built-in for, shared by the
+ * name orderings and search so they fold alike.
+ *
+ * Lowercasing alone misses the folds that expand or merge letters: "ß" and
+ * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
+ * up; the last step maps final sigma onto the medial one, as folding does.
+ */
+function caseFold(value: string): string {
+  return value.toLowerCase().toUpperCase().toLowerCase().replaceAll("ς", "σ");
 }
 
 /**

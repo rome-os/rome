@@ -161,6 +161,12 @@ describe("orderings do not depend on the host locale", () => {
     expect(compareDisplayNames("ada", "Ada")).not.toBe(0);
     expect(compareDisplayNames("Ada", "bob")).toBeLessThan(0);
   });
+
+  it("folds case the Unicode way, not only by lowercasing", () => {
+    // "Straße" folds to "strasse", so it sorts before "Strassf"; lowercasing
+    // alone keeps the "ß", a code point above every ASCII letter.
+    expect(compareDisplayNames("Straße", "Strassf")).toBeLessThan(0);
+  });
 });
 
 describe("what a search matches", () => {
@@ -169,6 +175,15 @@ describe("what a search matches", () => {
     // decomposed, and the reverse.
     expect(personMatchesQuery(person({ id: "x", displayName: "Jose\u0301" }), "José")).toBe(true);
     expect(personMatchesQuery(person({ id: "x", displayName: "José" }), "Jose\u0301")).toBe(true);
+  });
+
+  it("matches names that differ only by Unicode case folding", () => {
+    // Full folding, which lowercasing misses: "ß" is "ss", and a final sigma
+    // is the same letter as a medial one.
+    expect(personMatchesQuery(person({ id: "x", displayName: "Anna Straße" }), "STRASSE")).toBe(
+      true,
+    );
+    expect(personMatchesQuery(person({ id: "x", displayName: "Νικος" }), "νικοσ")).toBe(true);
   });
 
   it("finds a person by an account they hold, not only by their name", () => {
