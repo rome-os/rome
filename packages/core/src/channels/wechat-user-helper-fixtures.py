@@ -103,21 +103,27 @@ class ContactTests(unittest.TestCase):
     ]
     NOT_FRIENDS = ["filehelper", "weixin", "fmessage", "medianote", "floatbottle", "wxid_brand", "wxid_gone"]
 
-    def run_cmd(self, fn, delete_flag=True, names=None, **args):
+    def write_contacts(self, db, rows, delete_flag=True):
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE contact (id INTEGER PRIMARY KEY, username TEXT, nick_name TEXT,"
+                         " remark TEXT, alias TEXT, local_type INTEGER, verify_flag INTEGER"
+                         + (", delete_flag INTEGER)" if delete_flag else ")"))
+            rows = rows if delete_flag else [r[:6] for r in rows if not r[6]]
+            cols = "username, nick_name, remark, alias, local_type, verify_flag" + (", delete_flag" if delete_flag else "")
+            conn.executemany(f"INSERT INTO contact ({cols}) VALUES ({', '.join('?' * len(rows[0]))})", rows)
+            conn.commit()
+
+    def run_cmd(self, fn, delete_flag=True, names=None, self_username="wxid_self", pre_decrypted=None, **args):
         with tempfile.TemporaryDirectory() as directory:
             db = str(Path(directory) / "contact.db")
-            with closing(sqlite3.connect(db)) as conn:
-                conn.execute("CREATE TABLE contact (id INTEGER PRIMARY KEY, username TEXT, nick_name TEXT,"
-                             " remark TEXT, alias TEXT, local_type INTEGER, verify_flag INTEGER"
-                             + (", delete_flag INTEGER)" if delete_flag else ")"))
-                rows = self.ROWS if delete_flag else [r[:6] for r in self.ROWS if not r[6]]
-                cols = "username, nick_name, remark, alias, local_type, verify_flag" + (", delete_flag" if delete_flag else "")
-                conn.executemany(f"INSERT INTO contact ({cols}) VALUES ({', '.join('?' * len(rows[0]))})", rows)
-                conn.commit()
+            self.write_contacts(db, self.ROWS, delete_flag)
+            if pre_decrypted:  # the copy wechat-cli reads first, when it exists
+                os.makedirs(Path(directory) / "contact")
+                self.write_contacts(str(Path(directory) / "contact" / "contact.db"), pre_decrypted)
             cache = types.SimpleNamespace(get=lambda rel: db if rel == os.path.join("contact", "contact.db") else None)
             app = types.SimpleNamespace(cache=cache, decrypted_dir=directory, db_dir=directory)
             contacts = types.ModuleType("wechat_cli.core.contacts")
-            contacts.get_self_username = lambda *a: "wxid_self"
+            contacts.get_self_username = lambda *a: self_username
             # wechat-cli's own rule (remark, else nickname, else wxid), unless a test overrides it
             contacts.get_contact_names = lambda *a: names if names is not None else {
                 r[0]: r[2] or r[1] or r[0] for r in self.ROWS}
@@ -171,8 +177,21 @@ class ContactTests(unittest.TestCase):
         # One source with conversationName: whatever get_contact_names answers, not a local rule.
         record = self.run_cmd(helper.cmd_contact, names={"wxid_wang": "Wang F."}, username="wxid_wang")["contact"]
         self.assertEqual((record["name"], record["displayName"]), ("Wang F.", "Wang F."))
-        record = self.run_cmd(helper.cmd_contact, names={}, username="wxid_li")["contact"]
+        record = self.run_cmd(helper.cmd_contact, names={"wxid_self": "Me"}, username="wxid_li")["contact"]
         self.assertEqual(record["displayName"], "wxid_li")  # unknown to wechat-cli: the wxid, as conversationName
+
+    def test_rows_come_from_the_copy_wechat_cli_reads(self):
+        pre = [("wxid_self", "Me", "", "", 1, 0, 0), ("wxid_pre", "Pre Copy", "", "", 1, 0, 0)]
+        listed = [c["id"] for c in self.run_cmd(helper.cmd_contacts, pre_decrypted=pre, limit=50, query=None)["contacts"]]
+        self.assertEqual(listed, ["wxid_pre"])  # the pre-decrypted copy, not the cache's
+
+    def test_a_failed_name_load_is_an_error_not_wxids(self):
+        with self.assertRaisesRegex(helper.Unavailable, "contact names could not be read"):
+            self.run_cmd(helper.cmd_contacts, names={}, limit=50, query=None)
+
+    def test_an_unknown_self_is_an_error_not_a_friend(self):
+        with self.assertRaisesRegex(helper.Unavailable, "signed-in WeChat account could not be found"):
+            self.run_cmd(helper.cmd_contact, self_username="", username="wxid_self")
 
     def test_an_unknown_contact_is_null(self):
         self.assertEqual(self.run_cmd(helper.cmd_contact, username="wxid_nobody"), {"contact": None})

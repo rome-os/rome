@@ -325,6 +325,27 @@ class SendTests(unittest.TestCase):
         client.on_text, client.list.children = web_first, local_later
         self.assertEqual(send(client, desk, store, clock), "filehelper:1")
 
+    def test_a_local_section_loading_above_a_settled_more_section_is_not_ambiguous(self):
+        client, desk, store, clock = rig()
+        on_text, children, later, polls = client.on_text, client.list.children, [], [0]
+
+        def more_first(node):
+            on_text(node)
+            if client.pending:  # the target first shows only under "More"
+                later.append(client.pending[1])
+                q = client.search.value
+                client.pending = [client.pending[0], [("More", "header"), (q, "local"),
+                                                      ("Internet search results", "header"), (q, "web")]]
+
+        def local_above_later():
+            if later and client.rows and client.rows[0][0] == "More":
+                polls[0] += 1
+                if polls[0] >= 10:  # held past the early settle, then the local section loads above
+                    client.set_rows(later.pop())
+            return children()
+        client.on_text, client.list.children = more_first, local_above_later
+        self.assertEqual(send(client, desk, store, clock), "filehelper:1")
+
     def test_a_same_named_row_that_loads_during_the_keys_is_ambiguous(self):
         client, desk, store, clock = rig()
         key = client.key
@@ -754,7 +775,22 @@ class SendTests(unittest.TestCase):
                 return
             client_key(name)
         client.key = ctrl_enter_to_send
-        self.assertFails("no-echo", True, lambda: send(client, desk, store, clock))
+        start = clock.now
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
+        self.assertLess(clock.now - start, d.ECHO_TIMEOUT_S)  # fails fast, no echo wait
+
+    def test_a_line_break_before_the_body_is_also_unsent(self):
+        client, desk, store, clock = rig()
+        client_key = client.key
+
+        def caret_at_start(name):  # the caret sat at the start, so the break went first
+            if name == "Return" and client.focus is client.input:
+                client.input.value = "\n" + client.input.value
+                return
+            client_key(name)
+        client.key = caret_at_start
+        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
         self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
 
     def test_a_longer_leftover_is_not_cleared(self):

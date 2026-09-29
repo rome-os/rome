@@ -278,10 +278,17 @@ class Driver:
         web = {r[0] + 1 for r in rows if r[2] == NONLOCAL_HEADERS[0]}
         return [r for r in rows if r[2] == name and r[0] not in web]
 
+    @staticmethod
+    def opens_first(rows, name):
+        """The ranking that opens the target: a local header first, the target right under it."""
+        return len(rows) > 1 and rows[0][2] not in NONLOCAL_HEADERS and rows[1][2] == name
+
     def settle(self, box, name):
         """The real results (not the recent searches shown first) once they have
-        stopped changing: at once when they hold a local row named after the query,
-        else at the deadline, since local sections can load after the web one.
+        stopped changing: at once when their ranking opens the target, else at the
+        deadline. Local sections can load after the web one, so any other ranking
+        (target absent, below another row, or under a web or "More" header first)
+        is final only if it still holds when the window closes.
         Returns (rows or None when they never settled, whether a results panel showed)."""
         seen, stable, steady, panel, deadline = None, 0, None, False, self.clock.time() + 6
         while self.clock.time() < deadline and FOCUSED in box.states():
@@ -292,7 +299,7 @@ class Driver:
             stable = stable + 1 if self.are_results(rows, name) and names == seen else 0
             seen = names
             steady = rows if stable >= 2 else None
-            if steady and self.local_hits(rows, name):
+            if steady and self.opens_first(rows, name):
                 return rows, True
         return steady, panel
 
@@ -312,12 +319,12 @@ class Driver:
             raise Failure("not-found", f"no search result is named {name!r}")
         if len(self.local_hits(rows, name)) > 1:
             raise Failure("ambiguous", f"more than one search result is named {name!r}")
-        header = rows[0][2]
-        if header in NONLOCAL_HEADERS or len(rows) < 2 or rows[1][2] != name:
-            # The settled ranking puts the target below another result, or in a section that
-            # holds no chat. That stays so on a retry: the name does not lead to this one chat.
+        if not self.opens_first(rows, name):
+            # This ranking held through the whole settle window, so it is final: the target
+            # sits below another result, or in a section that holds no chat. A retry gives the
+            # same answer; the name does not lead to this one chat.
             raise Failure("ambiguous", f"the result named {name!r} is not the first local one (top: "
-                          f"{rows[1][2] if len(rows) > 1 else None!r} under {header!r})")
+                          f"{rows[1][2] if len(rows) > 1 else None!r} under {rows[0][2]!r})")
         self.key("Down", box)
         self.key("Up", box)
         rows = self.rows()
@@ -389,15 +396,25 @@ class Driver:
         self.guard("Return", box)
         self.returned = True  # from here the text may have gone out
         self.desk.key("Return")
-        # No verdict from the input here: a slow client can still be sending. Only the
-        # store decides, over the whole echo budget (`_send`).
+        # One look right after Return, name read last: a line break added to the body means
+        # the client sends with Ctrl+Enter and nothing went out. Anything else is no verdict:
+        # a slow client can still be sending, and only the store decides (`_send`).
+        try:
+            unsent = box.text() in (body + "\n", "\n" + body) and box.name == name
+        except Exception:  # noqa: BLE001 — unreadable: leave it to the store
+            unsent = False
+        if unsent:
+            with contextlib.suppress(Exception):
+                box.set_text("")
+            raise Failure("not-ready", "Return added a line break instead of sending, so the client "
+                          "probably sends with Ctrl+Enter; nothing was sent and the input was cleared", True)
 
     def clear_leftover(self, name, body):
         """After Return, a copy of the body still in the target's input, read name
         last, is cleared, so the guardian cannot send it again by accident. With
         Ctrl+Enter to send, Return only adds a line break to it."""
         with contextlib.suppress(Exception):
-            if self.box and self.box.text() in (body, body + "\n") and self.box.name == name:
+            if self.box and self.box.text() in (body, body + "\n", "\n" + body) and self.box.name == name:
                 self.box.set_text("")
 
     def send(self, chat_id, name, body, press_return=True):

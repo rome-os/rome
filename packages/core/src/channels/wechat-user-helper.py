@@ -330,11 +330,19 @@ def contact_record(row, self_username, names):
             "displayName": name, "alias": alias or None}
 
 
+def contact_db_path(app):
+    """The contact database copy wechat-cli's `get_contact_names` and
+    `get_self_username` read: the pre-decrypted file when it exists, else the
+    cache's. Rows and names then always come from one copy."""
+    pre_decrypted = os.path.join(app.decrypted_dir, "contact", "contact.db")
+    return pre_decrypted if os.path.exists(pre_decrypted) else app.cache.get(os.path.join("contact", "contact.db"))
+
+
 def contact_rows(where="", params=()):
     app = app_context()
     from wechat_cli.core.contacts import get_contact_names, get_self_username
 
-    path = app.cache.get(os.path.join("contact", "contact.db"))
+    path = contact_db_path(app)
     if not path:
         raise Unavailable("The WeChat contact database could not be decrypted.")
     with closing(sqlite3.connect(path)) as conn:
@@ -344,8 +352,15 @@ def contact_rows(where="", params=()):
         rows = conn.execute(
             f"SELECT username, alias, local_type, verify_flag, {deleted} FROM contact" + where, params
         ).fetchall()
-    self_username = get_self_username(app.db_dir, app.cache, app.decrypted_dir)
+        has_contacts = conn.execute("SELECT 1 FROM contact LIMIT 1").fetchone() is not None
+    # wechat-cli answers an empty map, and no self name, when its own read fails. Falling
+    # back to wxids would hide that, and would let the account itself pass as a friend.
     names = get_contact_names(app.cache, app.decrypted_dir)
+    if has_contacts and not names:
+        raise Unavailable("The WeChat contact names could not be read.")
+    self_username = get_self_username(app.db_dir, app.cache, app.decrypted_dir)
+    if has_contacts and not self_username:
+        raise Unavailable("The signed-in WeChat account could not be found among its contacts.")
     return [contact_record(row, self_username, names) for row in rows]
 
 
