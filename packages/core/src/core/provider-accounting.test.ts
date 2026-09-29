@@ -53,6 +53,17 @@ describe("provider-accounting", () => {
     expect(impliedCostUsd).toBeCloseTo(22.05);
   });
 
+  it("prices Anthropic Sonnet 5.5 at the Sonnet rates", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-sonnet-5-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    });
+
+    expect(impliedCostUsd).toBeCloseTo(22.05);
+  });
+
   it("matches model aliases with dated suffixes", () => {
     const accounting = buildAgentAccounting({
       provider: "anthropic",

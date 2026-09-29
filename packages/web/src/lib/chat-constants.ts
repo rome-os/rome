@@ -10,6 +10,7 @@ export const LARGE_MODEL_OPTIONS = [
   { id: "claude-opus-5-5", labelKey: "modelSelector.options.opus55" },
   { id: "claude-opus-5", labelKey: "modelSelector.options.opus5" },
   { id: "claude-opus-4-6", labelKey: "modelSelector.options.opus46" },
+  { id: "claude-sonnet-5-5", labelKey: "modelSelector.options.sonnet55" },
   { id: "claude-sonnet", labelKey: "modelSelector.options.sonnet" },
   { id: "claude-haiku", labelKey: "modelSelector.options.haiku" },
   { id: "claude-fable", labelKey: "modelSelector.options.fable" },

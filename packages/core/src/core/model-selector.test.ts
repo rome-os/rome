@@ -29,6 +29,11 @@ describe("webchat model selector", () => {
       providerId: "anthropic",
       model: "claude-opus-4-6[1m]",
     });
+    expect(resolveWebchatLargeModelSelection("claude-sonnet-5-5")).toMatchObject({
+      id: "claude-sonnet-5-5",
+      providerId: "anthropic",
+      model: "claude-sonnet-5-5",
+    });
     expect(resolveWebchatLargeModelSelection("claude-sonnet")).toMatchObject({
       providerId: "anthropic",
       model: "claude-sonnet-5",

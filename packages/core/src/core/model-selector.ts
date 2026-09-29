@@ -11,6 +11,7 @@ export type WebchatLargeModelSelectionId =
   | "claude-opus-5-5"
   | "claude-opus-5"
   | "claude-opus-4-6"
+  | "claude-sonnet-5-5"
   | "claude-sonnet"
   | "claude-haiku"
   | "claude-fable"
@@ -54,6 +55,11 @@ export const WEBCHAT_LARGE_MODEL_SELECTIONS: Record<ModelSelectionId, WebchatLar
       id: "claude-opus-4-6",
       providerId: "anthropic",
       model: "claude-opus-4-6[1m]",
+    },
+    "claude-sonnet-5-5": {
+      id: "claude-sonnet-5-5",
+      providerId: "anthropic",
+      model: "claude-sonnet-5-5",
     },
     "claude-sonnet": {
       id: "claude-sonnet",

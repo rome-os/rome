@@ -120,7 +120,7 @@ describe("ModelSelectorMenu", () => {
     // Filter down to a non-curated model, then pick it — selection closes the menu.
     await user.type(screen.getByPlaceholderText("Search models…"), "sonnet");
     await waitFor(() => expect(optionNames()).toContain("Sonnet"));
-    await user.click(screen.getByRole("option", { name: /Sonnet/ }));
+    await user.click(screen.getByRole("option", { name: /^Sonnet$/ }));
     expect(props.onChange).toHaveBeenCalledWith("claude-sonnet");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
 

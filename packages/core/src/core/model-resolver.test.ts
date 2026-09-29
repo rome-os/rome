@@ -153,6 +153,12 @@ describe("ModelResolver", () => {
       model: "claude-opus-5-5[1m]",
     });
     await expect(
+      resolver().getModelProvider({ tier: "medium", providerId: "anthropic" }),
+    ).resolves.toMatchObject({
+      modelProvider: claude,
+      model: "claude-sonnet-5-5",
+    });
+    await expect(
       resolver().getModelProvider({ tier: "small", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
