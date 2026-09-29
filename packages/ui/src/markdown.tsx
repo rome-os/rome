@@ -167,9 +167,14 @@ function dropTrailingEmptyListItems(node: MdastNode): void {
   );
 }
 
+// Named, since Streamdown keys its shared processor cache by plugin name.
+function remarkDropTrailingEmptyListItems() {
+  return dropTrailingEmptyListItems;
+}
+
 const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [
   ...Object.values(defaultRemarkPlugins),
-  () => dropTrailingEmptyListItems,
+  remarkDropTrailingEmptyListItems,
 ];
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
