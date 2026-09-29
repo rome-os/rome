@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { ChannelMessageHookDeps } from "@rome-os/app-runtime";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,7 +57,7 @@ export function createHook() {
     let current: ChannelMessageHook = createNoopChannelMessageHook();
     const reload = createChannelMessageHookReloader({
       catalog: catalogWithHookDir(dir),
-      deps: {},
+      deps: {} as ChannelMessageHookDeps,
       getCurrent: () => current,
       setCurrent: (hook) => {
         current = hook;
@@ -91,7 +92,7 @@ export function createHook() {
     const onSkip = rs.fn();
     const reload = createChannelMessageHookReloader({
       catalog: catalogWithHookDir(dir),
-      deps: {},
+      deps: {} as ChannelMessageHookDeps,
       getCurrent: () => current,
       setCurrent: (hook) => {
         current = hook;
@@ -122,7 +123,7 @@ export function createHook() {
     let current: ChannelMessageHook = previous;
     const reload = createChannelMessageHookReloader({
       catalog: catalogWithHookDir(dir),
-      deps: {},
+      deps: {} as ChannelMessageHookDeps,
       getCurrent: () => current,
       setCurrent: (hook) => {
         current = hook;

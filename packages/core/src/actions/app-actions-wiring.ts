@@ -5,7 +5,11 @@ import type { Action, ActionConfig } from "./types.js";
 import type { ChannelMessageHook } from "../hooks/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { ActionExecutionContext, AppRuntimeRepositories } from "@rome-os/app-runtime";
+import type {
+  ActionExecutionContext,
+  AppRuntimeRepositories,
+  ChannelMessageHookDeps,
+} from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
@@ -252,7 +256,7 @@ export function createAppActionsSubscriber(
 
 export async function createChannelMessageHookFromCatalog(
   catalog: AppCatalog,
-  deps: unknown,
+  deps: ChannelMessageHookDeps,
 ): Promise<ChannelMessageHook | null> {
   const hooks = catalog.listArtifacts("hook");
   const hookRef = hooks.find((artifact) => artifact.publicName === "channel-message");
@@ -285,7 +289,7 @@ export async function createChannelMessageHookFromCatalog(
  */
 export function createChannelMessageHookReloader(options: {
   catalog: AppCatalog;
-  deps: unknown;
+  deps: ChannelMessageHookDeps;
   getCurrent: () => ChannelMessageHook;
   setCurrent: (hook: ChannelMessageHook) => void;
   onSkip?: (reason: string) => void;
