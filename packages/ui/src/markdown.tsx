@@ -11,7 +11,13 @@ import {
   useSyncExternalStore,
   type ComponentPropsWithoutRef,
 } from "react";
-import { Streamdown, type Components, type MermaidOptions, type StreamdownProps } from "streamdown";
+import {
+  defaultRemarkPlugins,
+  Streamdown,
+  type Components,
+  type MermaidOptions,
+  type StreamdownProps,
+} from "streamdown";
 import { cn } from "./cn.js";
 import { MermaidDownloadMenuLayer } from "./mermaid-download-menu.js";
 
@@ -138,6 +144,33 @@ export interface MarkdownProps {
 }
 
 const STREAMDOWN_PLUGINS = { code, math, mermaid };
+
+interface MdastNode {
+  type: string;
+  children?: MdastNode[];
+}
+
+/**
+ * CommonMark reads a closing bare marker (`-`, `* `, `3. `) as an empty list
+ * item, which renders as a lone bullet under the list. Nobody means that, so
+ * trailing empty items are dropped, along with a list they leave empty.
+ * Empty items between filled ones are kept.
+ */
+function dropTrailingEmptyListItems(node: MdastNode): void {
+  if (!node.children) return;
+  for (const child of node.children) dropTrailingEmptyListItems(child);
+  if (node.type === "list") {
+    while (node.children.at(-1)?.children?.length === 0) node.children.pop();
+  }
+  node.children = node.children.filter(
+    (child) => child.type !== "list" || (child.children?.length ?? 0) > 0,
+  );
+}
+
+const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [
+  ...Object.values(defaultRemarkPlugins),
+  () => dropTrailingEmptyListItems,
+];
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
   fontFamily: ["--font-sans"],
@@ -427,6 +460,7 @@ function MarkdownImpl({
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={STREAMDOWN_PLUGINS}
+        remarkPlugins={REMARK_PLUGINS}
         urlTransform={urlTransform}
       >
         {children}
