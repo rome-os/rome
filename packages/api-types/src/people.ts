@@ -164,11 +164,16 @@ export function matchesQuery(query: string, haystack: readonly string[]): boolea
  * medial one and Cherokee its uppercase, as folding does, and the result is
  * normalized again, since the round trip can decompose a letter.
  *
- * Printable ASCII folds exactly as it lowercases, and a directory sort folds
- * every name on each comparison, so it skips the round trip.
+ * A directory sort folds every name on each comparison, so text that folds
+ * exactly as it lowercases skips the round trip: printable ASCII, and the
+ * caseless CJK punctuation, kana, ideographs and Hangul syllables most names
+ * here are written in. That holds for NFC input, which both callers pass; a
+ * decomposed kana voicing mark would otherwise stay apart from its letter.
  */
 function caseFold(value: string): string {
-  if (!/[^ -~]/.test(value)) return value.toLowerCase();
+  if (!/[^ -~\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(value)) {
+    return value.toLowerCase();
+  }
   return value
     .toLowerCase()
     .split("ı")
