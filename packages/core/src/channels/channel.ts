@@ -20,6 +20,7 @@ import type {
   ChannelInbound,
   ChannelSend as AppChannelSend,
   InboundEvent,
+  TalkActivity,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
@@ -31,8 +32,8 @@ import type { Messages } from "./messages.js";
 export type { InboundEvent };
 export type Inbound = ChannelInbound;
 
-/** Sending on a channel, as core's channels do it: the SDK's send port, and a
- *  way to reach one account directly. */
+/** Sending on a channel, as core's channels do it: the SDK's send port, a way
+ *  to reach one account directly, and a typing indicator. */
 export interface ChannelSend extends AppChannelSend {
   /**
    * Reaching one account directly rather than replying in a conversation that
@@ -42,6 +43,9 @@ export interface ChannelSend extends AppChannelSend {
    * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
   readonly direct: TalkDirectMessaging | null;
+  /** Showing the account that a reply is on its way, or null where the
+   *  channel cannot now. */
+  readonly activity: TalkActivity | null;
 }
 
 /** A send, or a direct-conversation lookup, on a channel nothing backs now. */

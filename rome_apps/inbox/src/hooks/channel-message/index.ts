@@ -4,11 +4,11 @@ import type {
   Channel,
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
+  ChannelMessageHookDeps,
   ConversationId,
   ConversationSettingsControl,
   InboundEvent,
   TalkActivitySession,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -26,7 +26,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
-    private readonly talkRouter: TalkRouter,
     private readonly conversationSettings: ConversationSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
@@ -135,7 +134,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     const activity = Promise.resolve()
       .then(
         () =>
-          this.talkRouter.feature(connectionId, "activity")?.begin({
+          channel.send?.activity?.begin({
             conversationId: message.conversationId,
             messageId: message.messageId,
           }) ?? null,
@@ -242,16 +241,22 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
   }
 }
 
-export function createHook(deps: {
-  actionEngine: ActionEngineLike;
-  talkRouter: TalkRouter;
-  conversationSettings: ConversationSettingsControl;
-  chatStop: ChatStopHandler;
-  channels: readonly Channel[];
-}): ChannelMessageHookInterface {
+/** A host handed the hook no `channels`, so it would hear nothing. */
+export class MissingChannelsError extends Error {
+  constructor() {
+    super(
+      "The channel-message hook needs `channels` in its deps; this host passes none, so inbound messages would go unheard.",
+    );
+    this.name = "MissingChannelsError";
+  }
+}
+
+/** Build the hook. Fails with {@link MissingChannelsError} on a host that
+ *  passes no `channels`; the host keeps booting and reports the hook failed. */
+export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInterface {
+  if (!Array.isArray(deps.channels)) throw new MissingChannelsError();
   return new ChannelMessageHook(
     deps.actionEngine,
-    deps.talkRouter,
     deps.conversationSettings,
     deps.chatStop,
     deps.channels,

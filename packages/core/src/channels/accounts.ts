@@ -1,6 +1,6 @@
 /**
- * A channel's address book. `ProviderAdapter` (adapter.ts) moves text; this
- * is who a channel can reach, and which of the identifiers a channel hands out
+ * A channel's address book. A channel's `send` and `inbound` ports
+ * (channel.ts) move messages; this is who a channel can reach, and which of the identifiers a channel hands out
  * name one and the same account. Vocabulary: docs/concepts/people.md.
  *
  * An account answers *who*. What was said to it — a last message, a count, a

@@ -100,9 +100,8 @@ export class ConversationBuffers<T> {
   }
 
   private async drain(conversation: string, entry: Conversation<T>): Promise<void> {
-    // Start one microtask after the push, so no handler runs inside the
-    // caller's push: not ahead of the other subscribers' pushes, and not inside
-    // the router's admission lock.
+    // Start one microtask after the push, so no handler starts inside the
+    // caller's push loop, ahead of the other subscribers' pushes.
     await Promise.resolve();
     let item = entry.waiting.shift();
     while (item !== undefined && !this.closed) {

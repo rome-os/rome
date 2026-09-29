@@ -8,7 +8,7 @@ function channel(name: string, send: ChannelSend | null): Channel {
 }
 
 function sending(direct: TalkDirectMessaging | null): ChannelSend {
-  return { send: async (conversationId) => ({ conversationId }), direct };
+  return { send: async (conversationId) => ({ conversationId }), direct, activity: null };
 }
 
 describe("readSendStates", () => {

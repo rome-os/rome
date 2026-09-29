@@ -1,6 +1,7 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
+import type { ConversationSettingsControl } from "./conversation-settings.js";
 
 export { z };
 export type { JSONSchema };
@@ -1560,6 +1561,10 @@ export interface TalkRouter {
 /** Sending on a channel. */
 export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  /** Showing the account that a reply is on its way (a typing indicator), or
+   *  null or absent where the channel cannot. Cosmetic: a caller never waits
+   *  on it to answer. */
+  readonly activity?: TalkActivity | null;
 }
 
 /**
@@ -1623,6 +1628,19 @@ export interface Channel {
   readonly name: string;
   readonly send: ChannelSend | null;
   readonly inbound: ChannelInbound | null;
+}
+
+/**
+ * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
+ * hears inbound messages through `channels`, one subscription per channel that
+ * can receive; `talkRouter` stays for hooks that still address Connections.
+ */
+export interface ChannelMessageHookDeps {
+  actionEngine: ActionEngineLike;
+  talkRouter: TalkRouter;
+  conversationSettings: ConversationSettingsControl;
+  chatStop: ChatStopHandler;
+  channels: readonly Channel[];
 }
 
 export interface ChannelMessageHook {

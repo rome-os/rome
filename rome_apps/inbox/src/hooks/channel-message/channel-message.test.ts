@@ -11,7 +11,7 @@ import type {
   TalkFeatureName,
   TalkRouter,
 } from "@rome-os/app-runtime";
-import { ChannelMessageHook } from "./index.js";
+import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
 
 const TELEGRAM_ID = "connection:telegram";
 const WHATSAPP_ID = "connection:whatsapp";
@@ -58,7 +58,7 @@ function snapshot(
   };
 }
 
-function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>[5] = {}) {
+function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>[4] = {}) {
   const handlers = new Map<string, (event: InboundEvent) => Promise<void>>();
   const features = new Map<string, Partial<TalkFeatureMap>>();
   const run = rs.fn(async () => ({ status: "ok" as const }));
@@ -76,12 +76,14 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   );
   const feature = <K extends TalkFeatureName>(connectionId: string, name: K) =>
     (features.get(connectionId)?.[name] ?? null) as TalkFeatureMap[K] | null;
-  const talkRouter = { feature } as unknown as TalkRouter;
   // One channel per Connection, as the channel list builds them.
   const channel = (name: string, connectionId: string): Channel => ({
     name,
     send: {
       send: (conversationId, outgoing) => send(connectionId, conversationId, outgoing),
+      get activity() {
+        return feature(connectionId, "activity");
+      },
     },
     inbound: {
       subscribe: (handler) => {
@@ -96,7 +98,6 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const channels = [channel("telegram", TELEGRAM_ID), channel("whatsapp", WHATSAPP_ID)];
   const hook = new ChannelMessageHook(
     actionEngine,
-    talkRouter,
     conversationSettings,
     chatStop,
     channels,
@@ -323,7 +324,7 @@ describe("ChannelMessageHook", () => {
     await expect(harness.emit(WHATSAPP_ID, message())).rejects.toThrow("no subscription");
 
     // The host swaps in a replacement after an app-keys change; register() on
-    // the (here: same) instance must resubscribe everything talkRouter lists.
+    // the (here: same) instance must resubscribe every channel that receives.
     await harness.hook.register();
     await harness.emit(TELEGRAM_ID, message({ text: "after reload" }));
     expect(harness.run).toHaveBeenCalledTimes(1);
@@ -359,5 +360,15 @@ describe("ChannelMessageHook", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+  it("refuses, by name, a host that passes no channels", () => {
+    expect(() =>
+      createHook({
+        actionEngine: {} as ActionEngineLike,
+        talkRouter: {} as TalkRouter,
+        conversationSettings: {} as ConversationSettingsControl,
+        chatStop: async () => ({ status: "idle" }),
+      } as unknown as Parameters<typeof createHook>[0]),
+    ).toThrow(MissingChannelsError);
   });
 });

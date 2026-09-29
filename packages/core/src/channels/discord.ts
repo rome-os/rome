@@ -303,8 +303,7 @@ export interface GuildChannelInfo {
 
 /**
  * Narrow structural view of {@link DiscordAdapter} for cross-module callers
- * (e.g. `worker-rpc.ts`) that hold a generic `ProviderAdapter` and need the
- * Discord-specific methods. Keeping the surface in one exported interface lets
+ * that need the Discord-specific methods. Keeping the surface in one exported interface lets
  * TypeScript catch signature drift at those call sites instead of letting a
  * hand-written structural cast silently rot.
  */

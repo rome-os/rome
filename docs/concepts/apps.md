@@ -215,7 +215,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 
 Hooks are event handlers that trigger behavior in response to system events. An app declares its hooks in its manifest.
 
-The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives on any [channel](messaging.md#channels) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing.
+The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives on any [channel](messaging.md#channels) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
 Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available.
 

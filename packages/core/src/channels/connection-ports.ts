@@ -68,6 +68,10 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
       if (!connectionId) return unbacked;
       return deps.router.feature(connectionId, "directMessaging");
     },
+    get activity() {
+      const connectionId = connectionIdFor(deps, service);
+      return connectionId ? deps.router.feature(connectionId, "activity") : null;
+    },
   };
 }
 

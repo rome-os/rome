@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage, TalkDirectMessaging } from "@rome-os/app-runtime";
+import type {
+  ConversationId,
+  InboundMessage,
+  TalkActivity,
+  TalkDirectMessaging,
+} from "@rome-os/app-runtime";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -32,6 +37,7 @@ function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean } = {},
   direct: TalkDirectMessaging | null = null,
+  activity: TalkActivity | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
   return {
@@ -55,7 +61,11 @@ function talkService(
                 return { conversationId, messageId: `sent-${epochs.length}` };
               },
               feature: ((name: string) =>
-                name === "directMessaging" ? direct : null) as Talker["feature"],
+                name === "directMessaging"
+                  ? direct
+                  : name === "activity"
+                    ? activity
+                    : null) as Talker["feature"],
             };
           },
         },
@@ -167,6 +177,21 @@ describe("channelList", () => {
     await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
     // A Connection whose talker offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
+  });
+
+  it("shows typing through the send port once a Connection offers it", async () => {
+    const begin = rs.fn(async () => null);
+    const { registry, channels } = setup([talkService("telegram", {}, null, { begin }).descriptor]);
+    const send = channels.find((channel) => channel.name === "telegram")!.send!;
+
+    expect(send.activity).toBeNull();
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    await send.activity!.begin({ conversationId: "c-1" as ConversationId });
+    expect(begin).toHaveBeenCalledWith({ conversationId: "c-1" });
   });
 
   it("delivers admitted, answerable messages to a subscription that outlives reconnects", async () => {
