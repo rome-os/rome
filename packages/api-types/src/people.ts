@@ -159,10 +159,17 @@ export function matchesQuery(query: string, haystack: readonly string[]): boolea
  *
  * Lowercasing alone misses the folds that expand or merge letters: "ß" and
  * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
- * up; the last step maps final sigma onto the medial one, as folding does.
+ * up, except for the dotless "ı", which folds to itself but would come back
+ * as "i", so it stays out of the round trip. The last step maps final sigma
+ * onto the medial one, as folding does.
  */
 function caseFold(value: string): string {
-  return value.toLowerCase().toUpperCase().toLowerCase().replaceAll("ς", "σ");
+  return value
+    .toLowerCase()
+    .split("ı")
+    .map((part) => part.toUpperCase().toLowerCase())
+    .join("ı")
+    .replaceAll("ς", "σ");
 }
 
 /**

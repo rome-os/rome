@@ -186,6 +186,11 @@ describe("what a search matches", () => {
     expect(personMatchesQuery(person({ id: "x", displayName: "Νικος" }), "νικοσ")).toBe(true);
   });
 
+  it("keeps the dotless ı apart from i, as Unicode folding does", () => {
+    expect(personMatchesQuery(person({ id: "x", displayName: "Işık" }), "işık")).toBe(true);
+    expect(personMatchesQuery(person({ id: "x", displayName: "Işık" }), "işik")).toBe(false);
+  });
+
   it("finds a person by an account they hold, not only by their name", () => {
     // A guardian searches with what they have: a phone number they were given,
     // a member id pasted from a profile URL. A saved name would otherwise hide
