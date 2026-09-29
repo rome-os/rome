@@ -161,6 +161,18 @@ describe("orderings do not depend on the host locale", () => {
     expect(compareDisplayNames("ada", "Ada")).not.toBe(0);
     expect(compareDisplayNames("Ada", "bob")).toBeLessThan(0);
   });
+
+  it("folds case the Unicode way, not only by lowercasing", () => {
+    // "Straße" folds to "strasse", so it sorts before "Strassf"; lowercasing
+    // alone keeps the "ß", a code point above every ASCII letter.
+    expect(compareDisplayNames("Straße", "Strassf")).toBeLessThan(0);
+  });
+
+  it("folds Cherokee to the uppercase letter Unicode folds both cases to", () => {
+    // Folded, "ꭰ" is "Ꭰ" (U+13A0), which sorts before "あ" (U+3042); its
+    // lowercase form (U+AB70) would sort after.
+    expect(compareDisplayNames("ꭰ", "あ")).toBeLessThan(0);
+  });
 });
 
 describe("what a search matches", () => {
@@ -169,6 +181,28 @@ describe("what a search matches", () => {
     // decomposed, and the reverse.
     expect(personMatchesQuery(person({ id: "x", displayName: "Jose\u0301" }), "José")).toBe(true);
     expect(personMatchesQuery(person({ id: "x", displayName: "José" }), "Jose\u0301")).toBe(true);
+  });
+
+  it("matches names that differ only by Unicode case folding", () => {
+    // Full folding, which lowercasing misses: "ß" is "ss", and a final sigma
+    // is the same letter as a medial one.
+    expect(personMatchesQuery(person({ id: "x", displayName: "Anna Straße" }), "STRASSE")).toBe(
+      true,
+    );
+    expect(personMatchesQuery(person({ id: "x", displayName: "Νικος" }), "νικοσ")).toBe(true);
+  });
+
+  it("matches a name whose fold decomposes it", () => {
+    // Uppercasing "Ϊ́" (U+03AA U+0301) and "ΐ" (U+0390) yields different
+    // sequences; normalizing after the fold makes them one again.
+    expect(personMatchesQuery(person({ id: "x", displayName: "\u0390" }), "\u03aa\u0301")).toBe(
+      true,
+    );
+  });
+
+  it("keeps the dotless ı apart from i, as Unicode folding does", () => {
+    expect(personMatchesQuery(person({ id: "x", displayName: "Işık" }), "işık")).toBe(true);
+    expect(personMatchesQuery(person({ id: "x", displayName: "Işık" }), "işik")).toBe(false);
   });
 
   it("finds a person by an account they hold, not only by their name", () => {

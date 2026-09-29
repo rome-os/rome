@@ -133,7 +133,7 @@ export { compareCodePoints };
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
   const normalizedB = b.normalize("NFC");
-  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  const byFolded = compareCodePoints(caseFold(normalizedA), caseFold(normalizedB));
   return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
 }
 
@@ -148,9 +148,40 @@ export function compareDisplayNames(a: string, b: string): number {
  * should find a row that stored it decomposed, and the reverse.
  */
 export function matchesQuery(query: string, haystack: readonly string[]): boolean {
-  const q = query.normalize("NFC").trim().toLowerCase();
+  const q = caseFold(query.normalize("NFC").trim());
   if (!q) return true;
-  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+  return caseFold(haystack.join(" ").normalize("NFC")).includes(q);
+}
+
+/**
+ * Unicode case folding, which JavaScript has no built-in for, shared by the
+ * name orderings and search so they fold alike.
+ *
+ * Lowercasing alone misses the folds that expand or merge letters: "ß" and
+ * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
+ * up, except for the dotless "ı", which folds to itself but would come back
+ * as "i", so it stays out of the round trip. Then final sigma becomes the
+ * medial one and Cherokee its uppercase, as folding does, and the result is
+ * normalized again, since the round trip can decompose a letter.
+ *
+ * A directory sort folds every name on each comparison, so text that folds
+ * exactly as it lowercases skips the round trip: printable ASCII, and the
+ * caseless CJK punctuation, kana, ideographs and Hangul syllables most names
+ * here are written in. That holds for NFC input, which both callers pass; a
+ * decomposed kana voicing mark would otherwise stay apart from its letter.
+ */
+function caseFold(value: string): string {
+  if (!/[^ -~\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(value)) {
+    return value.toLowerCase();
+  }
+  return value
+    .toLowerCase()
+    .split("ı")
+    .map((part) => part.toUpperCase().toLowerCase())
+    .join("ı")
+    .replaceAll("ς", "σ")
+    .replace(/[\u13f8-\u13fd\uab70-\uabbf]/g, (letter) => letter.toUpperCase())
+    .normalize("NFC");
 }
 
 /**

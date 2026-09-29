@@ -133,7 +133,7 @@ async function attempt(
 ): Promise<OutboxMessage> {
   let receipt: Awaited<ReturnType<typeof sendToTarget>>;
   try {
-    receipt = await sendToTarget(deps, target, row.text);
+    receipt = await sendToTarget(target, row.text);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await deps.outboxRepo.refused(row.id, message);

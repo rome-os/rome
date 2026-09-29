@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
+import type { ConversationId, InboundMessage, TalkDirectMessaging } from "@rome-os/app-runtime";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -7,7 +7,7 @@ import { createTalkRouter } from "../connections/talk-router.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
-import type { InboundEvent } from "./channel.js";
+import { ChannelNotConnected, type InboundEvent } from "./channel.js";
 import { channelList } from "./channel-list.js";
 
 const noAccounts: Accounts = {
@@ -31,6 +31,7 @@ function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean } = {},
+  direct: TalkDirectMessaging | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
   return {
@@ -53,7 +54,8 @@ function talkService(
               async send(conversationId) {
                 return { conversationId, messageId: `sent-${epochs.length}` };
               },
-              feature: () => null,
+              feature: ((name: string) =>
+                name === "directMessaging" ? direct : null) as Talker["feature"],
             };
           },
         },
@@ -139,6 +141,32 @@ describe("channelList", () => {
     await expect(
       telegram.send!.send("c-1" as ConversationId, { text: "hi" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
+  });
+
+  it("reaches an account directly only through a Connection that offers it", async () => {
+    const conversationFor = rs.fn(async (id: string) => id as ConversationId);
+    const { registry, channels } = setup([
+      talkService("telegram", {}, { conversationFor }).descriptor,
+      talkService("discord").descriptor,
+    ]);
+    const telegram = channels.find((channel) => channel.name === "telegram")!;
+    const discord = channels.find((channel) => channel.name === "discord")!;
+
+    // Nothing backs either channel yet: the lookup says so, as a send would.
+    await expect(telegram.send!.direct!.conversationFor("u-1")).rejects.toBeInstanceOf(
+      ChannelNotConnected,
+    );
+
+    for (const service of ["telegram", "discord"]) {
+      const connection = await registry.connect(service);
+      await registry.importCredential(connection.id, "bot", {
+        material: { token: "t" },
+        expiresAt: "never",
+      });
+    }
+    await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
+    // A Connection whose talker offers no direct messaging.
+    expect(discord.send!.direct).toBeNull();
   });
 
   it("delivers admitted, answerable messages to a subscription that outlives reconnects", async () => {

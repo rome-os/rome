@@ -5,10 +5,15 @@
  * Contract: `Channel` and `Inbound` (channel.ts).
  */
 
-import type { InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkDirectMessaging, TalkRouter } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
-import type { ChannelSend, Inbound, InboundEvent } from "./channel.js";
+import {
+  ChannelNotConnected,
+  type ChannelSend,
+  type Inbound,
+  type InboundEvent,
+} from "./channel.js";
 import { ConversationBuffers } from "./conversation-buffer.js";
 
 const log = createLogger("channel-ports");
@@ -46,13 +51,22 @@ function connectionIdFor(deps: ConnectionPortsDeps, service: string): string | n
 }
 
 function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend {
+  // What `direct` answers while no Connection exists for the channel: the
+  // lookup itself says so, the way `send` does, rather than passing for a
+  // channel that cannot reach an account directly.
+  const unbacked: TalkDirectMessaging = {
+    conversationFor: () => Promise.reject(new ChannelNotConnected(service)),
+  };
   return {
     send(conversationId, message) {
       const connectionId = connectionIdFor(deps, service);
-      if (!connectionId) {
-        return Promise.reject(new Error(`No connection backs channel "${service}"`));
-      }
+      if (!connectionId) return Promise.reject(new ChannelNotConnected(service));
       return deps.router.send(connectionId, conversationId, message);
+    },
+    get direct() {
+      const connectionId = connectionIdFor(deps, service);
+      if (!connectionId) return unbacked;
+      return deps.router.feature(connectionId, "directMessaging");
     },
   };
 }

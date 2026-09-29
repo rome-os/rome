@@ -57,8 +57,8 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
-import type { Channel } from "../channels/channel.js";
-import { connectionPorts, type ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { Channel, Channels } from "../channels/channel.js";
+import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -219,28 +219,46 @@ export class MockProviderAdapter implements ProviderAdapter {
   }
 }
 
-/** The channel a mock Talk router backs, by name, built by the production
- *  `connectionPorts` over a registry holding one `test:<name>` Connection with
- *  a Talk per mock adapter. A name with no mock adapter has no channel, as in
- *  `channelList`. */
-export function mockChannelLookup(
+/** The Connections a mock Talk router answers for, as `channelList` reads
+ *  them: one `test:<name>` Connection with a Talk per mock adapter. */
+export function mockConnections(
   talkRouter: TalkRouter,
   adapters: ReadonlyMap<string, unknown>,
-): (name: string) => Channel | null {
-  const registry: ConnectionPortsDeps["registry"] = {
-    find: (service) =>
-      adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
-    getDescriptor: (service) =>
-      adapters.has(service)
-        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
-        : null,
-    onUnlocked: () => {},
-    registeredServices: () => [...adapters.keys()],
+): ConnectionPortsDeps {
+  return {
+    registry: {
+      find: (service) =>
+        adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
+      getDescriptor: (service) =>
+        adapters.has(service)
+          ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+          : null,
+      onUnlocked: () => {},
+      registeredServices: () => [...adapters.keys()],
+    },
+    router: talkRouter,
   };
-  return (name) => {
-    const ports = connectionPorts({ registry, router: talkRouter }, name);
-    return ports ? { name, ...ports, accounts: null, messages: null } : null;
-  };
+}
+
+/** The harness's channel list over `talkRouter`, built by the production
+ *  `channelList`. A test that swaps the router rebuilds the list with it. */
+export function testChannels(
+  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts"> & {
+    channelPortMap: ReadonlyMap<string, unknown>;
+  },
+  talkRouter: TalkRouter,
+): Channels {
+  return channelList({
+    db: deps.db,
+    whatsAppAccounts: deps.whatsAppAccounts,
+    linkedInAccounts: deps.linkedInAccounts,
+    connections: mockConnections(talkRouter, deps.channelPortMap),
+  });
+}
+
+/** Look a channel up by name, as the backend-turn runner does. */
+export function channelNamed(channels: Channels): (name: string) => Channel | null {
+  return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
@@ -458,7 +476,11 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
+  const talkRouter = createMockTalkRouter(channelPortMap);
+  const channels = testChannels(
+    { db, whatsAppAccounts, linkedInAccounts, channelPortMap },
+    talkRouter,
+  );
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
@@ -478,8 +500,6 @@ export async function buildTestDeps(
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
-
-  const talkRouter = createMockTalkRouter(channelPortMap);
 
   const actionRegistry = new ActionRegistryImpl([]);
   const actionEngine = new ActionEngine(
@@ -585,7 +605,7 @@ export async function buildTestDeps(
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter, channelPortMap),
+    channel: channelNamed(channels),
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,

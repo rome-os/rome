@@ -186,8 +186,8 @@ describe("agent model pins through AgentSessionManager", () => {
     });
     await collect(resumed.sendTurn({ prompt: "continue" }).events);
     expect(anthropic.calls.map((call) => call.model)).toEqual([
-      "claude-sonnet-5",
-      "claude-sonnet-5",
+      "claude-sonnet-5-5",
+      "claude-sonnet-5-5",
     ]);
     expect(openai.openSession).not.toHaveBeenCalled();
   });

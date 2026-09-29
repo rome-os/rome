@@ -133,6 +133,16 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "anthropic",
+    matchesModel: (model) => hasPrefix(model, "claude-sonnet-5-5"),
+    resolveRates: (rawUsage) => ({
+      inputUsdPerMillion: 2,
+      outputUsdPerMillion: 10,
+      cacheReadUsdPerMillion: 0.2,
+      cacheWriteUsdPerMillion: 2 * getAnthropicCacheWriteMultiplier(rawUsage),
+    }),
+  },
+  {
+    provider: "anthropic",
     matchesModel: (model) =>
       hasPrefix(model, "claude-sonnet-5") ||
       hasPrefix(model, "claude-sonnet-4-6") ||
