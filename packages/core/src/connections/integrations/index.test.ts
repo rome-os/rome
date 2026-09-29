@@ -23,7 +23,6 @@ describe("registerBuiltinConnections", () => {
     registerBuiltinConnections(registry, {
       linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
       listAgents: () => [],
-      wechatUserEnabled: true,
       wechatUserRuntime: runtime,
     } as unknown as BuiltinConnectionDeps);
 
@@ -42,5 +41,19 @@ describe("registerBuiltinConnections", () => {
 
     expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
     expect(readerCommand).toHaveBeenCalled();
+  });
+  it("offers no WeChat personal connection without a runtime, so none is built twice", () => {
+    const registered = new Map<string, ConnectionDescriptor>();
+    const registry = {
+      register: (descriptor: ConnectionDescriptor) =>
+        registered.set(descriptor.service, descriptor),
+    } as unknown as ConnectionRegistry;
+
+    registerBuiltinConnections(registry, {
+      linkedinPoll: { minIntervalMs: 60_000, maxIntervalMs: 120_000 },
+      listAgents: () => [],
+    } as unknown as BuiltinConnectionDeps);
+
+    expect(registered.has(WECHAT_USER_SERVICE)).toBe(false);
   });
 });

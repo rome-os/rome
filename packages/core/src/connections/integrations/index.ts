@@ -75,11 +75,10 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
-  /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
-  wechatUserEnabled?: boolean;
-  /** The personal WeChat client runtime, shared with the channel list's reader
-   *  so the account is read through one client. Built by the descriptor when
-   *  absent. */
+  /** The personal WeChat client runtime, present only when config
+   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
+   *  the channel list's reader shares it, so the account is read through one
+   *  client. */
   wechatUserRuntime?: WechatUserRuntime;
 }
 
@@ -103,14 +102,13 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(createWechatDescriptor());
-  // The personal WeChat connection is opt-in (see config `wechatUserEnabled`).
+  // The personal WeChat connection is opt-in: boot passes its runtime only when
+  // config `wechatUserEnabled` is on.
   // It runs the client in this container and recovers its store key with a
   // local debugger, so it needs no host execution — only the container's own
   // capability to ptrace the client it launches.
-  if (deps.wechatUserEnabled) {
-    registry.register(
-      createWechatUserDescriptor(deps.wechatUserRuntime ? { runtime: deps.wechatUserRuntime } : {}),
-    );
+  if (deps.wechatUserRuntime) {
+    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
   }
   registry.register(
     createFeishuDescriptor({
