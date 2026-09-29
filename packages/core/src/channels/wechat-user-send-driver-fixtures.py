@@ -346,6 +346,30 @@ class SendTests(unittest.TestCase):
         client.on_text, client.list.children = more_first, local_above_later
         self.assertEqual(send(client, desk, store, clock), "filehelper:1")
 
+    def test_focus_lost_while_only_more_has_loaded_is_not_ambiguous(self):
+        client, desk, store, clock = rig()
+        on_text, states, polls = client.on_text, client.list.states, [0]
+
+        def more_only(node):
+            on_text(node)
+            if client.pending:  # only the "More" section has loaded so far
+                q = client.search.value
+                client.pending = [client.pending[0], [("More", "header"), (q, "local"),
+                                                      ("Internet search results", "header"), (q, "web")]]
+                polls[0] = 0
+
+        def focus_leaves_mid_settle():
+            answer = states()
+            if client.rows and client.rows[0][0] == "More":
+                polls[0] += 1
+                if polls[0] == 4:  # steady for a moment, then focus leaves the search box
+                    client.focus = None
+            return answer
+        client.on_text, client.list.states = more_only, focus_leaves_mid_settle
+        self.assertFails("focus-lost", False, lambda: send(client, desk, store, clock))
+        self.assertEqual((client.sent, client.search.value), ([], ""))
+        self.assertNotIn("Return", desk.events)
+
     def test_a_same_named_row_that_loads_during_the_keys_is_ambiguous(self):
         client, desk, store, clock = rig()
         key = client.key
@@ -767,16 +791,23 @@ class SendTests(unittest.TestCase):
 
     def test_a_leftover_with_the_newline_return_added_is_cleared(self):
         client, desk, store, clock = rig()
-        client_key = client.key
+        client_key, text, pending = client.key, client.input.text, [0]
 
-        def ctrl_enter_to_send(name):  # Return adds a line break instead of sending
+        def ctrl_enter_to_send(name):  # Return adds a line break instead of sending,
             if name == "Return" and client.focus is client.input:
-                client.input.value += "\n"
+                pending[0] = 3  # and WeChat handles the key only a few reads later
                 return
             client_key(name)
-        client.key = ctrl_enter_to_send
+
+        def text_after_the_key_lands():
+            if pending[0]:
+                pending[0] -= 1
+                if not pending[0]:
+                    client.input.value += "\n"
+            return text()
+        client.key, client.input.text = ctrl_enter_to_send, text_after_the_key_lands
         start = clock.now
-        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertFails("unsupported", True, lambda: send(client, desk, store, clock))
         self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
         self.assertLess(clock.now - start, d.ECHO_TIMEOUT_S)  # fails fast, no echo wait
 
@@ -790,7 +821,7 @@ class SendTests(unittest.TestCase):
                 return
             client_key(name)
         client.key = caret_at_start
-        self.assertFails("not-ready", True, lambda: send(client, desk, store, clock))
+        self.assertFails("unsupported", True, lambda: send(client, desk, store, clock))
         self.assertEqual((client.sent, client.all_inputs()["File Transfer"]), ([], ""))
 
     def test_a_longer_leftover_is_not_cleared(self):

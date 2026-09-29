@@ -11,6 +11,8 @@ a chat input. `ambiguous` means the name does not lead to exactly one chat: a
 second result has that name, or the settled results put the target below
 another one or in a section that holds no chat. `not-ready` covers a client or
 store that is not ready and results that never settled, which may pass.
+`unsupported` is a lasting client setting a retry cannot change: WeChat set to
+send with Ctrl+Enter. It carries `typed: true`; the input is cleared.
 `--dry-run` does every step but the Return in the chat input, then clears the
 input, and answers {"ok": true, "dryRun": true, "conversationId"}.
 `check` prints {"ready", "reason"} and does not touch the client. It is not
@@ -37,6 +39,7 @@ import time
 MAX_TEXT = 4000
 ENVELOPE_MARKERS = ("<?xml", "<msg>", "<msg ")  # the reader cuts a line's text at these
 ECHO_TIMEOUT_S = 30
+RETURN_POLLS = 5  # 0.1 s looks at the input after Return, for WeChat to handle the key
 PRESEND_TIMEOUT_S = 20  # all store reads before the client is touched
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Accessible names per interface language. Only English is verified live, and
@@ -289,9 +292,12 @@ class Driver:
         deadline. Local sections can load after the web one, so any other ranking
         (target absent, below another row, or under a web or "More" header first)
         is final only if it still holds when the window closes.
-        Returns (rows or None when they never settled, whether a results panel showed)."""
+        Returns (rows or None when they never settled, whether a results panel showed,
+        whether focus left the box before the deadline and cut the window short)."""
         seen, stable, steady, panel, deadline = None, 0, None, False, self.clock.time() + 6
-        while self.clock.time() < deadline and FOCUSED in box.states():
+        while self.clock.time() < deadline:
+            if FOCUSED not in box.states():
+                return steady, panel, True
             self.clock.sleep(0.3)
             rows = self.rows()
             names = [r[2] for r in rows]
@@ -300,16 +306,18 @@ class Driver:
             seen = names
             steady = rows if stable >= 2 else None
             if steady and self.opens_first(rows, name):
-                return rows, True
-        return steady, panel
+                return rows, True, False
+        return steady, panel, False
 
     def choose(self, box, name):
         """Leave current the one local result named `name`: index 1, under a first
         header that is not a web or "More" section."""
-        rows, panel = self.settle(box, name)
+        rows, panel, cut_short = self.settle(box, name)
+        if cut_short:
+            # Whatever held until focus left is not final, so it never answers ambiguous or
+            # not-found: a local section may still have been loading. The send starts over.
+            raise Failure("focus-lost", "the search lost focus before its results settled")
         if rows is None:
-            if FOCUSED not in box.states():
-                raise Failure("focus-lost", "the search lost focus before its results settled")
             if not panel:
                 raise Failure("not-ready", f"no search results panel appeared for {name!r}: WeChat shows "
                               '"Internet search results" only when online and in English, the one '
@@ -396,18 +404,28 @@ class Driver:
         self.guard("Return", box)
         self.returned = True  # from here the text may have gone out
         self.desk.key("Return")
-        # One look right after Return, name read last: a line break added to the body means
-        # the client sends with Ctrl+Enter and nothing went out. Anything else is no verdict:
-        # a slow client can still be sending, and only the store decides (`_send`).
-        try:
-            unsent = box.text() in (body + "\n", "\n" + body) and box.name == name
-        except Exception:  # noqa: BLE001 — unreadable: leave it to the store
-            unsent = False
+        # xdotool returns once the key is queued, so WeChat may not have handled Return yet.
+        # A few short looks, name read last: a line break added to the body means the client
+        # sends with Ctrl+Enter and nothing went out. An empty input, or anything else, is no
+        # verdict: a slow client can still be sending, and only the store decides (`_send`).
+        unsent = False
+        for _ in range(RETURN_POLLS):
+            self.clock.sleep(0.1)
+            try:
+                text = box.text()
+                if not text:
+                    break
+                if text in (body + "\n", "\n" + body) and box.name == name:
+                    unsent = True
+                    break
+            except Exception:  # noqa: BLE001 — unreadable: leave it to the store
+                break
         if unsent:
             with contextlib.suppress(Exception):
                 box.set_text("")
-            raise Failure("not-ready", "Return added a line break instead of sending, so the client "
-                          "probably sends with Ctrl+Enter; nothing was sent and the input was cleared", True)
+            raise Failure("unsupported", "WeChat is set to send with Ctrl+Enter, so Return only added a "
+                          "line break; nothing was sent and the input was cleared. Switch WeChat's send "
+                          "key to Enter, then send again", True)
 
     def clear_leftover(self, name, body):
         """After Return, a copy of the body still in the target's input, read name
