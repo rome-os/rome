@@ -31,13 +31,13 @@ source ~/.zshrc
 
 ```toml
 [whitelist]
-prefix = ["/path/to/rome-internal"]
+prefix = ["/path/to/rome"]
 ```
 
 5. Set up the project:
 
 ```bash
-cd rome-internal
+cd rome
 direnv allow          # activates Nix shell (provides node, pnpm)
 pnpm install          # install JS dependencies on the host (used by editor tooling)
 ```
