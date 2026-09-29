@@ -160,16 +160,23 @@ export function matchesQuery(query: string, haystack: readonly string[]): boolea
  * Lowercasing alone misses the folds that expand or merge letters: "ß" and
  * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
  * up, except for the dotless "ı", which folds to itself but would come back
- * as "i", so it stays out of the round trip. The last step maps final sigma
- * onto the medial one, as folding does.
+ * as "i", so it stays out of the round trip. Then final sigma becomes the
+ * medial one and Cherokee its uppercase, as folding does, and the result is
+ * normalized again, since the round trip can decompose a letter.
+ *
+ * Printable ASCII folds exactly as it lowercases, and a directory sort folds
+ * every name on each comparison, so it skips the round trip.
  */
 function caseFold(value: string): string {
+  if (!/[^ -~]/.test(value)) return value.toLowerCase();
   return value
     .toLowerCase()
     .split("ı")
     .map((part) => part.toUpperCase().toLowerCase())
     .join("ı")
-    .replaceAll("ς", "σ");
+    .replaceAll("ς", "σ")
+    .replace(/[\u13f8-\u13fd\uab70-\uabbf]/g, (letter) => letter.toUpperCase())
+    .normalize("NFC");
 }
 
 /**

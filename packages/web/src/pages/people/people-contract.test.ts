@@ -167,6 +167,12 @@ describe("orderings do not depend on the host locale", () => {
     // alone keeps the "ß", a code point above every ASCII letter.
     expect(compareDisplayNames("Straße", "Strassf")).toBeLessThan(0);
   });
+
+  it("folds Cherokee to the uppercase letter Unicode folds both cases to", () => {
+    // Folded, "ꭰ" is "Ꭰ" (U+13A0), which sorts before "あ" (U+3042); its
+    // lowercase form (U+AB70) would sort after.
+    expect(compareDisplayNames("ꭰ", "あ")).toBeLessThan(0);
+  });
 });
 
 describe("what a search matches", () => {
@@ -184,6 +190,14 @@ describe("what a search matches", () => {
       true,
     );
     expect(personMatchesQuery(person({ id: "x", displayName: "Νικος" }), "νικοσ")).toBe(true);
+  });
+
+  it("matches a name whose fold decomposes it", () => {
+    // Uppercasing "Ϊ́" (U+03AA U+0301) and "ΐ" (U+0390) yields different
+    // sequences; normalizing after the fold makes them one again.
+    expect(personMatchesQuery(person({ id: "x", displayName: "\u0390" }), "\u03aa\u0301")).toBe(
+      true,
+    );
   });
 
   it("keeps the dotless ı apart from i, as Unicode folding does", () => {
