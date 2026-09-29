@@ -13,6 +13,14 @@ import type {
 
 const log = createAppLogger("channel-message-hook");
 
+/**
+ * How long a turn may run before the hook reports it as still running: the
+ * same ten minutes a channel waits before reporting a stuck handler (R4). The
+ * hook dispatches turns without waiting on them, so the channel no longer sees
+ * a turn that hangs; this keeps a silent chat visible. The turn is not stopped.
+ */
+export const SLOW_TURN_MS = 10 * 60_000;
+
 export class ChannelMessageHook implements ChannelMessageHookInterface {
   private readonly subscriptions: Array<() => void> = [];
 
@@ -22,6 +30,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     private readonly conversationSettings: ConversationSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
+    private readonly options: { slowTurnMs?: number; log?: Pick<typeof log, "warn"> } = {},
   ) {}
 
   /** Subscribe once to every channel that can receive. A channel's
@@ -108,6 +117,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     let attachments = message.attachments;
+    // Through the service's Connection, which is `ref`'s: a service holds at
+    // most one Connection.
     const inboundMedia = channel.inbound?.media ?? null;
     if (inboundMedia && attachments.length > 0) {
       try {
@@ -152,6 +163,15 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     routedAgentName: string | undefined,
     activity: Promise<TalkActivitySession | null>,
   ): Promise<void> {
+    const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
+    const slow = setTimeout(() => {
+      (this.options.log ?? log).warn("message turn still running", {
+        service,
+        messageId: message.messageId,
+        runningMs: slowTurnMs,
+      });
+    }, slowTurnMs);
+    slow.unref?.();
     try {
       await this.actionEngine.run(
         "message_handler",
@@ -201,10 +221,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         senderId: message.senderId,
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      clearTimeout(slow);
     }
   }
 
-  /** Answer in a conversation on the channel it arrived on, where it can send. */
+  /** Answer in a conversation on the channel it arrived on, where it can send.
+   *  The channel sends through its service's Connection, not `ref`'s: a
+   *  service holds at most one Connection, so they are the same one. */
   private async reply(
     channel: Channel,
     conversationId: ConversationId,

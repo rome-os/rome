@@ -58,7 +58,7 @@ function snapshot(
   };
 }
 
-function createHarness() {
+function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>[5] = {}) {
   const handlers = new Map<string, (event: InboundEvent) => Promise<void>>();
   const features = new Map<string, Partial<TalkFeatureMap>>();
   const run = rs.fn(async () => ({ status: "ok" as const }));
@@ -100,6 +100,7 @@ function createHarness() {
     conversationSettings,
     chatStop,
     channels,
+    options,
   );
   // A conversation's events reach the handler one at a time, each after the
   // previous one settles, as rule R4 of `ChannelInbound` requires of a channel.
@@ -339,5 +340,24 @@ describe("ChannelMessageHook", () => {
     );
 
     expect(harness.stop).toHaveBeenCalledTimes(1);
+  });
+  it("reports a turn still running past the threshold, and not one that finished", async () => {
+    const warn = rs.fn();
+    const slow = createHarness({ slowTurnMs: 20, log: { warn } });
+    await slow.hook.register();
+    slow.run.mockImplementationOnce(() => new Promise(() => {}));
+
+    await slow.emit(TELEGRAM_ID, message({ messageId: "hung" }));
+    await slow.emit(TELEGRAM_ID, message({ messageId: "quick" }));
+
+    await rs.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith("message turn still running", {
+        service: "telegram",
+        messageId: "hung",
+        runningMs: 20,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
