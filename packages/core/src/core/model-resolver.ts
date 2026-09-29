@@ -8,6 +8,7 @@ import {
   type ProviderState,
 } from "./ai-tool-state.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
+import { matchesModelAlias } from "./model-alias.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("model-resolver");
@@ -127,24 +128,6 @@ function providerQuotaExhausted(providerId: ProviderId, state: ProviderState): b
 
 function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
   return state.loggedIn !== false && !providerQuotaExhausted(providerId, state);
-}
-
-/** Matches the effort and dated aliases Codex accepts for a concrete model. */
-function matchesModelAlias(model: string, baseModel: string): boolean {
-  const normalizedModel = model.toLowerCase();
-  const normalizedBaseModel = baseModel.toLowerCase();
-  if (
-    normalizedModel === normalizedBaseModel ||
-    normalizedModel.startsWith(`${normalizedBaseModel}:`)
-  ) {
-    return true;
-  }
-
-  const snapshotSuffix = normalizedModel.slice(`${normalizedBaseModel}-`.length);
-  return (
-    normalizedModel.startsWith(`${normalizedBaseModel}-`) &&
-    /^\d{4}-\d{2}-\d{2}(?::.+)?$/.test(snapshotSuffix)
-  );
 }
 
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {

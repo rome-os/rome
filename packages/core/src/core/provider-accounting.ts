@@ -1,4 +1,5 @@
 import type { AgentAccounting, AgentContextUsage, AgentTokenUsage } from "../types.js";
+import { matchesModelAlias } from "./model-alias.js";
 
 interface TokenRates {
   inputUsdPerMillion: number;
@@ -36,23 +37,6 @@ const OPENAI_LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5;
 
 function hasPrefix(model: string, prefix: string): boolean {
   return model.toLowerCase().startsWith(prefix.toLowerCase());
-}
-
-function matchesModelAlias(model: string, baseModel: string): boolean {
-  const normalizedModel = model.toLowerCase();
-  const normalizedBaseModel = baseModel.toLowerCase();
-  if (
-    normalizedModel === normalizedBaseModel ||
-    normalizedModel.startsWith(`${normalizedBaseModel}:`)
-  ) {
-    return true;
-  }
-
-  const snapshotSuffix = normalizedModel.slice(`${normalizedBaseModel}-`.length);
-  return (
-    normalizedModel.startsWith(`${normalizedBaseModel}-`) &&
-    /^\d{4}-\d{2}-\d{2}(?::.+)?$/.test(snapshotSuffix)
-  );
 }
 
 function anthropicRates(baseInputUsdPerMillion: number, outputUsdPerMillion: number): TokenRates {
