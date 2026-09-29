@@ -51,8 +51,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
    * then dispatch the turn and settle. The channel holds this conversation
    * until the handler settles (rule R4 of `ChannelInbound`), so waiting for
    * the whole turn would hold a `/stop` in the same chat behind the turn it is
-   * meant to stop. The agent session queues the conversation's turns in
-   * arrival order, so settling on dispatch keeps them ordered.
+   * meant to stop. Once dispatched, the order is best-effort: `message_handler`
+   * awaits a person lookup, a policy check and a store before its turn reaches
+   * the agent session's queue, so two quick messages can reach the session in
+   * either order, as they could before the channel ordered its handlers.
    */
   private async handleMessage(channel: Channel, event: InboundEvent): Promise<void> {
     const { message, ref } = event;
