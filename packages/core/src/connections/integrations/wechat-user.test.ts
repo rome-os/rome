@@ -13,7 +13,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
-import { WechatUserReader, WechatUserStorePending } from "../../channels/wechat-user.js";
+import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
@@ -328,13 +328,8 @@ describe("the WeChat personal Talker", () => {
     runtime: WechatUserRuntime,
     fault: (err: StreamFault) => void = () => {},
     probeIntervalMs = 60_000,
-    reader?: WechatUserReader,
   ) {
-    const descriptor = createWechatUserDescriptor({
-      runtime,
-      probeIntervalMs,
-      ...(reader ? { reader } : {}),
-    });
+    const descriptor = createWechatUserDescriptor({ runtime, probeIntervalMs });
     const kit = {
       connectionId: "conn-wechat-user",
       persist: async () => {},
@@ -482,22 +477,6 @@ describe("the WeChat personal Talker", () => {
     expect(deliver).not.toHaveBeenCalled();
 
     await talker.stop();
-  });
-
-  it("answers through the reader it is given, the one the channel list reads", async () => {
-    const runtime = fakeRuntime({ statuses: [READY] });
-    const shared = new WechatUserReader(
-      fakeRuntime({
-        statuses: [READY],
-        readerJson: {
-          conversations: [{ id: "wxid_friend", name: "A Friend", isGroup: false, unread: 0 }],
-        },
-      }),
-    );
-    const { talker } = buildTalker(runtime, () => {}, 60_000, shared);
-
-    const page = await talker.feature("directory")!.listConversations({ limit: 10 });
-    expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
   });
 
   it("lists conversations as provider-neutral descriptors", async () => {

@@ -415,12 +415,10 @@ export function toWechatUserInboundMessage(message: WechatUserMessage): InboundM
 // ── descriptor ────────────────────────────────────────────────────────────
 
 export interface WechatUserDescriptorDeps {
-  /** The client runtime. Built here when absent (tests). */
+  /** The client runtime. Boot passes the one the channel list reads through,
+   *  so the channel and this Connection coordinate one client; built here when
+   *  absent (tests). The reader is a stateless wrapper over it. */
   runtime?: WechatUserRuntime;
-  /** The reader the channel list reads the account with, built on `runtime`,
-   *  so the channel and this Connection read through one reader. Built on
-   *  `runtime` here when absent. */
-  reader?: WechatUserReader;
   pollIntervalMs?: number;
   probeIntervalMs?: number;
 }
@@ -433,7 +431,7 @@ export function createWechatUserDescriptor(
   deps: WechatUserDescriptorDeps = {},
 ): ConnectionDescriptor {
   const runtime = deps.runtime ?? new WechatUserRuntime();
-  const reader = deps.reader ?? new WechatUserReader(runtime);
+  const reader = new WechatUserReader(runtime);
 
   const recoverPassphrase = async (signal: AbortSignal): Promise<string> => {
     const driverDir = await stageCaptureDriver(runtime.runtimeDir);

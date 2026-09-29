@@ -252,7 +252,7 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db);
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
-  // The channel list and the Connection's Talk share this one runtime and reader.
+  // The channel list and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
@@ -1036,9 +1036,7 @@ async function main() {
     // The personal WeChat connection is opt-in; its key recovery runs a local
     // debugger in this container, needing no host execution.
     wechatUserEnabled: config.wechatUserEnabled,
-    ...(wechatUserRuntime && wechatUserReader
-      ? { wechatUserClient: { runtime: wechatUserRuntime, reader: wechatUserReader } }
-      : {}),
+    ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
   // Built after every descriptor is registered: each service with a Talk backs
   // its channel's send and inbound ports.

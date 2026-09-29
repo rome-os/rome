@@ -6,7 +6,7 @@ import type { PersonMappingRepository } from "../../db/repositories/person-mappi
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
-import type { WechatUserReader, WechatUserRuntime } from "../../channels/wechat-user.js";
+import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
@@ -77,10 +77,10 @@ export interface BuiltinConnectionDeps {
   db: DrizzleDb;
   /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
   wechatUserEnabled?: boolean;
-  /** The personal WeChat client and its reader, shared with the channel list so
-   *  the account is read through one runtime. Built by the descriptor when
+  /** The personal WeChat client runtime, shared with the channel list's reader
+   *  so the account is read through one client. Built by the descriptor when
    *  absent. */
-  wechatUserClient?: { runtime: WechatUserRuntime; reader: WechatUserReader };
+  wechatUserRuntime?: WechatUserRuntime;
 }
 
 /**
@@ -108,7 +108,9 @@ export function registerBuiltinConnections(
   // local debugger, so it needs no host execution — only the container's own
   // capability to ptrace the client it launches.
   if (deps.wechatUserEnabled) {
-    registry.register(createWechatUserDescriptor(deps.wechatUserClient ?? {}));
+    registry.register(
+      createWechatUserDescriptor(deps.wechatUserRuntime ? { runtime: deps.wechatUserRuntime } : {}),
+    );
   }
   registry.register(
     createFeishuDescriptor({
