@@ -3,6 +3,7 @@ import type { ActionRegistryImpl } from "./registry.js";
 import type { ActionEngine } from "./engine.js";
 import type { Action, ActionConfig } from "./types.js";
 import type { ChannelMessageHook } from "../hooks/types.js";
+import { createLogger, type Logger } from "../logger.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type {
@@ -253,9 +254,12 @@ export function createAppActionsSubscriber(
   };
 }
 
+const hookLog = createLogger("channel-message-hook-loader");
+
 export async function createChannelMessageHookFromCatalog(
   catalog: AppCatalog,
   deps: ChannelMessageHookDeps,
+  log: Pick<Logger, "warn"> = hookLog,
 ): Promise<ChannelMessageHook | null> {
   const hooks = catalog.listArtifacts("hook");
   const hookRef = hooks.find((artifact) => artifact.publicName === "channel-message");
@@ -267,7 +271,17 @@ export async function createChannelMessageHookFromCatalog(
   const module = await importModuleWithCacheBuster(entryPath);
 
   if (typeof module.createHook === "function") {
-    return module.createHook(deps) as ChannelMessageHook;
+    const hook = module.createHook(deps) as ChannelMessageHook;
+    // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
+    // removed registerConnection, which the host no longer calls: it would hear
+    // nothing and say nothing. Name the migration instead.
+    if (typeof (hook as { registerConnection?: unknown }).registerConnection === "function") {
+      log.warn(
+        "channel-message hook defines the removed registerConnection; subscribe through deps.channels in register()",
+        { owner: hookRef.ownerId },
+      );
+    }
+    return hook;
   }
 
   throw new Error(
