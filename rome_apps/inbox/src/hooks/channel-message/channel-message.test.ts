@@ -58,7 +58,7 @@ function snapshot(
   };
 }
 
-function createHarness(options: { settleMs?: number } = {}) {
+function createHarness() {
   const handlers = new Map<string, (event: InboundEvent) => Promise<void>>();
   const features = new Map<string, Partial<TalkFeatureMap>>();
   const run = rs.fn(async () => ({ status: "ok" as const }));
@@ -100,16 +100,26 @@ function createHarness(options: { settleMs?: number } = {}) {
     conversationSettings,
     chatStop,
     channels,
-    options,
   );
-  const emit = async (connectionId: string, incoming: InboundMessage) => {
+  // A conversation's events reach the handler one at a time, each after the
+  // previous one settles, as rule R4 of `ChannelInbound` requires of a channel.
+  const tails = new Map<string, Promise<void>>();
+  const emit = (connectionId: string, incoming: InboundMessage): Promise<void> => {
     const handler = handlers.get(connectionId);
-    if (!handler) throw new Error(`no subscription for ${connectionId}`);
-    await handler({
-      kind: "message",
-      message: incoming,
-      ref: { connectionId, conversationId: incoming.conversationId },
-    });
+    if (!handler) return Promise.reject(new Error(`no subscription for ${connectionId}`));
+    const key = `${connectionId}:${incoming.conversationId}`;
+    const handled = (tails.get(key) ?? Promise.resolve()).then(() =>
+      handler({
+        kind: "message",
+        message: incoming,
+        ref: { connectionId, conversationId: incoming.conversationId },
+      }),
+    );
+    tails.set(
+      key,
+      handled.catch(() => {}),
+    );
+    return handled;
   };
 
   return { hook, run, get, features, emit, stop, send };
@@ -317,15 +327,17 @@ describe("ChannelMessageHook", () => {
     await harness.emit(TELEGRAM_ID, message({ text: "after reload" }));
     expect(harness.run).toHaveBeenCalledTimes(1);
   });
-  it("releases a conversation whose turn has not settled within the bound", async () => {
-    const slow = createHarness({ settleMs: 20 });
-    await slow.hook.register();
-    slow.run.mockImplementationOnce(() => new Promise(() => {}));
+  it("hears a /stop in a chat whose turn is still running", async () => {
+    harness.run.mockImplementationOnce(() => new Promise(() => {}));
 
-    // The handler returns once the bound passes, though the turn never does.
-    await slow.emit(TELEGRAM_ID, message({ messageId: "stuck" }));
-    await slow.emit(TELEGRAM_ID, message({ messageId: "next" }));
+    // The turn never finishes; the conversation is still free for the next
+    // message once the turn is dispatched.
+    await harness.emit(TELEGRAM_ID, message({ messageId: "long turn" }));
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ messageId: "stop", text: "/stop", thread: { kind: "dm" } }),
+    );
 
-    expect(slow.run).toHaveBeenCalledTimes(2);
+    expect(harness.stop).toHaveBeenCalledTimes(1);
   });
 });

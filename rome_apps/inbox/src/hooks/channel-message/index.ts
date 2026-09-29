@@ -4,22 +4,14 @@ import type {
   Channel,
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
+  ConversationId,
   ConversationSettingsControl,
   InboundEvent,
+  TalkActivitySession,
   TalkRouter,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
-
-/**
- * How long the hook waits on one message before it stops holding that
- * conversation. The channel hears a conversation's next message only once the
- * hook settles the current one (rule R4 of `ChannelInbound`), so a turn that
- * never returned would silence the chat. Past this bound the hook stops
- * waiting and logs it; the turn itself keeps running, and the agent session
- * still queues the conversation's turns in arrival order.
- */
-export const MESSAGE_SETTLE_MS = 15 * 60_000;
 
 export class ChannelMessageHook implements ChannelMessageHookInterface {
   private readonly subscriptions: Array<() => void> = [];
@@ -30,7 +22,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     private readonly conversationSettings: ConversationSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
-    private readonly options: { settleMs?: number } = {},
   ) {}
 
   /** Subscribe once to every channel that can receive. A channel's
@@ -41,7 +32,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     for (const channel of this.channels) {
       const inbound = channel.inbound;
       if (!inbound) continue;
-      this.subscriptions.push(inbound.subscribe((event) => this.settle(channel, event)));
+      this.subscriptions.push(inbound.subscribe((event) => this.handleMessage(channel, event)));
     }
   }
 
@@ -55,27 +46,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
   }
 
-  /** Handle one message, releasing its conversation within the settle bound. */
-  private async settle(channel: Channel, event: InboundEvent): Promise<void> {
-    const settleMs = this.options.settleMs ?? MESSAGE_SETTLE_MS;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const bound = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        log.warn("message still handling; releasing its conversation", {
-          service: channel.name,
-          messageId: event.message.messageId,
-          settleMs,
-        });
-        resolve();
-      }, settleMs);
-    });
-    try {
-      await Promise.race([this.handleMessage(channel, event), bound]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
+  /**
+   * Take one message through the checks that decide whether it becomes a turn,
+   * then dispatch the turn and settle. The channel holds this conversation
+   * until the handler settles (rule R4 of `ChannelInbound`), so waiting for
+   * the whole turn would hold a `/stop` in the same chat behind the turn it is
+   * meant to stop. The agent session queues the conversation's turns in
+   * arrival order, so settling on dispatch keeps them ordered.
+   */
   private async handleMessage(channel: Channel, event: InboundEvent): Promise<void> {
     const { message, ref } = event;
     const { connectionId } = ref;
@@ -101,18 +79,18 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           service,
           senderId: message.senderId,
         });
-        await channel.send?.send(message.conversationId, {
-          text: chatStopReceipt(result.status),
-        });
+        await this.reply(channel, message.conversationId, chatStopReceipt(result.status));
       } catch (err) {
         log.error("stop command failed", {
           service,
           messageId: message.messageId,
           error: err instanceof Error ? err.message : String(err),
         });
-        await channel.send?.send(message.conversationId, {
-          text: "Stop could not be requested. Please try again.",
-        });
+        await this.reply(
+          channel,
+          message.conversationId,
+          "Stop could not be requested. Please try again.",
+        );
       }
       return;
     }
@@ -161,6 +139,17 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
+    void this.runTurn(message, service, connectionId, attachments, routedAgentName, activity);
+  }
+
+  private async runTurn(
+    message: InboundEvent["message"],
+    service: string,
+    connectionId: string,
+    attachments: InboundEvent["message"]["attachments"],
+    routedAgentName: string | undefined,
+    activity: Promise<TalkActivitySession | null>,
+  ): Promise<void> {
     try {
       await this.actionEngine.run(
         "message_handler",
@@ -211,6 +200,19 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  /** Answer in a conversation on the channel it arrived on, where it can send. */
+  private async reply(
+    channel: Channel,
+    conversationId: ConversationId,
+    text: string,
+  ): Promise<void> {
+    if (!channel.send) {
+      log.warn("cannot answer on a channel that does not send", { service: channel.name });
+      return;
+    }
+    await channel.send.send(conversationId, { text });
   }
 }
 

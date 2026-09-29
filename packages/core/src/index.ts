@@ -1068,16 +1068,14 @@ async function main() {
       }
     }
   }
+  // The hook subscribes to every channel that can receive; a channel's
+  // subscription follows whatever backs it, so no unlock needs the hook again.
   await messageHook.register();
-  connectionRegistry.onUnlocked("talk", (connection) => {
-    messageHook.registerConnection(connection.id, connection.service);
-  });
   // App-keys refreshes recreate this hook: it is instantiated once and held by
-  // the subscription closures above, so an env value captured in its module
-  // graph would otherwise outlive the key edit. The let-binding is the single
-  // handle — the onUnlocked callback reads it at call time, so a swap re-routes
-  // future unlocks, and register() on the fresh instance re-subscribes every
-  // channel that can receive.
+  // the channels' subscriptions, so an env value captured in its module graph
+  // would otherwise outlive the key edit. The let-binding is the single handle,
+  // and register() on the fresh instance re-subscribes every channel that can
+  // receive.
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
