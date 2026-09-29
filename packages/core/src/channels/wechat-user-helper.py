@@ -7,6 +7,8 @@ Commands answer JSON on stdout:
                                 keys, verify each, and write them where the
                                 reader looks
     conversations --limit N [--query Q]
+    contacts --limit N [--query Q]   friends only
+    contact --username WXID    one record, with displayName and alias, or null
     messages [--conversation ID] [--since UNIX] --limit N
     count --conversation ID
     check                     verify stored keys against the current databases
@@ -298,6 +300,48 @@ def cmd_conversations(args):
     print(json.dumps({"conversations": out}, ensure_ascii=False))
 
 
+def contact_record(row, self_username):
+    """One contact as the client shows it. `name` and `displayName` are the remark,
+    else the nickname, else the wxid. A friend is a person the account added:
+    `local_type` 1, not a group, not an official account (`gh_`), not the account
+    itself. `alias` is the 微信号 the person chose, if any."""
+    username, nick, remark, alias, local_type = row
+    name = remark or nick or username
+    group = username.endswith("@chatroom")
+    friend = local_type == 1 and not group and not username.startswith("gh_") and username != self_username
+    return {"id": username, "name": name, "isGroup": group, "isFriend": friend,
+            "displayName": name, "alias": alias or None}
+
+
+def contact_rows(where="", params=()):
+    app = app_context()
+    from wechat_cli.core.contacts import get_self_username
+
+    path = app.cache.get(os.path.join("contact", "contact.db"))
+    if not path:
+        raise Unavailable("The WeChat contact database could not be decrypted.")
+    with closing(sqlite3.connect(path)) as conn:
+        rows = conn.execute(
+            "SELECT username, nick_name, remark, alias, local_type FROM contact" + where, params
+        ).fetchall()
+    self_username = get_self_username(app.db_dir, app.cache, app.decrypted_dir)
+    return [contact_record(row, self_username) for row in rows]
+
+
+def cmd_contacts(args):
+    needle = args.query.lower() if args.query else None
+    friends = sorted((c for c in contact_rows(" WHERE local_type = 1") if c["isFriend"]),
+                     key=lambda c: (c["name"].casefold(), c["id"]))
+    out = [{k: c[k] for k in ("id", "name", "isGroup", "isFriend")} for c in friends
+           if not needle or needle in c["name"].lower() or needle in c["id"].lower()]
+    print(json.dumps({"contacts": out[:args.limit]}, ensure_ascii=False))
+
+
+def cmd_contact(args):
+    found = contact_rows(" WHERE username = ?", (args.username,))
+    print(json.dumps({"contact": found[0] if found else None}, ensure_ascii=False))
+
+
 # WeChat's numeric message kinds, named so a caller never has to match on the
 # CLI's display language.
 TYPE_NAMES = {
@@ -493,6 +537,15 @@ def main():
     conversations.add_argument("--limit", type=int, default=50)
     conversations.add_argument("--query", default=None)
     conversations.set_defaults(func=cmd_conversations)
+
+    contacts = sub.add_parser("contacts")
+    contacts.add_argument("--limit", type=int, default=50)
+    contacts.add_argument("--query", default=None)
+    contacts.set_defaults(func=cmd_contacts)
+
+    contact = sub.add_parser("contact")
+    contact.add_argument("--username", required=True)
+    contact.set_defaults(func=cmd_contact)
 
     messages = sub.add_parser("messages")
     messages.add_argument("--conversation", default=None)
