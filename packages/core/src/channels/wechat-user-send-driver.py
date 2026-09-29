@@ -39,7 +39,9 @@ ENVELOPE_MARKERS = ("<?xml", "<msg>", "<msg ")  # the reader cuts a line's text 
 ECHO_TIMEOUT_S = 30
 PRESEND_TIMEOUT_S = 20  # all store reads before the client is touched
 HERE = os.path.dirname(os.path.abspath(__file__))
-# Accessible names per interface language. Only English is verified live.
+# Accessible names per interface language. Only English is verified live, and
+# `ready_client` refuses any other language, so the Chinese entries are unreachable
+# today: they are kept for a locale verified later.
 SEARCH = ("Search", "搜索")
 CHATS = ("Chats", "聊天")
 TITLE = ("Weixin", "微信")  # the main window's X title; the Chinese one is not seen live yet
@@ -132,15 +134,25 @@ def search_box(frame):
     return boxes[0] if boxes else None
 
 
+def main_frame_and_markers(app):
+    """The frame showing a chat list or search box, and the names of those markers,
+    from one walk. Login and lock views show neither; a minimized window still
+    reports its nodes as showing."""
+    found = []
+    for f in app.children():
+        if f.role != "frame":
+            continue
+        names = [n.name for n in find(f, lambda n, st: (n.role == "list" and n.name in CHATS)
+                                      or (n.role == "text" and n.name in SEARCH and EDITABLE in st))]
+        if names:
+            found.append((f, names))
+    if len(found) != 1:
+        raise Failure("not-ready", f"expected one signed-in WeChat main window, found {len(found)}")
+    return found[0]
+
+
 def main_frame(app):
-    """The frame showing a chat list or search box. Login and lock views show
-    neither; a minimized window still reports its nodes as showing."""
-    frames = [f for f in app.children() if f.role == "frame" and find(
-        f, lambda n, st: (n.role == "list" and n.name in CHATS)
-        or (n.role == "text" and n.name in SEARCH and EDITABLE in st))]
-    if len(frames) != 1:
-        raise Failure("not-ready", f"expected one signed-in WeChat main window, found {len(frames)}")
-    return frames[0]
+    return main_frame_and_markers(app)[0]
 
 
 def chat_inputs(frame):
@@ -201,9 +213,9 @@ def is_echo(m, body):
 
 
 class Driver:
-    def __init__(self, app, desktop, store, clock=time):
+    def __init__(self, app, desktop, store, clock=time, frame=None):
         self.app, self.desk, self.store, self.clock = app, desktop, store, clock
-        self.frame = main_frame(app)
+        self.frame = frame if frame is not None else main_frame(app)
         self.typed, self.returned, self.box, self.dry_run = False, False, None, False
 
     def active(self):
@@ -300,6 +312,12 @@ class Driver:
             raise Failure("not-found", f"no search result is named {name!r}")
         if len(self.local_hits(rows, name)) > 1:
             raise Failure("ambiguous", f"more than one search result is named {name!r}")
+        header = rows[0][2]
+        if header in NONLOCAL_HEADERS or len(rows) < 2 or rows[1][2] != name:
+            # The settled ranking puts the target below another result, or in a section that
+            # holds no chat. That stays so on a retry: the name does not lead to this one chat.
+            raise Failure("ambiguous", f"the result named {name!r} is not the first local one (top: "
+                          f"{rows[1][2] if len(rows) > 1 else None!r} under {header!r})")
         self.key("Down", box)
         self.key("Up", box)
         rows = self.rows()
@@ -312,10 +330,10 @@ class Driver:
         if len(current) != 1:
             raise Failure("not-ready", f"the search results for {name!r} did not mark one current result")
         if current[0][0] != 1 or current[0][2] != name or header in NONLOCAL_HEADERS:
-            # Settled results that put the target below another one, or in a section that
-            # holds no chat, stay that way: the name does not lead to this one chat.
-            raise Failure("ambiguous", f"the result named {name!r} is not the first local one (top: "
-                          f"{current[0][2]!r} under {header!r})")
+            # The ranking checked out, so where the keys left the current row is a timing
+            # outcome, not a fact about the name: a retry can still open the chat.
+            raise Failure("not-ready", f"the keys left {current[0][2]!r} current under {header!r}, "
+                          f"not the result named {name!r}")
 
     def open_chat(self, name):
         self.bring_forward()
@@ -385,7 +403,7 @@ class Driver:
     def send(self, chat_id, name, body, press_return=True):
         self.dry_run = not press_return
         try:
-            return self._send(chat_id, name, body, press_return)
+            return self._send(chat_id, name, body)
         except Exception as e:  # noqa: BLE001 — any failure is a coded Failure with `typed`
             # The target's input was empty before typing, so what it holds is ours; the name
             # is read last, so only a chat switch in that one round trip could race it.
@@ -398,7 +416,7 @@ class Driver:
             code, tail = ("no-echo", " after Return; check WeChat") if self.returned else ("not-ready", "")
             raise Failure(code, f"{type(e).__name__}: {e}{tail}", self.typed) from e
 
-    def _send(self, chat_id, name, body, press_return):
+    def _send(self, chat_id, name, body):
         presend = self.clock.time() + PRESEND_TIMEOUT_S
         left = lambda end: max(1, end - self.clock.time())  # noqa: E731
         history = self.store.chat(chat_id, timeout=left(presend))
@@ -460,13 +478,13 @@ def ready_client():
     if subprocess.run(["pgrep", "-x", "wechat"], capture_output=True).returncode != 0:
         raise Failure("not-ready", "the WeChat client is not running")
     app, desktop = wechat_app(), Desktop()
-    if not find(main_frame(app), lambda n, st: (n.role == "list" and n.name == CHATS[0])
-                or (n.role == "text" and n.name == SEARCH[0] and EDITABLE in st)):
+    frame, markers = main_frame_and_markers(app)
+    if CHATS[0] not in markers and SEARCH[0] not in markers:
         raise Failure("not-ready", "WeChat's interface language is not English, the only one this "
                       "driver is verified on: set the client's language to English")
     if desktop.window() is None:
         raise Failure("not-ready", "the WeChat main window is not on the display")
-    return app, desktop
+    return app, desktop, frame
 
 
 def main():
@@ -488,8 +506,9 @@ def main():
                 or len(args.text) > MAX_TEXT or any(m in args.text for m in ENVELOPE_MARKERS)):
             raise Failure("invalid", "--chat and --name must be set; "
                           f"--text 1 to {MAX_TEXT} characters, no {ENVELOPE_MARKERS}")
-        app, desktop = ready_client()
-        message_id = Driver(app, desktop, Store()).send(args.chat, args.name, args.text, not args.dry_run)
+        app, desktop, frame = ready_client()
+        message_id = Driver(app, desktop, Store(), frame=frame).send(args.chat, args.name, args.text,
+                                                                    not args.dry_run)
         done = {"dryRun": True} if args.dry_run else {"messageId": message_id}
         print(json.dumps({"ok": True, **done, "conversationId": args.chat}, ensure_ascii=False))
     except Exception as e:  # noqa: BLE001 — every answer is one JSON object; Driver.send sets typed

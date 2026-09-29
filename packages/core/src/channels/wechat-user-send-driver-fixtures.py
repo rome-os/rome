@@ -707,7 +707,23 @@ class SendTests(unittest.TestCase):
         client, desk, store, clock = rig(open_chat="File Transfer")
         client.results["Li Wei"] = ["Li Wei Zhang", "Li Wei"]  # ranked above the target, for good
         self.assertFails("ambiguous", False, lambda: send(client, desk, store, clock, "wxid_li", "Li Wei"))
-        self.assertEqual((client.sent, client.search.value, desk.events), ([], "", ["Down", "Up"]))
+        # Decided from the settled ranking: no key is pressed.
+        self.assertEqual((client.sent, client.search.value, desk.events), ([], "", []))
+
+    def test_focus_that_lands_off_a_correct_ranking_is_not_ready(self):
+        client, desk, store, clock = rig()
+        key = client.key
+
+        def keys_then_focus_elsewhere(name):
+            key(name)
+            if name == "Up" and client.focus is client.search:  # the ranking is right; focus is not
+                client.cur = next(i for i, (_, kind) in enumerate(client.rows) if kind == "web")
+                for k, node in enumerate(client.list.kids):
+                    node.current = k == client.cur
+        client.key = keys_then_focus_elsewhere
+        self.assertFails("not-ready", False, lambda: send(client, desk, store, clock))
+        self.assertEqual((client.sent, client.search.value), ([], ""))
+        self.assertNotIn("Return", desk.events)
 
     def test_a_settled_target_in_a_nonlocal_section_is_ambiguous(self):
         client, desk, store, clock = rig(open_chat="File Transfer")
