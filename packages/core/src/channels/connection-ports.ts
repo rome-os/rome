@@ -86,15 +86,25 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
 
   // Each subscription's buffer hears one conversation's events one at a time,
   // in the order they are pushed here, which the router keeps as arrival
-  // order (R4). Nothing upstream waits on delivery, so dispatch returns once
-  // every event is buffered. A subscription's waiting events are dropped when
-  // it ends (R3); a handler already running keeps running, and its subscriber
-  // owns stopping it.
-  const dispatch = async (message: InboundMessage): Promise<void> => {
-    if (!isAnswerable(message)) return;
-    const event: InboundEvent = { kind: "message", message };
-    for (const buffers of subscriptions) buffers.push(message.conversationId, event);
-  };
+  // order (R4). A conversation is keyed by the Connection it arrived on as
+  // well, so two Connections' conversations sharing an id never share a queue.
+  // Nothing upstream waits on delivery, so dispatch returns once every event
+  // is buffered. A subscription's waiting events are dropped when it ends
+  // (R3); a handler already running keeps running, and its subscriber owns
+  // stopping it.
+  const dispatchFrom =
+    (connectionId: string) =>
+    async (message: InboundMessage): Promise<void> => {
+      if (!isAnswerable(message)) return;
+      const event: InboundEvent = {
+        kind: "message",
+        message,
+        ref: { connectionId, conversationId: message.conversationId },
+      };
+      // A Connection id is a UUID, so the first colon ends it.
+      const conversation = `${connectionId}:${message.conversationId}`;
+      for (const buffers of subscriptions) buffers.push(conversation, event);
+    };
 
   const attach = (connectionId: string): void => {
     if (attached.has(connectionId)) return;
@@ -105,7 +115,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
       detach();
       attached.delete(id);
     }
-    attached.set(connectionId, deps.router.subscribe(connectionId, dispatch));
+    attached.set(connectionId, deps.router.subscribe(connectionId, dispatchFrom(connectionId)));
   };
 
   // A Connection that unlocks after the first subscription still reaches it.

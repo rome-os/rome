@@ -1557,6 +1557,74 @@ export interface TalkRouter {
   feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
 }
 
+/** Sending on a channel. */
+export interface ChannelSend {
+  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+}
+
+/**
+ * What a subscriber hears from a channel. One kind today; a new kind (an
+ * interaction, an edit) joins this union so it passes the same admission as a
+ * message, and a handler switching on `kind` keeps compiling.
+ *
+ * `ref` addresses the event's conversation for the APIs that take a
+ * {@link ConversationRef} (conversation settings, stop), resolved by the
+ * channel so a subscriber does not track what backs it.
+ */
+export type InboundEvent = { kind: "message"; message: InboundMessage; ref: ConversationRef };
+
+/**
+ * Hearing what arrives on a channel. Every implementation owes all five:
+ *
+ * - **R1 Admitted only.** The channel's admission runs before any subscriber
+ *   hears an event. On a channel that pairs accounts (Telegram, Discord,
+ *   Feishu), an account the guardian has not approved never reaches a
+ *   subscriber, and neither does a pairing code. Any other channel delivers
+ *   every sender, and a subscriber decides what a stranger gets. An admission
+ *   that has not decided within fifteen seconds fails closed: that message is
+ *   not delivered, and the conversation's next message is admitted in order.
+ * - **R2 Answerable only.** An event is something a subscriber may answer: not
+ *   Rome's own sends, not the guardian's own messages from another device, not
+ *   reactions, edits or frames with no text and no attachments. The complete
+ *   record is the channel's stored messages.
+ * - **R3 Live, at most once.** Nothing is acknowledged or replayed. An event
+ *   that arrives with no subscriber, or while the channel is not receiving, is
+ *   not delivered later.
+ * - **R4 Fan-out, ordered per conversation.** Every subscriber hears every
+ *   event. A subscriber hears one conversation's events one at a time, in
+ *   arrival order: its handler for an event starts after its handler for the
+ *   previous event in that conversation settles. Different conversations and
+ *   different subscribers never wait on each other, so one slow or failing
+ *   handler holds up only its own conversation for its own subscriber. A
+ *   handler that never settles stops that conversation for that subscriber for
+ *   good, so a subscriber settles every event it takes; one still running
+ *   after ten minutes is logged, and so is a conversation with twenty events
+ *   waiting. A conversation holds at most a hundred waiting events per
+ *   subscriber, and the oldest is dropped and logged past that (R3). Events
+ *   still waiting when a subscription ends are dropped (R3); a handler already
+ *   running keeps running.
+ * - **R5 Durable subscription.** A subscription outlives a reconnect of
+ *   whatever backs the channel.
+ */
+export interface ChannelInbound {
+  subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
+  /** Materializes a message's attachments, or null when the channel cannot
+   *  now. A consumer without it uses the attachments as delivered. */
+  readonly media: TalkInboundMedia | null;
+}
+
+/**
+ * A channel as an app reaches one: its name, as every stored row spells it,
+ * and the ports that move messages. Either port is null where the channel
+ * cannot send, or where nothing ever arrives on it. A present port is what the
+ * channel can do, not a promise that it is doing it now.
+ */
+export interface Channel {
+  readonly name: string;
+  readonly send: ChannelSend | null;
+  readonly inbound: ChannelInbound | null;
+}
+
 export interface ChannelMessageHook {
   register(): Promise<void>;
   registerConnection(connectionId: string, service: string): void;

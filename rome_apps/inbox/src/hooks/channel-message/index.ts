@@ -1,57 +1,90 @@
 import { chatStopReceipt, createAppLogger, isStopCommand } from "@rome-os/app-runtime";
 import type {
   ActionEngineLike,
+  Channel,
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
   ConversationSettingsControl,
-  InboundMessage,
+  InboundEvent,
   TalkRouter,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
 
+/**
+ * How long the hook waits on one message before it stops holding that
+ * conversation. The channel hears a conversation's next message only once the
+ * hook settles the current one (rule R4 of `ChannelInbound`), so a turn that
+ * never returned would silence the chat. Past this bound the hook stops
+ * waiting and logs it; the turn itself keeps running, and the agent session
+ * still queues the conversation's turns in arrival order.
+ */
+export const MESSAGE_SETTLE_MS = 15 * 60_000;
+
 export class ChannelMessageHook implements ChannelMessageHookInterface {
-  private readonly subscriptions = new Map<string, () => void>();
+  private readonly subscriptions: Array<() => void> = [];
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
     private readonly talkRouter: TalkRouter,
     private readonly conversationSettings: ConversationSettingsControl,
     private readonly chatStop: ChatStopHandler,
+    private readonly channels: readonly Channel[],
+    private readonly options: { settleMs?: number } = {},
   ) {}
 
+  /** Subscribe once to every channel that can receive. A channel's
+   *  subscription follows whatever backs it, so a Connection that appears or
+   *  reconnects later needs nothing more from the hook. */
   async register(): Promise<void> {
-    for (const { connectionId, service } of await this.talkRouter.list()) {
-      this.registerConnection(connectionId, service);
+    if (this.subscriptions.length > 0) return;
+    for (const channel of this.channels) {
+      const inbound = channel.inbound;
+      if (!inbound) continue;
+      this.subscriptions.push(inbound.subscribe((event) => this.settle(channel, event)));
     }
   }
 
-  registerConnection(connectionId: string, service: string): void {
-    if (this.subscriptions.has(connectionId)) return;
-    const unsubscribe = this.talkRouter.subscribe(connectionId, async (message) => {
-      await this.handleMessage(connectionId, service, message);
-    });
-    this.subscriptions.set(connectionId, unsubscribe);
-  }
+  /** Nothing to do: `register` already reaches every Connection's channel. */
+  registerConnection(): void {}
 
+  /** Detach from every channel. Messages still waiting are dropped by the
+   *  channel; a turn already running finishes, and the agent session queues
+   *  the successor hook's turns for that conversation behind it. */
   unregister(): void {
-    for (const unsubscribe of this.subscriptions.values()) {
-      unsubscribe();
-    }
-    this.subscriptions.clear();
+    for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
   }
 
-  private async handleMessage(
-    connectionId: string,
-    service: string,
-    message: InboundMessage,
-  ): Promise<void> {
+  /** Handle one message, releasing its conversation within the settle bound. */
+  private async settle(channel: Channel, event: InboundEvent): Promise<void> {
+    const settleMs = this.options.settleMs ?? MESSAGE_SETTLE_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        log.warn("message still handling; releasing its conversation", {
+          service: channel.name,
+          messageId: event.message.messageId,
+          settleMs,
+        });
+        resolve();
+      }, settleMs);
+    });
+    try {
+      await Promise.race([this.handleMessage(channel, event), bound]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async handleMessage(channel: Channel, event: InboundEvent): Promise<void> {
+    const { message, ref } = event;
+    const { connectionId } = ref;
+    const service = channel.name;
     if (!message.text?.trim() && message.attachments.length === 0) {
       log.debug("skipping empty message", { service, messageId: message.messageId });
       return;
     }
 
-    const ref = { connectionId, conversationId: message.conversationId };
     if (isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
@@ -68,7 +101,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           service,
           senderId: message.senderId,
         });
-        await this.talkRouter.send(connectionId, message.conversationId, {
+        await channel.send?.send(message.conversationId, {
           text: chatStopReceipt(result.status),
         });
       } catch (err) {
@@ -77,7 +110,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           messageId: message.messageId,
           error: err instanceof Error ? err.message : String(err),
         });
-        await this.talkRouter.send(connectionId, message.conversationId, {
+        await channel.send?.send(message.conversationId, {
           text: "Stop could not be requested. Please try again.",
         });
       }
@@ -95,7 +128,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
 
     let attachments = message.attachments;
-    const inboundMedia = this.talkRouter.feature(connectionId, "inboundMedia");
+    const inboundMedia = channel.inbound?.media ?? null;
     if (inboundMedia && attachments.length > 0) {
       try {
         attachments = await inboundMedia.materialize(message);
@@ -186,11 +219,13 @@ export function createHook(deps: {
   talkRouter: TalkRouter;
   conversationSettings: ConversationSettingsControl;
   chatStop: ChatStopHandler;
+  channels: readonly Channel[];
 }): ChannelMessageHookInterface {
   return new ChannelMessageHook(
     deps.actionEngine,
     deps.talkRouter,
     deps.conversationSettings,
     deps.chatStop,
+    deps.channels,
   );
 }

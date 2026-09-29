@@ -26,11 +26,24 @@ function buffers(
 }
 
 describe("ConversationBuffers", () => {
+  it("starts no handler inside push", async () => {
+    const held = heldHandler();
+    const { buffer } = buffers(held.handle, {});
+
+    buffer.push("chat", "a");
+    expect(held.started).toEqual([]);
+    expect(buffer.depth("chat")).toBe(1);
+    await rs.waitFor(() => expect(held.started).toEqual(["a"]));
+    expect(buffer.depth("chat")).toBe(0);
+  });
+
   it("drops the oldest waiting event past capacity, and logs it", async () => {
     const held = heldHandler();
     const { buffer, log } = buffers(held.handle, { capacity: 2 });
 
-    for (const item of ["a", "b", "c", "d"]) buffer.push("chat", item);
+    buffer.push("chat", "a");
+    await rs.waitFor(() => expect(held.started).toEqual(["a"]));
+    for (const item of ["b", "c", "d"]) buffer.push("chat", item);
 
     // "a" is being handled; "b" was the oldest waiting when "d" arrived.
     expect(buffer.depth("chat")).toBe(2);
@@ -53,7 +66,9 @@ describe("ConversationBuffers", () => {
     const backingUp = () =>
       log.warn.mock.calls.filter(([message]) => message === "inbound conversation backing up");
 
-    for (const item of ["a", "b", "c", "d"]) buffer.push("chat", item);
+    buffer.push("chat", "a");
+    await rs.waitFor(() => expect(held.started).toEqual(["a"]));
+    for (const item of ["b", "c", "d"]) buffer.push("chat", item);
     expect(backingUp()).toEqual([
       ["inbound conversation backing up", { conversation: "chat", waiting: 2 }],
     ]);
@@ -90,6 +105,7 @@ describe("ConversationBuffers", () => {
     const { buffer } = buffers(held.handle, {});
 
     buffer.push("chat", "running");
+    await rs.waitFor(() => expect(held.started).toEqual(["running"]));
     buffer.push("chat", "waiting");
     buffer.close();
     buffer.push("chat", "late");

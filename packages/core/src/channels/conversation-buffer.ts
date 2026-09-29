@@ -80,7 +80,9 @@ export class ConversationBuffers<T> {
     if (idle) void this.drain(conversation, entry);
   }
 
-  /** Events waiting in a conversation, not counting one being handled. */
+  /** Events waiting in a conversation, not counting one being handled. An
+   *  event pushed to an idle conversation still counts until its loop starts,
+   *  one microtask after the push. */
   depth(conversation: string): number {
     return this.conversations.get(conversation)?.waiting.length ?? 0;
   }
@@ -98,6 +100,10 @@ export class ConversationBuffers<T> {
   }
 
   private async drain(conversation: string, entry: Conversation<T>): Promise<void> {
+    // Start one microtask after the push, so no handler runs inside the
+    // caller's push: not ahead of the other subscribers' pushes, and not inside
+    // the router's admission lock.
+    await Promise.resolve();
     let item = entry.waiting.shift();
     while (item !== undefined && !this.closed) {
       await this.handleOne(conversation, item);

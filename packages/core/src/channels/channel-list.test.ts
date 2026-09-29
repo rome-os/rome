@@ -192,6 +192,7 @@ describe("channelList", () => {
     service.epochs[0]!.deliver?.(message({ messageId: "first" }));
     await rs.waitFor(() => expect(heard.map((e) => e.message.messageId)).toEqual(["first"]));
     expect(heard[0]?.kind).toBe("message");
+    expect(heard[0]?.ref).toEqual({ connectionId: connection.id, conversationId: "c-1" });
     expect(failing).toHaveBeenCalledTimes(1);
 
     await connection.auth.revoke("bot");
