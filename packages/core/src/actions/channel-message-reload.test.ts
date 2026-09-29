@@ -47,7 +47,6 @@ export function createHook() {
     secret: captured,
     registered: false,
     async register() { this.registered = true; },
-    registerConnection() {},
     unregister() {},
   };
 }
@@ -81,12 +80,11 @@ export function createHook() {
   it("keeps a hook without unregister() in place rather than double-registering", async () => {
     const dir = await writeHookModule(`
 export function createHook() {
-  return { async register() {}, registerConnection() {} };
+  return { async register() {} };
 }
 `);
     const previous = {
       async register() {},
-      registerConnection() {},
     } as ChannelMessageHook;
     let current: ChannelMessageHook = previous;
     const onSkip = rs.fn();
@@ -110,14 +108,12 @@ export function createHook() {
 export function createHook() {
   return {
     async register() { throw new Error("register exploded"); },
-    registerConnection() {},
     unregister() {},
   };
 }
 `);
     const previous = {
       register: rs.fn(async () => {}),
-      registerConnection: rs.fn(),
       unregister: rs.fn(),
     };
     let current: ChannelMessageHook = previous;

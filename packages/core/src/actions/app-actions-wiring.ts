@@ -69,7 +69,6 @@ export function assertRequiredHookPresent<T>(hook: T | null, hookName: string): 
 export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
-    registerConnection() {},
     unregister() {},
   };
 }

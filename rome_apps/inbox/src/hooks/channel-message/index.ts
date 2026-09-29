@@ -44,9 +44,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     }
   }
 
-  /** Nothing to do: `register` already reaches every Connection's channel. */
-  registerConnection(): void {}
-
   /** Detach from every channel. Messages still waiting are dropped by the
    *  channel; a turn already running finishes, and the agent session queues
    *  the successor hook's turns for that conversation behind it. */
