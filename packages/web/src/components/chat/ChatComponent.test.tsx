@@ -31,8 +31,21 @@ afterEach(async () => {
   cleanup();
   localStorage.clear();
   rs.restoreAllMocks();
+  rs.unstubAllGlobals();
   await i18n.changeLanguage("en");
 });
+
+function stubCoarsePointer() {
+  rs.stubGlobal(
+    "matchMedia",
+    rs.fn((query: string) => ({
+      matches: query === "(hover: none) and (pointer: coarse)",
+      media: query,
+      addEventListener: rs.fn(),
+      removeEventListener: rs.fn(),
+    })),
+  );
+}
 
 const testNewsFeed = {
   version: 1,
@@ -165,6 +178,22 @@ describe("ChatComponent empty home", () => {
 
     await user.keyboard("Hello Rome");
     expect((composer as HTMLTextAreaElement).value).toBe("Hello Rome");
+  });
+
+  it("does not autofocus the draft composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent();
+
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  });
+
+  it("prefills a draft without focusing the composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent({ initialDraftText: "Plan a trip" });
+
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(composer.value).toBe("Plan a trip");
+    expect(document.activeElement).not.toBe(composer);
   });
 
   it("shows horizontally scrollable pinned chats and Rome News above a bottom composer", async () => {

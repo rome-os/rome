@@ -24,6 +24,7 @@ import {
   postSessionTurn,
 } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import type { AgentMention, ChatErrorNotice, ChatSession } from "@/lib/chat-types";
 import {
@@ -64,6 +65,7 @@ export function ChatComponent({
   const { t, i18n } = useTranslation("chat");
 
   const { data: settings } = useSettings();
+  const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
     typeof settings?.agentName === "string" ? settings.agentName : undefined;
@@ -74,8 +76,8 @@ export function ChatComponent({
 
   const draftComposerRef = useRef<ChatComposerHandle>(null);
   useEffect(() => {
-    if (!sessionId) draftComposerRef.current?.focus();
-  }, [sessionId]);
+    if (!sessionId && !coarsePointer) draftComposerRef.current?.focus();
+  }, [sessionId, coarsePointer]);
   const draftDragDepthRef = useRef(0);
   const [draftStreamError, setDraftStreamError] = useState<string | ChatErrorNotice | null>(null);
   const [isDraggingDraftFiles, setIsDraggingDraftFiles] = useState(false);
@@ -94,8 +96,8 @@ export function ChatComponent({
     if (!initialDraftText || sessionId) return;
     if (appliedDraftRef.current === initialDraftText) return;
     appliedDraftRef.current = initialDraftText;
-    draftComposerRef.current?.insertText(initialDraftText);
-  }, [initialDraftText, sessionId]);
+    draftComposerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
+  }, [initialDraftText, sessionId, coarsePointer]);
 
   // Same once-per-value seeding for a structured skill selection — the chip
   // counterpart of the draft text.
