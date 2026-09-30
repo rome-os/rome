@@ -210,6 +210,7 @@ export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): T
         agent: msg.agent,
         ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
         ...(msg.endedAt ? { endedAt: msg.endedAt } : {}),
+        ...(msg.isError !== undefined ? { isError: msg.isError } : {}),
       };
     case "subagent_start":
       return {

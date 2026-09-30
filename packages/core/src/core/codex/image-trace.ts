@@ -101,6 +101,11 @@ export async function createGeneratedImageTracker(
   };
 }
 
+/** An image-generation item or event that codex reports as failed. */
+function imageGenerationFailed(value: Record<string, unknown>): boolean {
+  return value.status === "failed" || (typeof value.error === "string" && value.error.length > 0);
+}
+
 export function translateImageGenerationBegin(
   event: Record<string, unknown>,
   ctx: ToolTraceState,
@@ -149,6 +154,7 @@ export async function translateImageGenerationEnd(
       tool: "ImageGeneration",
       output,
       endedAt: timestampFromMs(event.completed_at_ms) ?? new Date().toISOString(),
+      isError: imageGenerationFailed(event),
     },
   ];
 }
@@ -192,6 +198,7 @@ export async function translateImageGenerationCompleted(
       tool: "ImageGeneration",
       output: imageGenerationOutput,
       endedAt: new Date().toISOString(),
+      isError: imageGenerationFailed(item),
     },
   ];
 }
@@ -253,6 +260,7 @@ async function generatedImageFileTraceMessages(file: GeneratedImageFile): Promis
       tool: "ImageGeneration",
       output: await imageGenerationOutputPayload(outputRecord),
       endedAt: timestamp,
+      isError: false,
     },
   ];
 }

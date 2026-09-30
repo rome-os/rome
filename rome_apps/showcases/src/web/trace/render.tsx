@@ -81,7 +81,14 @@ function shortValue(value: unknown): string {
   return String(value);
 }
 
-function isErrorOutput(output: unknown): boolean {
+function toolFailed(result: ToolResultBlock): boolean {
+  if (result.isError !== undefined) return result.isError;
+  return isLegacyErrorOutput(result.output);
+}
+
+// Results recorded before `tool_result.isError` existed carry no flag, so read
+// each provider's own failure signal from the output.
+function isLegacyErrorOutput(output: unknown): boolean {
   const normalized = normalizeTracePayload(output);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return false;
   const record = normalized as Record<string, unknown>;
@@ -139,7 +146,7 @@ function Payload({
 
 function ToolStep({ use, result }: { use: ToolUseBlock; result: ToolResultBlock | null }) {
   const [open, setOpen] = useState(false);
-  const status = result ? (isErrorOutput(result.output) ? "error" : "ok") : "running";
+  const status = result ? (toolFailed(result) ? "error" : "ok") : "running";
   const duration = formatDuration(stepDurationMs(use, result));
   const dotClass =
     status === "ok" ? "bg-success" : status === "error" ? "bg-destructive" : "bg-warning";

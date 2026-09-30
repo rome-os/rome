@@ -137,6 +137,8 @@ export interface StreamBlock {
   toolUseId?: string;
   input?: unknown;
   output?: unknown;
+  /** On `tool_result` blocks: whether the call failed. Absent on older results. */
+  isError?: boolean;
   turnId?: string;
   audioUrl?: string;
   audioMimeType?: string;

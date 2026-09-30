@@ -1294,6 +1294,7 @@ describe("AnthropicProvider", () => {
           toolUseId: "toolu_websearch_1",
           tool: "WebSearch",
           output: { results: [{ title: "Result 1", url: "https://example.com" }] },
+          isError: false,
         },
         { type: "result", content: "Done" },
       ]);
@@ -1519,6 +1520,7 @@ describe("AnthropicProvider", () => {
           toolUseId: "toolu_webfetch_1",
           tool: "WebFetch",
           output: { content: "Request failed", isError: true },
+          isError: true,
         },
         { type: "result", content: "Handled" },
       ]);

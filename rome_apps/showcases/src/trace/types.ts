@@ -54,6 +54,8 @@ export interface ToolResultBlock extends TraceBlockBase {
   output: unknown;
   toolUseId?: string;
   endedAt?: string;
+  /** Whether the call failed. Absent on results recorded before Rome set it. */
+  isError?: boolean;
 }
 
 export interface TraceTokenUsage {
