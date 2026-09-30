@@ -1,29 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createLinkedInDescriptor } from "./linkedin.js";
-import type {
-  LinkedInHistoryMessage,
-  LinkedInSyncSink,
-  LinkedInThreadCursor,
-} from "../../channels/linkedin-sync.js";
-import type { Credential, RuntimeKit } from "../types.js";
-import type { InboundMessage } from "@rome-os/app-runtime";
-
-/** A sink that only answers history reads — the rest of the mirror is idle here. */
-function historySink(rows: LinkedInHistoryMessage[]): LinkedInSyncSink {
-  return {
-    async upsertThreads() {},
-    async upsertMessages() {},
-    async getThreadCursors(): Promise<Map<string, LinkedInThreadCursor>> {
-      return new Map();
-    },
-    async markThreadSynced() {},
-    async fetchHistory() {
-      return rows;
-    },
-  };
-}
+import { createTestDb, type TestDb } from "../test/helpers.js";
+import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { linkedInHistoryMessage } from "./linkedin-history.js";
+import type { LinkedInHistoryMessage } from "./linkedin-sync.js";
+import type { ChannelMessage } from "@rome-os/app-runtime";
 
 function historyMessage(overrides: Partial<LinkedInHistoryMessage> = {}): LinkedInHistoryMessage {
   return {
@@ -40,19 +20,9 @@ function historyMessage(overrides: Partial<LinkedInHistoryMessage> = {}): Linked
   };
 }
 
-async function readHistory(rows: LinkedInHistoryMessage[]): Promise<InboundMessage[]> {
-  const descriptor = createLinkedInDescriptor({
-    syncSink: historySink(rows),
-    minIntervalMs: 15 * 60_000,
-    maxIntervalMs: 30 * 60_000,
-  });
-  const talker = descriptor.capabilities.talker!.build(
-    {} as Record<string, Credential>,
-    {} as RuntimeKit,
-  );
-  const history = talker.feature("history");
-  if (!history) throw new Error("the LinkedIn talker did not expose a history feature");
-  return await history.query({});
+/** Mirrored rows as the channel reads them back. */
+async function readHistory(rows: LinkedInHistoryMessage[]): Promise<ChannelMessage[]> {
+  return rows.map(linkedInHistoryMessage);
 }
 
 /**
@@ -115,5 +85,14 @@ describe("LinkedIn message addressing", () => {
       historyMessage({ senderProfileUrl: null, senderIsSelf: true }),
     ]);
     expect(me.senderId).toBe("linkedin:self");
+  });
+});
+
+describe("linkedInHistoryMessage", () => {
+  it("leaves a sender the mirror recorded no name for unnamed", () => {
+    expect(
+      linkedInHistoryMessage(historyMessage({ senderName: null })).senderDisplayName,
+    ).toBeUndefined();
+    expect(linkedInHistoryMessage(historyMessage()).senderDisplayName).toBe("Ada Lovelace");
   });
 });

@@ -158,8 +158,6 @@ export interface LinkedInSyncSink {
       isGroup?: boolean | null;
     },
   ): Promise<void>;
-  /** Mirrored history, newest last; `threadId: null` spans every thread. */
-  fetchHistory?(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]>;
   /** Replace authoritative thread membership without refreshing profile metadata. */
   replaceThreadParticipantMembership?(
     threadId: string,

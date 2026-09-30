@@ -1532,12 +1532,17 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
+/**
+ * The platform's own history of a Connection's conversations: at most `limit`
+ * of them at or after `since`, oldest first, each saying which channel carried
+ * it and which way it went.
+ */
 export interface TalkHistory {
   query(input: {
     conversationId?: ConversationId;
     since?: Date;
     limit?: number;
-  }): Promise<InboundMessage[]>;
+  }): Promise<ChannelMessage[]>;
 }
 
 export interface TalkInboundMedia {

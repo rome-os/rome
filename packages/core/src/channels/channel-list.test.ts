@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
+  ChannelMessage,
   ConversationId,
   InboundMessage,
   TalkActivity,
   TalkDirectMessaging,
+  TalkHistory,
 } from "@rome-os/app-runtime";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
@@ -35,9 +37,10 @@ function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
 /** A pasted-token service whose every talker epoch is recorded. */
 function talkService(
   service: string,
-  ports: { sends?: boolean; receives?: boolean } = {},
+  ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
   direct: TalkDirectMessaging | null = null,
   activity: TalkActivity | null = null,
+  history: TalkHistory | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
   return {
@@ -65,7 +68,9 @@ function talkService(
                   ? direct
                   : name === "activity"
                     ? activity
-                    : null) as Talker["feature"],
+                    : name === "history"
+                      ? history
+                      : null) as Talker["feature"],
             };
           },
         },
@@ -151,6 +156,37 @@ describe("channelList", () => {
     await expect(
       telegram.send!.send("c-1" as ConversationId, { text: "hi" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
+  });
+
+  it("reads a live channel's history through its Connection, newest first", async () => {
+    // The Connection's history answers oldest first.
+    const said = (messageId: string, at: number): ChannelMessage => ({
+      ...message({ messageId, timestamp: new Date(at) }),
+      channel: "telegram",
+      direction: "inbound",
+    });
+    const history: TalkHistory = { query: async () => [said("older", 1), said("newer", 2)] };
+    const { registry, channels } = setup([
+      talkService("telegram", { history: true }, null, null, history).descriptor,
+    ]);
+    const telegram = channels.find((channel) => channel.name === "telegram")!;
+    // Rome keeps no copy of a live channel, so People reads it elsewhere.
+    expect(telegram.messages?.byAccount).toBeNull();
+
+    await expect(telegram.messages!.query({})).rejects.toThrow(
+      'No connection backs channel "telegram"',
+    );
+
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+    const page = await telegram.messages!.query({});
+    expect(page.map((entry) => entry.messageId)).toEqual(["newer", "older"]);
+    expect((await telegram.messages!.query({ limit: 1 })).map((entry) => entry.messageId)).toEqual([
+      "newer",
+    ]);
   });
 
   it("reaches an account directly only through a Connection that offers it", async () => {

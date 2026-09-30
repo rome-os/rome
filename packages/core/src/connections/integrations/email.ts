@@ -242,6 +242,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
     capabilities: {
       talker: {
         needs: ["inbox"] as const,
+        history: true,
         build(creds, kit): Talker {
           const material = creds.inbox.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
@@ -299,7 +300,10 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter),
+                history: historyFeature(adapter, {
+                  channel: "email",
+                  isOwn: (message) => message.channelUserId === adapter.getAddress(),
+                }),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },

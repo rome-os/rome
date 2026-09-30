@@ -45,7 +45,6 @@ class FakeWhatsAppAdapter {
   stopped = false;
   startError: unknown = null;
   readonly sent: Array<{ channelUserId: string; threadId: string; msg: unknown }> = [];
-  readonly historyCalls: Array<{ threadId: string | null; windowHours: number }> = [];
 
   onSync(sink: WhatsAppSyncSink): void {
     this.sync = sink;
@@ -71,10 +70,6 @@ class FakeWhatsAppAdapter {
   }
   async saveIncomingAttachments(m: NormalizedMessage) {
     return m.attachments;
-  }
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<unknown[]> {
-    this.historyCalls.push({ threadId, windowHours });
-    return [];
   }
 }
 
@@ -165,20 +160,16 @@ describe("whatsapp descriptor shape", () => {
     expect(fake.stopped).toBe(true);
   });
 
-  it("forwards fetchHistory to the adapter (fetch_channel_history parity)", async () => {
+  // What was said is the channel's `messages`, read from the mirror
+  // (whatsapp-messages.ts). The Talk no longer reads history of its own.
+  it("leaves history to the channel", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
     const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
       { session: sessionCred() },
       runtimeKit(),
     );
-    await expect(
-      talker.feature("history")?.query({
-        conversationId: "chat-1@s.whatsapp.net" as ConversationId,
-        limit: 20,
-      }),
-    ).resolves.toEqual([]);
-    expect(fake.historyCalls).toEqual([{ threadId: "chat-1@s.whatsapp.net", windowHours: 24 }]);
+    expect(talker.feature("history")).toBeNull();
   });
 });
 

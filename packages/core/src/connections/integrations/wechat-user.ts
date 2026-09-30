@@ -12,9 +12,9 @@
 // The connection is READ-ONLY. `send` throws, `directMessaging` answers null,
 // and nothing is delivered into the agent pipeline: a personal account's whole
 // history arriving as inbound turns would put an agent in the middle of every
-// conversation the guardian has ever had. The read surfaces are `directory`
-// (which chats exist) and `history` (what was said), both live queries against
-// the client's own store.
+// conversation the guardian has ever had. The Talk's read surface is `directory`
+// (which chats exist), a live query against the client's own store. What was
+// said is the channel's `messages` (wechat-user-messages.ts), read the same way.
 //
 // Fault mapping: a reader that reports the account signed out, or a key that no
 // longer fits, is terminal (CredentialRejected → the grant degrades → the
@@ -471,17 +471,6 @@ export function createWechatUserDescriptor(
             },
           };
 
-          const history: TalkHistory = {
-            async query(input) {
-              const messages = await reader.messages({
-                ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-                ...(input.since ? { since: input.since } : {}),
-                limit: historyQueryLimit(input.limit),
-              });
-              return messages.map(toWechatUserChannelMessage);
-            },
-          };
-
           const talker: WechatUserTalker = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
@@ -572,7 +561,7 @@ export function createWechatUserDescriptor(
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               // `directMessaging` is absent on purpose: answering null is the
               // whole declaration that this channel cannot be written to.
-              const features: Partial<TalkFeatureMap> = { directory, history };
+              const features: Partial<TalkFeatureMap> = { directory };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },
             getRuntimeDegradation(): CapabilityDegradation | null {

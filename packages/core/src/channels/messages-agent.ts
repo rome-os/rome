@@ -4,6 +4,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
+import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 
@@ -108,13 +109,16 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
 }
 
 /** Who said a transcript line and in which session's thread, as the row
- *  recorded them. A private thread is a direct one, and a thread type with no
- *  kind of its own reads as unknown. */
-function transcriptDetail(raw: Record<string, unknown>): MessageDetail {
+ *  recorded them. Rome's own lines carry no sender, the way the sentinel log
+ *  reads them. A private thread is a direct one, and a thread type with no kind
+ *  of its own reads as unknown. */
+function transcriptDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
   const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
   const detail: MessageDetail = {};
   const sender = { id: text(raw.senderId), name: text(raw.senderName) };
-  if (sender.id !== null || sender.name !== null) detail.sender = sender;
+  if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
+    detail.sender = sender;
+  }
   const threadId = text(raw.threadId);
   if (threadId !== null) {
     const type = text(raw.threadType);

@@ -154,6 +154,27 @@ describe("agentMessages", () => {
     expect(byRef.get("agent:m-later")?.sender).toBeUndefined();
   });
 
+  it("names the person as the sender and leaves Rome's own lines unattributed", async () => {
+    await message(db, "m-rome", {
+      sessionId: "s-direct",
+      role: "notification",
+      at: 350,
+      senderId: "rome",
+    });
+    await message(db, "m-person", {
+      sessionId: "s-direct",
+      role: "user",
+      at: 360,
+      senderId: DIRECT,
+    });
+    const page = await agentMessages(db).read({ accounts: [account], limit: WHOLE_HISTORY });
+    const byRef = new Map(page.map((entry) => [entry.ref, entry]));
+    // The sentinel log reads Rome's replies the same way.
+    expect(byRef.get("agent:m-rome")).toMatchObject({ direction: "outbound" });
+    expect(byRef.get("agent:m-rome")?.sender).toBeUndefined();
+    expect(byRef.get("agent:m-person")?.sender).toEqual({ id: DIRECT, name: null });
+  });
+
   it("keeps an account on its own channel", async () => {
     // `s-elsewhere` spells this account's thread id on another channel, so the
     // pair is all that keeps the two histories apart.

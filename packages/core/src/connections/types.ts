@@ -263,6 +263,10 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
+      /** True when the Talk reads the platform's own history, so the channel it
+       *  backs answers `messages.query` through it. Absent means it does not:
+       *  the channel's messages come from a store, or from nowhere. */
+      history?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

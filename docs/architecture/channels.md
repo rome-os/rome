@@ -4,7 +4,7 @@ How a [channel](../concepts/messaging.md#channels) is connected: the server-owne
 
 ## Channel ports
 
-A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send` and `inbound`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
+A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound` and `messages`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
 
 ### Invariants
 
@@ -19,6 +19,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
 - `messages` answers one `query` for what was said on the channel: every conversation or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
 - Only a copy Rome keeps answers the per-person reads a People timeline makes (`messages.byAccount`). A channel without one leaves them null, and People reads it from Rome's own transcript instead.
+- A channel with no store of its own, such as a Telegram user account, Discord, email or webchat, answers `query` through its Connection's history read. While no Connection exists for the channel, the read rejects as a send does.
 - Every subscriber hears every event. A subscriber hears one conversation's events one at a time, in arrival order. Different conversations and different subscribers never wait on each other, so one slow or failing handler holds up only its own conversation for its own subscriber. A handler that never settles stops that conversation for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a conversation with twenty events waiting. A conversation holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
 

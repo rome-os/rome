@@ -1,7 +1,5 @@
 // A row of the WhatsApp mirror as the message it records, for the channel's
-// `query` (whatsapp-messages.ts). The adapter's history read shares the line and
-// the attachments, but still names the sender and the chat through its live
-// connection until that read is removed.
+// `query` and its account reads (whatsapp-messages.ts).
 
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
@@ -9,7 +7,7 @@ import type { WaHistoryMessage } from "./whatsapp-sync.js";
 
 /** The line a mirrored row reads as. A reaction names what it reacted to, and
  *  media with no caption reads as its type rather than as nothing. */
-export function historyText(row: WaHistoryMessage): string {
+function historyText(row: WaHistoryMessage): string {
   if (row.type === "reaction") {
     const emoji = row.text?.trim() || "reaction";
     return row.reactsToId ? `Reacted ${emoji} to message ${row.reactsToId}` : `Reacted ${emoji}`;
@@ -25,7 +23,7 @@ export function historyText(row: WaHistoryMessage): string {
 /** What came attached to a mirrored row, as far as the mirror knows it: the
  *  kind, and the caption the text doubles as. The mirror keeps no file name,
  *  MIME type or download handle. */
-export function historyAttachments(row: WaHistoryMessage): Attachment[] {
+function historyAttachments(row: WaHistoryMessage): Attachment[] {
   if (!row.hasMedia) return [];
   const type = historyAttachmentType(row.type);
   if (!type) return [];
@@ -56,6 +54,10 @@ function historyAttachmentType(type: string | null): Attachment["type"] | null {
  *  the chat's own JID names the other person. */
 export const WHATSAPP_SELF_SENDER = "whatsapp:self";
 
+/** The sender id of a group line the mirror recorded no address for. The
+ *  chat's JID names the group, not whoever spoke in it. */
+export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
+
 /**
  * A mirrored row as a {@link ChannelMessage}.
  *
@@ -69,7 +71,7 @@ export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
   const senderId = row.fromMe
     ? (row.senderJid ?? WHATSAPP_SELF_SENDER)
     : isGroup
-      ? (row.senderJid ?? row.chatJid)
+      ? (row.senderJid ?? WHATSAPP_UNKNOWN_SENDER)
       : row.chatJid;
   const threadName = row.chatName ?? row.chatPhoneNumber ?? undefined;
   const senderName = row.senderName ?? row.pushName ?? row.senderPhoneNumber;

@@ -1147,6 +1147,7 @@ async function main() {
 
   const workerRpcServer = new WorkerRpcServer({
     talkRouter,
+    channels,
     connectionRegistry,
     conversationSettings,
     routinesRepo,

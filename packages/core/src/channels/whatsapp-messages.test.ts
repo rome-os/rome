@@ -8,7 +8,7 @@ import {
   testMessagesQueryContract,
   WHOLE_HISTORY,
 } from "./messages-contract.js";
-import { WHATSAPP_SELF_SENDER } from "./whatsapp-history.js";
+import { WHATSAPP_SELF_SENDER, WHATSAPP_UNKNOWN_SENDER } from "./whatsapp-history.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 import { channelMessageDetail, type AccountMessages, type MessageAccount } from "./messages.js";
 
@@ -181,6 +181,28 @@ describe("whatsAppMessages", () => {
       id: WHATSAPP_SELF_SENDER,
       name: null,
     });
+  });
+
+  it("marks a group line with no recorded sender as from an unknown sender", async () => {
+    const now = new Date();
+    testDb.db
+      .insert(waMessages)
+      .values({
+        id: "anon",
+        chatJid: GROUP,
+        senderJid: null,
+        fromMe: false,
+        timestamp: new Date(780_000),
+        type: "text",
+        text: "who said this",
+        hasMedia: false,
+        createdAt: now,
+      })
+      .run();
+    const [line] = await whatsAppMessages(testDb.db).query({ conversationId: groupChat, limit: 1 });
+    // The chat's JID names the group, not whoever spoke in it.
+    expect(line).toMatchObject({ messageId: "anon", senderId: WHATSAPP_UNKNOWN_SENDER });
+    expect(line?.senderDisplayName).toBeUndefined();
   });
 
   it("reads `since` as an instant, not as the second it falls in", async () => {

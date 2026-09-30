@@ -1,5 +1,6 @@
 import type {
   Attachment,
+  ChannelMessage,
   ConversationId,
   InboundMessage,
   MessageReceipt,
@@ -130,18 +131,37 @@ export function addressIsConversationFeature(): TalkDirectMessaging {
   };
 }
 
-export function historyFeature(adapter: {
-  fetchHistory(conversationId: string | null, windowHours: number): Promise<NormalizedMessage[]>;
-}): TalkHistory {
+/**
+ * History over an adapter's own read, as the channel's record: the channel's
+ * name, and which way each message went. `isOwn` says which lines the account
+ * the Connection speaks as wrote. Absent, every line is one Rome was told.
+ */
+export function historyFeature(
+  adapter: {
+    fetchHistory(conversationId: string | null, windowHours: number): Promise<NormalizedMessage[]>;
+  },
+  record: { channel: string; isOwn?(message: NormalizedMessage): boolean },
+): TalkHistory {
   return {
     async query(input) {
       const messages = await adapter.fetchHistory(
         input.conversationId ?? null,
         historyWindowHours(input.since),
       );
-      return messages.slice(0, historyQueryLimit(input.limit)).map(toInboundMessage);
+      return messages
+        .slice(0, historyQueryLimit(input.limit))
+        .map((message) => toHistoryMessage(message, record.channel, record.isOwn?.(message)));
     },
   };
+}
+
+/** One line of a Connection's history as the channel's record. */
+export function toHistoryMessage(
+  message: NormalizedMessage,
+  channel: string,
+  own = false,
+): ChannelMessage {
+  return { ...toInboundMessage(message), channel, direction: own ? "outbound" : "inbound" };
 }
 
 export function typingActivityFeature(adapter: {

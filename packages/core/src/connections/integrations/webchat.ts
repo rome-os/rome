@@ -22,7 +22,7 @@
 // notes for how the wire stage should source `getPort("webchat")`
 // post-migration.
 
-import { WebChatAdapter } from "../../channels/webchat.js";
+import { WEBCHAT_GUARDIAN_USER_ID, WebChatAdapter } from "../../channels/webchat.js";
 import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { ConnectionDescriptor, Talker } from "../types.js";
@@ -47,6 +47,7 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
         // Webchat turns start from its own HTTP route, so its channel has no
         // inbound port for the channel-message hook to answer a second time.
         receives: false,
+        history: true,
         build(): Talker {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 
@@ -67,7 +68,13 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
               );
             },
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = { history: historyFeature(adapter) };
+              const features: Partial<TalkFeatureMap> = {
+                history: historyFeature(adapter, {
+                  channel: "webchat",
+                  // Every line the guardian did not write is an agent's reply.
+                  isOwn: (message) => message.channelUserId !== WEBCHAT_GUARDIAN_USER_ID,
+                }),
+              };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },
           };

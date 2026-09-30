@@ -13,7 +13,6 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 import type { ProviderAdapter } from "./adapter.js";
-import { historyAttachments, historyText } from "./whatsapp-history.js";
 import type { NormalizedMessage, Attachment, OutgoingMessage } from "./types.js";
 import type {
   WhatsAppSyncSink,
@@ -524,19 +523,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
     this.handler = handler;
   }
 
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-    const fetchHistory = this.syncSink?.fetchHistory;
-    if (!fetchHistory) {
-      throw new Error("WhatsApp history store is not available");
-    }
-
-    const safeWindowHours = Number.isFinite(windowHours) && windowHours > 0 ? windowHours : 24;
-    const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
-    const threadJid = threadId ? this.canonicalJid(threadId) : null;
-    const rows = await fetchHistory.call(this.syncSink, threadJid, since);
-    return rows.map((row) => this.historyRowToNormalized(row));
-  }
-
   async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
     if (message.attachments.length === 0) return message.attachments;
     const raw = message.rawEvent as WAMessage | undefined;
@@ -661,34 +647,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
     }
 
     return attachments;
-  }
-
-  private historyRowToNormalized(row: WaHistoryMessage): NormalizedMessage {
-    const threadId = this.canonicalJid(row.chatJid);
-    const threadType = row.isGroup || threadId.endsWith("@g.us") ? "group" : "private";
-    const senderJid = row.senderJid ? this.canonicalJid(row.senderJid) : null;
-    const channelUserId = row.fromMe
-      ? (this.selfPnJid() ?? senderJid ?? threadId)
-      : threadType === "group"
-        ? (senderJid ?? threadId)
-        : threadId;
-    const text = historyText(row);
-
-    return {
-      id: row.id,
-      channel: "whatsapp",
-      channelUserId,
-      displayName: row.fromMe
-        ? "You"
-        : (row.senderName ?? row.pushName ?? row.senderPhoneNumber ?? senderJid ?? "Unknown"),
-      threadId,
-      threadName: row.chatName ?? row.chatPhoneNumber ?? undefined,
-      threadType,
-      timestamp: row.timestamp,
-      text,
-      attachments: historyAttachments(row),
-      rawEvent: row,
-    };
   }
 
   private async fetchLatestWaWebVersion(): Promise<[number, number, number] | null> {

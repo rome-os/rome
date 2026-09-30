@@ -4,8 +4,8 @@ import type {
   ActionConfig,
   ActionResult,
   Attachment,
+  ChannelMessage,
   ConversationId,
-  InboundMessage,
   TalkRouter,
 } from "@rome-os/app-runtime";
 
@@ -38,10 +38,29 @@ interface StructuredMessage {
   attachments: StructuredAttachment[];
 }
 
-function toStructuredMessages(messages: InboundMessage[]): StructuredMessage[] {
+/**
+ * The name a line is shown under. A message names its sender only as the
+ * channel recorded them, so the fallbacks for an unnamed one are this tool's,
+ * and each channel keeps the ones it has always shown: the guardian's own
+ * WhatsApp lines as "You", a WhatsApp group line with no recorded sender as
+ * "Unknown", and an unnamed LinkedIn sender as no name at all.
+ */
+function senderLabel(channel: string, m: ChannelMessage): string {
+  if (channel === "whatsapp") {
+    if (m.direction === "outbound") return "You";
+    return m.senderDisplayName ?? (m.senderId === WHATSAPP_UNKNOWN_SENDER ? "Unknown" : m.senderId);
+  }
+  if (channel === "linkedin") return m.senderDisplayName ?? "";
+  return m.senderDisplayName ?? m.senderId;
+}
+
+/** The sender id a WhatsApp group line carries when no sender was recorded. */
+const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
+
+function toStructuredMessages(channel: string, messages: ChannelMessage[]): StructuredMessage[] {
   return messages.map((m) => ({
     id: m.messageId,
-    displayName: m.senderDisplayName ?? m.senderId,
+    displayName: senderLabel(channel, m),
     timestamp: m.timestamp.toISOString(),
     threadId: m.conversationId,
     threadName: m.thread?.name,
@@ -56,13 +75,13 @@ function toStructuredMessages(messages: InboundMessage[]): StructuredMessage[] {
   }));
 }
 
-function formatMessages(messages: InboundMessage[], windowHours: number): string {
+function formatMessages(channel: string, messages: ChannelMessage[], windowHours: number): string {
   if (messages.length === 0) {
     return "(No messages found in the requested window.)";
   }
 
   // Group by threadName (or threadId as fallback)
-  const threads = new Map<string, InboundMessage[]>();
+  const threads = new Map<string, ChannelMessage[]>();
   for (const msg of messages) {
     const key = msg.thread?.name ?? msg.conversationId;
     let bucket = threads.get(key);
@@ -89,7 +108,7 @@ function formatMessages(messages: InboundMessage[], windowHours: number): string
           text = text ? `${text} [attachments: ${names}]` : `[attachments: ${names}]`;
         }
         if (!text) return null;
-        return `[${time}] **${m.senderDisplayName ?? m.senderId}**: ${text}`;
+        return `[${time}] **${senderLabel(channel, m)}**: ${text}`;
       })
       .filter(Boolean);
 
@@ -168,7 +187,7 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
 
       log.info("fetching channel history", { channel, threadId, windowHours });
 
-      let messages: InboundMessage[];
+      let messages: ChannelMessage[];
       try {
         messages = await history.query({
           ...(threadId ? { conversationId: threadId as ConversationId } : {}),
@@ -199,14 +218,14 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
         channel,
         messageCount: messages.length,
         windowHours,
-        content: formatMessages(messages, windowHours),
+        content: formatMessages(channel, messages, windowHours),
       };
 
       // Opt-in: only add the structured array when explicitly requested, so
       // existing callers (LLM agents, the `dream` action) keep the exact same
       // payload and token footprint they have today.
       if (includeMessages) {
-        data.messages = toStructuredMessages(messages);
+        data.messages = toStructuredMessages(channel, messages);
       }
 
       return { status: "ok", data };

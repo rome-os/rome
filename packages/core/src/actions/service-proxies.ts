@@ -50,6 +50,7 @@ import type {
   TalkFeatureMap,
   TalkFeatureName,
   TalkRouter,
+  ChannelMessage,
   InboundMessage,
   MessageReceipt,
   OutgoingMessage,
@@ -227,9 +228,9 @@ export class TalkRouterProxy implements TalkRouter {
         conversationId?: ConversationId;
         since?: Date;
         limit?: number;
-      }): Promise<InboundMessage[]> => {
+      }): Promise<ChannelMessage[]> => {
         const messages = await getWorkerRpc().call<
-          Array<Omit<InboundMessage, "timestamp"> & { timestamp: Date | string }>
+          Array<Omit<ChannelMessage, "timestamp"> & { timestamp: Date | string }>
         >("talk.history.query", {
           connectionId,
           ...input,

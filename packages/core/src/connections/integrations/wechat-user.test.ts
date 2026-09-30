@@ -391,7 +391,7 @@ describe("the WeChat personal Talker", () => {
     }
   });
 
-  it("keeps history available and retries a failed client launch without rejecting the grant", async () => {
+  it("retries a failed client launch without rejecting the grant", async () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, state: "stopped", running: false }],
       readerJson: { messages: [] },
@@ -404,7 +404,6 @@ describe("the WeChat personal Talker", () => {
         expect(rs.mocked(runtime.start).mock.calls.length).toBeGreaterThanOrEqual(2),
       );
       expect(degradation()?.reason).toContain("desktop unavailable");
-      expect(await talker.feature("history")!.query({ limit: 1 })).toEqual([]);
       expect(fault).not.toHaveBeenCalled();
     } finally {
       await talker.stop();
@@ -510,38 +509,11 @@ describe("the WeChat personal Talker", () => {
     await talker.stop();
   });
 
-  it("reads history through the reader", async () => {
-    const runtime = fakeRuntime({
-      statuses: [READY],
-      readerJson: {
-        messages: [
-          {
-            id: "wxid_friend:5",
-            conversationId: "wxid_friend",
-            conversationName: "A Friend",
-            isGroup: false,
-            senderId: "wxid_friend",
-            senderName: "A Friend",
-            isSelf: false,
-            timestamp: 1789348325,
-            type: "text",
-            text: "hello",
-          },
-        ],
-      },
-    });
-    const { talker } = buildTalker(runtime);
-
-    const messages = await talker
-      .feature("history")!
-      .query({ conversationId: "wxid_friend" as ConversationId, limit: 10 });
-    expect(messages[0]).toMatchObject({
-      messageId: "wxid_friend:5",
-      conversationId: "wxid_friend",
-      senderId: "wxid_friend",
-      text: "hello",
-    });
-
+  // What was said is the channel's `messages`, read through the same reader
+  // (wechat-user-messages.ts). The Talk offers only the directory.
+  it("leaves history to the channel", async () => {
+    const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
+    expect(talker.feature("history")).toBeNull();
     await talker.stop();
   });
 });

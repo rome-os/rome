@@ -36,6 +36,7 @@ import {
   historyQueryLimit,
   historyWindowHours,
   normalizedFromInbound,
+  toHistoryMessage,
   toInboundMessage,
   toMessageReceipt,
 } from "./talk-features.js";
@@ -252,6 +253,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     capabilities: {
       talker: {
         needs: ["bot"] as const,
+        history: true,
         build(creds, kit): Talker {
           const token = creds.bot.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -309,7 +311,11 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                     input.conversationId ?? null,
                     historyWindowHours(input.since),
                   );
-                  return messages.slice(0, historyQueryLimit(input.limit)).map(toInboundMessage);
+                  // The read leaves bot messages out, so every line is one a
+                  // person wrote and Rome was told.
+                  return messages
+                    .slice(0, historyQueryLimit(input.limit))
+                    .map((message) => toHistoryMessage(message, "discord"));
                 },
               };
               const inboundMedia: TalkInboundMedia = {

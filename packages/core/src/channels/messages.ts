@@ -59,7 +59,7 @@ export interface MessageQuery {
 }
 
 const DEFAULT_QUERY_LIMIT = 100;
-const MAX_QUERY_LIMIT = 1_000;
+export const MAX_QUERY_LIMIT = 1_000;
 
 /** What a People timeline entry says about a message beyond the line itself. */
 export type MessageDetail = Pick<Message, "sender" | "conversation" | "attachments">;

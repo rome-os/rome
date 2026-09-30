@@ -131,6 +131,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     const activity = Promise.resolve()
       .then(
         () =>
+          // Typing follows the channel's current Connection, the one a reply would go out on.
           channel.send?.activity?.begin({
             conversationId: message.conversationId,
             messageId: message.messageId,

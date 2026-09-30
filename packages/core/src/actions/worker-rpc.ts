@@ -2,13 +2,15 @@ import type { ChildProcess } from "node:child_process";
 import { actionExecutionContext } from "./context.js";
 import { replayContext } from "./replay.js";
 import { z } from "zod";
+import type { Channels } from "../channels/channel.js";
+import { readTalkHistory } from "./talk-history.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import type {
   BackendTurnRunner,
   ConversationId,
   ConversationRef,
   ConversationSettingsControl,
-  InboundMessage,
+  ChannelMessage,
   OutgoingMessage,
   TalkRouter,
   UpdateConversationSettingsInput,
@@ -166,6 +168,9 @@ interface RpcResponseMessage {
 
 export interface WorkerRpcServices {
   talkRouter: TalkRouter;
+  /** The channels `talk.history.query` reads, by the service a connection
+   *  belongs to. */
+  channels: Channels;
   connectionRegistry: ConnectionRegistry;
   conversationSettings: ConversationSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
@@ -390,15 +395,17 @@ export class WorkerRpcServer {
     );
   }
 
-  private async handleTalkHistory(params: unknown): Promise<InboundMessage[]> {
+  private async handleTalkHistory(params: unknown): Promise<ChannelMessage[]> {
     const { connectionId, conversationId, since, limit } = parseParams(
       "talk.history.query",
       TalkHistoryParams,
       params,
     );
-    const history = this.services.talkRouter.feature(connectionId, "history");
-    if (!history) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
-    return history.query({
+    const service = this.services.connectionRegistry
+      .all()
+      .find((connection) => connection.id === connectionId)?.service;
+    const channel = this.services.channels.find((candidate) => candidate.name === service);
+    return readTalkHistory(channel, connectionId, {
       ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
