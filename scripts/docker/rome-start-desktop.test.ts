@@ -1,7 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:net";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +46,17 @@ async function freePort(): Promise<number> {
   server.close();
   await once(server, "close");
   return port;
+}
+
+function listening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(port, "127.0.0.1");
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
 }
 
 function started(): { program: string; pid: number; args: string }[] {
@@ -120,6 +139,26 @@ afterEach(() => {
 
 // The script and these tests read /proc and use setsid and pgrep, so they need Linux.
 describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
+  it("keeps its lock and logs in a directory only its user can write, by default", () => {
+    // /tmp would let another account create the lock first and block the start.
+    const home = join(dir, "home");
+    const result = spawnSync(
+      "bash",
+      [SCRIPT, "notes", `:${display}`, String(vncPort), String(novncPort)],
+      {
+        encoding: "utf8",
+        timeout: 60_000,
+        env: { PATH: `${dir}:${process.env.PATH}`, FAKE_RECORD: record, HOME: home },
+      },
+    );
+    expect(result.status).toBe(0);
+    const state = join(home, ".cache", "rome-desktop");
+    expect(statSync(state).mode & 0o777).toBe(0o700);
+    for (const file of [".rome-desktop-notes.lock", "xtigervnc-notes.log", "novnc-notes.log"]) {
+      expect(existsSync(join(state, file))).toBe(true);
+    }
+  }, 60_000);
+
   it("writes its logs to ROME_DESKTOP_LOG_DIR", () => {
     expect(run().status).toBe(0);
     for (const log of ["xtigervnc", "openbox", "novnc"]) {
@@ -152,14 +191,16 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
       join(dir, "websockify"),
       [`127.0.0.1:${novncPort}`, `localhost:${vncPort}`],
       {
-        env: { FAKE_RECORD: join(dir, "foreign-record") },
+        // PATH lets the stand-in's `env node` find node where CI installs it.
+        env: { FAKE_RECORD: join(dir, "foreign-record"), PATH: process.env.PATH ?? "" },
       },
     );
     await once(foreign, "spawn");
-    for (let i = 0; i < 100 && !existsSync(join(dir, "foreign-record")); i++) {
+    // Wait until it listens, so the test never passes on a process that died.
+    for (let i = 0; i < 250 && !(await listening(novncPort)); i++) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    await new Promise((r) => setTimeout(r, 200));
+    expect(await listening(novncPort)).toBe(true);
     try {
       const result = runWith({ FOREIGN_PID: String(foreign.pid) });
 

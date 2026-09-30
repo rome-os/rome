@@ -16,13 +16,13 @@ Desktops are static. A fixed table in [`packages/core/src/desktops.ts`](../../pa
   - `openbox` with `DISPLAY=:<n>`, the window manager
   - `websockify 127.0.0.1:<novnc> localhost:<vnc>`, the WebSocket bridge the dashboard's noVNC client connects to
 
-  WeChat's runtime runs it before it starts the client or captures keys, with the arguments `startDesktopArgs` builds from the table row. Until the entrypoint's own call is removed, the entrypoint also runs it at container start when `WECHAT_USER_DISPLAY` is set.
+  WeChat's runtime runs it before it starts the client or captures keys, with the arguments `startDesktopArgs` builds from the table row. WeChat's health check also runs it for a client already on the desktop, so a part that died, such as websockify, comes back while the client keeps running. Until the entrypoint's own call is removed, the entrypoint also runs it at container start when `WECHAT_USER_DISPLAY` is set.
 - **The desktop proxy**: routes `/desktop-proxy/<name>/` to the table's websockify port.
 
 ## Contracts
 
 - `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop. Any other first segment names a desktop. `/desktop-proxy/<name>` and every path under it go to that desktop's websockify port, and answer 404 when the table has no such desktop. `/desktop/<name>` shows no desktop for a name outside `^[a-z][a-z0-9-]{0,31}$` or for `websockify`, because characters such as `?` and `#` would end the proxy path early and reach the shared desktop. Together these mean `/desktop/<name>` never shows the shared desktop under another name.
-- The start script is idempotent. It reuses a running X server with the same display and RFB port, an Openbox on that display, and a websockify with the same ports, and it starts only what is missing. It reuses only processes the calling user owns. Runs for the same desktop take turns, under a `flock` on `.rome-desktop-<name>.lock`. Its logs and lock go to `ROME_DESKTOP_LOG_DIR`, `/tmp` by default. It exits 1 with the reason on stderr, and 2 on malformed arguments.
+- The start script is idempotent. It reuses a running X server with the same display and RFB port, an Openbox on that display, and a websockify with the same ports, and it starts only what is missing. It reuses only processes the calling user owns. Runs for the same desktop take turns, under a `flock` on `.rome-desktop-<name>.lock`. Its logs and lock go to `ROME_DESKTOP_LOG_DIR`, by default `~/.cache/rome-desktop` with mode 0700. They are not in `/tmp`, where another account could create the lock first and keep the desktop from starting. It exits 1 with the reason on stderr, and 2 on malformed arguments.
 - `DesktopPage` encodes the whole socket path into `desktop-vnc.html?path=`, so a name reaches the proxy intact. `NamedDesktopPage`'s name check is defence in depth.
 
 ## Invariants

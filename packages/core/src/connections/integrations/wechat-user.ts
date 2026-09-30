@@ -501,6 +501,10 @@ export function createWechatUserDescriptor(
                     // so it cannot degrade a client that reads fine.
                     await runtime.ensureAccessibility();
                     if (epoch.signal.aborted) return;
+                    // The desktop outlives any one process on it; restart a part
+                    // that died, so the guardian can still reach the client.
+                    await runtime.repairDesktop(epoch.signal);
+                    if (epoch.signal.aborted) return;
                   }
                   if (!status.running) {
                     degradation = {

@@ -56,6 +56,7 @@ function fakeRuntime(opts: {
     prepareSession: rs.fn(async () => {}),
     ensureDesktop: rs.fn(async () => {}),
     ensureAccessibility: rs.fn(async () => {}),
+    repairDesktop: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     start: rs.fn(async () => {}),
     stop: rs.fn(async () => {}),
@@ -383,6 +384,19 @@ describe("the WeChat personal Talker", () => {
       await rs.waitFor(() => expect(runtime.ensureAccessibility).toHaveBeenCalledTimes(1));
       await rs.waitFor(() => expect(degradation()).toBeNull());
       expect(runtime.prepareSession).not.toHaveBeenCalled();
+      expect(runtime.start).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
+  it("repairs the desktop under a client that is already running", async () => {
+    // A crashed websockify or Openbox would otherwise leave /desktop/wechat
+    // broken until the client itself exits.
+    const runtime = fakeRuntime({ statuses: [READY] });
+    const { talker } = buildTalker(runtime);
+    try {
+      await rs.waitFor(() => expect(runtime.repairDesktop).toHaveBeenCalledTimes(1));
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
       await talker.stop();

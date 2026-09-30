@@ -7,9 +7,10 @@
 # Idempotent: a process of this user's that already runs for this display and
 # these ports is reused, and only a missing one is started. Runs for the same
 # desktop take turns. Each program starts in its own session, so it outlives this
-# script and whoever ran it. Run it as the user the desktop belongs to. Logs go to
-# ROME_DESKTOP_LOG_DIR, /tmp by default. Exits 1, with the reason on stderr, when
-# the display or a port belongs to something else or a program fails to start.
+# script and whoever ran it. Run it as the user the desktop belongs to. Its lock
+# and logs go to ROME_DESKTOP_LOG_DIR, by default ~/.cache/rome-desktop. Exits 1,
+# with the reason on stderr, when the display or a port belongs to something
+# else or a program fails to start.
 set -euo pipefail
 
 if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
@@ -27,7 +28,10 @@ if ! [[ "$NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || ! [[ "$DISPLAY_ID" =~ ^:[0-9]+$ 
   exit 2
 fi
 DISPLAY_NUM="${DISPLAY_ID#:}"
-LOG_DIR="${ROME_DESKTOP_LOG_DIR:-/tmp}"
+# The lock and logs live where only this user can write. In /tmp another
+# account could create the lock first and keep the desktop from starting.
+LOG_DIR="${ROME_DESKTOP_LOG_DIR:-${HOME:?}/.cache/rome-desktop}"
+[ -d "$LOG_DIR" ] || { mkdir -p "$(dirname "$LOG_DIR")" && mkdir -m 700 "$LOG_DIR"; }
 OWNER_UID="$(id -u)"
 
 # Every check below reads, then starts. A second run for the same desktop would

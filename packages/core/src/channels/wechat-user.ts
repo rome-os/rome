@@ -382,6 +382,23 @@ export class WechatUserRuntime {
   }
 
   /**
+   * Start whatever part of WeChat's own desktop has died under a running client
+   * on it, such as a crashed websockify that leaves /desktop/wechat broken.
+   * Call it after `status()` or `pid()` has found the client. Never throws: a
+   * repair that fails is logged, and the client keeps running.
+   */
+  async repairDesktop(signal?: AbortSignal): Promise<void> {
+    if (!this.desktop || this.currentDisplay !== this.desktop.display) return;
+    try {
+      await this.ensureDesktop(signal);
+    } catch (error) {
+      log.warn("wechat_user.desktop_repair_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Start WeChat's own desktop, or reuse it, before a client starts on it. The
    * desktop outlives Rome, so a Rome restart finds it running. Where the start
    * script is not installed, as on a host `pnpm start`, the client stays on the

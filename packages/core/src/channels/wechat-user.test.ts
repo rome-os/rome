@@ -338,6 +338,42 @@ describe("WechatUserRuntime display", () => {
     expect(calls.find(([file]) => file === "env")).toContain("ROME_DESKTOP_LOG_DIR=/var/log/rome");
   });
 
+  it("repairs the desktop under a running client on it, and never throws", async () => {
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:100\0");
+    let exit = 0;
+    const { run, calls } = scriptedRun({
+      pgrep: () => ok("42\n"),
+      env: () => ({ code: exit, stdout: "", stderr: "Error: websockify exited" }),
+    });
+    const runtime = await installedRuntime(run, { procDir: proc });
+
+    await runtime.status();
+    await runtime.repairDesktop();
+    expect(calls.filter(([file]) => file === "env")).toHaveLength(1);
+    exit = 1;
+    await expect(runtime.repairDesktop()).resolves.toBeUndefined();
+    expect(calls.filter(([file]) => file === "env")).toHaveLength(2);
+    await rm(join(proc, ".."), { recursive: true, force: true });
+  });
+
+  it("leaves a client on another display alone when repairing", async () => {
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:99\0");
+    const { run, calls } = scriptedRun({ pgrep: () => ok("42\n") });
+    const runtime = await installedRuntime(run, { procDir: proc });
+
+    await runtime.status();
+    await runtime.repairDesktop();
+
+    expect(calls.some(([file]) => file === "env")).toBe(false);
+    await rm(join(proc, ".."), { recursive: true, force: true });
+  });
+
   it("does not start the client when its desktop fails to start", async () => {
     wechatEnabled();
     const { run, calls } = scriptedRun({
