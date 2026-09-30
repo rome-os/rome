@@ -34,6 +34,9 @@ function extractText(rawContent: string): string {
         if (typeof block === "object" && block !== null) {
           const b = block as Record<string, unknown>;
           if (b.type === "tool_result" || b.type === "tool_use") return "";
+          // Stored text parts carry the text in `content`; `text` is the
+          // older block shape.
+          if (b.type === "text" && typeof b.content === "string") return b.content;
           if (typeof b.text === "string") return b.text;
         }
         return "";
@@ -120,7 +123,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
-                AND ws.type IN ('webchat', 'channel')
+                AND ws.type IN ('webchat', 'webchat_handoff')
                 AND wm.role IN ('user', 'assistant')
               ORDER BY wm.created_at ASC
             `,
@@ -132,7 +135,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               FROM rome_agent_messages wm
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
-                AND ws.type IN ('webchat', 'channel')
+                AND ws.type IN ('webchat', 'webchat_handoff')
                 AND wm.role IN ('user', 'assistant')
               ORDER BY wm.session_id, wm.created_at ASC
             `,

@@ -38,7 +38,7 @@ export function createAction(
         const row = appContext.db.connection.get(
           sql`
             SELECT id FROM rome_sessions
-            WHERE type IN ('webchat', 'channel')
+            WHERE type IN ('webchat', 'webchat_handoff')
             ORDER BY activity_at DESC
             LIMIT 1
           `,

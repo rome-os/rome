@@ -122,9 +122,10 @@ describe("skill_review against the system schema", () => {
     `);
   }
 
-  it("reviews the most recently active guardian conversation, not a background run", async () => {
-    seedSession("long-running-channel", "channel", 1700000000, 1700000300);
+  it("reviews the most recently active guardian conversation, not a channel or background run", async () => {
+    seedSession("long-running-web", "webchat", 1700000000, 1700000300);
     seedSession("newer-idle-web", "webchat", 1700000100, 1700000100);
+    seedSession("group-chat", "channel", 1700000150, 1700000350);
     seedSession("dream-run", "action", 1700000200, 1700000400);
 
     const runCalls: Array<{ prompt: string }> = [];
@@ -142,6 +143,6 @@ describe("skill_review against the system schema", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect(runCalls).toHaveLength(1);
-    expect(runCalls[0].prompt).toContain("long-running-channel");
+    expect(runCalls[0].prompt).toContain("long-running-web");
   });
 });

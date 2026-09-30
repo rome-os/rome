@@ -252,19 +252,28 @@ describe("get_webchat_conversations against the system schema", () => {
     `);
   }
 
-  const text = (value: string) => JSON.stringify([{ type: "text", text: value }]);
+  // The shape core persists: text parts carry their text in `content`.
+  const text = (value: string) => JSON.stringify([{ type: "text", content: value }]);
 
-  it("reads guardian conversations and skips background runs, traces and notifications", async () => {
+  it("reads guardian conversations and skips channels, background runs, traces and notifications", async () => {
     const now = Math.floor(Date.now() / 1000);
     seedSession("web", "Web chat", "webchat", now - 60);
-    seedSession("tg", "Telegram chat", "channel", now - 60);
+    seedSession("handoff", "Handoff chat", "webchat_handoff", now - 60);
+    seedSession("group", "Group chat", "channel", now - 60);
     seedSession("bg", "Dream run", "action", now - 60);
     seedMessage("m1", "web", "user", text("web question"), now - 50);
     seedMessage("m2", "web", "trace", "[]", now - 45);
     seedMessage("m3", "web", "notification", text("ping"), now - 44);
-    seedMessage("m4", "web", "assistant", text("web answer"), now - 40);
-    seedMessage("m5", "tg", "user", text("channel question"), now - 30);
-    seedMessage("m6", "bg", "user", text("dream prompt"), now - 20);
+    seedMessage(
+      "m4",
+      "web",
+      "assistant",
+      JSON.stringify([{ type: "text", content: "web answer", turnPhase: "final" }]),
+      now - 40,
+    );
+    seedMessage("m5", "handoff", "user", text("handoff question"), now - 35);
+    seedMessage("m6", "group", "user", text("group member message"), now - 30);
+    seedMessage("m7", "bg", "user", text("dream prompt"), now - 20);
 
     const result = await createAction(actionConfig, realDeps()).execute({ windowHours: 1 });
 
@@ -274,7 +283,9 @@ describe("get_webchat_conversations against the system schema", () => {
     expect(data.content).toContain("### Conversation: Web chat");
     expect(data.content).toContain("**Guardian**: web question");
     expect(data.content).toContain("**Agent**: web answer");
-    expect(data.content).toContain("### Conversation: Telegram chat");
+    expect(data.content).toContain("### Conversation: Handoff chat");
+    expect(data.content).toContain("**Guardian**: handoff question");
+    expect(data.content).not.toContain("group member message");
     expect(data.content).not.toContain("ping");
     expect(data.content).not.toContain("dream prompt");
   });
