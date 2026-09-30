@@ -60,15 +60,17 @@ process_env_contains() {
   return 1
 }
 
-# True when pid $1 is a live X server (Xtigervnc, Xvfb, Xorg and the like).
-# A lock survives a container restart, and its pid can then name any new
-# process, so a live owner that is not an X server leaves the lock stale. So
-# does an owner that has exited, or a zombie nobody reaped.
+# True when pid $1 is a live X server (Xtigervnc, Xvfb, Xorg and the like)
+# running this display. A lock survives a container restart, and its pid can
+# then name any new process, even the shared desktop's X server, so an owner
+# that is not an X server on this display leaves the lock stale. So does an
+# owner that has exited, or a zombie nobody reaped.
 x_server_alive() {
   local state comm
   state="$(sed -E 's/^.*\) (.).*$/\1/' "/proc/$1/stat" 2>/dev/null || true)"
   comm="$(cat "/proc/$1/comm" 2>/dev/null || true)"
-  [ -n "$state" ] && [ "$state" != "Z" ] && [ "$state" != "X" ] && [[ "$comm" == X* ]]
+  [ -n "$state" ] && [ "$state" != "Z" ] && [ "$state" != "X" ] && [[ "$comm" == X* ]] &&
+    grep -zqFx -- "$DISPLAY_ID" "/proc/$1/cmdline" 2>/dev/null
 }
 
 fail() {

@@ -170,10 +170,27 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     expect(result.stdout).toContain(`Removing stale X lock /tmp/.X${display}-lock.`);
   }, 60_000);
 
-  it("refuses a display whose X lock a live X server holds", async () => {
+  it("clears an X lock whose pid a restart gave to an X server on another display", async () => {
+    // After docker restart the pid can belong to the shared :99 server, say.
     writeFileSync(join(dir, "Xvfb"), "#!/bin/sh\nwhile :; do sleep 1; done\n");
     chmodSync(join(dir, "Xvfb"), 0o755);
-    const foreign = spawn(join(dir, "Xvfb"));
+    const other = spawn(join(dir, "Xvfb"), [`:${display + 1}`]);
+    await once(other, "spawn");
+    try {
+      writeFileSync(`/tmp/.X${display}-lock`, `${other.pid}\n`);
+
+      const result = run();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`Removing stale X lock /tmp/.X${display}-lock.`);
+    } finally {
+      other.kill("SIGKILL");
+    }
+  }, 60_000);
+
+  it("refuses a display whose X lock a live X server on that display holds", async () => {
+    writeFileSync(join(dir, "Xvfb"), "#!/bin/sh\nwhile :; do sleep 1; done\n");
+    chmodSync(join(dir, "Xvfb"), 0o755);
+    const foreign = spawn(join(dir, "Xvfb"), [`:${display}`]);
     await once(foreign, "spawn");
     try {
       writeFileSync(`/tmp/.X${display}-lock`, `${foreign.pid}\n`);
