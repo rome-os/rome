@@ -14,6 +14,7 @@ import {
   ExternalLink,
   FolderKanban,
   GripVertical,
+  Info,
   MessagesSquare,
   PanelRightOpen,
   Pencil,
@@ -384,6 +385,12 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
           <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
             <PanelRightOpen aria-hidden />
             {tApps("installed.openSplitTitle")}
+          </ContextMenuItem>
+          <ContextMenuItem asChild>
+            <Link to={`/app-details/${encodeURIComponent(app.id)}`}>
+              <Info aria-hidden />
+              {tApps("installed.viewDetails")}
+            </Link>
           </ContextMenuItem>
           <ContextMenuSeparator />
           {pinned ? (

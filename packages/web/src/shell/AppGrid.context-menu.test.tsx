@@ -107,7 +107,7 @@ describe.each([
   ["expanded sidebar", false],
   ["collapsed rail", true],
 ] as const)("pinned app context menu in the %s", (_name, collapsed) => {
-  it("offers new-tab, split-view, and unpin actions", async () => {
+  it("offers new-tab, split-view, details, and unpin actions", async () => {
     renderSidebar(collapsed);
 
     fireEvent.contextMenu(await findPinnedAppLink());
@@ -117,7 +117,7 @@ describe.each([
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Open in split view", "Unpin from sidebar"]);
+    ).toEqual(["Open in new tab", "Open in split view", "View details", "Unpin from sidebar"]);
   });
 });
 
@@ -191,6 +191,18 @@ it("keeps the active chat when opening a pinned app in split view", async () => 
       search: "?hideSidebar=1",
       state: { widgets: [{ type: "app", appId: "recipe-box" }] },
     }),
+  );
+});
+
+it("opens a pinned app's details page from its context menu", async () => {
+  const user = userEvent.setup();
+  renderSidebar(false);
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "View details" }));
+
+  expect(JSON.parse(screen.getByTestId("location").textContent ?? "{}").pathname).toBe(
+    "/app-details/recipe-box",
   );
 });
 
