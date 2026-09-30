@@ -701,6 +701,68 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
+  it("reloads an off-floor turn's answer before attaching a newer turn", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+    });
+    rs.mocked(listSessionMessages).mockImplementation((sid) =>
+      sid === "session-1" ? Promise.reject(new Error("messages unavailable")) : Promise.resolve([]),
+    );
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    let resolveAnswerReload!: (messages: Awaited<ReturnType<typeof listSessionMessages>>) => void;
+    rs.mocked(listSessionMessages).mockImplementation((sid) =>
+      sid === "session-1"
+        ? new Promise((resolve) => (resolveAnswerReload = resolve))
+        : Promise.resolve([]),
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-2", status: "running" }]);
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(resolveAnswerReload).toBeDefined());
+    expect(openTurnStream).not.toHaveBeenCalledWith("turn-2", expect.any(Object));
+    await act(async () =>
+      resolveAnswerReload([
+        {
+          id: "off-floor-answer",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          role: "assistant",
+          content: JSON.stringify([{ type: "text", content: "Finished" }]),
+          createdAt: "2026-09-30T14:00:00.000Z",
+        },
+      ]),
+    );
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object)));
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("off-floor-answer");
+  });
+
   it("reconciles a local turn that finishes after it loses the floor", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(listSessionTurns).mockResolvedValue([]);
@@ -1253,6 +1315,37 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
+  it("releases a recovering turn when the session lookup returns 404", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    const onSessionNotFound = rs.fn();
+    renderChat(<Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockImplementation((_sid, _signal, onHttpError) => {
+      onHttpError?.(404);
+      return Promise.resolve(null);
+    });
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(onSessionNotFound).toHaveBeenCalledWith("session-1");
+    expect(screen.queryByTestId("stop-button")).toBeNull();
+  });
+
   it("times out a stalled message reload while reconciling an ended turn", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
@@ -1785,6 +1878,28 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(listSessionMessages).toHaveBeenCalledTimes(3);
     expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
+  it("shares one Stop reconciliation chain across repeated clicks", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionMessages).mockRejectedValue(new Error("messages unavailable"));
+    rs.mocked(listSessionMessages).mockClear();
+    rs.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stop-button"));
+      fireEvent.click(screen.getByTestId("stop-button"));
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(0);
+    });
+    expect(interruptTurn).toHaveBeenCalledTimes(3);
+    expect(listSessionMessages).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
   });
 
   it("cancels Stop reconciliation retries when the chat unmounts", async () => {

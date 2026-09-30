@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { postSessionTurn } from "./chat-api";
+import { listSessionTurns, postSessionTurn } from "./chat-api";
 
 afterEach(() => {
   rs.unstubAllGlobals();
+});
+
+describe("listSessionTurns", () => {
+  it("reports a non-OK HTTP status separately from the null result", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 404 })));
+    const onHttpError = rs.fn();
+    await expect(listSessionTurns("session-1", undefined, onHttpError)).resolves.toBeNull();
+    expect(onHttpError).toHaveBeenCalledWith(404);
+  });
 });
 
 describe("postSessionTurn", () => {

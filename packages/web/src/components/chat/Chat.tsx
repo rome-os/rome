@@ -373,13 +373,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // A lost SSE connection is not proof that its server turn ended. Keep its
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
-  const pendingMessageReconciliationsRef = useRef<Set<string>>(new Set());
+  const pendingMessageReconciliationsRef = useRef<Map<string, string>>(new Map());
   const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
   const stopRetryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const stopRetryActiveTurnIdsRef = useRef<Set<string>>(new Set());
   const isChatMountedRef = useRef(true);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
@@ -645,6 +646,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       isChatMountedRef.current = false;
       for (const timer of stopRetryTimersRef.current) clearTimeout(timer);
       stopRetryTimersRef.current.clear();
+      stopRetryActiveTurnIdsRef.current.clear();
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -781,11 +783,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     [isReadVisibleSession, markSessionRead],
   );
   const queueOffFloorReconciliation = useCallback(
-    (id: string) => {
+    (id: string, turnId: string) => {
       // Keep this marker even if the first fetch succeeds: the turn may still
       // be running, so a floor-return lookup must refresh its final answer.
       if (pendingMessageReconciliationsRef.current.has(id)) return;
-      pendingMessageReconciliationsRef.current.add(id);
+      pendingMessageReconciliationsRef.current.set(id, turnId);
       void loadMessages(id, { force: true, dropLocalOptimistic: true, bounded: true });
     },
     [loadMessages],
@@ -1076,7 +1078,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
       if (turnId) {
         endSessionStream(recoveringSessionId, turnId);
-        queueOffFloorReconciliation(recoveringSessionId);
+        queueOffFloorReconciliation(recoveringSessionId, turnId);
       }
     }
 
@@ -1173,25 +1175,48 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
         lookupController = new AbortController();
+        let lookupHttpStatus: number | null = null;
         const turns = await withRequestTimeout(
-          listSessionTurns(reattachSessionId, lookupController.signal),
+          listSessionTurns(
+            reattachSessionId,
+            lookupController.signal,
+            (status) => (lookupHttpStatus = status),
+          ),
           () => lookupController?.abort(),
         );
         lookupController = null;
         if (cancelled) return;
         if (!turns) {
+          if (
+            (lookupHttpStatus === 404 || lookupHttpStatus === 401 || lookupHttpStatus === 403) &&
+            stillObserving()
+          ) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+            if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
+            setRecoveryNotice((current) =>
+              current?.sessionId === reattachSessionId ? null : current,
+            );
+            if (lookupHttpStatus === 404) {
+              onSessionNotFoundRef.current?.(reattachSessionId);
+            } else {
+              setStreamError(t("stream.errors.reconnectStatus", { status: lookupHttpStatus }));
+            }
+            // This is an authoritative access/session failure, not a transient
+            // network gap. Wait for navigation or a fresh effect to retry.
+            cancelled = true;
+            return;
+          }
           noteRecoveryFailure();
           return;
         }
         if (!turns.length) {
-          if (pendingMessageReconciliationsRef.current.has(reattachSessionId)) {
-            if (!(await reloadWhileObserving())) return;
-            pendingMessageReconciliationsRef.current.delete(reattachSessionId);
-          }
           const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
-          if (suppressedTurnId) {
-            if (!(await reloadWhileObserving())) return;
-          }
+          const needsReload =
+            pendingMessageReconciliationsRef.current.has(reattachSessionId) ||
+            Boolean(suppressedTurnId) ||
+            (wasRecovering && recoveringSessionIdsRef.current.has(reattachSessionId));
+          if (needsReload && !(await reloadWhileObserving())) return;
+          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
           suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
@@ -1202,7 +1227,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             recoveringSessionIdsRef.current.has(reattachSessionId) &&
             stillObserving()
           ) {
-            if (!(await reloadWhileObserving())) return;
             if (!recoveringSessionIdsRef.current.has(reattachSessionId)) {
               return;
             }
@@ -1222,15 +1246,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           releasedTurnIdsRef.current.delete(reattachSessionId);
         }
         const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
+        const pendingTurnId = pendingMessageReconciliationsRef.current.get(reattachSessionId);
         if (target.turnId === suppressedTurnId) return;
-        if (suppressedTurnId) {
+        if (
+          suppressedTurnId ||
+          (pendingTurnId && target.turnId !== pendingTurnId) ||
+          (observedTurnId && target.turnId !== observedTurnId)
+        ) {
+          // Preserve the prior turn's durable answer before switching to a
+          // different active turn. One fetch reconciles all pending markers.
           if (!(await reloadWhileObserving())) return;
+        }
+        if (suppressedTurnId) {
           suppressedTurnIdsRef.current.delete(reattachSessionId);
         }
-        if (observedTurnId && target.turnId !== observedTurnId) {
-          // A missed message_insert may be the only durable copy of the old
-          // turn's answer. Load it before replacing that turn's live preview.
-          if (!(await reloadWhileObserving())) return;
+        if (pendingTurnId && target.turnId !== pendingTurnId) {
+          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
         }
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
@@ -1289,7 +1320,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               noteRecoverySuccess();
               if (!finished) {
                 if (reattachSessionId !== floorSessionIdRef.current) {
-                  queueOffFloorReconciliation(reattachSessionId);
+                  queueOffFloorReconciliation(reattachSessionId, attachedTurnId);
                 } else {
                   void loadMessages(reattachSessionId, {
                     force: true,
@@ -1500,7 +1531,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 endSessionStream(sendingSessionId, pendingTurnId);
                 if (!finished) {
                   if (sendingSessionId !== floorSessionIdRef.current) {
-                    queueOffFloorReconciliation(sendingSessionId);
+                    queueOffFloorReconciliation(sendingSessionId, pendingTurnId);
                   } else {
                     void loadMessages(sendingSessionId, {
                       force: true,
@@ -1678,14 +1709,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       delayMs: number,
       confirmedFinished = false,
       retryDelayMs = RECONNECT_BASE_DELAY_MS,
+      continuation = false,
     ): void => {
+      if (!continuation) {
+        if (stopRetryActiveTurnIdsRef.current.has(turnId)) return;
+        stopRetryActiveTurnIdsRef.current.add(turnId);
+      }
       const stillOwnsStream = () =>
         isChatMountedRef.current &&
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
       const timer = setTimeout(async () => {
         stopRetryTimersRef.current.delete(timer);
-        if (!stillOwnsStream()) return;
+        if (!stillOwnsStream()) {
+          stopRetryActiveTurnIdsRef.current.delete(turnId);
+          return;
+        }
         if (!confirmedFinished) {
           const lookupController = new AbortController();
           const turns = await withRequestTimeout(
@@ -1698,12 +1737,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 retryDelayMs,
                 false,
                 Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+                true,
               );
+            } else {
+              stopRetryActiveTurnIdsRef.current.delete(turnId);
             }
             return;
           }
-          if (turns.some((turn) => turn.turnId === turnId)) return;
-          if (!stillOwnsStream()) return;
+          if (turns.some((turn) => turn.turnId === turnId)) {
+            stopRetryActiveTurnIdsRef.current.delete(turnId);
+            return;
+          }
+          if (!stillOwnsStream()) {
+            stopRetryActiveTurnIdsRef.current.delete(turnId);
+            return;
+          }
         }
         const observedSendRevision = acceptedSendRevisionsRef.current.get(sid) ?? 0;
         const loaded = await loadMessages(sid, {
@@ -1720,11 +1768,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               retryDelayMs,
               true,
               Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+              true,
             );
+          } else {
+            stopRetryActiveTurnIdsRef.current.delete(turnId);
           }
           return;
         }
-        if (!stillOwnsStream()) return;
+        if (!stillOwnsStream()) {
+          stopRetryActiveTurnIdsRef.current.delete(turnId);
+          return;
+        }
         targetController?.abort();
         releasedTurnIdsRef.current.set(sid, turnId);
         recoveringSessionIdsRef.current.delete(sid);
@@ -1732,6 +1786,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           current?.sessionId === sid && current.turnId === turnId ? null : current,
         );
         endSessionStream(sid, turnId);
+        stopRetryActiveTurnIdsRef.current.delete(turnId);
       }, delayMs);
       stopRetryTimersRef.current.add(timer);
     };
