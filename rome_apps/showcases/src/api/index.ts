@@ -392,8 +392,9 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
         ws.agent_name,
         ws.created_at,
         cast(count(wm.id) as integer) AS trace_count
-      FROM webchat_sessions ws
-      JOIN webchat_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
+      FROM rome_sessions ws
+      JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
+      WHERE ws.type IN ('webchat', 'webchat_handoff')
       GROUP BY ws.id, ws.name, ws.project_name, ws.project_path, ws.agent_name, ws.created_at
       ORDER BY max(wm.created_at) DESC
       LIMIT 100
@@ -414,7 +415,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const map = new Map<string, string>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM webchat_messages wm
+      FROM rome_agent_messages wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'user'
       ORDER BY wm.created_at ASC
@@ -428,11 +429,11 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   }
 
   // Reassemble each trace message's full block array from the append-only
-  // `webchat_trace_blocks` table, keyed by the trace message id.
+  // `rome_agent_trace_blocks` table, keyed by the trace message id.
   //
-  // Core no longer stores the trace inline: a role='trace' webchat_messages row
+  // Core no longer stores the trace inline: a role='trace' rome_agent_messages row
   // is a constant `'[]'` stub, and every block (tool_use, thinking, text, …)
-  // lives as its own `webchat_trace_blocks` row ordered by seq. Reading
+  // lives as its own `rome_agent_trace_blocks` row ordered by seq. Reading
   // `wm.content` alone yields the empty stub, which is why an imported replay
   // showed no steps and no final answer. We mirror the repository's
   // `mergeTraceContent`: concatenate the per-message block JSON back into a
@@ -440,7 +441,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   private traceContentsByMessage(sessionId: string): Map<string, string> {
     const rows = this.ctx.db.connection.all(sql`
       SELECT message_id, content
-      FROM webchat_trace_blocks
+      FROM rome_agent_trace_blocks
       WHERE session_id = ${sessionId}
       ORDER BY message_id ASC, seq ASC
     `) as Array<{ message_id: string; content: string }>;
@@ -468,7 +469,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const map = new Map<string, TraceBlockDto[]>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.content AS content
-      FROM webchat_messages wm
+      FROM rome_agent_messages wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'assistant'
       ORDER BY wm.created_at ASC
@@ -513,7 +514,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     const open = new Map<string, ReplyInteractionBlock>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.role AS role, wm.content AS content
-      FROM webchat_messages wm
+      FROM rome_agent_messages wm
       WHERE wm.session_id = ${sessionId}
         AND wm.role IN ('assistant', 'user')
       ORDER BY
@@ -596,10 +597,11 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
         wm.cache_read_tokens,
         wm.cache_write_tokens,
         wm.cost_usd
-      FROM webchat_messages wm
-      JOIN webchat_sessions ws ON ws.id = wm.session_id
+      FROM rome_agent_messages wm
+      JOIN rome_sessions ws ON ws.id = wm.session_id
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'trace'
+        AND ws.type IN ('webchat', 'webchat_handoff')
       ORDER BY wm.created_at ASC
     `) as SourceTraceRow[];
 
@@ -627,12 +629,12 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     rows.forEach((row, index) => {
       // The trace row holds only the agent's steps (empty for a plain text
       // reply); append the turn's final assistant text so the replay shows it.
-      // Legacy sessions (pre webchat_trace_blocks) instead stored the full trace
+      // Legacy sessions (pre rome_agent_trace_blocks) instead stored the full trace
       // — already ending in the final text — inline in wm.content, so skip the
       // append when the trace already carries a text block to avoid a doubled
       // reply.
       // Prefer the reassembled append-only blocks; fall back to the row's
-      // inline content for legacy traces stored before webchat_trace_blocks.
+      // inline content for legacy traces stored before rome_agent_trace_blocks.
       const traceContent = traceContentByMessage.get(row.message_id) ?? row.content;
       const traceBlocks = parseTraceBlocks(traceContent);
       const traceHasText = traceBlocks.some((b) => b.type === "text");
