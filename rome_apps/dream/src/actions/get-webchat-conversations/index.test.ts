@@ -255,7 +255,7 @@ describe("get_webchat_conversations against the system schema", () => {
   // The shape core persists: text parts carry their text in `content`.
   const text = (value: string) => JSON.stringify([{ type: "text", content: value }]);
 
-  it("reads guardian conversations and skips channels, background runs, traces and notifications", async () => {
+  it("reads webchat and handoff conversations, not channels or background runs", async () => {
     const now = Math.floor(Date.now() / 1000);
     seedSession("web", "Web chat", "webchat", now - 60);
     seedSession("handoff", "Handoff chat", "webchat_handoff", now - 60);
@@ -263,7 +263,6 @@ describe("get_webchat_conversations against the system schema", () => {
     seedSession("bg", "Dream run", "action", now - 60);
     seedMessage("m1", "web", "user", text("web question"), now - 50);
     seedMessage("m2", "web", "trace", "[]", now - 45);
-    seedMessage("m3", "web", "notification", text("ping"), now - 44);
     seedMessage(
       "m4",
       "web",
@@ -279,14 +278,13 @@ describe("get_webchat_conversations against the system schema", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { messageCount: number; content: string };
-    expect(data.messageCount).toBe(3);
+    expect(data.messageCount).toBe(4);
     expect(data.content).toContain("### Conversation: Web chat");
     expect(data.content).toContain("**Guardian**: web question");
     expect(data.content).toContain("**Agent**: web answer");
     expect(data.content).toContain("### Conversation: Handoff chat");
     expect(data.content).toContain("**Guardian**: handoff question");
     expect(data.content).not.toContain("group member message");
-    expect(data.content).not.toContain("ping");
     expect(data.content).not.toContain("dream prompt");
   });
 

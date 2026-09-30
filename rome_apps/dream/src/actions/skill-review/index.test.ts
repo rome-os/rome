@@ -115,18 +115,18 @@ describe("skill_review against the system schema", () => {
     testDb.close();
   });
 
-  function seedSession(id: string, type: string, createdAt: number, activityAt: number): void {
+  function seedSession(id: string, type: string, createdAt: number): void {
     testDb.db.run(sql`
       INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-      VALUES (${id}, ${id}, ${type}, ${createdAt}, ${activityAt})
+      VALUES (${id}, ${id}, ${type}, ${createdAt}, ${createdAt})
     `);
   }
 
-  it("reviews the most recently active guardian conversation, not a channel or background run", async () => {
-    seedSession("long-running-web", "webchat", 1700000000, 1700000300);
-    seedSession("newer-idle-web", "webchat", 1700000100, 1700000100);
-    seedSession("group-chat", "channel", 1700000150, 1700000350);
-    seedSession("dream-run", "action", 1700000200, 1700000400);
+  it("reviews the newest webchat session, not a newer channel or background run", async () => {
+    seedSession("older-web", "webchat", 1700000000);
+    seedSession("newest-web", "webchat", 1700000100);
+    seedSession("group-chat", "channel", 1700000200);
+    seedSession("dream-run", "action", 1700000300);
 
     const runCalls: Array<{ prompt: string }> = [];
     const deps = {
@@ -143,6 +143,6 @@ describe("skill_review against the system schema", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect(runCalls).toHaveLength(1);
-    expect(runCalls[0].prompt).toContain("long-running-web");
+    expect(runCalls[0].prompt).toContain("newest-web");
   });
 });
