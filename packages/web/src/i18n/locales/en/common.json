@@ -185,7 +185,7 @@
   },
   "desktop": {
     "iframeTitle": "Rome Desktop",
-    "wechatIframeTitle": "WeChat desktop"
+    "namedIframeTitle": "Rome desktop “{{name}}”"
   },
   "chat": {
     "add": "Open an app",

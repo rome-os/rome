@@ -2,7 +2,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import DesktopPage, { applyDesktopSafeAreaBottom } from "./DesktopPage";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import DesktopPage, { applyDesktopSafeAreaBottom, NamedDesktopPage } from "./DesktopPage";
 
 afterEach(() => {
   cleanup();
@@ -32,13 +33,29 @@ describe("DesktopPage", () => {
     expect(setProperty).toHaveBeenCalledWith("--rome-safe-area-bottom", "34px");
   });
 
-  it("shows WeChat's own display through its own proxy path", async () => {
+  it("shows a named desktop through its own proxy path", async () => {
     await i18n.changeLanguage("en");
 
-    render(<DesktopPage view="wechat" />);
+    render(<DesktopPage name="wechat" />);
 
-    expect(screen.getByTitle("WeChat desktop").getAttribute("src")).toBe(
+    expect(screen.getByTitle("Rome desktop “wechat”").getAttribute("src")).toBe(
       "/desktop-vnc.html?resize=scale&path=desktop-proxy/wechat/websockify",
+    );
+  });
+
+  it("serves /desktop/:name for any name", async () => {
+    await i18n.changeLanguage("en");
+
+    render(
+      <MemoryRouter initialEntries={["/desktop/notes"]}>
+        <Routes>
+          <Route path="/desktop/:name" element={<NamedDesktopPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTitle("Rome desktop “notes”").getAttribute("src")).toBe(
+      "/desktop-vnc.html?resize=scale&path=desktop-proxy/notes/websockify",
     );
   });
 });

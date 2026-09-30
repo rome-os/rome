@@ -51,6 +51,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
+import type { DesktopManager } from "../desktops/manager.js";
 
 export interface ApiConfig {
   port: number;
@@ -126,6 +127,8 @@ export interface ApiDeps {
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
+  /** Named desktops, served under `/desktop-proxy/<name>/`. */
+  desktops: Pick<DesktopManager, "get">;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:

@@ -185,7 +185,7 @@
   },
   "desktop": {
     "iframeTitle": "Rome 桌面",
-    "wechatIframeTitle": "微信桌面"
+    "namedIframeTitle": "Rome 桌面“{{name}}”"
   },
   "chat": {
     "add": "打开一个应用",

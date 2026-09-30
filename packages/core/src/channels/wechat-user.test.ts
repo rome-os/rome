@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  wechatDesktopPins,
   wechatUserDisplay,
   loginWindowId,
   WechatUserReader,
@@ -224,6 +225,36 @@ describe("wechatUserDisplay", () => {
         WECHAT_USER_DISPLAY: value,
       }),
     ).toThrow("WECHAT_USER_DISPLAY must be a display like :100, other than :99");
+  });
+});
+
+describe("wechatDesktopPins", () => {
+  it("pins the wechat desktop to the legacy display and its ports", () => {
+    expect(wechatDesktopPins({ WECHAT_USER_ENABLED: "true", WECHAT_USER_DISPLAY: ":100" })).toEqual(
+      {
+        wechat: { display: 100, vncPort: 5901, novncPort: 6081 },
+      },
+    );
+    expect(
+      wechatDesktopPins({
+        WECHAT_USER_ENABLED: "true",
+        WECHAT_USER_DISPLAY: ":120",
+        ROME_WECHAT_VNC_PORT: "5950",
+        ROME_WECHAT_NOVNC_PORT: "6150",
+      }),
+    ).toEqual({ wechat: { display: 120, vncPort: 5950, novncPort: 6150 } });
+  });
+
+  it("pins nothing without a valid legacy display", () => {
+    expect(wechatDesktopPins({ WECHAT_USER_ENABLED: "true" })).toEqual({});
+    expect(wechatDesktopPins({ WECHAT_USER_DISPLAY: ":100" })).toEqual({});
+    expect(
+      wechatDesktopPins({
+        WECHAT_USER_ENABLED: "true",
+        DISPLAY: ":99",
+        WECHAT_USER_DISPLAY: ":99",
+      }),
+    ).toEqual({});
   });
 });
 

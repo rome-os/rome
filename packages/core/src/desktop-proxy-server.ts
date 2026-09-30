@@ -1,44 +1,38 @@
 import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import net from "node:net";
-import { wechatUserDisplay } from "./channels/wechat-user.js";
 import type { DrizzleDb } from "./db/index.js";
 import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
+import { type DesktopManager, isDesktopName } from "./desktops/manager.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("desktop-proxy");
 
 const PREFIX = "/desktop-proxy";
-/** WeChat's own display (`WECHAT_USER_DISPLAY`), shown at /desktop/wechat. Same
- *  mount, same auth posture as the shared desktop: only the upstream differs. */
-const WECHAT_PREFIX = `${PREFIX}/wechat`;
 
-/** The websockify port and the path it sees, for a request under `/desktop-proxy`.
- *  Null for WeChat's view unless WeChat is enabled with its own display, the only
- *  case in which the entrypoint starts its websockify: nothing of ours listens on
- *  that port otherwise, and the shared websockify ignores the path. */
-export function desktopUpstream(pathname: string): { port: number; path: string } | null {
-  if (pathname === WECHAT_PREFIX || pathname.startsWith(`${WECHAT_PREFIX}/`)) {
-    if (!ownDisplayActive()) return null;
-    return {
-      port: Number(process.env.ROME_WECHAT_NOVNC_PORT ?? 6081),
-      path: pathname.slice(WECHAT_PREFIX.length) || "/",
-    };
+/**
+ * The websockify port and the path it sees, for an upgrade under `/desktop-proxy`.
+ * `/desktop-proxy/<name>` and everything under it go to that named desktop,
+ * and resolve to null when it is not running. Every other path goes to the
+ * shared desktop, whose websockify ignores the path.
+ */
+export async function desktopUpstream(
+  rawUrl: string,
+  desktops: Pick<DesktopManager, "get">,
+): Promise<{ port: number; path: string } | null> {
+  const rest = rawUrl.slice(PREFIX.length);
+  const named = /^\/([^/?]+)(.*)$/.exec(rest);
+  if (named && isDesktopName(named[1]!)) {
+    const desktop = await desktops.get(named[1]!);
+    if (!desktop) return null;
+    const tail = named[2]!;
+    return { port: desktop.novncPort, path: tail.startsWith("/") ? tail : `/${tail}` };
   }
   return {
     port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
-    path: pathname.slice(PREFIX.length) || "/",
+    path: rest || "/",
   };
-}
-
-/** Fail closed: a value the shared rule rejects has no display of ours either. */
-function ownDisplayActive(): boolean {
-  try {
-    return wechatUserDisplay() !== null;
-  } catch {
-    return false;
-  }
 }
 
 function buildUpstreamUpgradeRequest(
@@ -63,7 +57,11 @@ function buildUpstreamUpgradeRequest(
   return lines.join("\r\n") + "\r\n\r\n";
 }
 
-export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close(): void } {
+export function attachDesktopProxy(
+  httpServer: Server,
+  db: DrizzleDb,
+  desktops: Pick<DesktopManager, "get">,
+): { close(): void } {
   const host = "127.0.0.1";
   const upstreams = new Set<net.Socket>();
 
@@ -83,9 +81,10 @@ export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close()
     socket.on("close", teardown);
 
     void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
+      .then(async (allowed) => {
         if (!allowed || socket.destroyed) return;
-        const target = desktopUpstream(rawUrl);
+        const target = await desktopUpstream(rawUrl, desktops);
+        if (socket.destroyed) return;
         if (!target) {
           rejectUpgrade(socket, 404, "Not Found");
           return;

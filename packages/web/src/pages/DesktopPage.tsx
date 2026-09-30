@@ -1,11 +1,5 @@
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-
-/** Each desktop the guardian can watch: the shared one, and WeChat's own display
- *  (`WECHAT_USER_DISPLAY`, served under /desktop-proxy/wechat). */
-const views = {
-  shared: { path: "desktop-proxy/websockify", titleKey: "desktop.iframeTitle" },
-  wechat: { path: "desktop-proxy/wechat/websockify", titleKey: "desktop.wechatIframeTitle" },
-} as const;
 
 export function applyDesktopSafeAreaBottom(
   iframe: HTMLIFrameElement,
@@ -18,13 +12,18 @@ export function applyDesktopSafeAreaBottom(
   );
 }
 
-export default function DesktopPage({ view = "shared" }: { view?: keyof typeof views }) {
+/** The shared desktop, or with `name` the named desktop Rome core serves under
+ *  /desktop-proxy/<name>/. */
+export default function DesktopPage({ name }: { name?: string }) {
   const { t } = useTranslation("common");
-  const { path, titleKey } = views[view];
+  const path = name
+    ? `desktop-proxy/${encodeURIComponent(name)}/websockify`
+    : "desktop-proxy/websockify";
+  const title = name ? t("desktop.namedIframeTitle", { name }) : t("desktop.iframeTitle");
   return (
     <div className="h-[var(--rome-mobile-content-height)] bg-foreground md:h-dvh">
       <iframe
-        title={t(titleKey)}
+        title={title}
         src={`/desktop-vnc.html?resize=scale&path=${path}`}
         className="block h-full w-full border-0 bg-foreground"
         allow="clipboard-read; clipboard-write"
@@ -37,4 +36,10 @@ export default function DesktopPage({ view = "shared" }: { view?: keyof typeof v
       />
     </div>
   );
+}
+
+/** `/desktop/:name`. */
+export function NamedDesktopPage() {
+  const { name } = useParams<{ name: string }>();
+  return <DesktopPage name={name} />;
 }
