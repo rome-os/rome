@@ -494,7 +494,8 @@ export interface AgentContextUsage {
  * Why a model run ended, in one vocabulary across providers.
  *
  * - `completed`: the model finished its answer.
- * - `max_tokens`: the model hit its output-token limit.
+ * - `max_tokens`: the model's output was cut off at a token limit: its
+ *   output-token limit, or the context window filling up.
  * - `refusal`: the model declined to answer.
  * - `interrupted`: the run was stopped before it finished, usually by the user.
  * - `error`: the run failed.
