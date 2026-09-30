@@ -1138,6 +1138,14 @@ describe("Chat turn stream lifecycle", () => {
     const firstError = screen.getByTestId("chat-composer").dataset.error;
     expect(firstError).toBe("stream.errors.reconnectStatus");
 
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-2" } });
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe(firstError);
+
     await act(async () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });

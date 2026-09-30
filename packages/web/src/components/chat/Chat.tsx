@@ -1250,7 +1250,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
     ): Promise<void> => {
-      setStreamError(null);
+      setStreamError((current) =>
+        recoveringSessionIdsRef.current.has(sendingSessionId) &&
+        current === reconnectErrorRef.current
+          ? current
+          : null,
+      );
       // Sending re-engages stickiness so the user follows their own message and
       // the reply, even if they'd scrolled up to read history.
       scrollToBottom("auto");
