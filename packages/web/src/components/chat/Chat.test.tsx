@@ -1724,8 +1724,17 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("recovery-notice")).toBeTruthy();
     expect(screen.getByTestId("stop-button")).toBeTruthy();
 
+    let recoveredController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
-      Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start() {} }))),
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              recoveredController = controller;
+            },
+          }),
+        ),
+      ),
     );
     await act(async () => {
       window.dispatchEvent(new Event("online"));
@@ -1733,6 +1742,11 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
     });
     expect(openTurnStream).toHaveBeenCalledTimes(5);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    await act(async () => {
+      recoveredController!.enqueue(new TextEncoder().encode(": keepalive\n\n"));
+      await Promise.resolve();
+    });
     expect(screen.queryByTestId("recovery-notice")).toBeNull();
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });

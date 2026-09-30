@@ -848,7 +848,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string): Promise<boolean> => {
+    async (
+      res: Response,
+      sessionId: string,
+      turnId: string,
+      onFirstActivity?: () => void,
+    ): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
         return false;
@@ -897,6 +902,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         const { done, value } = result;
         if (done) break;
+        if (value.byteLength && onFirstActivity) {
+          onFirstActivity();
+          onFirstActivity = undefined;
+        }
         lastStreamActivityAtRef.current.set(turnId, Date.now());
 
         buffer += decoder.decode(value, { stream: true });
@@ -1123,7 +1132,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     const noteRecoveryConnected = () => {
       recoveringSessionIdsRef.current.delete(reattachSessionId);
-      setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
     };
 
     const schedule = (delayMs: number) => {
@@ -1286,11 +1294,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
 
-        setStreamError(null);
         noteRecoveryConnected();
         streamOpened = true;
         streamOpenedAt = Date.now();
-        finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId, () => {
+          setStreamError(null);
+          setRecoveryNotice((current) =>
+            current?.sessionId === reattachSessionId ? null : current,
+          );
+        });
         if (finished) noteRecoverySuccess();
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
