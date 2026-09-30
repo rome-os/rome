@@ -1,4 +1,4 @@
-import type { AgentAccounting, AgentContextUsage, AgentTokenUsage } from "../types.js";
+import type { AgentAccounting, AgentContextUsage, AgentStop, AgentTokenUsage } from "../types.js";
 
 interface TokenRates {
   inputUsdPerMillion: number;
@@ -19,6 +19,7 @@ interface BuildAgentAccountingParams {
   usage: AgentTokenUsage;
   reportedCostUsd?: number;
   numTurns?: number;
+  stop?: AgentStop;
   stopReason?: string;
   durationMs?: number;
   rawUsage?: Record<string, unknown>;
@@ -299,6 +300,7 @@ export function buildAgentAccounting(params: BuildAgentAccountingParams): AgentA
     context: params.context,
     costUsd: params.reportedCostUsd ?? impliedCostUsd,
     numTurns: params.numTurns,
+    ...(params.stop ? { stop: params.stop } : {}),
     stopReason: params.stopReason,
     durationMs: params.durationMs,
     rawUsage: params.rawUsage,

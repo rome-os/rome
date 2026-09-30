@@ -24,6 +24,7 @@ import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentMessage, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
+  AgentStop,
   AgentTurnOutput,
   AgentTurnStatus,
   ErrorMessage,
@@ -107,6 +108,7 @@ import {
   type AgentLifecycleDispatcher,
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
+import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 import type {
@@ -2218,7 +2220,7 @@ class AgentSessionImpl implements AgentSession {
           // never fall back to (or race with) a later provider-thread head.
           if (outbound.type === "result") {
             const interrupted =
-              sink.lifecycleInterrupted || outbound.accounting?.stopReason === "interrupted";
+              sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
             if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
             await this.maybePersistProviderInfo();
             await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
@@ -2292,7 +2294,7 @@ class AgentSessionImpl implements AgentSession {
     // without peeking back into the terminal's accounting.
     const accounting =
       terminal.type === "result" || terminal.type === "error" ? terminal.accounting : undefined;
-    const interrupted = sink.lifecycleInterrupted || accounting?.stopReason === "interrupted";
+    const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(accounting);
     this.publishOutbound(sink, {
       type: "turn_end",
       turnId: sink.turnId,
@@ -2663,9 +2665,14 @@ class AgentSessionImpl implements AgentSession {
         : undefined;
     const stopReason =
       accounting?.stopReason ?? (sink.lifecycleInterrupted ? "interrupted" : undefined);
+    const stop = resolveTurnStop({
+      accounting,
+      terminalKind,
+      interrupted: sink.lifecycleInterrupted,
+    });
     const status = classifyAgentTurnStatus({
       terminalKind,
-      stopReason,
+      stop,
       interrupted: sink.lifecycleInterrupted,
     });
 
@@ -2686,7 +2693,7 @@ class AgentSessionImpl implements AgentSession {
         finishedAt,
         durationMs,
       }),
-      output: buildLifecycleOutput(terminal, status, stopReason),
+      output: buildLifecycleOutput(terminal, status, stop, stopReason),
       metrics: {
         toolCallCount: this.currentTurnToolCallCount,
         skillWritten: this.currentTurnSkillWritten,
@@ -2876,12 +2883,11 @@ class AgentSessionImpl implements AgentSession {
           // else is this agent's own output.
           yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
           if (isTerminalBlock(out)) {
-            status =
-              out.accounting?.stopReason === "interrupted"
-                ? "interrupted"
-                : out.type === "error"
-                  ? "error"
-                  : "completed";
+            status = isInterruptedAccounting(out.accounting)
+              ? "interrupted"
+              : out.type === "error"
+                ? "error"
+                : "completed";
             terminalSeen = true;
             break;
           }
@@ -3579,14 +3585,17 @@ function buildSubagentTools(
 function buildLifecycleOutput(
   terminal: StreamAgentMessage | undefined,
   status: AgentTurnStatus,
+  stop?: AgentStop,
   stopReason?: string,
 ): AgentTurnOutput {
+  const stopField = stop ? { stop } : {};
   if (terminal?.type === "result") {
     return {
       text: terminal.content,
       structuredOutput: terminal.structuredOutput,
       state: status === "interrupted" ? "partial" : "final",
       terminalKind: "result",
+      ...stopField,
       stopReason,
       accounting: terminal.accounting,
     };
@@ -3596,6 +3605,7 @@ function buildLifecycleOutput(
       text: "",
       state: "none",
       terminalKind: "error",
+      ...stopField,
       stopReason,
       error: terminal.error,
       accounting: terminal.accounting,
@@ -3604,6 +3614,7 @@ function buildLifecycleOutput(
   return {
     text: "",
     state: "none",
+    ...stopField,
     stopReason,
   };
 }

@@ -32,11 +32,25 @@ function fallbackModelUsage(accounting: TraceAccounting): TraceModelUsage {
   };
 }
 
-function UsageStat({ label, value }: { label: string; value: number }) {
+function UsageStat({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     // Sans and mono baselines differ at 13px, so this mixed-font row needs an explicit cross-size.
     <div className="flex h-4 min-w-0 items-baseline justify-between gap-3">
-      <span className="truncate text-aux text-muted-foreground">{label}</span>
+      {hint ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={0}
+              className="truncate text-aux text-muted-foreground underline decoration-dotted underline-offset-2 outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+            >
+              {label}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{hint}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="truncate text-aux text-muted-foreground">{label}</span>
+      )}
       <span className="font-mono text-aux text-foreground tabular-nums">
         {formatTraceNumber(value)}
       </span>
@@ -111,6 +125,13 @@ export function UsageSummaryBlock({ accounting }: { accounting: TraceAccounting 
           />
           <UsageStat label={t("usage.labels.input")} value={accounting.usage.inputTokens} />
           <UsageStat label={t("usage.labels.output")} value={accounting.usage.outputTokens} />
+          {accounting.usage.reasoningTokens !== undefined ? (
+            <UsageStat
+              label={t("usage.labels.reasoning")}
+              value={accounting.usage.reasoningTokens}
+              hint={t("usage.reasoningHint")}
+            />
+          ) : null}
         </div>
       </div>
 

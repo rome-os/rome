@@ -14,6 +14,7 @@
 // approval gate (inside the Rome tool facade) is the only gate and no server→client
 // approval round-trips are needed.
 
+import type { AgentErrorCode, ErrorMessage } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
   ModelProvider,
@@ -75,7 +76,9 @@ import {
   type Usage,
 } from "./codex/common.js";
 import type { AgentMessage, AgentPlan, AgentPlanStepStatus } from "../types.js";
+import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import { codexStop } from "./stop-reason.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-revoked.js";
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
@@ -339,10 +342,14 @@ interface ActiveTurn {
    *  means the turn ends with an `error` block instead of a `result`. */
   failed: boolean;
   errorMessage: string | null;
-  /** Set to `"usage_limit"` (exhausted codex quota) or `"auth_revoked"` (the
-   *  stored credentials were revoked server-side) so the terminal `error` block
-   *  can carry the classification for state refresh and UI handling. */
-  errorCode: "usage_limit" | "auth_revoked" | null;
+  /** Classification of the failure (for example `"usage_limit"` for exhausted
+   *  codex quota, `"auth_revoked"` for credentials revoked server-side) so the
+   *  terminal `error` block can carry it for state refresh and UI handling. */
+  errorCode: AgentErrorCode | null;
+  /** HTTP status codex reported for the failed request, if any. */
+  errorHttpStatus?: number;
+  /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
+  nativeStatus: string | null;
 }
 
 interface CodexAppServerProviderOptions {
@@ -354,8 +361,22 @@ interface CodexAppServerProviderOptions {
 }
 
 interface CodexFailureClassification {
-  code: "usage_limit" | "auth_revoked" | null;
+  code: AgentErrorCode | null;
+  httpStatus?: number;
   pending?: Promise<void>;
+}
+
+/** Terminal `error` block for a classified codex failure. */
+function codexErrorBlock(
+  error: string,
+  classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
+): ErrorMessage {
+  return {
+    type: "error",
+    error,
+    ...(classification.code ? { code: classification.code } : {}),
+    ...(classification.httpStatus !== undefined ? { httpStatus: classification.httpStatus } : {}),
+  };
 }
 
 async function persistCodexAuthRevoked(
@@ -397,7 +418,11 @@ function classifyCodexFailure(
       pending: persistCodexAuthRevoked(options.onAuthRevoked),
     };
   }
-  return { code: null };
+  const info = classifyCodexErrorInfo(turnError);
+  return {
+    code: info.code ?? null,
+    ...(info.httpStatus !== undefined ? { httpStatus: info.httpStatus } : {}),
+  };
 }
 
 export class CodexAppServerProvider implements ModelProvider {
@@ -717,6 +742,7 @@ export class CodexAppServerProvider implements ModelProvider {
           if (activeTurn) {
             if (activeTurn.turnId && activeTurn.turnId !== p.turn?.id) return;
             activeTurn.completed = true;
+            activeTurn.nativeStatus = p.turn?.status ?? null;
             if (p.turn?.status === "failed") {
               // `turn.error` is a structured `TurnError` object (camelCase),
               // not a string — extract the human message and classify quota
@@ -725,6 +751,7 @@ export class CodexAppServerProvider implements ModelProvider {
               activeTurn.errorMessage = codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               const classification = classifyCodexFailure(p.turn?.error, this.options);
               activeTurn.errorCode = classification.code;
+              activeTurn.errorHttpStatus = classification.httpStatus;
               if (classification.pending) activeTurn.pending.push(classification.pending);
             } else if (params.outputSchema && p.turn?.status !== "completed") {
               activeTurn.failed = true;
@@ -752,14 +779,13 @@ export class CodexAppServerProvider implements ModelProvider {
             activeTurn.failed = true;
             activeTurn.errorMessage = message;
             activeTurn.errorCode = code;
+            activeTurn.errorHttpStatus = classification.httpStatus;
             if (classification.pending) activeTurn.pending.push(classification.pending);
             activeTurn.resolveDone();
           } else {
             if (classification.pending) void classification.pending;
             // Out-of-turn error: no turn to attach to, emit directly.
-            sink.push(
-              code ? { type: "error", error: message, code } : { type: "error", error: message },
-            );
+            sink.push(codexErrorBlock(message, classification));
           }
           return;
         }
@@ -890,6 +916,7 @@ export class CodexAppServerProvider implements ModelProvider {
         failed: false,
         errorMessage: null,
         errorCode: null,
+        nativeStatus: null,
       };
       activeTurn = turn;
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
@@ -928,9 +955,10 @@ export class CodexAppServerProvider implements ModelProvider {
         if (!closed && !runtime.isClosed()) {
           if (turn.errorMessage) {
             runtime.sink.push(
-              turn.errorCode
-                ? { type: "error", error: turn.errorMessage, code: turn.errorCode }
-                : { type: "error", error: turn.errorMessage },
+              codexErrorBlock(turn.errorMessage, {
+                code: turn.errorCode,
+                httpStatus: turn.errorHttpStatus,
+              }),
             );
           } else {
             if (runtime === sourceRuntime && turn.turnId) {
@@ -942,6 +970,7 @@ export class CodexAppServerProvider implements ModelProvider {
               agentName: params.agentName,
               appStoreListingId: params.appStoreListingId,
               reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
+              stop: codexStop(turn.nativeStatus ?? undefined),
               stopReason: turn.failed ? "error" : "end_turn",
               durationMs: Date.now() - turn.startedAt,
             });
@@ -982,11 +1011,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(
-            classification.code
-              ? { type: "error", error: message, code: classification.code }
-              : { type: "error", error: message },
-          );
+          runtime.sink.push(codexErrorBlock(message, classification));
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();

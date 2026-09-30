@@ -91,5 +91,36 @@ describe("UsageSummaryBlock", () => {
 
     await user.hover(contextProgress);
     expect((await screen.findAllByText("usage.contextUsage: 25%")).length).toBeGreaterThan(0);
+    // No run reported reasoning, so no reasoning line.
+    expect(screen.queryByText("usage.labels.reasoning")).toBeNull();
+  });
+
+  it("shows reasoning tokens with a hint that they are part of output", async () => {
+    const user = userEvent.setup();
+    const accounting: TraceAccounting = {
+      provider: "anthropic",
+      model: "main-model",
+      usage: {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        inputTokens: 10,
+        outputTokens: 63,
+        reasoningTokens: 60,
+      },
+    };
+
+    render(
+      <TooltipProvider>
+        <UsageSummaryBlock accounting={accounting} />
+      </TooltipProvider>,
+    );
+
+    const label = screen.getByText("usage.labels.reasoning");
+    expect(label.parentElement?.textContent).toContain("60");
+    // Reasoning is a subset of output, so the total counts output once.
+    expect(screen.getByText("73")).toBeTruthy();
+
+    await user.hover(label);
+    expect((await screen.findAllByText("usage.reasoningHint")).length).toBeGreaterThan(0);
   });
 });

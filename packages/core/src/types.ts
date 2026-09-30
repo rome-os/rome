@@ -19,6 +19,8 @@ export type {
   AgentPlanStep,
   AgentPlanStepStatus,
   AgentAccounting,
+  AgentStop,
+  AgentStopReason,
   AgentContextUsage,
   AgentTokenUsage,
   ReasoningEffort,

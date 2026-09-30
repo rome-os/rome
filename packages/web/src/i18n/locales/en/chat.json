@@ -177,9 +177,11 @@
       "cacheWrite": "Cache write",
       "input": "Input",
       "output": "Output",
+      "reasoning": "Reasoning",
       "context": "Context",
       "mainContext": "Main context"
-    }
+    },
+    "reasoningHint": "Included in output. Claude's count is an estimate."
   },
   "approvals": {
     "headerPending": "Guardian approval needed",

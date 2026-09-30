@@ -1377,6 +1377,8 @@ describe("CodexAppServerProvider", () => {
           cache_write_tokens: 0,
           reasoning_tokens: 0,
         },
+        stop: { reason: "completed", raw: "completed" },
+        stopReason: "end_turn",
       },
     });
 
@@ -2185,7 +2187,7 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("does not tag a non-usage-limit turn failure", async () => {
+  it("tags a server-side turn failure as transient rather than usage_limit", async () => {
     const provider = new CodexAppServerProvider();
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -2212,8 +2214,54 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     const err = msgs.find((m) => m.type === "error");
-    expect(err).toMatchObject({ type: "error", error: "stream disconnected" });
-    expect((err as { code?: string }).code).toBeUndefined();
+    expect(err).toMatchObject({ type: "error", error: "stream disconnected", code: "transient" });
+    await session.close();
+  });
+
+  it("carries the HTTP status and context-window code from codexErrorInfo", async () => {
+    const provider = new CodexAppServerProvider();
+    let turnNumber = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        turnNumber += 1;
+        const turnId = `turn-${turnNumber}`;
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: turnId } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: turnId,
+            status: "failed",
+            error:
+              turnNumber === 1
+                ? {
+                    message: "connection failed",
+                    codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 503 } },
+                  }
+                : { message: "context full", codexErrorInfo: "contextWindowExceeded" },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    let collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "first" });
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      type: "error",
+      code: "transient",
+      httpStatus: 503,
+    });
+
+    collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "second" });
+    const second = (await collected).find((m) => m.type === "error");
+    expect(second).toMatchObject({ type: "error", code: "context_window_exceeded" });
+    expect(second).not.toHaveProperty("httpStatus");
     await session.close();
   });
 });

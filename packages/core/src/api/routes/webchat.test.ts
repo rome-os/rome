@@ -443,7 +443,7 @@ describe("Webchat API", () => {
           accounting: {
             provider: "test",
             model: "child-model",
-            usage: { inputTokens: 3, outputTokens: 4 },
+            usage: { inputTokens: 3, outputTokens: 4, reasoningTokens: 2 },
             costUsd: 0.03,
           },
         },
@@ -568,6 +568,15 @@ describe("Webchat API", () => {
         },
       ],
     });
+    // Only the grandchild reported reasoning: the rollup sums what was
+    // reported, and a turn whose runs reported none stays without the field.
+    expect(
+      (await readAccounting("/chat/messages/parent-usage-trace/content"))?.usage.reasoningTokens,
+    ).toBe(2);
+    expect(
+      (await readAccounting("/chat/messages/parent-usage-trace/content?includeSubagentUsage=false"))
+        ?.usage,
+    ).not.toHaveProperty("reasoningTokens");
     expect(await deps.webchatRepo.getMessageContent("parent-usage-trace")).not.toContain(
       "includedSubagentCount",
     );

@@ -1646,6 +1646,7 @@ describe("AnthropicProvider", () => {
           },
           costUsd: 0.00789,
           numTurns: 2,
+          stop: { reason: "completed", raw: "end_turn" },
           stopReason: "end_turn",
           durationMs: 50,
           rawUsage: {
@@ -1659,6 +1660,70 @@ describe("AnthropicProvider", () => {
       expect(
         (messages[0] as { type: "result"; accounting?: { costUsd?: number } }).accounting?.costUsd,
       ).toBeCloseTo(0.00789);
+      // No output_tokens_details: the provider reported no reasoning count.
+      expect(
+        (messages[0] as { type: "result"; accounting?: { usage: Record<string, unknown> } })
+          .accounting?.usage,
+      ).not.toHaveProperty("reasoningTokens");
+    });
+
+    it("reads reasoning tokens from output_tokens_details and maps the stop reason", async () => {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "success",
+          result: "21",
+          usage: {
+            input_tokens: 2,
+            output_tokens: 63,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 16007,
+            output_tokens_details: { thinking_tokens: 60 },
+          },
+          num_turns: 1,
+          stop_reason: "max_tokens",
+          terminal_reason: "completed",
+          total_cost_usd: 0.1,
+          duration_ms: 5,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages[0]).toMatchObject({
+        type: "result",
+        accounting: {
+          usage: { outputTokens: 63, reasoningTokens: 60 },
+          stop: { reason: "max_tokens", raw: "max_tokens" },
+          stopReason: "max_tokens",
+        },
+      });
+    });
+
+    it("classifies a prompt that no longer fits the context window", async () => {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          errors: ["Prompt is too long"],
+          num_turns: 1,
+          stop_reason: null,
+          terminal_reason: "prompt_too_long",
+          total_cost_usd: 0,
+          duration_ms: 1,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages[0]).toMatchObject({
+        type: "error",
+        code: "context_window_exceeded",
+      });
     });
   });
 });

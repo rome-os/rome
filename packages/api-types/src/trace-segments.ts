@@ -1,6 +1,13 @@
 // WebChat trace wire DTOs. Session model: docs/concepts/sessions.md.
 
-import type { AgentPlan, RomeSessionRef } from "@rome-os/app-runtime";
+import type {
+  AgentErrorCode,
+  AgentErrorProvider,
+  AgentErrorReason,
+  AgentPlan,
+  AgentStop,
+  RomeSessionRef,
+} from "@rome-os/app-runtime";
 export type {
   AgentInputState,
   InputStatusMessage,
@@ -128,6 +135,8 @@ export interface TraceTokenUsage {
   cacheWriteTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /** Subset of `outputTokens`; see `AgentTokenUsage.reasoningTokens`. */
+  reasoningTokens?: number;
 }
 
 export interface TraceContextUsage {
@@ -152,6 +161,8 @@ export interface TraceAccounting {
   context?: TraceContextUsage;
   costUsd?: number;
   numTurns?: number;
+  stop?: AgentStop;
+  /** @deprecated Read `stop.reason`. */
   stopReason?: string;
   durationMs?: number;
   rawUsage?: Record<string, unknown>;
@@ -174,14 +185,10 @@ export interface ErrorBlock extends TraceBlockBase {
   type: "error";
   error: string;
   accounting?: TraceAccounting;
-  code?:
-    | "usage_limit"
-    | "auth_revoked"
-    | "model_provider_unavailable"
-    | "model_unavailable"
-    | "no_model_provider_available";
-  provider?: "openai" | "anthropic";
-  reason?: "not_logged_in" | "quota_exhausted" | "model_access_denied" | "no_available_provider";
+  code?: AgentErrorCode;
+  httpStatus?: number;
+  provider?: AgentErrorProvider;
+  reason?: AgentErrorReason;
 }
 
 export interface StructuredOutputBlock extends TraceBlockBase {

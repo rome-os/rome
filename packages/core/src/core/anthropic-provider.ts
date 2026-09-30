@@ -24,6 +24,7 @@ import type {
   ModelReasoningEffort,
 } from "./agent-runner.js";
 import { buildAgentAccounting } from "./provider-accounting.js";
+import { anthropicStop } from "./stop-reason.js";
 import { createLogger } from "../logger.js";
 import {
   type ModelMetricAttribution,
@@ -206,11 +207,23 @@ async function readSdkContextUsage(
   }
 }
 
+/**
+ * Reasoning tokens from the Messages API's `output_tokens_details`. The API
+ * computes the count by re-tokenizing the raw reasoning, so it is an
+ * estimate that can differ from the billed count by a few tokens.
+ */
+function readReasoningTokens(usage: BetaUsageShape): number | undefined {
+  const details = (usage as { output_tokens_details?: unknown }).output_tokens_details;
+  if (!details || typeof details !== "object") return undefined;
+  return readPositiveNumber((details as { thinking_tokens?: unknown }).thinking_tokens);
+}
+
 function buildAnthropicAccounting(
   result: SDKResultMessage,
   model: string,
   providerId: string,
   context?: AgentContextUsage,
+  aborted = false,
 ) {
   // SDK types mark these required, but mock test data may omit them; treat
   // the absence of `usage` as "no accounting to report" rather than crashing.
@@ -219,6 +232,7 @@ function buildAnthropicAccounting(
     return undefined;
   }
 
+  const reasoningTokens = readReasoningTokens(usage);
   return buildAgentAccounting({
     provider: providerId,
     model,
@@ -227,9 +241,11 @@ function buildAnthropicAccounting(
       outputTokens: readPositiveNumber(usage.output_tokens) ?? 0,
       cacheReadTokens: readPositiveNumber(usage.cache_read_input_tokens) ?? 0,
       cacheWriteTokens: readPositiveNumber(usage.cache_creation_input_tokens) ?? 0,
+      ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     },
     reportedCostUsd: readPositiveNumber(result.total_cost_usd),
     numTurns: readPositiveNumber(result.num_turns),
+    stop: anthropicStop(result, aborted),
     stopReason: result.stop_reason ?? undefined,
     durationMs: readPositiveNumber(result.duration_ms),
     rawUsage: buildRawUsage(usage),
@@ -715,6 +731,7 @@ export class AnthropicProvider implements ModelProvider {
               effectiveModel,
               providerId,
               contextUsage,
+              abortController.signal.aborted,
             );
             const resultData = {
               subtype: message.subtype,
@@ -787,6 +804,13 @@ export class AnthropicProvider implements ModelProvider {
                   type: "error",
                   error: errorText,
                   ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
+                  accounting,
+                };
+              } else if (message.terminal_reason === "prompt_too_long") {
+                yield {
+                  type: "error",
+                  error: errorText,
+                  code: "context_window_exceeded",
                   accounting,
                 };
               } else {

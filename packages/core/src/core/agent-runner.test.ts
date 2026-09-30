@@ -2912,7 +2912,46 @@ describe("AgentRunner", () => {
           text: "Partial answer",
           state: "partial",
           terminalKind: "result",
+          stop: { reason: "interrupted", raw: "interrupted" },
           stopReason: "interrupted",
+        },
+      });
+    });
+
+    it("reports the unified stop reason on a turn that ended at the output limit", async () => {
+      const lifecycle = createLifecycleRecorder();
+      const provider = new MockModelProvider([
+        [
+          {
+            type: "result",
+            content: "Cut off",
+            accounting: {
+              provider: "mock",
+              model: "mock-large",
+              usage: {
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                inputTokens: 4,
+                outputTokens: 2,
+                reasoningTokens: 1,
+              },
+              stop: { reason: "max_tokens", raw: "max_tokens" },
+              stopReason: "max_tokens",
+            },
+          },
+        ],
+      ]);
+      const runner = createRunner(provider, lifecycle);
+
+      await collectMessages(runner.run({ agentName: "test-main", prompt: "Go long" }));
+
+      expect(lifecycle.finished[0]).toMatchObject({
+        status: "completed",
+        output: {
+          state: "final",
+          stop: { reason: "max_tokens", raw: "max_tokens" },
+          stopReason: "max_tokens",
+          accounting: { usage: { reasoningTokens: 1 } },
         },
       });
     });

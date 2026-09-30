@@ -177,9 +177,11 @@
       "cacheWrite": "缓存写入",
       "input": "输入",
       "output": "输出",
+      "reasoning": "推理",
       "context": "上下文",
       "mainContext": "主智能体上下文"
-    }
+    },
+    "reasoningHint": "已计入输出。Claude 的数值为估算值。"
   },
   "approvals": {
     "headerPending": "需要守护者批准",

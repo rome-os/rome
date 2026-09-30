@@ -470,12 +470,48 @@ export interface AgentTokenUsage {
   cacheWriteTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Output tokens the model spent on reasoning. A subset of `outputTokens`,
+   * never added to it. Absent when the provider reports no reasoning count.
+   *
+   * How each provider fills it:
+   * - `openai` (Codex): the provider's own `reasoning_output_tokens` count.
+   * - `anthropic` (Claude): an estimate. The Messages API computes it by
+   *   re-tokenizing the model's raw reasoning, so it can differ from the
+   *   billed count by a few tokens. It counts the full reasoning even when
+   *   the returned thinking text is a shorter summary.
+   */
+  reasoningTokens?: number;
 }
 
 export interface AgentContextUsage {
   usedTokens: number;
   windowTokens?: number;
   remainingTokens?: number;
+}
+
+/**
+ * Why a model run ended, in one vocabulary across providers.
+ *
+ * - `completed`: the model finished its answer.
+ * - `max_tokens`: the model hit its output-token limit.
+ * - `refusal`: the model declined to answer.
+ * - `interrupted`: the run was stopped before it finished, usually by the user.
+ * - `error`: the run failed.
+ * - `other`: the provider reported a reason with no match above; read `raw`.
+ */
+export type AgentStopReason =
+  | "completed"
+  | "max_tokens"
+  | "refusal"
+  | "interrupted"
+  | "error"
+  | "other";
+
+export interface AgentStop {
+  reason: AgentStopReason;
+  /** The provider's own value, for logs and diagnostics. Do not branch on it. */
+  raw?: string;
 }
 
 export interface AgentAccounting {
@@ -485,6 +521,13 @@ export interface AgentAccounting {
   context?: AgentContextUsage;
   costUsd?: number;
   numTurns?: number;
+  /** Why the run ended. Read this instead of `stopReason`. */
+  stop?: AgentStop;
+  /**
+   * @deprecated Read `stop.reason`. This is the provider's own value
+   * (Anthropic `stop_reason`, or `"end_turn"`/`"error"` for Codex), so it
+   * differs between providers.
+   */
   stopReason?: string;
   durationMs?: number;
   rawUsage?: Record<string, unknown>;
@@ -534,6 +577,9 @@ export interface AgentTurnOutput {
   structuredOutput?: unknown;
   state: "final" | "partial" | "none";
   terminalKind?: "result" | "error";
+  /** Why the turn's model run ended. Read this instead of `stopReason`. */
+  stop?: AgentStop;
+  /** @deprecated Read `stop.reason`. Provider-specific; see `AgentAccounting.stopReason`. */
   stopReason?: string;
   error?: string;
   accounting?: AgentAccounting;
@@ -754,7 +800,10 @@ export type AgentErrorCode =
   | "auth_revoked"
   | "model_provider_unavailable"
   | "model_unavailable"
-  | "no_model_provider_available";
+  | "no_model_provider_available"
+  | "context_window_exceeded"
+  | "transient"
+  | "invalid_request";
 
 export type AgentErrorProvider = "openai" | "anthropic";
 
@@ -770,13 +819,21 @@ export interface ErrorMessage {
   accounting?: AgentAccounting;
   /**
    * Optional machine-readable classification of the failure, set by providers
-   * that can categorize it. `"usage_limit"` marks a provider whose quota/rate
-   * limit is exhausted; `"auth_revoked"` marks a provider whose stored
-   * credentials are no longer valid server-side (e.g. Codex's refresh token was
-   * revoked) and need a re-login. Consumers use these instead of parsing the
+   * that can categorize it. Consumers use these instead of parsing the
    * human-readable `error`.
+   *
+   * - `usage_limit`: the provider's quota or rate limit is exhausted.
+   * - `auth_revoked`: the stored credentials are no longer valid server-side
+   *   (for example, Codex's refresh token was revoked) and need a re-login.
+   * - `context_window_exceeded`: the conversation no longer fits the model's
+   *   context window. Retrying the same turn fails the same way.
+   * - `transient`: a temporary provider or network failure, such as an
+   *   overloaded server or a dropped stream. Retrying later can succeed.
+   * - `invalid_request`: the provider rejected the request as malformed.
    */
   code?: AgentErrorCode;
+  /** HTTP status of the failed provider request, when the provider reports it. */
+  httpStatus?: number;
   /** Provider and cause used by interactive clients to offer recovery UI. */
   provider?: AgentErrorProvider;
   reason?: AgentErrorReason;

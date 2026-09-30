@@ -806,21 +806,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const value = usage && typeof usage === "object" ? (usage as Record<string, unknown>) : {};
     const finiteOrZero = (field: unknown): number =>
       typeof field === "number" && Number.isFinite(field) ? field : 0;
+    const reasoningTokens = value.reasoningTokens;
     return {
       cacheReadTokens: finiteOrZero(value.cacheReadTokens),
       cacheWriteTokens: finiteOrZero(value.cacheWriteTokens),
       inputTokens: finiteOrZero(value.inputTokens),
       outputTokens: finiteOrZero(value.outputTokens),
+      ...(typeof reasoningTokens === "number" && Number.isFinite(reasoningTokens)
+        ? { reasoningTokens }
+        : {}),
     };
   };
   const addTokenUsage = (left: TraceTokenUsage, right: TraceTokenUsage): TraceTokenUsage => {
     const normalizedLeft = normalizeTokenUsage(left);
     const normalizedRight = normalizeTokenUsage(right);
+    // Reasoning is reported only by some runs. Sum what was reported, and
+    // stay absent when no run reported it, rather than showing a false zero.
+    const hasReasoning =
+      normalizedLeft.reasoningTokens !== undefined || normalizedRight.reasoningTokens !== undefined;
     return {
       cacheReadTokens: normalizedLeft.cacheReadTokens + normalizedRight.cacheReadTokens,
       cacheWriteTokens: normalizedLeft.cacheWriteTokens + normalizedRight.cacheWriteTokens,
       inputTokens: normalizedLeft.inputTokens + normalizedRight.inputTokens,
       outputTokens: normalizedLeft.outputTokens + normalizedRight.outputTokens,
+      ...(hasReasoning
+        ? {
+            reasoningTokens:
+              (normalizedLeft.reasoningTokens ?? 0) + (normalizedRight.reasoningTokens ?? 0),
+          }
+        : {}),
     };
   };
   const modelUsageForAccounting = (accounting: TraceAccounting): TraceModelUsage => ({
