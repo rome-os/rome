@@ -26,7 +26,7 @@ Each process carries `ROME_DESKTOP=<name>` in its environment. Rome finds its de
 ## Invariants
 
 1. **One desktop per name.** `acquire` looks for a running desktop before it chooses a slot, and it serialises its calls.
-2. **Slots.** Slot `k` is display `:100+k`, RFB port `5901+k` and websockify port `6081+k`, for `k` from 0 to 63. A name takes the first free slot. A slot is free when no X server runs on its display, no live process owns its X lock, and neither port is listening.
+2. **Slots.** Slot `k` is display `:100+k`, RFB port `5901+k` and websockify port `6081+k`, for `k` from 0 to 63. A name takes the first free slot. A slot is free when no X server runs on its display, no live process owns its X lock, and neither port is listening. A zombie does not count as live. When a name's X server has died but its websockify still runs, the name returns to that slot and adopts the websockify.
 3. **Pins.** A pinned name always uses its pin. Legacy `WECHAT_USER_DISPLAY` pins `wechat`, with `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT`. A pinned name adopts a matching X server that has no marker, which is how Rome takes over the display the entrypoint started for WeChat. When something else holds the pin, `acquire` fails rather than move. No other name takes a slot that overlaps a pin.
 4. **No borrowed displays.** Rome never adopts an X server or a port it did not start for that name. A lock whose owner has exited is removed before a start.
 5. **Desktops outlive Rome.** The processes run in their own sessions, detached from Rome, so a Rome restart or a `tsx --watch` reload leaves them running. They end with the container.

@@ -2,7 +2,7 @@
 // files, TCP ports and detached spawns. The manager holds the rules; this file
 // holds only the reads and writes, so tests can replace it whole.
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync } from "node:fs";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import { access, constants, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import { delimiter, join } from "node:path";
@@ -29,6 +29,7 @@ export interface DesktopSystem {
   processes(programs: readonly string[]): Promise<ProcessInfo[]>;
   /** The pid in `/tmp/.X<n>-lock`, or null when there is no readable lock. */
   xLockOwner(display: number): Promise<number | null>;
+  /** False for a pid that has exited, including a zombie nobody reaped. */
   pidAlive(pid: number): boolean;
   /** Removes `/tmp/.X<n>-lock` and `/tmp/.X11-unix/X<n>`. Missing files are fine. */
   removeXState(display: number): Promise<void>;
@@ -99,9 +100,17 @@ export function nodeDesktopSystem(
     },
 
     pidAlive(pid) {
-      // `/proc/<pid>` exists for every user's process, where `kill -0` from a
-      // non-root Rome would fail on another user's X server.
-      return existsSync(join(procDir, String(pid)));
+      // `/proc/<pid>/stat` exists for every user's process, where `kill -0`
+      // from a non-root Rome would fail on another user's X server. A killed
+      // X server whose parent never reaps it stays a zombie, which is dead.
+      let stat: string;
+      try {
+        stat = readFileSync(join(procDir, String(pid), "stat"), "utf8");
+      } catch {
+        return false;
+      }
+      const state = stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+      return state !== "Z" && state !== "X";
     },
 
     async removeXState(display) {

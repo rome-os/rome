@@ -194,18 +194,33 @@ export class DesktopManager {
     const otherPins = Object.entries(this.pins)
       .filter(([pinned]) => pinned !== name)
       .map(([, slot]) => slot);
-    for (let k = 0; k < SLOT_COUNT; k++) {
-      const slot = slotAt(k);
+    // A desktop whose X server died leaves its websockify listening. Reusing
+    // that slot adopts it, where any other slot would strand it.
+    const ownFirst = Array.from({ length: SLOT_COUNT }, (_, k) => slotAt(k)).sort(
+      (a, b) =>
+        Number(this.hasOwnWebsockify(name, procs, b)) -
+        Number(this.hasOwnWebsockify(name, procs, a)),
+    );
+    for (const slot of ownFirst) {
       if (otherPins.some((pin) => overlaps(pin, slot))) continue;
       if (procs.some((proc) => isProgram(proc, "Xtigervnc") && runsDisplay(proc, slot.display))) {
         continue;
       }
       if (await this.xServerAlive(slot.display)) continue;
       if (await this.system.portListening(slot.vncPort)) continue;
-      if (await this.system.portListening(slot.novncPort)) continue;
+      if (
+        !this.hasOwnWebsockify(name, procs, slot) &&
+        (await this.system.portListening(slot.novncPort))
+      ) {
+        continue;
+      }
       return slot;
     }
     throw new Error(`No free desktop slot for "${name}"`);
+  }
+
+  private hasOwnWebsockify(name: string, procs: ProcessInfo[], slot: DesktopSlot): boolean {
+    return this.findWebsockify(procs, slot)?.env[NAME_MARKER] === name;
   }
 
   private async xServerAlive(display: number): Promise<boolean> {

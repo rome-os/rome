@@ -181,6 +181,39 @@ describe("DesktopManager.acquire", () => {
     expect(fake.removed).toEqual([103]);
   });
 
+  it("returns to the slot where its own websockify outlived its X server", async () => {
+    const fake = fakeSystem({
+      procs: [
+        {
+          pid: 20,
+          argv: ["websockify", "127.0.0.1:6083", "localhost:5903"],
+          env: { ROME_DESKTOP: "notes" },
+        },
+      ],
+      locks: new Map([[102, 19]]),
+      ports: new Set([6083]),
+    });
+    const desktop = await manager(fake).acquire("notes");
+
+    expect(desktop.display).toBe(":102");
+    expect(fake.spawns.map((spawn) => spawn.program)).toEqual(["Xtigervnc", "openbox"]);
+    expect(fake.removed).toEqual([102]);
+  });
+
+  it("does not take a slot whose websockify belongs to another name", async () => {
+    const fake = fakeSystem({
+      procs: [
+        {
+          pid: 20,
+          argv: ["websockify", "127.0.0.1:6081", "localhost:5901"],
+          env: { ROME_DESKTOP: "other" },
+        },
+      ],
+      ports: new Set([6081]),
+    });
+    expect((await manager(fake).acquire("notes")).display).toBe(":101");
+  });
+
   it("clears a stale X lock left by a dead server and reuses its slot", async () => {
     const fake = fakeSystem({ locks: new Map([[100, 55]]) });
     const desktop = await manager(fake).acquire("notes");

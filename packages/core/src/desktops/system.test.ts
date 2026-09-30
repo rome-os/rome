@@ -16,11 +16,12 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function fakeProcess(pid: number, argv: string[], env: string[]) {
+async function fakeProcess(pid: number, argv: string[], env: string[], state = "S") {
   const dir = join(root, "proc", String(pid));
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "cmdline"), `${argv.join("\0")}\0`);
   await writeFile(join(dir, "environ"), `${env.join("\0")}\0`);
+  await writeFile(join(dir, "stat"), `${pid} (${argv[0]} (x)) ${state} 1 ${pid} ${pid}\n`);
 }
 
 describe("nodeDesktopSystem", () => {
@@ -64,11 +65,13 @@ describe("nodeDesktopSystem", () => {
     expect(await system.xLockOwner(100)).toBeNull();
   });
 
-  it("tells a live pid from a dead one", async () => {
+  it("counts an exited pid and an unreaped zombie as dead", async () => {
     await fakeProcess(4242, ["Xtigervnc"], []);
+    await fakeProcess(4244, ["Xtigervnc"], [], "Z");
     const system = nodeDesktopSystem({ procDir: join(root, "proc") });
     expect(system.pidAlive(4242)).toBe(true);
     expect(system.pidAlive(4243)).toBe(false);
+    expect(system.pidAlive(4244)).toBe(false);
   });
 
   it("sees a loopback listener", async () => {
