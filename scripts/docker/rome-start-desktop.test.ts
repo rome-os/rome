@@ -138,14 +138,15 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
   }, 60_000);
 
   it("treats an unreaped zombie holding the X lock as dead", async () => {
-    // The child exits at once, and the parent execs into sleep and never reaps it.
-    const parent = spawn("sh", ["-c", "true & echo $!; exec sleep 30"]);
+    // The child exits once the parent has exec'd into sleep, which never reaps
+    // it. A child that exits before the exec can be reaped by sh itself.
+    const parent = spawn("sh", ["-c", "sleep 0.3 & echo $!; exec sleep 30"]);
     const [line] = (await once(parent.stdout, "data")) as [Buffer];
     const zombie = Number(line.toString().trim());
     try {
       for (
         let i = 0;
-        i < 50 && !readFileSync(`/proc/${zombie}/stat`, "utf8").includes(") Z ");
+        i < 150 && !readFileSync(`/proc/${zombie}/stat`, "utf8").includes(") Z ");
         i++
       ) {
         await new Promise((r) => setTimeout(r, 20));
