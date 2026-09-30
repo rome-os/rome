@@ -378,7 +378,9 @@ describe("Chat turn stream lifecycle", () => {
     renderChat(<Chat sessionId="session-1" />);
     fireEvent.click(screen.getByTestId("send-button"));
     await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
-    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-local", expect.any(Object)));
+    await waitFor(() =>
+      expect(openTurnStream).toHaveBeenCalledWith("turn-local", expect.any(Object)),
+    );
 
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-local", status: "running" }]);
     rs.useFakeTimers();
