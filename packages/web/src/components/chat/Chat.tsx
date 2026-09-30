@@ -1127,6 +1127,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
         (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) === observedSendRevision &&
         (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId;
+      const reloadWhileObserving = async () => {
+        const loaded = await loadMessages(reattachSessionId, {
+          force: true,
+          dropLocalOptimistic: true,
+          shouldApply: stillObserving,
+          bounded: true,
+        });
+        if (!loaded && stillObserving()) noteRecoveryFailure();
+        return loaded && stillObserving();
+      };
       let attachedTurnId: string | null = null;
       let finished = false;
       let streamOpened = false;
@@ -1151,17 +1161,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!turns.length) {
           const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
           if (suppressedTurnId) {
-            const loaded = await loadMessages(reattachSessionId, {
-              force: true,
-              dropLocalOptimistic: true,
-              shouldApply: stillObserving,
-              bounded: true,
-            });
-            if (!loaded) {
-              if (stillObserving()) noteRecoveryFailure();
-              return;
-            }
-            if (!stillObserving()) return;
+            if (!(await reloadWhileObserving())) return;
           }
           suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
@@ -1173,17 +1173,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             recoveringSessionIdsRef.current.has(reattachSessionId) &&
             stillObserving()
           ) {
-            const loaded = await loadMessages(reattachSessionId, {
-              force: true,
-              dropLocalOptimistic: true,
-              shouldApply: stillObserving,
-              bounded: true,
-            });
-            if (!loaded) {
-              if (stillObserving()) noteRecoveryFailure();
-              return;
-            }
-            if (!recoveringSessionIdsRef.current.has(reattachSessionId) || !stillObserving()) {
+            if (!(await reloadWhileObserving())) return;
+            if (!recoveringSessionIdsRef.current.has(reattachSessionId)) {
               return;
             }
             recoveringSessionIdsRef.current.delete(reattachSessionId);
@@ -1204,35 +1195,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
         if (target.turnId === suppressedTurnId) return;
         if (suppressedTurnId) {
-          const loaded = await loadMessages(reattachSessionId, {
-            force: true,
-            dropLocalOptimistic: true,
-            shouldApply: stillObserving,
-            bounded: true,
-          });
-          if (!loaded) {
-            if (stillObserving()) noteRecoveryFailure();
-            return;
-          }
-          if (!stillObserving()) return;
+          if (!(await reloadWhileObserving())) return;
           suppressedTurnIdsRef.current.delete(reattachSessionId);
         }
         if (observedTurnId && target.turnId !== observedTurnId) {
           // A missed message_insert may be the only durable copy of the old
           // turn's answer. Load it before replacing that turn's live preview.
-          const loaded = await loadMessages(reattachSessionId, {
-            force: true,
-            dropLocalOptimistic: true,
-            shouldApply: stillObserving,
-            bounded: true,
-          });
-          if (!loaded) {
-            if (stillObserving()) noteRecoveryFailure();
-            return;
-          }
-          if (!stillObserving()) {
-            return;
-          }
+          if (!(await reloadWhileObserving())) return;
         }
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
@@ -1275,8 +1244,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
           if (
-            suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId ||
-            releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId
+            (!currentTurnId || currentTurnId === attachedTurnId) &&
+            (suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId ||
+              releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId)
           ) {
             recoveringSessionIdsRef.current.delete(reattachSessionId);
           } else if (!currentTurnId || currentTurnId === attachedTurnId) {

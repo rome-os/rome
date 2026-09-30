@@ -1655,6 +1655,62 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false");
   });
 
+  it("does not let a released turn's late finalizer disable a newer turn's recovery", async () => {
+    const controllers = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+    rs.mocked(openTurnStream).mockImplementation((turnId: string) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              // Deliberately ignore abort so turn A's reader can finish late.
+              controllers.set(turnId, controller);
+            },
+          }),
+        ),
+      ),
+    );
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 200 }));
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-B" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(controllers.has("turn-1")).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.useFakeTimers();
+    fireEvent.click(screen.getByTestId("stop-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_500);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(controllers.has("turn-B")).toBe(true);
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    await act(async () => {
+      controllers.get("turn-B")!.error(new Error("turn B stream dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    const checksBeforeOldFinalizer = rs.mocked(listSessionTurns).mock.calls.length;
+
+    await act(async () => {
+      controllers.get("turn-1")!.error(new Error("turn A finally exits"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(4_000);
+    });
+    expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(checksBeforeOldFinalizer);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
   it("does not let a delayed force-release abort a fresh stream for the same turn", async () => {
     const streamControllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
