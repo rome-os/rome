@@ -10,7 +10,7 @@ import {
 } from "./messages-contract.js";
 import { WHATSAPP_SELF_SENDER } from "./whatsapp-history.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
-import type { AccountMessages, MessageAccount } from "./messages.js";
+import { channelMessageDetail, type AccountMessages, type MessageAccount } from "./messages.js";
 
 // `wa_messages` as a `Messages` store. What it must answer is the contract
 // suites'; what the account reads must leave out is the mirror's own scoping —
@@ -109,7 +109,7 @@ describe("whatsAppMessages", () => {
       direction: "inbound",
       ref: `${PHONE}:e`,
       body: "latest",
-      sender: { id: PHONE, name: null },
+      sender: { id: PHONE, name: PHONE },
       conversation: { id: PHONE, name: null, kind: "dm" },
     });
   });
@@ -153,6 +153,41 @@ describe("whatsAppMessages", () => {
       conversationId: PHONE as ConversationId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["r", "e", "c", "a"]);
+  });
+
+  // One row, two doors: the account reads and `query` map a row through the
+  // same mapper, so they cannot describe one message two ways.
+  it("describes a message the same way through both reads", async () => {
+    const now = new Date();
+    testDb.db
+      .insert(waContacts)
+      .values({ jid: PHONE, name: "Ada", firstSyncedAt: now, updatedAt: now })
+      .run();
+    const store = whatsAppMessages(testDb.db);
+    const read = await accountReads(testDb.db).read({ accounts, limit: WHOLE_HISTORY });
+    const queried = await store.query({});
+    for (const entry of read) {
+      const same = queried.find(
+        (message) => `${message.conversationId}:${message.messageId}` === entry.ref,
+      );
+      expect(same).toBeDefined();
+      expect({ sender: entry.sender, conversation: entry.conversation }).toEqual(
+        channelMessageDetail(same!),
+      );
+    }
+    // The guardian's line in a direct chat, which the sync stores with no sender.
+    expect(read.find((entry) => entry.ref === `${PHONE}:c`)?.sender).toEqual({
+      id: WHATSAPP_SELF_SENDER,
+      name: "You",
+    });
+  });
+
+  it("reads `since` as an instant, not as the second it falls in", async () => {
+    const page = await whatsAppMessages(testDb.db).query({
+      conversationId: PHONE as ConversationId,
+      since: new Date(300_500),
+    });
+    expect(page.map((entry) => entry.messageId)).toEqual(["r", "e"]);
   });
 
   it("names the sender and the chat from the mirror's contacts", async () => {

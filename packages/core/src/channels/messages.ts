@@ -61,6 +61,44 @@ export interface MessageQuery {
 const DEFAULT_QUERY_LIMIT = 100;
 const MAX_QUERY_LIMIT = 1_000;
 
+/** What a People timeline entry says about a message beyond the line itself. */
+export type MessageDetail = Pick<Message, "sender" | "conversation" | "attachments">;
+
+/**
+ * The detail a {@link ChannelMessage} carries, as a timeline entry carries it.
+ * A store answering both reads maps a row to a `ChannelMessage` once and takes
+ * the entry's detail from it, so the two reads describe one row the same way.
+ */
+export function channelMessageDetail(message: ChannelMessage): MessageDetail {
+  const detail: MessageDetail = {
+    sender: { id: message.senderId || null, name: message.senderDisplayName || null },
+    conversation: {
+      id: message.conversationId,
+      name: message.thread?.name ?? null,
+      kind: message.thread?.kind ?? null,
+    },
+  };
+  if (message.attachments.length > 0) {
+    detail.attachments = message.attachments.map((attachment) => ({
+      type: attachment.type,
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+      ...(attachment.caption ? { caption: attachment.caption } : {}),
+    }));
+  }
+  return detail;
+}
+
+/**
+ * The earliest instant a query reads from, rounded up to a whole second: every
+ * store here keeps seconds, so a `since` inside a second answers only the
+ * seconds after it rather than the one it falls in.
+ */
+export function querySince(since: Date | undefined): Date {
+  if (!since) return new Date(0);
+  return new Date(Math.ceil(since.getTime() / 1000) * 1000);
+}
+
 /** The number of messages a query asks for, defaulted and capped. */
 export function queryLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_QUERY_LIMIT;

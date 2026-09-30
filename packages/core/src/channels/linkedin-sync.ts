@@ -114,6 +114,9 @@ export interface LinkedInHistoryMessage {
   messageId: string;
   threadId: string;
   threadName: string | null;
+  /** LinkedIn's own group flag for the thread, null until it has been
+   *  snapshotted. */
+  isGroup?: boolean | null;
   /** sent_at when LinkedIn reported one, else the mirror's first-seen time. */
   sentAt: Date;
   senderName: string | null;

@@ -10,25 +10,23 @@
 // answers concurrent `resolve` calls from a single shared load.
 
 import { sql, type SQL } from "drizzle-orm";
-import type { Message, MessageAttachment, MessageConversationInfo } from "@rome/api-types/message";
+import type { Message } from "@rome/api-types/message";
 import type { DrizzleDb } from "../db/index.js";
-import type { AccountMessages, MessageAccount, MessageRead } from "./messages.js";
+import type { AccountMessages, MessageAccount, MessageDetail, MessageRead } from "./messages.js";
 
 /**
  * A store's rows as timeline entries: a SELECT producing exactly the columns
- * `source`, `key`, `at`, `outbound`, `ref`, `body`, `sender_id`, `sender_name`,
- * `conversation_id`, `conversation_name`, `conversation_kind` and
- * `attachment_type`.
+ * `source`, `key`, `at`, `outbound`, `ref`, `body` and `detail`.
  *
  * - `source` is the channel an entry arrived on, and `key` the scope entry the
  *   row answers for — one of the strings the view was handed, an address of
  *   the account a message belongs to.
  * - `at` is epoch seconds, `outbound` is 1 for something Rome said and 0 for
  *   something it was told, `body` is the line to render or NULL.
- * - The last six describe the message and select nothing: who said it, the
- *   conversation it was said in (`conversation_kind` one of `dm`, `group`,
- *   `topic`), and the type of what came attached. NULL wherever the store did
- *   not record it.
+ * - `detail` describes the message and selects nothing: a JSON object of the
+ *   row's own fields, which the store's `detail` option turns into who said it,
+ *   where and with what attached. One column, so a store reads it with the same
+ *   mapper its `query` uses.
  * - `ref` must be unique across everything the store can put on one person's
  *   timeline. Ids unique only within a conversation (a WhatsApp message id, a
  *   LinkedIn message id) are qualified by the conversation.
@@ -82,6 +80,9 @@ export interface SqlMessagesOptions {
    * as expensive as the parse it wraps.
    */
   body?(raw: string | null): string | null;
+  /** The view's `detail` object as what a timeline entry says about the
+   *  message beyond its line. */
+  detail(raw: Record<string, unknown>): MessageDetail;
 }
 
 /**
@@ -168,20 +169,6 @@ interface JobResult {
 
 const COUNT_ONLY = 0;
 
-/** The columns a view selects to describe a message rather than to scope,
- *  order or page it. Carried through the batch untouched. */
-const DETAIL_COLUMNS = [
-  "sender_id",
-  "sender_name",
-  "conversation_id",
-  "conversation_name",
-  "conversation_kind",
-  "attachment_type",
-] as const;
-
-const detailsFrom = (table: string): SQL =>
-  sql.raw(DETAIL_COLUMNS.map((column) => `${table}.${column} AS ${column}`).join(", "));
-
 /** A history the store holds none of. Built per job rather than shared: the
  *  entries are the caller's array to do as it likes with. */
 const nothing = (): JobResult => ({ entries: [], total: 0 });
@@ -228,7 +215,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
         held.outbound AS outbound,
         held.ref AS ref,
         held.body AS body,
-        ${detailsFrom("held")}
+        held.detail AS detail
       FROM (${rows}) held
       -- The pair, never the key alone: a store holding several channels side by
       -- side would otherwise hand one channel's message to a job that asked
@@ -251,7 +238,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
         scoped.outbound AS outbound,
         scoped.ref AS ref,
         scoped.body AS body,
-        ${detailsFrom("scoped")},
+        scoped.detail AS detail,
         ask.cap AS cap,
         row_number() OVER w AS position,
         count(*) OVER w AS total
@@ -266,7 +253,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
     )
     -- Never fewer than one row per job: a job that asked for no page still has
     -- to be told how long the history it did not ask for is.
-    SELECT rq, source, at, outbound, ref, body, ${sql.raw(DETAIL_COLUMNS.join(", "))}, position, total
+    SELECT rq, source, at, outbound, ref, body, detail, position, total
     FROM ranked
     WHERE position <= max(cap, 1)
     ORDER BY rq ASC, position ASC
@@ -282,7 +269,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
     // The head of a history is answered whether or not the job asked for a
     // page, so a job that only wanted the length discards the row it read it
     // off.
-    if (Number(row.position) <= job.limit) result.entries.push(toEntry(row, options.body));
+    if (Number(row.position) <= job.limit) result.entries.push(toEntry(row, options));
   }
   return results;
 }
@@ -317,53 +304,17 @@ const AFTER_CURSOR = sql`
                AND (scoped.source > ask.c_source
                     OR (scoped.source = ask.c_source AND scoped.ref > ask.c_ref)))))`;
 
-function toEntry(
-  row: Record<string, unknown>,
-  body?: (raw: string | null) => string | null,
-): Message {
+function toEntry(row: Record<string, unknown>, options: SqlMessagesOptions): Message {
   const raw = (row.body as string | null) ?? null;
-  const text = (column: string) => {
-    const value = row[column];
-    return value === null || value === undefined || value === "" ? null : String(value);
-  };
   const entry: Message = {
     source: String(row.source),
     timestamp: Number(row.at),
     direction: Number(row.outbound) === 1 ? "outbound" : "inbound",
     ref: String(row.ref),
-    body: body ? body(raw) : raw,
+    body: options.body ? options.body(raw) : raw,
   };
-  const sender = { id: text("sender_id"), name: text("sender_name") };
-  if (sender.id !== null || sender.name !== null) entry.sender = sender;
-  const conversationId = text("conversation_id");
-  if (conversationId !== null) {
-    entry.conversation = {
-      id: conversationId,
-      name: text("conversation_name"),
-      kind: conversationKind(text("conversation_kind")),
-    };
-  }
-  const attachment = attachmentType(text("attachment_type"));
-  if (attachment !== null) entry.attachments = [{ type: attachment }];
-  return entry;
-}
-
-function conversationKind(raw: string | null): MessageConversationInfo["kind"] {
-  return raw === "dm" || raw === "group" || raw === "topic" ? raw : null;
-}
-
-const ATTACHMENT_TYPES = new Set<string>([
-  "image",
-  "video",
-  "audio",
-  "document",
-  "sticker",
-  "location",
-  "contact",
-]);
-
-function attachmentType(raw: string | null): MessageAttachment["type"] | null {
-  return raw !== null && ATTACHMENT_TYPES.has(raw) ? (raw as MessageAttachment["type"]) : null;
+  const detail = typeof row.detail === "string" ? options.detail(JSON.parse(row.detail)) : {};
+  return { ...entry, ...detail };
 }
 
 /**

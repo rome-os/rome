@@ -33,9 +33,9 @@ export function linkedInHistoryText(row: LinkedInHistoryMessage): string {
 /**
  * A mirrored row as a {@link ChannelMessage}.
  *
- * Read as a direct thread, the way the channel's history has always read it:
- * the mirror knows a thread is a group only once it has been snapshotted. The
- * mirror keeps no attachments.
+ * A group once LinkedIn has said so, and otherwise a direct thread, the way the
+ * channel's history has always read it: the mirror knows a thread is a group
+ * only once it has been snapshotted. The mirror keeps no attachments.
  */
 export function linkedInHistoryMessage(row: LinkedInHistoryMessage): ChannelMessage {
   return {
@@ -48,7 +48,10 @@ export function linkedInHistoryMessage(row: LinkedInHistoryMessage): ChannelMess
     text: linkedInHistoryText(row),
     attachments: [],
     timestamp: row.sentAt,
-    thread: { kind: "dm", ...(row.threadName ? { name: row.threadName } : {}) },
+    thread: {
+      kind: row.isGroup === true ? "group" : "dm",
+      ...(row.threadName ? { name: row.threadName } : {}),
+    },
     raw: row,
   };
 }

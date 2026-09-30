@@ -9,7 +9,7 @@ import {
   WHOLE_HISTORY,
 } from "./messages-contract.js";
 import { linkedInMessages } from "./linkedin-messages.js";
-import type { AccountMessages, MessageAccount } from "./messages.js";
+import { channelMessageDetail, type AccountMessages, type MessageAccount } from "./messages.js";
 
 // `linkedin_messages` as a `Messages` store. The mirror holds group threads
 // and rooms the guardian is one of many in; a person's history is the threads
@@ -128,6 +128,8 @@ function seedMirror(testDb: TestDb): void {
           threadId: seed.thread,
           sentAt: message.sentAt === false ? null : new Date(message.at * 1000),
           senderIsSelf: message.self ?? false,
+          senderName: message.self ? "Self" : "Member",
+          senderProfileUrl: `https://www.linkedin.com/in/${message.self ? SELF : MEMBER}/`,
           text: message.text ?? null,
           createdAt: new Date(message.at * 1000),
         })),
@@ -166,6 +168,7 @@ describe("linkedInMessages", () => {
       direction: "inbound",
       ref: "t-direct:e",
       body: "latest",
+      sender: { id: MEMBER, name: "Member" },
       conversation: { id: "t-direct", name: null, kind: "dm" },
     });
   });
@@ -221,11 +224,31 @@ describe("linkedInMessages", () => {
     expect(await messages.latest(asAccount)).toBeNull();
   });
 
-  it("queries a thread LinkedIn calls a group", async () => {
+  it("queries a thread LinkedIn calls a group, as a group", async () => {
     const page = await linkedInMessages(testDb.db).query({
       conversationId: "t-flagged" as ConversationId,
     });
     expect(page.map((entry) => entry.messageId)).toEqual(["g"]);
+    expect(page[0]?.thread?.kind).toBe("group");
+  });
+
+  // One row, two doors: the account reads and `query` map a row through the
+  // same mapper, so they cannot describe one message two ways.
+  it("describes a message the same way through both reads", async () => {
+    const read = await accountReads(testDb.db).read({ accounts, limit: WHOLE_HISTORY });
+    const queried = await linkedInMessages(testDb.db).query({});
+    expect(read.length).toBeGreaterThan(0);
+    for (const entry of read) {
+      const same = queried.find(
+        (message) => `${message.conversationId}:${message.messageId}` === entry.ref,
+      );
+      expect(same).toBeDefined();
+      expect({ sender: entry.sender, conversation: entry.conversation }).toEqual(
+        channelMessageDetail(same!),
+      );
+    }
+    // The member id the profile URL carries, through either read.
+    expect(read[0]?.sender?.id).toBe(MEMBER);
   });
 
   it("queries a direct thread, reading an undated message at when it was stored", async () => {

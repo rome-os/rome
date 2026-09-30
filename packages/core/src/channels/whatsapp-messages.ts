@@ -1,8 +1,13 @@
 import { isJidGroup, jidNormalizedUser } from "@whiskeysockets/baileys";
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import { queryLimit, type Messages } from "./messages.js";
+import {
+  WA_HISTORY_JOINS,
+  WhatsAppStoreRepository,
+  waHistoryJson,
+  waHistoryRow,
+} from "../db/repositories/whatsapp-store.js";
+import { channelMessageDetail, queryLimit, querySince, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 import { whatsAppHistoryMessage } from "./whatsapp-history.js";
 
@@ -12,7 +17,9 @@ import { whatsAppHistoryMessage } from "./whatsapp-history.js";
  * Rome holds.
  *
  * `query` reads every chat, groups and reactions included, with the chat's and
- * the sender's names joined from the mirror's contacts and chats.
+ * the sender's names joined from the mirror's contacts and chats. The account
+ * reads describe a message through the same row mapper, so a line reads the
+ * same sender, chat and attachments through either.
  *
  * The account reads are scoped by chat. A WhatsApp message hangs off the chat
  * it was said in, and a direct chat is addressed by the contact. A contact
@@ -34,7 +41,7 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
   return {
     async query({ conversationId, since, limit }) {
       const chat = conversationId ? canonicalChat(conversationId) : null;
-      const rows = await mirror.fetchHistory(chat, since ?? new Date(0));
+      const rows = await mirror.fetchHistory(chat, querySince(since), queryLimit(limit));
       // The mirror answers oldest first; the port answers newest first.
       return rows.reverse().slice(0, queryLimit(limit)).map(whatsAppHistoryMessage);
     },
@@ -52,25 +59,14 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
             CASE WHEN m.from_me THEN 1 ELSE 0 END AS outbound,
             m.chat_jid || ':' || m.id AS ref,
             m.text AS body,
-            coalesce(m.sender_jid, CASE WHEN m.from_me THEN NULL ELSE m.chat_jid END) AS sender_id,
-            CASE WHEN m.from_me THEN NULL
-              ELSE coalesce(sc.name, sc.notify, sc.verified_name, m.push_name,
-                            cc.name, cc.notify, cc.verified_name)
-            END AS sender_name,
-            m.chat_jid AS conversation_id,
-            coalesce(ch.name, cc.name, cc.notify, cc.verified_name, cc.phone_number)
-              AS conversation_name,
-            'dm' AS conversation_kind,
-            CASE WHEN m.has_media AND m.type IN ('image', 'video', 'audio', 'document', 'sticker')
-              THEN m.type END AS attachment_type
+            ${waHistoryJson()} AS detail
           FROM wa_messages m
-          LEFT JOIN wa_chats ch ON ch.jid = m.chat_jid
-          LEFT JOIN wa_contacts cc ON cc.jid = m.chat_jid
-          LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
+          ${WA_HISTORY_JOINS}
           WHERE ${chats}
             AND m.chat_jid NOT LIKE '%@g.us'
             AND coalesce(m.type, '') <> 'reaction'`;
       },
+      detail: (raw) => channelMessageDetail(whatsAppHistoryMessage(waHistoryRow(raw))),
     }),
   };
 }

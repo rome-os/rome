@@ -4,7 +4,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
-import type { AccountMessages } from "./messages.js";
+import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -76,12 +76,13 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
           ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
           m.content AS body,
-          m.sender_id AS sender_id,
-          m.sender_name AS sender_name,
-          s.source_thread_id AS conversation_id,
-          s.source_thread_name AS conversation_name,
-          ${threadKind(sql`s.source_thread_type`)} AS conversation_kind,
-          NULL AS attachment_type
+          json_object(
+            'senderId', m.sender_id,
+            'senderName', m.sender_name,
+            'threadId', s.source_thread_id,
+            'threadName', s.source_thread_name,
+            'threadType', s.source_thread_type
+          ) AS detail
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
@@ -94,17 +95,28 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
     body: messageContentText,
+    detail: transcriptDetail,
   });
 }
 
-/** A session's thread type as a conversation kind: a private thread is a
- *  direct one, and a type with no kind of its own reads as unknown. */
-function threadKind(type: SQL): SQL {
-  return sql`CASE ${type}
-    WHEN 'private' THEN 'dm'
-    WHEN 'group' THEN 'group'
-    WHEN 'topic' THEN 'topic'
-  END`;
+/** Who said a transcript line and in which session's thread, as the row
+ *  recorded them. A private thread is a direct one, and a thread type with no
+ *  kind of its own reads as unknown. */
+function transcriptDetail(raw: Record<string, unknown>): MessageDetail {
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
+  const detail: MessageDetail = {};
+  const sender = { id: text(raw.senderId), name: text(raw.senderName) };
+  if (sender.id !== null || sender.name !== null) detail.sender = sender;
+  const threadId = text(raw.threadId);
+  if (threadId !== null) {
+    const type = text(raw.threadType);
+    detail.conversation = {
+      id: threadId,
+      name: text(raw.threadName),
+      kind: type === "private" ? "dm" : type === "group" || type === "topic" ? type : null,
+    };
+  }
+  return detail;
 }
 
 /** The line a stored agent message renders as: its text parts, joined.

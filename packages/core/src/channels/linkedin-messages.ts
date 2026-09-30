@@ -1,8 +1,12 @@
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
+import {
+  LinkedInStoreRepository,
+  linkedInHistoryJson,
+  linkedInHistoryRow,
+} from "../db/repositories/linkedin-store.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
-import { queryLimit, type Messages } from "./messages.js";
+import { channelMessageDetail, queryLimit, querySince, type Messages } from "./messages.js";
 import { inList, keysIn, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -25,14 +29,19 @@ import { inList, keysIn, sqlMessages } from "./messages-sql.js";
  * holds however many members of however many people the scope names at once,
  * which a read grouping a whole directory into one pass depends on.
  *
- * The mirror keeps a sender's name but no id for them, so the account reads
- * name the sender and leave the id out.
+ * Both reads describe a message through the same row mapper, so a line reads
+ * the same sender and thread through either. The sender's id is the member id
+ * in the profile URL the mirror keeps.
  */
 export function linkedInMessages(db: DrizzleDb): Messages {
   const mirror = new LinkedInStoreRepository(db);
   return {
     async query({ conversationId, since, limit }) {
-      const rows = await mirror.fetchHistory(conversationId ?? null, since ?? new Date(0));
+      const rows = await mirror.fetchHistory(
+        conversationId ?? null,
+        querySince(since),
+        queryLimit(limit),
+      );
       // The mirror answers oldest first; the port answers newest first.
       return rows.reverse().slice(0, queryLimit(limit)).map(linkedInHistoryMessage);
     },
@@ -50,12 +59,7 @@ export function linkedInMessages(db: DrizzleDb): Messages {
             CASE WHEN m.sender_is_self THEN 1 ELSE 0 END AS outbound,
             m.thread_id || ':' || m.message_id AS ref,
             m.text AS body,
-            NULL AS sender_id,
-            m.sender_name AS sender_name,
-            m.thread_id AS conversation_id,
-            coalesce(t.conversation_name, t.person_name) AS conversation_name,
-            'dm' AS conversation_kind,
-            NULL AS attachment_type
+            ${linkedInHistoryJson()} AS detail
           FROM linkedin_messages m
           JOIN linkedin_threads t ON t.thread_id = m.thread_id
           JOIN linkedin_thread_participants tp
@@ -65,6 +69,7 @@ export function linkedInMessages(db: DrizzleDb): Messages {
               SELECT count(*) FROM linkedin_thread_participants x WHERE x.thread_id = m.thread_id
             ) <= 2`;
       },
+      detail: (raw) => channelMessageDetail(linkedInHistoryMessage(linkedInHistoryRow(raw))),
     }),
   };
 }

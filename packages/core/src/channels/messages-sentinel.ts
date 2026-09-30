@@ -3,7 +3,7 @@
 
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
-import type { AccountMessages } from "./messages.js";
+import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -47,12 +47,11 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
           0 AS outbound,
           'sentinel:' || l.id AS ref,
           l.text AS body,
-          l.channel_user_id AS sender_id,
-          l.display_name AS sender_name,
-          l.thread_id AS conversation_id,
-          NULL AS conversation_name,
-          NULL AS conversation_kind,
-          NULL AS attachment_type
+          json_object(
+            'senderId', l.channel_user_id,
+            'senderName', l.display_name,
+            'threadId', l.thread_id
+          ) AS detail
         FROM sentinel_log l
         WHERE ${direct}
         UNION ALL
@@ -63,14 +62,22 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
           1,
           'sentinel:' || l.id || ':reply',
           l.response,
-          NULL,
-          NULL,
-          l.thread_id,
-          NULL,
-          NULL,
-          NULL
+          json_object('threadId', l.thread_id)
         FROM sentinel_log l
         WHERE ${direct} AND l.response IS NOT NULL AND l.response <> ''`;
     },
+    detail: logDetail,
   });
+}
+
+/** Who a log line names as its sender and the thread it names, as recorded.
+ *  The log keeps neither the thread's name nor whether it is a group. */
+function logDetail(raw: Record<string, unknown>): MessageDetail {
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
+  const detail: MessageDetail = {};
+  const sender = { id: text(raw.senderId), name: text(raw.senderName) };
+  if (sender.id !== null || sender.name !== null) detail.sender = sender;
+  const threadId = text(raw.threadId);
+  if (threadId !== null) detail.conversation = { id: threadId, name: null, kind: null };
+  return detail;
 }

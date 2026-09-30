@@ -16,7 +16,9 @@ import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-t
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
+  channelMessageDetail,
   queryLimit,
+  querySince,
   type AccountMessages,
   type MessageAccount,
   type MessageRead,
@@ -47,22 +49,14 @@ function windowSize(limit: number): number {
  *  reader's own id, already qualified as `<conversation>:<localId>` and so
  *  unique across the account's timeline. */
 function toMessage(message: WechatUserMessage): Message {
-  const entry: Message = {
+  return {
     source: WECHAT_USER_CHANNEL,
     timestamp: message.timestamp,
     body: message.text || null,
     direction: message.isSelf ? "outbound" : "inbound",
     ref: message.id,
-    conversation: {
-      id: message.conversationId,
-      name: message.conversationName || null,
-      kind: message.isGroup ? "group" : "dm",
-    },
+    ...channelMessageDetail(toWechatUserChannelMessage(message)),
   };
-  if (message.senderId || message.senderName) {
-    entry.sender = { id: message.senderId || null, name: message.senderName || null };
-  }
-  return entry;
 }
 
 /**
@@ -117,13 +111,12 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
     async query({ conversationId, since, limit }) {
       const messages = await reader.messages({
         ...(conversationId ? { conversationId } : {}),
-        ...(since ? { since } : {}),
+        ...(since ? { since: querySince(since) } : {}),
         limit: queryLimit(limit),
       });
-      // The reader answers oldest first; the port answers newest first.
-      return messages
-        .map(toWechatUserChannelMessage)
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      // The reader answers oldest first, same-second messages included; the
+      // port answers newest first.
+      return messages.map(toWechatUserChannelMessage).reverse();
     },
     byAccount: wechatUserAccountMessages(reader),
   };

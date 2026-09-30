@@ -316,6 +316,19 @@ function helperOrderReader(rows: WechatUserMessage[]): WechatUserReader {
   } as unknown as WechatUserReader;
 }
 
+describe("wechatUserMessages query order", () => {
+  it("answers same-second messages newest first", async () => {
+    const store = wechatUserMessages(
+      helperOrderReader([
+        msg({ id: "wxid_a:1", timestamp: 1000, text: "first" }),
+        msg({ id: "wxid_a:2", timestamp: 1000, text: "second" }),
+      ]),
+    );
+    const page = await store.query({ conversationId: "wxid_a" as ConversationId });
+    expect(page.map((entry) => entry.messageId)).toEqual(["wxid_a:2", "wxid_a:1"]);
+  });
+});
+
 testMessagesQueryContract("wechatUserMessages", () => ({
   messages: wechatUserMessages(
     helperOrderReader([
