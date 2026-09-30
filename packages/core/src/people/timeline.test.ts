@@ -2,13 +2,13 @@ import { describe, it, expect } from "@rstest/core";
 import { latestDynamic } from "@rome/api-types/people";
 import { parseMessageCursor, type Message } from "@rome/api-types/message";
 import { memoryMessages } from "../channels/messages-memory.js";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { readPersonTimeline } from "./timeline.js";
 import { readPeopleActivity } from "./activity.js";
 
 // The merge above the stores: what a page is, how it resumes, and which store
 // owns an account. Every store here is in-memory, so nothing below is about
-// SQL — a store that answers the `Messages` contract is a store this merge can
+// SQL — a store that answers the `AccountMessages` contract is a store this merge can
 // page.
 
 const account = (channel: string, ...addresses: string[]): MessageAccount => ({
@@ -25,13 +25,13 @@ const entry = (
 
 /**
  * A store holding `held`, keyed by the address each entry arrived at — the
- * reference `Messages` implementation, which is what makes these fakes prove
+ * reference `AccountMessages` implementation, which is what makes these fakes prove
  * something: they answer the contract every real adapter is enrolled in.
  *
  * An entry's `source` is the channel it belongs to, so an address on one
  * channel never answers for an account on another.
  */
-function store(held: Record<string, Message[]>): Messages {
+function store(held: Record<string, Message[]>): AccountMessages {
   return memoryMessages(
     Object.entries(held).flatMap(([address, entries]) =>
       entries.map((held) => ({ channel: held.source, address, entry: held })),
@@ -40,13 +40,13 @@ function store(held: Record<string, Message[]>): Messages {
 }
 
 /** One store, with every verb the merge reaches for written down. The property
- *  name rather than only the call, so a merge that asked for a verb `Messages`
+ *  name rather than only the call, so a merge that asked for a verb `AccountMessages`
  *  does not have is caught here rather than by the type checker alone. */
 function watched(
   name: string,
-  messages: Messages,
+  messages: AccountMessages,
   asked: Array<{ store: string; verb: string }>,
-): Messages {
+): AccountMessages {
   return new Proxy(messages, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver);
@@ -168,7 +168,7 @@ describe("readPersonTimeline", () => {
   });
 
   it("asks a store for nothing but read, count and latest", async () => {
-    // The seam is `Messages` and only `Messages`: `holds` and `digest` were how
+    // The seam is `AccountMessages` and only `AccountMessages`: `holds` and `digest` were how
     // the old interface asked a store who it answered for, and a merge still
     // reaching for either would be reading a store two ways at once.
     const asked: Array<{ store: string; verb: string }> = [];

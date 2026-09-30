@@ -18,10 +18,10 @@ import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
 import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
+import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.js";
 import {
   createWechatUserDescriptor,
   makeWechatUserSetup,
-  toWechatUserInboundMessage,
   WECHAT_USER_SERVICE,
   wechatUserGrantProfileSchema,
 } from "./wechat-user.js";
@@ -288,9 +288,9 @@ describe("makeWechatUserSetup", () => {
   });
 });
 
-describe("toWechatUserInboundMessage", () => {
+describe("toWechatUserChannelMessage", () => {
   it("attributes an authorless notice to the chat it arrived in", () => {
-    const message = toWechatUserInboundMessage({
+    const message = toWechatUserChannelMessage({
       id: "notifymessage:44",
       conversationId: "notifymessage",
       isGroup: false,
@@ -305,7 +305,7 @@ describe("toWechatUserInboundMessage", () => {
   });
 
   it("carries the group name and sender through", () => {
-    const message = toWechatUserInboundMessage({
+    const message = toWechatUserChannelMessage({
       id: "45357963768@chatroom:8123",
       conversationId: "45357963768@chatroom",
       conversationName: "Karball",

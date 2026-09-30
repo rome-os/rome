@@ -40,7 +40,8 @@ withClient("the WeChat reader contract", () => {
     "reads a direct contact's body, latest message, and count through the People store",
     async () => {
       const directory = wechatUserAccounts(reader);
-      const store = wechatUserMessages(reader);
+      const store = wechatUserMessages(reader).byAccount;
+      if (!store) throw new Error("the WeChat store answers per-account reads");
       const { accounts } = await directory.listAccounts({ limit: 100 });
       expect(accounts.length).toBeGreaterThan(0);
       let checked = false;

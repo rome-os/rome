@@ -13,6 +13,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 import type { ProviderAdapter } from "./adapter.js";
+import { historyAttachments, historyText } from "./whatsapp-history.js";
 import type { NormalizedMessage, Attachment, OutgoingMessage } from "./types.js";
 import type {
   WhatsAppSyncSink,
@@ -728,45 +729,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function historyText(row: WaHistoryMessage): string {
-  if (row.type === "reaction") {
-    const emoji = row.text?.trim() || "reaction";
-    return row.reactsToId ? `Reacted ${emoji} to message ${row.reactsToId}` : `Reacted ${emoji}`;
-  }
-  const text = row.text?.trim() ?? "";
-  if (text) return text;
-  if (row.hasMedia) {
-    return `[${row.type ?? "media"}]`;
-  }
-  return "";
-}
-
-function historyAttachments(row: WaHistoryMessage): Attachment[] {
-  if (!row.hasMedia) return [];
-  const type = historyAttachmentType(row.type);
-  if (!type) return [];
-  const text = row.text?.trim();
-  return [
-    {
-      type,
-      ...(text ? { caption: text } : {}),
-    },
-  ];
-}
-
-function historyAttachmentType(type: string | null): Attachment["type"] | null {
-  switch (type) {
-    case "image":
-    case "video":
-    case "audio":
-    case "document":
-    case "sticker":
-      return type;
-    default:
-      return null;
-  }
 }
 
 // WhatsApp timestamps arrive as unix seconds, either a plain number or a

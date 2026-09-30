@@ -1,13 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { countingDb, createTestDb, type TestDb } from "../test/helpers.js";
-import { waMessages } from "../db/schema.js";
-import { testMessagesContract, WHOLE_HISTORY } from "./messages-contract.js";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { DrizzleDb } from "../db/index.js";
+import { waChats, waContacts, waMessages } from "../db/schema.js";
+import {
+  testAccountMessagesContract,
+  testMessagesQueryContract,
+  WHOLE_HISTORY,
+} from "./messages-contract.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
-import type { MessageAccount, MessageConversation } from "./messages.js";
+import type { AccountMessages, MessageAccount } from "./messages.js";
 
 // `wa_messages` as a `Messages` store. What it must answer is the contract
-// suite's; what it must leave out is the mirror's own scoping — a group thread,
-// a reaction, another contact — which is what the cases below pin.
+// suites'; what the account reads must leave out is the mirror's own scoping —
+// a group thread, a reaction, another contact — which is what the cases below
+// pin.
 
 // One account, addressed both ways WhatsApp addresses a contact.
 const PHONE = "15550001@s.whatsapp.net";
@@ -19,8 +26,15 @@ const GROUP = "1200000@g.us";
 const account = { channel: "whatsapp", addresses: [PHONE, LID] };
 const accounts = [account];
 const silent = [{ channel: "whatsapp", addresses: ["15554444@s.whatsapp.net"] }];
-const groupChat: MessageConversation = { channel: "whatsapp", id: GROUP };
-const emptyChat: MessageConversation = { channel: "whatsapp", id: "1299999@g.us" };
+const groupChat = GROUP as ConversationId;
+const emptyChat = "1299999@g.us" as ConversationId;
+
+/** The store's per-account reads, which every whatsApp store answers. */
+function accountReads(db: DrizzleDb): AccountMessages {
+  const reads = whatsAppMessages(db).byAccount;
+  if (!reads) throw new Error("the WhatsApp mirror answers per-account reads");
+  return reads;
+}
 
 interface Seed {
   id: string;
@@ -85,7 +99,7 @@ describe("whatsAppMessages", () => {
   const refs = (entries: { ref: string }[]) => entries.map((entry) => entry.ref);
 
   it("merges both addresses of the account, newest first", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
     expect(refs(page)).toEqual([`${PHONE}:e`, `${PHONE}:c`, `${LID}:d`, `${PHONE}:a`]);
     expect(page[0]).toEqual({
@@ -94,17 +108,19 @@ describe("whatsAppMessages", () => {
       direction: "inbound",
       ref: `${PHONE}:e`,
       body: "latest",
+      sender: { id: PHONE, name: null },
+      conversation: { id: PHONE, name: null, kind: "dm" },
     });
   });
 
   it("leaves out reactions", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
     expect(refs(page)).not.toContain(`${PHONE}:r`);
   });
 
   it("leaves out group threads", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     const group: MessageAccount[] = [{ channel: "whatsapp", addresses: [GROUP] }];
     expect(await messages.latest(group)).toBeNull();
     expect(await messages.count(group)).toBe(0);
@@ -112,16 +128,16 @@ describe("whatsAppMessages", () => {
 
   // The chat is the conversation: a WhatsApp message hangs off it, and a group
   // chat is the one no account can name.
-  it("answers a group chat asked for as a conversation", async () => {
-    const messages = whatsAppMessages(testDb.db);
-    const page = await messages.readConversation({ conversation: groupChat, limit: WHOLE_HISTORY });
-    // Newest first, the tie at 700 settled by direction, and the group's own
-    // reaction left out the way every read leaves one out.
-    expect(refs(page)).toEqual([`${GROUP}:g4`, `${GROUP}:g3`, `${GROUP}:g2`, `${GROUP}:g`]);
+  it("queries a group chat, reactions and all", async () => {
+    const page = await whatsAppMessages(testDb.db).query({ conversationId: groupChat });
+    // Newest first, and the tie at 700 in the mirror's own order.
+    expect(page.map((entry) => entry.messageId)).toEqual(["gr", "g4", "g3", "g2", "g"]);
+    expect(page.find((entry) => entry.messageId === "gr")?.text).toBe("Reacted 👍");
+    expect(page.find((entry) => entry.messageId === "g2")?.direction).toBe("outbound");
   });
 
   it("answers a group chat's messages to no account read", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     const held = await messages.read({ accounts, limit: WHOLE_HISTORY });
     expect(refs(held).some((ref) => ref.startsWith(GROUP))).toBe(false);
     // Nor to a caller that hands the group's own JID over as an address.
@@ -131,29 +147,47 @@ describe("whatsAppMessages", () => {
     expect(await messages.latest(asAccount)).toBeNull();
   });
 
-  it("answers a direct chat asked for as a conversation", async () => {
-    const messages = whatsAppMessages(testDb.db);
-    // A direct chat is addressed by the contact, so its id is the address the
-    // account already reads under — one store asked a second way.
-    const page = await messages.readConversation({
-      conversation: { channel: "whatsapp", id: PHONE },
-      limit: WHOLE_HISTORY,
+  it("queries a direct chat by the contact's address", async () => {
+    const page = await whatsAppMessages(testDb.db).query({
+      conversationId: PHONE as ConversationId,
     });
-    expect(refs(page)).toEqual([`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`]);
+    expect(page.map((entry) => entry.messageId)).toEqual(["r", "e", "c", "a"]);
   });
 
-  it("holds nothing for a conversation on another channel", async () => {
-    const messages = whatsAppMessages(testDb.db);
-    expect(
-      await messages.readConversation({
-        conversation: { channel: "linkedin", id: GROUP },
-        limit: WHOLE_HISTORY,
-      }),
-    ).toEqual([]);
+  it("names the sender and the chat from the mirror's contacts", async () => {
+    const now = new Date();
+    testDb.db
+      .insert(waContacts)
+      .values({ jid: PHONE, name: "Ada", firstSyncedAt: now, updatedAt: now })
+      .run();
+    testDb.db.insert(waChats).values({ jid: GROUP, name: "Book club", updatedAt: now }).run();
+    const store = whatsAppMessages(testDb.db);
+
+    const [latest] = await store.query({ conversationId: PHONE as ConversationId, limit: 2 });
+    expect(latest).toMatchObject({
+      channel: "whatsapp",
+      direction: "inbound",
+      conversationId: PHONE,
+      senderId: PHONE,
+      thread: { kind: "dm", name: "Ada" },
+    });
+    const [answered] = await store
+      .query({
+        conversationId: PHONE as ConversationId,
+        since: new Date(300_000),
+      })
+      .then((page) => page.filter((entry) => entry.messageId === "c"));
+    expect(answered).toMatchObject({ direction: "outbound", senderDisplayName: "You" });
+    const [group] = await store.query({ conversationId: groupChat, limit: 1 });
+    expect(group?.thread).toEqual({ kind: "group", name: "Book club" });
+
+    const read = await accountReads(testDb.db).latest(accounts);
+    expect(read?.conversation).toEqual({ id: PHONE, name: "Ada", kind: "dm" });
+    expect(read?.sender).toEqual({ id: PHONE, name: "Ada" });
   });
 
   it("holds nothing for an account on another channel", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     // The same string, on a channel this store does not serve.
     const elsewhere: MessageAccount[] = [{ channel: "linkedin", addresses: [PHONE] }];
     expect(await messages.latest(elsewhere)).toBeNull();
@@ -162,7 +196,7 @@ describe("whatsAppMessages", () => {
   });
 
   it("holds nothing for an empty scope", async () => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     expect(await messages.latest([])).toBeNull();
     expect(await messages.count([])).toBe(0);
     expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
@@ -187,7 +221,7 @@ describe("whatsAppMessages", () => {
     },
     { scope: silent, of: "a contact the mirror holds nothing for", refs: [] },
   ])("answers read, count and latest over $of", async ({ scope, refs: expected }) => {
-    const messages = whatsAppMessages(testDb.db);
+    const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts: scope, limit: WHOLE_HISTORY });
 
     expect(refs(page)).toEqual(expected);
@@ -196,11 +230,11 @@ describe("whatsAppMessages", () => {
   });
 
   it("serves concurrent latest and read calls from one store pass", async () => {
-    const cursor = await whatsAppMessages(testDb.db).latest(accounts);
+    const cursor = await accountReads(testDb.db).latest(accounts);
     if (!cursor) throw new Error("the mirror answered nothing to resume from");
 
     const counted = countingDb(testDb.db);
-    const messages = whatsAppMessages(counted.db);
+    const messages = accountReads(counted.db);
     const before = counted.passes();
 
     // Every shape at once — two scopes, a first page, a page resuming from a
@@ -224,7 +258,7 @@ describe("whatsAppMessages", () => {
 
   it("costs one pass per round of calls, not one per account", async () => {
     const counted = countingDb(testDb.db);
-    const messages = whatsAppMessages(counted.db);
+    const messages = accountReads(counted.db);
     const directory = [PHONE, LID, OTHER, GROUP, "15554444@s.whatsapp.net"].map(
       (address): MessageAccount[] => [{ channel: "whatsapp", addresses: [address] }],
     );
@@ -235,13 +269,18 @@ describe("whatsAppMessages", () => {
   });
 });
 
-testMessagesContract("whatsAppMessages", () => {
+testAccountMessagesContract("whatsAppMessages", () => {
+  const testDb = createTestDb();
+  seedMirror(testDb);
+  return { messages: accountReads(testDb.db), accounts, silent };
+});
+
+testMessagesQueryContract("whatsAppMessages", () => {
   const testDb = createTestDb();
   seedMirror(testDb);
   return {
     messages: whatsAppMessages(testDb.db),
-    accounts,
-    silent,
+    channel: "whatsapp",
     conversation: groupChat,
     silentConversation: emptyChat,
   };

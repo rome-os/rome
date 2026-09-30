@@ -26,7 +26,6 @@ import { rm } from "node:fs/promises";
 import type {
   ConversationDescriptor,
   ConversationId,
-  InboundMessage,
   TalkDirectory,
   TalkFeatureMap,
   TalkFeatureName,
@@ -42,7 +41,10 @@ import {
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
-import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
+import {
+  toWechatUserChannelMessage,
+  WECHAT_USER_CHANNEL,
+} from "../../channels/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
@@ -390,28 +392,6 @@ function toConversationDescriptor(
   };
 }
 
-/**
- * Project a reader message onto Talk's provider-neutral shape. `senderId`
- * falls back to the conversation for an authorless system notice, because an
- * empty sender reads downstream as an unknown person rather than as the chat.
- */
-export function toWechatUserInboundMessage(message: WechatUserMessage): InboundMessage {
-  return {
-    messageId: message.id,
-    conversationId: message.conversationId as ConversationId,
-    senderId: message.senderId || message.conversationId,
-    ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
-    text: message.text,
-    attachments: [],
-    timestamp: new Date(message.timestamp * 1000),
-    thread: {
-      kind: message.isGroup ? "group" : "dm",
-      ...(message.conversationName ? { name: message.conversationName } : {}),
-    },
-    raw: message,
-  };
-}
-
 // ── descriptor ────────────────────────────────────────────────────────────
 
 export interface WechatUserDescriptorDeps {
@@ -498,7 +478,7 @@ export function createWechatUserDescriptor(
                 ...(input.since ? { since: input.since } : {}),
                 limit: historyQueryLimit(input.limit),
               });
-              return messages.map(toWechatUserInboundMessage);
+              return messages.map(toWechatUserChannelMessage);
             },
           };
 

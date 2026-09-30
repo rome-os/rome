@@ -14,8 +14,9 @@
  *
  * Deliberately generic: `source` names the producer, `ref` is that producer's
  * own id for the message, and `body` is the line to render. A Rome App that
- * starts contributing messages fills the same five fields instead of extending
- * this shape.
+ * starts contributing messages fills the same fields instead of extending this
+ * shape. The five that order and page it are required, and who said it, where
+ * and with what attached ride along wherever the producer recorded them.
  *
  * `ref` must be unique across everything one `source` can put on one timeline,
  * not merely within the conversation it came from. A person holds several
@@ -33,6 +34,36 @@ export interface Message {
   body: string | null;
   direction: "inbound" | "outbound";
   ref: string;
+  /** Who said it, where the store recorded them. Absent when it did not. */
+  sender?: MessageSender;
+  /** The conversation it was said in, where the store recorded it. */
+  conversation?: MessageConversationInfo;
+  /** What came attached, as pointers. Absent when nothing did or the store
+   *  kept no record of it. */
+  attachments?: MessageAttachment[];
+}
+
+/** The account that said a message. Either half may be unknown: some stores
+ *  keep a name without an id, and some an id without a name. */
+export interface MessageSender {
+  id: string | null;
+  name: string | null;
+}
+
+/** The conversation a message was said in, named by the platform's own id. */
+export interface MessageConversationInfo {
+  id: string;
+  name: string | null;
+  kind: "dm" | "group" | "topic" | null;
+}
+
+/** One attachment, described rather than carried: its bytes stay with the
+ *  platform or the channel that saved them. */
+export interface MessageAttachment {
+  type: "image" | "video" | "audio" | "document" | "sticker" | "location" | "contact";
+  mimeType?: string;
+  fileName?: string;
+  caption?: string;
 }
 
 /**

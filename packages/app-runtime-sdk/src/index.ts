@@ -1399,6 +1399,22 @@ export interface InboundMessage {
   raw?: unknown;
 }
 
+/**
+ * One message as a channel reads it back: an {@link InboundMessage} that also
+ * says which channel carried it and which way it went. A read answers what
+ * Rome said as well as what it was told, so the direction is part of the
+ * record rather than implied by the port it came through.
+ *
+ * `senderDisplayName`, `thread` and `attachments` carry what the source holds:
+ * a store that never recorded a sender's name or a file's type leaves them
+ * out rather than guessing.
+ */
+export interface ChannelMessage extends InboundMessage {
+  /** The channel's name, as every stored row and link spells it. */
+  channel: string;
+  direction: "inbound" | "outbound";
+}
+
 /** Exact provider-neutral chat command recognized before an agent turn. */
 export function isStopCommand(text: string): boolean {
   return text.trim().toLowerCase() === "/stop";

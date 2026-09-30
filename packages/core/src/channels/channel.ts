@@ -25,7 +25,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
-import type { Messages } from "./messages.js";
+import type { AccountMessages, Messages } from "./messages.js";
 
 // The port contracts, rules R1–R5 among them, are the apps SDK's: an app hears
 // a channel through the same `ChannelInbound` core does.
@@ -106,7 +106,8 @@ export interface Channel extends AppChannel {
    *
    * A channel that holds the conversation as the platform has it answers back
    * past the point Rome started watching. Whether it reads a table a sync fills
-   * or calls the platform is its own business, and no caller can tell.
+   * or calls the platform is its own business, and no caller of `query` can
+   * tell. Only a copy Rome keeps answers `byAccount`.
    *
    * Null means what was said there survives only in Rome's own transcript — a
    * store that belongs to no channel and answers for all of them. So not every
@@ -144,9 +145,12 @@ export function addressBooks(channels: Channels): AddressBooks {
   return books;
 }
 
-/** The channels' own message stores, in the channels' order. Rome's stores —
- *  the agent transcript, the sentinel log — are not here: they belong to no
- *  channel, and a read that wants them appends them behind these. */
-export function messageStores(channels: Channels): Messages[] {
-  return channels.flatMap((channel) => (channel.messages ? [channel.messages] : []));
+/** The channels' own stores that answer per-account reads, in the channels'
+ *  order. Rome's stores — the agent transcript, the sentinel log — are not
+ *  here: they belong to no channel, and a read that wants them appends them
+ *  behind these. */
+export function messageStores(channels: Channels): AccountMessages[] {
+  return channels.flatMap((channel) =>
+    channel.messages?.byAccount ? [channel.messages.byAccount] : [],
+  );
 }
