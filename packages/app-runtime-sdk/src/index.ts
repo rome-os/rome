@@ -521,7 +521,11 @@ export interface AgentAccounting {
   context?: AgentContextUsage;
   costUsd?: number;
   numTurns?: number;
-  /** Why the run ended. Read this instead of `stopReason`. */
+  /**
+   * How this provider model run ended, as the provider reported it. Read this
+   * instead of `stopReason`. For the outcome of the whole turn, read
+   * `AgentTurnOutput.stop`, which can differ (see there).
+   */
   stop?: AgentStop;
   /**
    * @deprecated Read `stop.reason`. This is the provider's own value
@@ -577,7 +581,15 @@ export interface AgentTurnOutput {
   structuredOutput?: unknown;
   state: "final" | "partial" | "none";
   terminalKind?: "result" | "error";
-  /** Why the turn's model run ended. Read this instead of `stopReason`. */
+  /**
+   * The turn's outcome, consistent with the turn's `status`: `interrupted`
+   * when the turn was interrupted, `error` when it ended with an error block,
+   * and never `error` when it ended with a result. It can therefore differ
+   * from `accounting.stop`, which reports how the provider's model run ended.
+   * For example, a run that completed but whose structured output Rome
+   * rejected has `accounting.stop.reason` `completed` and `stop.reason`
+   * `error`. Read this instead of `stopReason`.
+   */
   stop?: AgentStop;
   /** @deprecated Read `stop.reason`. Provider-specific; see `AgentAccounting.stopReason`. */
   stopReason?: string;

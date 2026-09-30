@@ -2955,6 +2955,37 @@ describe("AgentRunner", () => {
         },
       });
     });
+    it("keeps the turn stop consistent with a completed status when the run reported an error", async () => {
+      // Claude's `success` result flagged `is_error` still reaches Rome as a
+      // `result` terminal, so the turn completes; its stop must not say `error`.
+      const lifecycle = createLifecycleRecorder();
+      const provider = new MockModelProvider([
+        [
+          {
+            type: "result",
+            content: "API Error: overloaded",
+            accounting: {
+              provider: "mock",
+              model: "mock-large",
+              usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 1, outputTokens: 1 },
+              stop: { reason: "error", raw: "api_error" },
+            },
+          },
+        ],
+      ]);
+      const runner = createRunner(provider, lifecycle);
+
+      await collectMessages(runner.run({ agentName: "test-main", prompt: "Hi" }));
+
+      expect(lifecycle.finished[0]).toMatchObject({
+        status: "completed",
+        output: {
+          state: "final",
+          stop: { reason: "other", raw: "api_error" },
+          accounting: { stop: { reason: "error", raw: "api_error" } },
+        },
+      });
+    });
   });
 
   describe("shared context propagation", () => {

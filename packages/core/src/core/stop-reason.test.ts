@@ -156,6 +156,16 @@ describe("resolveTurnStop", () => {
     ).toEqual({ reason: "error" });
   });
 
+  it("never reports error for a turn that ended with a result", () => {
+    expect(
+      resolveTurnStop({
+        accounting: accounting({ stop: { reason: "error", raw: "api_error" } }),
+        terminalKind: "result",
+        interrupted: false,
+      }),
+    ).toEqual({ reason: "other", raw: "api_error" });
+  });
+
   it("passes through the provider's stop for a result", () => {
     expect(
       resolveTurnStop({
