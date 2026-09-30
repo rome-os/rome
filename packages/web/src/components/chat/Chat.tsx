@@ -1041,11 +1041,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // A disconnected reader may still own a live preview. Reloading now can
       // render its persisted copy beside that preview until recovery settles.
       if (shouldStop) {
-        return await loadMessages(sessionId, {
+        const loaded = await loadMessages(sessionId, {
           force: true,
           dropLocalOptimistic: true,
           bounded: true,
         });
+        if (loaded) pendingMessageReconciliationsRef.current.delete(sessionId);
+        return loaded;
       }
       return false;
     },
@@ -1175,11 +1177,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           noteRecoveryFailure();
           return;
         }
-        if (pendingMessageReconciliationsRef.current.has(reattachSessionId)) {
-          if (!(await reloadWhileObserving())) return;
-          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
-        }
         if (!turns.length) {
+          if (pendingMessageReconciliationsRef.current.has(reattachSessionId)) {
+            if (!(await reloadWhileObserving())) return;
+            pendingMessageReconciliationsRef.current.delete(reattachSessionId);
+          }
           const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
           if (suppressedTurnId) {
             if (!(await reloadWhileObserving())) return;
