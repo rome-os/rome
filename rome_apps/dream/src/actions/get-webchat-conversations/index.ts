@@ -116,10 +116,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM webchat_messages wm
-              JOIN webchat_sessions ws ON ws.id = wm.session_id
+              FROM rome_agent_messages wm
+              JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
+                AND ws.type IN ('webchat', 'channel')
+                AND wm.role IN ('user', 'assistant')
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -127,9 +129,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           rows = appContext.db.connection.all(
             sql`
               SELECT wm.session_id, ws.name AS session_name, wm.role, wm.content, wm.created_at
-              FROM webchat_messages wm
-              JOIN webchat_sessions ws ON ws.id = wm.session_id
+              FROM rome_agent_messages wm
+              JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
+                AND ws.type IN ('webchat', 'channel')
+                AND wm.role IN ('user', 'assistant')
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

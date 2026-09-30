@@ -32,8 +32,16 @@ export function createAction(
       let sessionId = args.sessionId as string | undefined;
 
       if (!sessionId) {
+        // The turn that triggered this review just finished, so take the most
+        // recently active guardian conversation. rome_sessions also holds
+        // background runs, including this review's own agent session.
         const row = appContext.db.connection.get(
-          sql`SELECT id FROM webchat_sessions ORDER BY created_at DESC LIMIT 1`,
+          sql`
+            SELECT id FROM rome_sessions
+            WHERE type IN ('webchat', 'channel')
+            ORDER BY activity_at DESC
+            LIMIT 1
+          `,
         ) as { id: string } | undefined;
         if (!row) {
           return { status: "ok", data: { result: "No webchat sessions found." } };
