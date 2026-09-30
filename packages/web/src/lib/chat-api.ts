@@ -373,8 +373,14 @@ export interface PostSessionTurnOptions {
   signal?: AbortSignal;
 }
 
-export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | null> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, { credentials: "include" });
+export async function listSessionTurns(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<TurnInfo[] | null> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
+    credentials: "include",
+    signal,
+  });
   if (!res.ok) return null;
   return (await res.json()) as TurnInfo[];
 }

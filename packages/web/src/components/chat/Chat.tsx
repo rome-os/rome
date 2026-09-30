@@ -129,6 +129,24 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 // (and the Stop button's turnId) stuck on a stale turn. Three missed
 // keepalives + margin.
 const STREAM_STALL_TIMEOUT_MS = 50_000;
+const RECONNECT_REQUEST_TIMEOUT_MS = 10_000;
+
+async function withRequestTimeout<T>(request: Promise<T>, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          onTimeout();
+          reject(new Error("reconnect request timed out"));
+        }, RECONNECT_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -1015,6 +1033,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let lookupController: AbortController | null = null;
     let streamController: AbortController | null = null;
     let retryDelayMs = 2000;
     let failedChecks = 0;
@@ -1081,7 +1100,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // one (or the first queued one) — its events stream is keyed by
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
-        const turns = await listSessionTurns(reattachSessionId);
+        lookupController = new AbortController();
+        const turns = await withRequestTimeout(
+          listSessionTurns(reattachSessionId, lookupController.signal),
+          () => lookupController?.abort(),
+        );
+        lookupController = null;
         if (cancelled) return;
         if (!turns) {
           noteRecoveryFailure();
@@ -1144,7 +1168,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         startSessionStream(reattachSessionId, attachedTurnId);
 
         streamController = createTurnStreamController(attachedTurnId);
-        const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
+        const streamRes = await withRequestTimeout(
+          openTurnStream(attachedTurnId, streamController.signal),
+          () => streamController?.abort(),
+        );
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
             if (streamRes.status === 404) {
@@ -1219,6 +1246,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     return () => {
       cancelled = true;
+      lookupController?.abort();
       streamController?.abort();
       if (pollTimer) clearTimeout(pollTimer);
     };

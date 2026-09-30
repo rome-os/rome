@@ -1025,6 +1025,62 @@ describe("Chat turn stream lifecycle", () => {
     expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
   });
 
+  it("times out a stalled recovery lookup and keeps retry available", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockImplementation(() => new Promise(() => {}));
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(45_000);
+    });
+    expect(listSessionTurns).toHaveBeenCalledTimes(4);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
+  it("times out a stalled stream open without settling the live view", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockImplementation(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(16_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
   it("retries recovery immediately when connectivity returns", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
