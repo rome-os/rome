@@ -116,6 +116,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
+  transport?: ConstructorParameters<typeof DiscordAdapter>[1];
   conversationSettings: ConversationSettingsService;
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
@@ -256,24 +257,27 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           const token = creds.bot.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
 
-          const adapter = new DiscordAdapter({
-            botToken: token.token,
-            connectionId: kit.connectionId,
-            conversationSettings: deps.conversationSettings,
-            chatStop: deps.chatStop,
-            listAgents: deps.listAgents,
-            resolveDiscordPerson: (channelUserId) =>
-              deps.personMappingRepo.findByChannelUser("discord", channelUserId),
-            // Live gateway faults (post-login) route through here; the descriptor
-            // maps the adapter's kind onto grant state vs. transport.
-            onGatewayFault: ({ kind, cause }) => {
-              faultSink?.(
-                kind === "credential"
-                  ? new CredentialRejected({ grant: "bot", cause })
-                  : new Disconnected(cause),
-              );
+          const adapter = new DiscordAdapter(
+            {
+              botToken: token.token,
+              connectionId: kit.connectionId,
+              conversationSettings: deps.conversationSettings,
+              chatStop: deps.chatStop,
+              listAgents: deps.listAgents,
+              resolveDiscordPerson: (channelUserId) =>
+                deps.personMappingRepo.findByChannelUser("discord", channelUserId),
+              // Live gateway faults (post-login) route through here; the descriptor
+              // maps the adapter's kind onto grant state vs. transport.
+              onGatewayFault: ({ kind, cause }) => {
+                faultSink?.(
+                  kind === "credential"
+                    ? new CredentialRejected({ grant: "bot", cause })
+                    : new Disconnected(cause),
+                );
+              },
             },
-          });
+            deps.transport,
+          );
 
           const routeStartFault = (err: unknown): void => {
             faultSink?.(
@@ -393,7 +397,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
         needs: ["bot"] as const,
         build(creds) {
           const token = creds.bot.material as { token: string };
-          const adapter = new DiscordAdapter({ botToken: token.token });
+          const adapter = new DiscordAdapter({ botToken: token.token }, deps.transport);
           return {
             operations: () => [
               {

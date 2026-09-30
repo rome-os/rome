@@ -1,3 +1,4 @@
+import { traceImApi } from "./diagnostics/api-trace.js";
 import { Bot, type Context, InputFile } from "grammy";
 import { Marked, Renderer, type Token } from "marked";
 import type { ProviderAdapter } from "./adapter.js";
@@ -100,6 +101,19 @@ function markdownToTelegramHtml(md: string): string {
  */
 export type CreateTelegramBot = (botToken: string) => Bot;
 
+export function createTracedTelegramBot(
+  token: string,
+  createBot: CreateTelegramBot = (value) => new Bot(value),
+): Bot {
+  const bot = createBot(token);
+  bot.api.config.use((previous, method, payload, signal) =>
+    traceImApi("telegram", "sdk", { method, body: payload }, () =>
+      previous(method, payload, signal),
+    ),
+  );
+  return bot;
+}
+
 export class TelegramAdapter implements ProviderAdapter {
   readonly channelName = "telegram";
   private bot: Bot;
@@ -108,7 +122,7 @@ export class TelegramAdapter implements ProviderAdapter {
 
   constructor(
     private config: { botToken: string; onPollingError?: (err: unknown) => void },
-    createBot: CreateTelegramBot = (botToken) => new Bot(botToken),
+    createBot: CreateTelegramBot = createTracedTelegramBot,
   ) {
     this.bot = createBot(config.botToken);
     this.onPollingError = config.onPollingError;

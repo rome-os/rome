@@ -1,3 +1,4 @@
+import { traceLarkHttp } from "./diagnostics/lark-trace.js";
 import {
   createLarkChannel,
   type CardActionEvent,
@@ -88,6 +89,19 @@ interface FeishuChannelConfig {
  */
 export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
 
+export function defaultCreateChannel(config: FeishuConfig): LarkChannel {
+  return createLarkChannel({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    domain: config.domain === "lark" ? Domain.Lark : Domain.Feishu,
+    httpInstance: traceLarkHttp(config.domain === "lark" ? "lark" : "feishu"),
+    transport: "websocket",
+    outbound: { markdownConverter: "builtin" },
+    includeRawEvent: true,
+    loggerLevel: LoggerLevel.warn,
+  });
+}
+
 /**
  * Feishu / Lark channel adapter.
  *
@@ -124,21 +138,7 @@ export class FeishuAdapter implements ProviderAdapter {
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
 
-  constructor(
-    config: FeishuConfig,
-    createChannel: CreateLarkChannel = (c) =>
-      createLarkChannel({
-        appId: c.appId,
-        appSecret: c.appSecret,
-        domain: c.domain === "lark" ? Domain.Lark : Domain.Feishu,
-        transport: "websocket",
-        outbound: { markdownConverter: "builtin" },
-        // Populate `raw` on normalized events so rawEvent carries the real
-        // wire-level payload (e.g. for media not surfaced in the normal shape).
-        includeRawEvent: true,
-        loggerLevel: LoggerLevel.warn,
-      }),
-  ) {
+  constructor(config: FeishuConfig, createChannel: CreateLarkChannel = defaultCreateChannel) {
     this.channel = createChannel(config);
     this.connectionId = config.connectionId;
     this.conversationSettings = config.conversationSettings;

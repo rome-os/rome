@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
     # `edited` is not a default pull_request type, but the lint job validates the
     # PR title, and a title is fixed by editing it rather than by pushing. Without
     # it a corrected title would leave the failed run standing with no way to

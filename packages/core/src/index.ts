@@ -1,3 +1,4 @@
+import { configureImApiTrace } from "./channels/diagnostics/api-trace.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission } from "./channels/pairing.js";
 import { dirname, join } from "node:path";
@@ -207,6 +208,7 @@ import {
 
 async function main() {
   const config = loadConfig();
+  configureImApiTrace(config.imApiTrace);
 
   if (config.database.type === "sqlite") {
     const dbPath = config.database.sqlitePath;
