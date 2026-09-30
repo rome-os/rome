@@ -514,6 +514,10 @@ describe("the WeChat personal Talker", () => {
   it("leaves history to the channel", async () => {
     const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
     expect(talker.feature("history")).toBeNull();
+    expect(
+      createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
+        .talker?.history,
+    ).toBeUndefined();
     await talker.stop();
   });
 });

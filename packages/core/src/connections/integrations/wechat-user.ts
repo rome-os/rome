@@ -29,7 +29,6 @@ import type {
   TalkDirectory,
   TalkFeatureMap,
   TalkFeatureName,
-  TalkHistory,
 } from "@rome-os/app-runtime";
 import {
   isWechatUserSessionRejected,
@@ -37,14 +36,10 @@ import {
   WechatUserRuntime,
   WechatUserStorePending,
   type WechatUserConversation,
-  type WechatUserMessage,
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
 import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
-import {
-  toWechatUserChannelMessage,
-  WECHAT_USER_CHANNEL,
-} from "../../channels/wechat-user-messages.js";
+import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import { abortableDelay, SetupAbortError } from "../setup/session.js";
@@ -58,7 +53,7 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { directoryPage, historyQueryLimit } from "./talk-features.js";
+import { directoryPage } from "./talk-features.js";
 
 const log = createLogger("wechat-user");
 

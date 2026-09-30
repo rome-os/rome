@@ -405,7 +405,11 @@ export class WorkerRpcServer {
       .all()
       .find((connection) => connection.id === connectionId)?.service;
     const channel = this.services.channels.find((candidate) => candidate.name === service);
-    return readTalkHistory(channel, connectionId, {
+    const source = {
+      channel,
+      connectionHistory: this.services.talkRouter.feature(connectionId, "history"),
+    };
+    return readTalkHistory(source, connectionId, {
       ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),

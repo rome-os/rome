@@ -11,7 +11,6 @@ import { readFileSync } from "node:fs";
 import { createTestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { readTalkHistory } from "../../../../../packages/core/src/actions/talk-history.js";
 import type { Channel } from "../../../../../packages/core/src/channels/channel.js";
-import { connectionPorts } from "../../../../../packages/core/src/channels/connection-ports.js";
 import { linkedInMessages } from "../../../../../packages/core/src/channels/linkedin-messages.js";
 import { whatsAppMessages } from "../../../../../packages/core/src/channels/whatsapp-messages.js";
 import { wechatUserMessages } from "../../../../../packages/core/src/channels/wechat-user-messages.js";
@@ -334,26 +333,6 @@ it("reads every channel's history exactly as main did", async () => {
     const { db } = createTestDb();
     seedMirrors(db);
     const telegram = fakeTelegramAdapter();
-    const live = connectionPorts(
-      {
-        registry: {
-          getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-          find: () => [{ id: "c-tg" }],
-          onUnlocked: () => {},
-          registeredServices: () => ["telegram_user"],
-        } as never,
-        router: {
-          feature: (_id: string, name: string) =>
-            name === "history"
-              ? historyFeature(telegram, {
-                  channel: "telegram_user",
-                  isOwn: (message) => message.channelUserId === telegram.selfId,
-                })
-              : null,
-        } as never,
-      },
-      "telegram_user",
-    );
     const channels: Channel[] = [
       {
         name: "whatsapp",
@@ -381,14 +360,21 @@ it("reads every channel's history exactly as main did", async () => {
         send: null,
         inbound: null,
         accounts: null,
-        messages: live?.messages ?? null,
+        messages: null,
       },
     ];
+    const telegramHistory = historyFeature(telegram, {
+      channel: "telegram_user",
+      isOwn: (message) => message.channelUserId === telegram.selfId,
+    });
     const serviceOf = new Map(CONNECTIONS.map((c) => [c.connectionId, c.service]));
     const out = await runScenarios((connectionId) => ({
       query: (input) =>
         readTalkHistory(
-          channels.find((channel) => channel.name === serviceOf.get(connectionId)),
+          {
+            channel: channels.find((channel) => channel.name === serviceOf.get(connectionId)),
+            connectionHistory: connectionId === "c-tg" ? telegramHistory : null,
+          },
           connectionId,
           input,
         ),

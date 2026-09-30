@@ -231,6 +231,13 @@ export class EmailAdapter implements ProviderAdapter {
     return this.address;
   }
 
+  /** Whether a history line is one this inbox sent. The history read names
+   *  every line it counts as sent by this inbox's normalized address. */
+  sentByThisInbox(message: NormalizedMessage): boolean {
+    const selfAddress = normalizeAddress(this.address);
+    return selfAddress !== "" && message.channelUserId === selfAddress;
+  }
+
   async start(): Promise<void> {
     // Provisioning is route-driven: the connect ceremony calls
     // MailProvider.provision() and confers the `inbox` grant directly, so the

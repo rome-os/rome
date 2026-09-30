@@ -55,8 +55,11 @@ export function connectionPorts(
  * no `byAccount`: a People timeline reads these channels from Rome's own
  * transcript instead.
  *
- * The history answers oldest first, within the Connection's own window and
- * caps; this port answers newest first, as every `query` does.
+ * The history answers oldest first, within the Connection's own caps, and
+ * reads a window rounded out to whole hours; this port keeps what falls at or
+ * after `since` and answers newest first, as every `query` does. The history
+ * keeps the oldest thousand lines of a window that holds more, so such a
+ * window answers the newest of those.
  */
 function connectionMessages(deps: ConnectionPortsDeps, service: string): Messages {
   return {
@@ -70,7 +73,11 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
         ...(since ? { since } : {}),
         limit: MAX_QUERY_LIMIT,
       });
-      return [...read].reverse().slice(0, queryLimit(limit));
+      const from = since?.getTime();
+      return read
+        .filter((message) => from === undefined || message.timestamp.getTime() >= from)
+        .reverse()
+        .slice(0, queryLimit(limit));
     },
     byAccount: null,
   };

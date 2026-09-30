@@ -561,6 +561,27 @@ describe("EmailAdapter.fetchHistory", () => {
     expect(provider.getMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("recognises its own sends however the inbox address is written", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [
+          listItem({ providerMessageId: "mine", labels: ["sent"], from: "slug@mail.romeos.cc" }),
+          listItem({ providerMessageId: "theirs", receivedAt: new Date(2000).toISOString() }),
+        ],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    // The configured address in display-name form, with capitals.
+    const adapter = makeAdapter(provider, { address: "Rome <Slug@Mail.RomeOS.cc>" });
+
+    const messages = await adapter.fetchHistory(null, 24);
+
+    expect(messages.map((m) => [m.id, adapter.sentByThisInbox(m)])).toEqual([
+      ["mine", true],
+      ["theirs", false],
+    ]);
+  });
+
   it("filters to a single thread when threadId is given", async () => {
     const provider = makeProvider({
       listMessages: rs.fn(async () => ({

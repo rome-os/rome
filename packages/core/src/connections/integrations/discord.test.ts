@@ -241,6 +241,12 @@ describe("discord descriptor shape", () => {
     ]);
   });
 
+  // The flag is what gives the channel a \`messages\` port; the feature is what
+  // answers it. A Talk offering one without the other is unreachable or broken.
+  it("declares the history its Talk offers", () => {
+    expect(makeDiscordDescriptor(deps).capabilities.talker?.history).toBe(true);
+  });
+
   it("exposes provider-neutral history", async () => {
     fakeState.historyMessages = [
       {

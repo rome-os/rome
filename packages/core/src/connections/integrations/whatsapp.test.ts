@@ -170,6 +170,7 @@ describe("whatsapp descriptor shape", () => {
       runtimeKit(),
     );
     expect(talker.feature("history")).toBeNull();
+    expect(createWhatsAppDescriptor(deps).capabilities.talker?.history).toBeUndefined();
   });
 });
 

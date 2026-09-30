@@ -54,7 +54,10 @@ function senderLabel(channel: string, m: ChannelMessage): string {
   return m.senderDisplayName ?? m.senderId;
 }
 
-/** The sender id a WhatsApp group line carries when no sender was recorded. */
+/** The sender id a WhatsApp group line carries when no sender was recorded.
+ *  The same string as core's `WHATSAPP_UNKNOWN_SENDER`
+ *  (packages/core/src/channels/whatsapp-history.ts): an app reads the record,
+ *  not core, and the parity test's unnamed group line fails if they drift. */
 const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
 
 function toStructuredMessages(channel: string, messages: ChannelMessage[]): StructuredMessage[] {

@@ -217,6 +217,12 @@ describe("telegram_user descriptor shape", () => {
     expect(fakeState.stopped).toBe(true);
   });
 
+  // The flag is what gives the channel a \`messages\` port; the feature is what
+  // answers it. A Talk offering one without the other is unreachable or broken.
+  it("declares the history its Talk offers", () => {
+    expect(makeTelegramUserDescriptor().capabilities.talker?.history).toBe(true);
+  });
+
   it("exposes provider-neutral history", async () => {
     const h = buildTalker();
     h.start();

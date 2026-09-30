@@ -302,7 +302,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
                 inboundMedia: inboundMediaFeature(adapter),
                 history: historyFeature(adapter, {
                   channel: "email",
-                  isOwn: (message) => message.channelUserId === adapter.getAddress(),
+                  isOwn: (message) => adapter.sentByThisInbox(message),
                 }),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;

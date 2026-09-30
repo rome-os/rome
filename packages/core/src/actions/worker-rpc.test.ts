@@ -74,7 +74,9 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
-    talkRouter?: { list: ReturnType<typeof rs.fn> };
+    talkRouter?: { list?: ReturnType<typeof rs.fn>; feature?: ReturnType<typeof rs.fn> };
+    channels?: unknown[];
+    connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -106,6 +108,8 @@ function makeServer(
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
     talkRouter: overrides.talkRouter,
+    channels: overrides.channels ?? [],
+    connectionRegistry: overrides.connectionRegistry,
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -230,6 +234,87 @@ describe("WorkerRpcServer param validation", () => {
     expect(first.result).toEqual([{ connectionId: "discord-1", service: "discord" }]);
     expect(second.result).toEqual([{ connectionId: "wechat-1", service: "wechat" }]);
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  describe("talk.history.query", () => {
+    const line = (messageId: string, at: number) => ({
+      messageId,
+      conversationId: "c1",
+      senderId: "s1",
+      text: messageId,
+      attachments: [],
+      timestamp: new Date(at),
+      channel: "email",
+      direction: "inbound",
+    });
+    const connectionRegistry = {
+      all: () => [
+        { id: "email-a", service: "email" },
+        { id: "email-b", service: "email" },
+        { id: "wa-1", service: "whatsapp" },
+      ],
+    };
+
+    it("reads a channel with no store from the connection it names", async () => {
+      const feature = rs.fn((connectionId: string) => ({
+        query: async () => [line(`from-${connectionId}`, 1_000)],
+      }));
+      const { server } = makeServer({
+        talkRouter: { feature },
+        connectionRegistry,
+        channels: [{ name: "email", send: null, inbound: null, accounts: null, messages: null }],
+      });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "talk.history.query", { connectionId: "email-b" });
+
+      expect(response.error).toBeUndefined();
+      expect((response.result as Array<{ messageId: string }>).map((m) => m.messageId)).toEqual([
+        "from-email-b",
+      ]);
+      expect(feature).toHaveBeenCalledWith("email-b", "history");
+    });
+
+    it("reads a store's channel through its query, oldest first", async () => {
+      const query = rs.fn(async () => [line("newer", 2_000), line("older", 1_000)]);
+      const { server } = makeServer({
+        talkRouter: { feature: rs.fn(() => null) },
+        connectionRegistry,
+        channels: [
+          {
+            name: "whatsapp",
+            send: null,
+            inbound: null,
+            accounts: null,
+            messages: { query, byAccount: null },
+          },
+        ],
+      });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "talk.history.query", { connectionId: "wa-1" });
+
+      expect((response.result as Array<{ messageId: string }>).map((m) => m.messageId)).toEqual([
+        "older",
+        "newer",
+      ]);
+      expect(query).toHaveBeenCalledTimes(1);
+    });
+
+    it("says an unknown connection has no history", async () => {
+      const { server } = makeServer({
+        talkRouter: { feature: rs.fn(() => null) },
+        connectionRegistry,
+      });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "talk.history.query", { connectionId: "nope" });
+
+      expect(response.error).toMatch(/Talk history is unavailable for connection "nope"/);
+    });
   });
 
   it("enables an app and echoes the result when params are valid", async () => {

@@ -328,6 +328,37 @@ describe("email Talker fault mapping", () => {
     expect(provider.sent).toHaveLength(1);
   });
 
+  it("marks the lines this inbox sent as outbound, however its address is written", async () => {
+    const provider = makeProvider({
+      listMessages: async () => ({
+        messages: [
+          {
+            providerMessageId: "mine",
+            threadId: "t1",
+            from: ADDRESS,
+            subject: "",
+            preview: "",
+            receivedAt: new Date().toISOString(),
+            labels: ["sent"],
+          },
+        ],
+      }),
+    });
+    const h = buildTalker(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
+    h.start();
+
+    const history = await h.talker.feature("history")?.query({});
+    expect(history?.map((line) => [line.messageId, line.direction])).toEqual([
+      ["mine", "outbound"],
+    ]);
+  });
+
+  // The flag is what gives the channel a \`messages\` port; the feature is what
+  // answers it. A Talk offering one without the other is unreachable or broken.
+  it("declares the history its Talk offers", () => {
+    expect(makeEmailDescriptor(makeDeps(makeProvider())).capabilities.talker?.history).toBe(true);
+  });
+
   it("forwards fetchHistory and saveIncomingAttachments", async () => {
     const provider = makeProvider();
     const h = buildTalker(provider);
