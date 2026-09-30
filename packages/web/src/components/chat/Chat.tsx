@@ -521,6 +521,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     floorSessionIdRef.current = floorSessionId;
   }, [floorSessionId]);
+  useEffect(() => {
+    const retryRecoveringFloor = () => {
+      const sid = floorSessionIdRef.current;
+      if (sid && recoveringSessionIdsRef.current.has(sid)) {
+        setStreamReconnectRevision((revision) => revision + 1);
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") retryRecoveringFloor();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", retryRecoveringFloor);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", retryRecoveringFloor);
+    };
+  }, []);
   const isReadVisibleSession = useCallback(
     (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
     [],
