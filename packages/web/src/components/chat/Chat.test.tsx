@@ -6,12 +6,14 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
+import type { ChatComposerProps } from "./ChatComposer";
 import {
   deleteSession,
   interruptTurn,
   listSessionMessages,
   listSessionTurns,
   openTurnStream,
+  postSessionTurn,
 } from "@/lib/chat-api";
 
 const t = (key: string) => key;
@@ -83,8 +85,10 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { identity: { name: string } } }) => (
-    <div data-testid="message-list">{live.identity.name}</div>
+  MessageList: ({ live }: { live: { identity: { name: string }; isStreaming: boolean } }) => (
+    <div data-testid="message-list" data-streaming={String(live.isStreaming)}>
+      {live.identity.name}
+    </div>
   ),
   findActiveSubmission: () => null,
   findLastSubmission: () => null,
@@ -94,8 +98,18 @@ rs.mock("@/components/chat/MessageList", () => ({
 rs.mock("@/components/chat/ChatComposer", () => ({
   // Expose the streaming state + Stop wiring so tests can drive stopMessage
   // the way the real composer's Stop button does.
-  ChatComposer: (props: { isStreaming?: boolean; onStop?: () => void }) => (
+  ChatComposer: (props: ChatComposerProps) => (
     <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      <button
+        type="button"
+        data-testid="send-button"
+        onClick={() =>
+          void props.onSend(
+            { text: "Hello", uploads: [], reasoningEffort: "medium", projectPath: "" },
+            { onUploadProgress: () => {}, signal: new AbortController().signal },
+          )
+        }
+      />
       {props.isStreaming && props.onStop ? (
         <button type="button" data-testid="stop-button" onClick={props.onStop} />
       ) : null}
@@ -120,18 +134,7 @@ rs.mock("@/lib/chat-api", () => {
       lastSeenActivityAt: null,
       unread: false,
     }),
-    openTurnStream: rs.fn((_turnId: string, signal?: AbortSignal) => {
-      const body = new ReadableStream({
-        start(controller) {
-          signal?.addEventListener(
-            "abort",
-            () => controller.error(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        },
-      });
-      return Promise.resolve(new Response(body));
-    }),
+    openTurnStream: rs.fn(),
     postSessionTurn: rs.fn(),
     postSessionTurnJson: rs.fn(),
   };
@@ -182,6 +185,19 @@ class MockEventSource {
 beforeEach(() => {
   appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
+  rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  rs.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
+    const body = new ReadableStream({
+      start(controller) {
+        signal?.addEventListener(
+          "abort",
+          () => controller.error(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      },
+    });
+    return Promise.resolve(new Response(body));
+  });
   mockUseSessionIdentity.mockReturnValue({
     sessionName: null,
     pinnedAgentMention: null,
@@ -344,6 +360,113 @@ describe("Chat session events", () => {
 });
 
 describe("Chat turn stream lifecycle", () => {
+  it("keeps a foreground send live when its stream drops", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-local" } });
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-local", expect.any(Object)));
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-local", status: "running" }]);
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("mobile connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
+    expect(screen.getByTestId("message-list").dataset.streaming).toBe("true");
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the live turn and Stop visible while reconnecting after a mobile stream drop", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("mobile connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
+    expect(screen.getByTestId("message-list").dataset.streaming).toBe("true");
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
+  });
+
+  it("settles a dropped stream only after the server confirms the turn ended", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("mobile connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
+
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+    expect(screen.getByTestId("message-list").dataset.streaming).toBe("false");
+    expect(screen.queryByTestId("stop-button")).toBeNull();
+  });
+
   it("deletes a chat only after the app confirmation dialog is confirmed", async () => {
     const user = userEvent.setup();
     renderChat(<Chat sessionId="session-1" />);

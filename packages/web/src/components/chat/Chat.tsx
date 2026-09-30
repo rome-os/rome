@@ -342,6 +342,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
+  // A lost SSE connection is not proof that its server turn ended. Keep its
+  // live UI while the reattach poll checks server truth and opens a new stream.
+  const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
@@ -745,10 +748,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string) => {
+    async (res: Response, sessionId: string, turnId: string): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
-        return;
+        return false;
       }
 
       const reader = res.body.getReader();
@@ -942,6 +945,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
       // After stream ends, reload messages from DB (gets both trace + assistant)
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      return shouldStop;
     },
     [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
   );
@@ -973,19 +977,29 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // entry exists) or a prior reattach hasn't drained yet.
       if (
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
-        streamingSessionsRef.current.has(reattachSessionId)
+        (streamingSessionsRef.current.has(reattachSessionId) &&
+          !recoveringSessionIdsRef.current.has(reattachSessionId))
       ) {
         schedule(2000);
         return;
       }
       let attachedTurnId: string | null = null;
+      let finished = false;
       try {
         // List in-flight turns by turnId. Reattach to the running
         // one (or the first queued one) — its events stream is keyed by
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
         const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
+        if (cancelled) return;
+        if (!turns?.length) {
+          if (turns && recoveringSessionIdsRef.current.delete(reattachSessionId)) {
+            const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+            if (currentTurnId) endSessionStream(reattachSessionId, currentTurnId);
+            void loadMessages(reattachSessionId, { force: true, dropLocalOptimistic: true });
+          }
+          return;
+        }
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
         attachedTurnId = target.turnId;
@@ -1001,7 +1015,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
 
-        await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId);
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
@@ -1011,10 +1025,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             releaseTurnStreamController(attachedTurnId, streamController);
             streamController = null;
           }
-          // Turn-guarded: this reattach finalizer must only clear the entry
-          // it installed. If a newer turn (foreground send or fresh reattach)
-          // has replaced it in the meantime, endSessionStream is a no-op.
-          endSessionStream(reattachSessionId, attachedTurnId);
+          if (finished) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+            // A newer turn may have replaced this one while it drained.
+            endSessionStream(reattachSessionId, attachedTurnId);
+          } else if (!cancelled) {
+            recoveringSessionIdsRef.current.add(reattachSessionId);
+          }
         }
         if (!cancelled) {
           schedule(2000);
@@ -1143,6 +1160,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // turn keeps running server-side.
       void (async () => {
         const streamController = createTurnStreamController(pendingTurnId);
+        let finished = false;
         try {
           const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
           if (!streamRes.ok || !streamRes.body) {
@@ -1154,7 +1172,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             );
             return;
           }
-          await consumeStream(streamRes, sendingSessionId, pendingTurnId);
+          finished = await consumeStream(streamRes, sendingSessionId, pendingTurnId);
         } catch {
           // Mid-stream drop (reader rejected, network blip). Silent like the
           // reattach poll: bumping the reconnect revision below re-triggers it.
@@ -1174,8 +1192,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (!turns || turns.size === 0) {
             inflightTurnsRef.current.delete(sendingSessionId);
             locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+            if (finished) recoveringSessionIdsRef.current.delete(sendingSessionId);
+            else recoveringSessionIdsRef.current.add(sendingSessionId);
             setStreamReconnectRevision((revision) => revision + 1);
-            endSessionStream(sendingSessionId, pendingTurnId);
+            if (finished) endSessionStream(sendingSessionId, pendingTurnId);
           }
           releaseTurnStreamController(pendingTurnId, streamController);
         }
