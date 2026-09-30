@@ -582,6 +582,20 @@ describe("EmailAdapter.fetchHistory", () => {
     ]);
   });
 
+  it("counts a line labelled sent as its own even with no address to match", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [listItem({ providerMessageId: "sent", labels: ["sent"], from: "" })],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    const adapter = makeAdapter(provider, { address: "" });
+
+    const [line] = await adapter.fetchHistory(null, 24);
+
+    expect(line && adapter.sentByThisInbox(line)).toBe(true);
+  });
+
   it("filters to a single thread when threadId is given", async () => {
     const provider = makeProvider({
       listMessages: rs.fn(async () => ({

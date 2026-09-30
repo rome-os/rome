@@ -45,7 +45,9 @@ export interface MessageRead {
 
 /**
  * What `query` asks for. Every field narrows it, and none is required: a query
- * naming nothing asks for the channel's newest messages.
+ * naming nothing asks for the channel's newest messages. A channel read live
+ * through its Connection reaches back a bounded default when no `since` is
+ * named (connection-ports.ts), and a caller wanting more names one.
  */
 export interface MessageQuery {
   /** One conversation, by the platform's own id for it. Absent for every

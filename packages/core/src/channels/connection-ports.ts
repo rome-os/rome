@@ -60,7 +60,14 @@ export function connectionPorts(
  * after `since` and answers newest first, as every `query` does. The history
  * keeps the oldest thousand lines of a window that holds more, so such a
  * window answers the newest of those.
+ *
+ * A query naming no `since` reads the last {@link LIVE_DEFAULT_WINDOW_MS}. A
+ * wider default would not answer newer lines: some platforms' reads (Discord's)
+ * keep the oldest lines after their cutoff, so reaching further back trades
+ * the newest lines for older ones. A caller wanting more names a `since`.
  */
+export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
+
 function connectionMessages(deps: ConnectionPortsDeps, service: string): Messages {
   return {
     async query({ conversationId, since, limit }) {
@@ -68,14 +75,14 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       if (!connectionId) throw new ChannelNotConnected(service);
       const history = deps.router.feature(connectionId, "history");
       if (!history) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
+      const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
       const read = await history.query({
         ...(conversationId ? { conversationId } : {}),
-        ...(since ? { since } : {}),
+        since: from,
         limit: MAX_QUERY_LIMIT,
       });
-      const from = since?.getTime();
       return read
-        .filter((message) => from === undefined || message.timestamp.getTime() >= from)
+        .filter((message) => message.timestamp.getTime() >= from.getTime())
         .reverse()
         .slice(0, queryLimit(limit));
     },

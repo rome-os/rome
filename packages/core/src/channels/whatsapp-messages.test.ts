@@ -8,7 +8,8 @@ import {
   testMessagesQueryContract,
   WHOLE_HISTORY,
 } from "./messages-contract.js";
-import { WHATSAPP_SELF_SENDER, WHATSAPP_UNKNOWN_SENDER } from "./whatsapp-history.js";
+import { WHATSAPP_UNKNOWN_SENDER } from "@rome-os/app-runtime";
+import { WHATSAPP_SELF_SENDER } from "./whatsapp-history.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 import { channelMessageDetail, type AccountMessages, type MessageAccount } from "./messages.js";
 

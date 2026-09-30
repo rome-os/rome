@@ -1,7 +1,11 @@
 // A row of the WhatsApp mirror as the message it records, for the channel's
 // `query` and its account reads (whatsapp-messages.ts).
 
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import {
+  type ChannelMessage,
+  type ConversationId,
+  WHATSAPP_UNKNOWN_SENDER,
+} from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
 import type { WaHistoryMessage } from "./whatsapp-sync.js";
 
@@ -53,10 +57,6 @@ function historyAttachmentType(type: string | null): Attachment["type"] | null {
  *  address for it. The sync leaves a direct chat's outbound sender empty, and
  *  the chat's own JID names the other person. */
 export const WHATSAPP_SELF_SENDER = "whatsapp:self";
-
-/** The sender id of a group line the mirror recorded no address for. The
- *  chat's JID names the group, not whoever spoke in it. */
-export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
 
 /**
  * A mirrored row as a {@link ChannelMessage}.

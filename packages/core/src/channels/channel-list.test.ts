@@ -165,7 +165,10 @@ describe("channelList", () => {
       channel: "telegram",
       direction: "inbound",
     });
-    const history: TalkHistory = { query: async () => [said("older", 1), said("newer", 2)] };
+    const now = Date.now();
+    const history: TalkHistory = {
+      query: async () => [said("older", now - 2_000), said("newer", now - 1_000)],
+    };
     const { registry, channels } = setup([
       talkService("telegram", { history: true }, null, null, history).descriptor,
     ]);
@@ -187,6 +190,32 @@ describe("channelList", () => {
     expect((await telegram.messages!.query({ limit: 1 })).map((entry) => entry.messageId)).toEqual([
       "newer",
     ]);
+  });
+
+  it("reports a Talk whose history flag and history feature disagree", async () => {
+    testDb = createTestDb();
+    const error = rs.fn();
+    const logger = { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error };
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(testDb.db),
+      logger: logger as never,
+    });
+    // Offers a history read but does not declare one, so its channel would
+    // never get a `messages` port.
+    const history: TalkHistory = { query: async () => [] };
+    registry.register(talkService("telegram", {}, null, null, history).descriptor);
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+
+    expect(error).toHaveBeenCalledWith("talker history flag disagrees with its history feature", {
+      connectionId: connection.id,
+      service: "telegram",
+      declared: false,
+      offered: true,
+    });
   });
 
   it("reaches an account directly only through a Connection that offers it", async () => {

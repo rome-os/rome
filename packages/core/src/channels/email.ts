@@ -213,6 +213,11 @@ export class EmailAdapter implements ProviderAdapter {
   // flight within one process lifetime.
   private readonly pendingAttachments = new Map<string, EmailBodyPart[]>();
 
+  // The history lines this inbox's read counted as sent, the one place that
+  // decides it. Held by the line itself, so nothing outlives the lines a
+  // caller still holds.
+  private readonly sentLines = new WeakSet<NormalizedMessage>();
+
   constructor(deps: EmailAdapterDeps) {
     this.provider = deps.provider;
     this.settingsRepo = deps.settingsRepo;
@@ -231,11 +236,10 @@ export class EmailAdapter implements ProviderAdapter {
     return this.address;
   }
 
-  /** Whether a history line is one this inbox sent. The history read names
-   *  every line it counts as sent by this inbox's normalized address. */
+  /** Whether a history line is one this inbox sent, as the history read that
+   *  produced it decided. */
   sentByThisInbox(message: NormalizedMessage): boolean {
-    const selfAddress = normalizeAddress(this.address);
-    return selfAddress !== "" && message.channelUserId === selfAddress;
+    return this.sentLines.has(message);
   }
 
   async start(): Promise<void> {
@@ -667,7 +671,7 @@ export class EmailAdapter implements ProviderAdapter {
     const parts = downloadableParts(full?.attachments ?? []);
     const attachments: Attachment[] = attachmentsFromParts(parts);
 
-    return {
+    const message: NormalizedMessage = {
       id: item.providerMessageId,
       channel: "email",
       // The list already excludes unauthenticated mail, so no `unauthenticated:`
@@ -682,6 +686,8 @@ export class EmailAdapter implements ProviderAdapter {
       attachments,
       rawEvent: full ?? item,
     };
+    if (isOutbound) this.sentLines.add(message);
+    return message;
   }
 
   private verifySignature(rawBody: string, signature: string): boolean {

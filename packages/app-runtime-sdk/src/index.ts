@@ -1494,6 +1494,13 @@ export interface ChannelMessage extends InboundMessage {
   direction: "inbound" | "outbound";
 }
 
+/**
+ * The sender id a WhatsApp group line carries when the channel recorded no
+ * sender for it: the chat's own id names the group, not whoever spoke in it.
+ * A reader that shows such a line under a name picks its own fallback for it.
+ */
+export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
+
 /** Exact provider-neutral chat command recognized before an agent turn. */
 export function isStopCommand(text: string): boolean {
   return text.trim().toLowerCase() === "/stop";
