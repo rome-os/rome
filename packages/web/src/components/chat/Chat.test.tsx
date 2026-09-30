@@ -457,6 +457,63 @@ describe("Chat turn stream lifecycle", () => {
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object)));
   });
 
+  it("releases recovery when the floor changes during a pending turn lookup", async () => {
+    let resolveRecoveryLookup: ((turns: { turnId: string; status: string }[]) => void) | null =
+      null;
+    let sessionOneLookups = 0;
+    rs.mocked(listSessionTurns).mockImplementation((sid) => {
+      if (sid !== "session-1") return Promise.resolve([]);
+      if (++sessionOneLookups === 1) {
+        return Promise.resolve([{ turnId: "turn-1", status: "running" }]);
+      }
+      return new Promise((resolve) => {
+        resolveRecoveryLookup = resolve;
+      });
+    });
+    rs.mocked(postSessionTurnJson).mockResolvedValue({ ok: true, data: { turnId: "turn-2" } });
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(sessionOneLookups).toBe(2);
+    expect(resolveRecoveryLookup).not.toBeNull();
+
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByTestId("submit-prior-floor"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
+
+    await act(async () => {
+      resolveRecoveryLookup!([{ turnId: "turn-1", status: "running" }]);
+      await Promise.resolve();
+    });
+  });
+
   it("recovers a reattached turn after its effect is cancelled by a floor change", async () => {
     rs.mocked(listSessionTurns).mockImplementation(async (sid) =>
       sid === "session-1" ? [{ turnId: "turn-1", status: "running" }] : [],

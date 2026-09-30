@@ -959,6 +959,24 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   );
 
   useEffect(() => {
+    // A pending turn lookup can outlive a floor change. Release retained
+    // off-floor entries here: the cancelled lookup may never resolve, and no
+    // reattach poll runs for that session while it is off-floor.
+    for (const recoveringSessionId of recoveringSessionIdsRef.current) {
+      if (
+        recoveringSessionId === floorSessionId ||
+        locallyStreamingSessionIdsRef.current.has(recoveringSessionId)
+      ) {
+        continue;
+      }
+      recoveringSessionIdsRef.current.delete(recoveringSessionId);
+      const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
+      if (turnId) {
+        endSessionStream(recoveringSessionId, turnId);
+        void loadMessages(recoveringSessionId, { force: true, dropLocalOptimistic: true });
+      }
+    }
+
     // Reattach to whichever session holds the floor — during a handoff that's
     // the specialist's child session, not the main one (only the floor can have
     // an in-flight turn, since shallower callers are suspended). On reload this
