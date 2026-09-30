@@ -62,6 +62,11 @@ describe("desktopSlot", () => {
     "5901.5",
     "-1",
     " 5901x",
+    // Forms Number() accepts but the start script's ^[0-9]+$ rejects.
+    "0x170D",
+    "5.9e3",
+    " 5901",
+    "5901 ",
   ])("has no wechat desktop when a port is %s", (value) => {
     expect(desktopSlot("wechat", { ...wechatOn, ROME_WECHAT_VNC_PORT: value })).toBeNull();
     expect(desktopSlot("wechat", { ...wechatOn, ROME_WECHAT_NOVNC_PORT: value })).toBeNull();

@@ -229,7 +229,8 @@ export interface WechatUserSetupDeps {
    *  under gdb in this container and blocks until a login derives the key, so the
    *  caller shows the scan walkthrough alongside it rather than waiting for a
    *  login first. */
-  recoverPassphrase: (signal: AbortSignal) => Promise<string>;
+  /** Launches the client on `display` and returns its store passphrase. */
+  recoverPassphrase: (signal: AbortSignal, display: string) => Promise<string>;
   /** Stage the capture driver inside this container before recovery runs. */
   stageDriver: () => Promise<void>;
   pollIntervalMs?: number;
@@ -319,11 +320,13 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         // Recovery replaces any running client, so it starts on WeChat's own
         // desktop. Bring that up after the status read: a legacy client still on
         // the shared display would have pulled `display` and the links there.
-        await runtime.ensureDesktop(signal);
+        // Recovery gets the returned display rather than reading `display`,
+        // which the Talker's probe could move back while the driver is staged.
+        const display = await runtime.ensureDesktop(signal);
         interact.show(
           remembered ? rememberedView(runtime.desktopPath) : scanView(runtime.desktopPath),
         );
-        const recovery = deps.recoverPassphrase(signal);
+        const recovery = deps.recoverPassphrase(signal, display);
         const qr = { stop: remembered };
         const qrLoop = (async () => {
           let last: string | undefined;
@@ -412,11 +415,11 @@ export function createWechatUserDescriptor(
   const runtime = deps.runtime ?? new WechatUserRuntime();
   const reader = new WechatUserReader(runtime);
 
-  const recoverPassphrase = async (signal: AbortSignal): Promise<string> => {
+  const recoverPassphrase = async (signal: AbortSignal, display: string): Promise<string> => {
     const driverDir = await stageCaptureDriver(runtime.runtimeDir);
     try {
       return await recoverWechatPassphrase(
-        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir, display: runtime.display },
+        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir, display },
         signal,
       );
     } finally {

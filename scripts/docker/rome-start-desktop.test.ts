@@ -92,8 +92,8 @@ function runWith(env: Record<string, string>, ...extra: string[]) {
 }
 
 /** Two runs at once, as when a WeChat retry overlaps a start. */
-async function runTwiceAtOnce() {
-  const runs = [0, 1].map(() => {
+async function runTwiceAtOnce(count = 2, overrides: Record<string, string> = {}) {
+  const runs = Array.from({ length: count }, () => {
     const child = spawn(
       "bash",
       [SCRIPT, "notes", `:${display}`, String(vncPort), String(novncPort)],
@@ -102,6 +102,7 @@ async function runTwiceAtOnce() {
           PATH: `${dir}:${process.env.PATH}`,
           FAKE_RECORD: record,
           ROME_DESKTOP_LOG_DIR: dir,
+          ...overrides,
         },
       },
     );
@@ -164,6 +165,18 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     for (const log of ["xtigervnc", "openbox", "novnc"]) {
       expect(existsSync(join(dir, `${log}-notes.log`))).toBe(true);
     }
+  }, 60_000);
+
+  it("creates its default directory safely when first runs overlap", async () => {
+    // The lock lives in this directory, so creating it is not serialised.
+    const home = join(dir, "home");
+    const env = { HOME: home, ROME_DESKTOP_LOG_DIR: "" };
+    const results = await runTwiceAtOnce(6, env);
+
+    expect(results.map(({ code, stderr }) => ({ code, stderr }))).toEqual(
+      Array.from({ length: 6 }, () => ({ code: 0, stderr: "" })),
+    );
+    expect(statSync(join(home, ".cache", "rome-desktop")).mode & 0o777).toBe(0o700);
   }, 60_000);
 
   it("starts each program once when two runs overlap", async () => {

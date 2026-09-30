@@ -403,14 +403,19 @@ export class WechatUserRuntime {
    * desktop outlives Rome, so a Rome restart finds it running. Where the start
    * script is not installed, as on a host `pnpm start`, the client stays on the
    * shared desktop. Throws WechatUserRuntimeError when the desktop cannot start.
+   *
+   * Resolves to the display a new client should start on. A caller that
+   * launches the client later passes this value on rather than reading
+   * `display`, which a concurrent `pid()` can move to a still-running legacy
+   * client's display in the meantime.
    */
-  async ensureDesktop(signal?: AbortSignal): Promise<void> {
+  async ensureDesktop(signal?: AbortSignal): Promise<string> {
     const desktop = this.desktop;
-    if (!desktop) return;
+    if (!desktop) return this.currentDisplay;
     if (!(await exists(this.desktopScript))) {
       log.warn("wechat_user.desktop_unavailable", { script: this.desktopScript });
       this.currentDisplay = sharedDisplay();
-      return;
+      return this.currentDisplay;
     }
     // env -i: the desktop's programs outlive Rome and need none of its
     // configuration or credentials. ROME_DESKTOP_LOG_DIR passes through so this
@@ -429,6 +434,7 @@ export class WechatUserRuntime {
       );
     }
     this.currentDisplay = desktop.display;
+    return desktop.display;
   }
 
   /**

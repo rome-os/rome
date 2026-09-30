@@ -31,7 +31,12 @@ DISPLAY_NUM="${DISPLAY_ID#:}"
 # The lock and logs live where only this user can write. In /tmp another
 # account could create the lock first and keep the desktop from starting.
 LOG_DIR="${ROME_DESKTOP_LOG_DIR:-${HOME:?}/.cache/rome-desktop}"
-[ -d "$LOG_DIR" ] || { mkdir -p "$(dirname "$LOG_DIR")" && mkdir -m 700 "$LOG_DIR"; }
+# The lock lives in this directory, so first runs can race to create it: a
+# directory another run just made counts as success.
+if [ ! -d "$LOG_DIR" ]; then
+  mkdir -p "$(dirname "$LOG_DIR")"
+  mkdir -m 700 "$LOG_DIR" 2>/dev/null || [ -d "$LOG_DIR" ]
+fi
 OWNER_UID="$(id -u)"
 
 # Every check below reads, then starts. A second run for the same desktop would

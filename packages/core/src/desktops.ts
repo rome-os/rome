@@ -34,10 +34,12 @@ const DOCKER_SCRIPTS = "/opt/rome/scripts/docker";
 /** The script that starts or reuses a desktop, as installed in the image. */
 export const DESKTOP_SCRIPT = `${DOCKER_SCRIPTS}/rome-start-desktop.sh`;
 
-/** The port in `value`, `fallback` when unset, or null when `value` is not an
- *  integer from 1 to 65535. */
+/** The port in `value`, `fallback` when unset, or null when `value` is not
+ *  decimal digits for an integer from 1 to 65535. */
 function port(value: string | undefined, fallback: number): number | null {
   if (!value) return fallback;
+  // The start script's rule, so a port Rome accepts is one the script accepts.
+  if (!/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : null;
 }

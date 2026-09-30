@@ -298,6 +298,14 @@ describe("WechatUserRuntime display", () => {
     await rm(join(proc, ".."), { recursive: true, force: true });
   });
 
+  it("returns the display it prepared, for the caller to launch on", async () => {
+    wechatEnabled();
+    const { run } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });
+    expect(await (await installedRuntime(run)).ensureDesktop()).toBe(":100");
+    const missing = await installedRuntime(run, { desktopScript: "/nonexistent/start.sh" });
+    expect(await missing.ensureDesktop()).toBe(":99");
+  });
+
   it("stays on the shared desktop where the start script is not installed", async () => {
     wechatEnabled();
     const { run, calls } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });

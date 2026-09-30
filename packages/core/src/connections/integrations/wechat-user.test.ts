@@ -54,7 +54,10 @@ function fakeRuntime(opts: {
     install: rs.fn(async () => {}),
     installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
-    ensureDesktop: rs.fn(async () => {}),
+    // A concurrent status() can move `display` to a legacy client's display,
+    // so the fake reports the shared one; the setup must use what this returns.
+    display: ":99",
+    ensureDesktop: rs.fn(async () => ":100"),
     ensureAccessibility: rs.fn(async () => {}),
     repairDesktop: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
@@ -173,6 +176,9 @@ describe("makeWechatUserSetup", () => {
     // The scan step polls the login window so the QR can be shown inline.
     expect(runtime.captureLoginQr).toHaveBeenCalled();
     expect(recoverPassphrase).toHaveBeenCalledTimes(1);
+    // Recovery launches on the display ensureDesktop prepared, not whatever
+    // `display` reads by the time recovery gets to it.
+    expect(recoverPassphrase).toHaveBeenCalledWith(expect.anything(), ":100");
     expect(runtime.readerCommand).toHaveBeenCalledWith(
       ["derive", "--passphrase", "a".repeat(64)],
       expect.anything(),
