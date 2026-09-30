@@ -321,8 +321,8 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
 
   // A plain click on a sidebar row already opens it in place, so the menu's
   // open is the one a click cannot do: a new tab — wherever there are tabs.
-  const renderOpenMenuItem = (href: string): React.ReactNode => (
-    <ContextMenuItem asChild>
+  const renderOpenMenuItem = (href: string, onSelect?: () => void): React.ReactNode => (
+    <ContextMenuItem asChild onSelect={onSelect}>
       {canOpenNewTab ? (
         <a href={href} target="_blank" rel="noopener noreferrer">
           <ExternalLink aria-hidden />
@@ -371,22 +371,29 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     );
   };
 
+  // onSelect runs after any item, for a caller that must close its own menu.
   const withAppContextMenu = (
     app: InstalledAppCard | CachedApp,
     trigger: React.ReactNode,
     pinned = true,
+    onSelect?: () => void,
   ): React.ReactNode => {
     if (!app.href) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
-          {renderOpenMenuItem(app.href)}
-          <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
+          {renderOpenMenuItem(app.href, onSelect)}
+          <ContextMenuItem
+            onSelect={() => {
+              openAppInSplitView(app.id);
+              onSelect?.();
+            }}
+          >
             <PanelRightOpen aria-hidden />
             {tApps("installed.openSplitTitle")}
           </ContextMenuItem>
-          <ContextMenuItem asChild>
+          <ContextMenuItem asChild onSelect={onSelect}>
             <Link to={`/app-details/${encodeURIComponent(app.id)}`}>
               <Info aria-hidden />
               {tApps("installed.viewDetails")}
@@ -395,15 +402,21 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
           <ContextMenuSeparator />
           {pinned ? (
             <ContextMenuItem
-              onSelect={() =>
-                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)))
-              }
+              onSelect={() => {
+                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)));
+                onSelect?.();
+              }}
             >
               <PinOff aria-hidden />
               {tApps("installed.unpin")}
             </ContextMenuItem>
           ) : (
-            <ContextMenuItem onSelect={() => persistPins([...pins, { type: "app", id: app.id }])}>
+            <ContextMenuItem
+              onSelect={() => {
+                persistPins([...pins, { type: "app", id: app.id }]);
+                onSelect?.();
+              }}
+            >
               <Pin aria-hidden />
               {tApps("installed.pin")}
             </ContextMenuItem>
@@ -570,7 +583,9 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             apps={recentApps}
             unopenedIds={unopenedIds}
             pathname={location.pathname}
-            wrapWithContextMenu={(app, trigger) => withAppContextMenu(app, trigger, false)}
+            wrapWithContextMenu={(app, trigger, onSelect) =>
+              withAppContextMenu(app, trigger, false, onSelect)
+            }
           />
           {onSearch ? (
             <>
