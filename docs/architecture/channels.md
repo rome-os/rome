@@ -20,8 +20,20 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - `messages` answers one `query` for what was said on the channel: every conversation or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
 - Only a copy Rome keeps answers the per-person reads a People timeline makes (`messages.byAccount`). A channel without one leaves them null, and People reads it from Rome's own transcript instead.
 - A channel with no store of its own, such as a Telegram user account, Discord, email or webchat, answers `query` through its Connection's history read. Without a `since`, that read covers the last day, and a caller wanting more names one. While no Connection exists for the channel, the read rejects as a send does.
+- That read is a live platform call, and one over every conversation is costly. So a read is shared for thirty seconds with the later queries its window covers, for the same conversation or for all of them. A read cut at the thousand-line cap is not shared, and neither is a failed one. A shared read answers what a fresh one would, older by at most thirty seconds.
+- That read goes to the first Connection backing the channel. A channel two Connections back (two Telegram accounts) reads one of them through `query`. A caller that means a particular one names it to the channels service below.
 - Every subscriber hears every event. A subscriber hears one conversation's events one at a time, in arrival order. Different conversations and different subscribers never wait on each other, so one slow or failing handler holds up only its own conversation for its own subscriber. A handler that never settles stops that conversation for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a conversation with twenty events waiting. A conversation holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
+
+### Channels for app actions
+
+App actions reach channels through one service, `deps.channels` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels with the Connections that back each, sends, and reads `messages`, all by channel name. In a worker the same calls cross to the main process over RPC.
+
+- It is the only path an action sends or reads history by. The main process and a worker answer the same call identically, which a worker's direct Connection lookup could not.
+- It chooses the Connection: the one an action names, which must back the channel, or else the channel's only one. With several and none named, it refuses rather than guessing.
+- `query` is the general read. `history` is the read `fetch_channel_history` has always made, with the windows and pages the retired per-channel reads cut, oldest first. It is kept only so the tool's output does not change.
+- Admission and pairing stay in the router that dispatches a Connection's inbound events, and an account directory stays on the Connection. The service adds no path around either.
+- The deprecated `TalkRouter` that actions used to receive is answered through this service in a worker.
 
 ## Connection setup
 

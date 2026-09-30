@@ -15,7 +15,7 @@
  *
  * // Via direct function call from the local action module
  * import { executeSendMessage } from "./index.js";
- * await executeSendMessage(talkRouter, {
+ * await executeSendMessage(channels, {
  *   channel: "discord",
  *   threadId: "123456",
  *   text: "Hello!",

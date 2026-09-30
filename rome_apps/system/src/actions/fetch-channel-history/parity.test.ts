@@ -4,19 +4,20 @@
 // file's seeded mirrors, WeChat reader and Telegram account at a fixed clock:
 // main's WhatsApp, LinkedIn and WeChat history features and a Telegram history
 // over the same fake account. This test runs the same scenarios through the
-// channels and `talk.history.query` and asks for the same output.
+// channels service app actions read history through, and asks for the same
+// output.
 
 import { expect, it, rs } from "@rstest/core";
 import { readFileSync } from "node:fs";
 import { createTestDb } from "../../../../../packages/core/src/test/helpers.js";
-import { readTalkHistory } from "../../../../../packages/core/src/actions/talk-history.js";
+import { createChannelsService } from "../../../../../packages/core/src/channels/channels-service.js";
 import type { Channel } from "../../../../../packages/core/src/channels/channel.js";
 import { linkedInMessages } from "../../../../../packages/core/src/channels/linkedin-messages.js";
 import { whatsAppMessages } from "../../../../../packages/core/src/channels/whatsapp-messages.js";
 import { wechatUserMessages } from "../../../../../packages/core/src/channels/wechat-user-messages.js";
 import { WechatUserReader } from "../../../../../packages/core/src/channels/wechat-user.js";
 import { historyFeature } from "../../../../../packages/core/src/connections/integrations/talk-features.js";
-import type { ConversationId, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ChannelsService, NormalizedMessage } from "@rome-os/app-runtime";
 import {
   linkedinMessages,
   linkedinThreads,
@@ -305,21 +306,8 @@ const SCENARIOS: Array<Record<string, unknown>> = [
   { channel: "telegram_user", windowHours: 1.5, includeMessages: true },
 ];
 
-async function runScenarios(
-  history: (connectionId: string) => {
-    query(input: {
-      conversationId?: ConversationId;
-      since?: Date;
-      limit?: number;
-    }): Promise<unknown[]>;
-  } | null,
-): Promise<unknown[]> {
-  const talkRouter = {
-    list: async () => CONNECTIONS,
-    feature: (connectionId: string, name: string) =>
-      name === "history" ? history(connectionId) : null,
-  };
-  const action = createAction({ name: "fetch_channel_history" } as never, { talkRouter } as never);
+async function runScenarios(channels: ChannelsService): Promise<unknown[]> {
+  const action = createAction({ name: "fetch_channel_history" } as never, { channels });
   const out = [];
   for (const args of SCENARIOS)
     out.push({ args, result: await action.execute(args as never, {} as never) });
@@ -367,18 +355,20 @@ it("reads every channel's history exactly as main did", async () => {
       channel: "telegram_user",
       isOwn: (message) => message.channelUserId === telegram.selfId,
     });
-    const serviceOf = new Map(CONNECTIONS.map((c) => [c.connectionId, c.service]));
-    const out = await runScenarios((connectionId) => ({
-      query: (input) =>
-        readTalkHistory(
-          {
-            channel: channels.find((channel) => channel.name === serviceOf.get(connectionId)),
-            connectionHistory: connectionId === "c-tg" ? telegramHistory : null,
-          },
-          connectionId,
-          input,
-        ),
-    }));
+    // The channels service app actions get, over this file's channels and a
+    // router answering the four connections.
+    const service = createChannelsService({
+      channels: () => channels,
+      router: {
+        list: async () => CONNECTIONS,
+        feature: ((connectionId: string, name: string) =>
+          connectionId === "c-tg" && name === "history" ? telegramHistory : null) as never,
+        send: async () => {
+          throw new Error("history reads send nothing");
+        },
+      },
+    });
+    const out = await runScenarios(service);
     const main = JSON.parse(readFileSync(new URL("./parity.main.json", import.meta.url), "utf8"));
     expect(JSON.parse(JSON.stringify(out))).toEqual(main);
   } finally {

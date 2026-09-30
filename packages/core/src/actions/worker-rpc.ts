@@ -2,8 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { actionExecutionContext } from "./context.js";
 import { replayContext } from "./replay.js";
 import { z } from "zod";
-import type { Channels } from "../channels/channel.js";
-import { readTalkHistory } from "./talk-history.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import type {
   BackendTurnRunner,
@@ -12,7 +10,8 @@ import type {
   ConversationSettingsControl,
   ChannelMessage,
   OutgoingMessage,
-  TalkRouter,
+  ChannelsService,
+  MessageReceipt,
   UpdateConversationSettingsInput,
   ResetConversationSettingsInput,
   ListConversationSettingsInput,
@@ -47,6 +46,23 @@ const TalkHistoryParams = z.object({
   conversationId: z.string().optional(),
   since: z.string().datetime().optional(),
   limit: z.number().int().positive().optional(),
+});
+
+const ChannelsSendParams = z.object({
+  channel: z.string().min(1),
+  conversationId: z.string(),
+  message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
+    message: "message must be an object",
+  }),
+  connectionId: z.string().min(1).optional(),
+});
+
+const ChannelsReadParams = z.object({
+  channel: z.string().min(1),
+  conversationId: z.string().optional(),
+  since: z.string().datetime().optional(),
+  limit: z.number().int().positive().optional(),
+  connectionId: z.string().min(1).optional(),
 });
 
 const ConversationRefParams = z.object({
@@ -167,10 +183,9 @@ interface RpcResponseMessage {
 }
 
 export interface WorkerRpcServices {
-  talkRouter: TalkRouter;
-  /** The channels `talk.history.query` reads, by the service a connection
-   *  belongs to. */
-  channels: Channels;
+  /** How a worker's actions send and read on channels (`channels.*`), and what
+   *  the deprecated `talk.*` calls are answered through. */
+  channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
   conversationSettings: ConversationSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
@@ -273,8 +288,20 @@ export class WorkerRpcServer {
 
   private async dispatch(method: string, params: unknown): Promise<unknown> {
     switch (method) {
+      case "channels.list":
+        return await this.services.channelsService.list();
+      case "channels.send":
+        return await this.handleChannelsSend(params);
+      case "channels.query":
+        return await this.handleChannelsQuery(params);
+      case "channels.history":
+        return await this.handleChannelsHistory(params);
+      // The deprecated `TalkRouterProxy`'s calls, answered through the same
+      // channels service by the connection's channel.
       case "talk.list":
-        return await this.services.talkRouter.list();
+        return (await this.services.channelsService.list()).flatMap((channel) =>
+          channel.connectionIds.map((connectionId) => ({ connectionId, service: channel.name })),
+        );
       case "talk.send":
         return await this.handleTalkSend(params);
       case "talk.history.query":
@@ -382,16 +409,67 @@ export class WorkerRpcServer {
     return { ok: true };
   }
 
+  private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
+    const { channel, conversationId, message, connectionId } = parseParams(
+      "channels.send",
+      ChannelsSendParams,
+      params,
+    );
+    return await this.services.channelsService.send(
+      channel,
+      conversationId as ConversationId,
+      message,
+      connectionId ? { connectionId } : undefined,
+    );
+  }
+
+  private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
+    const { channel, conversationId, since, limit } = parseParams(
+      "channels.query",
+      ChannelsReadParams,
+      params,
+    );
+    return await this.services.channelsService.query(channel, {
+      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
+      ...(since ? { since: new Date(since) } : {}),
+      ...(limit ? { limit } : {}),
+    });
+  }
+
+  private async handleChannelsHistory(params: unknown): Promise<ChannelMessage[]> {
+    const { channel, conversationId, since, limit, connectionId } = parseParams(
+      "channels.history",
+      ChannelsReadParams,
+      params,
+    );
+    return await this.services.channelsService.history(channel, {
+      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
+      ...(since ? { since: new Date(since) } : {}),
+      ...(limit ? { limit } : {}),
+      ...(connectionId ? { connectionId } : {}),
+    });
+  }
+
+  /** The channel a connection backs, by the service it belongs to. */
+  private channelOf(connectionId: string): string | undefined {
+    return this.services.connectionRegistry
+      .all()
+      .find((connection) => connection.id === connectionId)?.service;
+  }
+
   private async handleTalkSend(params: unknown) {
     const { connectionId, conversationId, message } = parseParams(
       "talk.send",
       TalkSendParams,
       params,
     );
-    return await this.services.talkRouter.send(
-      connectionId,
+    const channel = this.channelOf(connectionId);
+    if (!channel) throw new Error(`unknown connection "${connectionId}"`);
+    return await this.services.channelsService.send(
+      channel,
       conversationId as ConversationId,
       message,
+      { connectionId },
     );
   }
 
@@ -401,18 +479,13 @@ export class WorkerRpcServer {
       TalkHistoryParams,
       params,
     );
-    const service = this.services.connectionRegistry
-      .all()
-      .find((connection) => connection.id === connectionId)?.service;
-    const channel = this.services.channels.find((candidate) => candidate.name === service);
-    const source = {
-      channel,
-      connectionHistory: this.services.talkRouter.feature(connectionId, "history"),
-    };
-    return readTalkHistory(source, connectionId, {
+    const channel = this.channelOf(connectionId);
+    if (!channel) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
+    return await this.services.channelsService.history(channel, {
       ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
+      connectionId,
     });
   }
 
@@ -422,11 +495,11 @@ export class WorkerRpcServer {
       EmailIngestInboundParams,
       params,
     );
-    const connections = (await this.services.talkRouter.list()).filter(
-      (connection) => connection.service === "email",
+    const email = (await this.services.channelsService.list()).find(
+      (channel) => channel.name === "email",
     );
-    if (connections.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-    return (await this.services.connectionRegistry.ingest(connections[0]!.connectionId, {
+    if (email?.connectionIds.length !== 1) return { status: "skipped", reason: "channel_inactive" };
+    return (await this.services.connectionRegistry.ingest(email.connectionIds[0]!, {
       rawBody,
       signature,
     })) as EmailInboundResult;

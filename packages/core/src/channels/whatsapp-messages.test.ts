@@ -8,7 +8,6 @@ import {
   testMessagesQueryContract,
   WHOLE_HISTORY,
 } from "./messages-contract.js";
-import { WHATSAPP_UNKNOWN_SENDER } from "@rome-os/app-runtime";
 import { WHATSAPP_SELF_SENDER } from "./whatsapp-history.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 import { channelMessageDetail, type AccountMessages, type MessageAccount } from "./messages.js";
@@ -202,7 +201,7 @@ describe("whatsAppMessages", () => {
       .run();
     const [line] = await whatsAppMessages(testDb.db).query({ conversationId: groupChat, limit: 1 });
     // The chat's JID names the group, not whoever spoke in it.
-    expect(line).toMatchObject({ messageId: "anon", senderId: WHATSAPP_UNKNOWN_SENDER });
+    expect(line).toMatchObject({ messageId: "anon", senderId: "" });
     expect(line?.senderDisplayName).toBeUndefined();
   });
 

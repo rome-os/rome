@@ -11,6 +11,8 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
+import { createChannelsService } from "../channels/channels-service.js";
+import type { Channels } from "../channels/channel.js";
 import type { ActionResult } from "./types.js";
 
 interface SubprocessEngine {
@@ -74,8 +76,7 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
-    talkRouter?: { list?: ReturnType<typeof rs.fn>; feature?: ReturnType<typeof rs.fn> };
-    channels?: unknown[];
+    channelsService?: unknown;
     connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
   } = {},
 ) {
@@ -107,8 +108,7 @@ function makeServer(
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    talkRouter: overrides.talkRouter,
-    channels: overrides.channels ?? [],
+    channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
   } as unknown as WorkerRpcServices;
   return {
@@ -222,9 +222,12 @@ describe("WorkerRpcServer param validation", () => {
   it("serves the current main-process Talk connection list", async () => {
     const list = rs
       .fn()
-      .mockResolvedValueOnce([{ connectionId: "discord-1", service: "discord" }])
-      .mockResolvedValueOnce([{ connectionId: "wechat-1", service: "wechat" }]);
-    const { server } = makeServer({ talkRouter: { list } });
+      .mockResolvedValueOnce([{ name: "discord", connectionIds: ["discord-1"] }])
+      .mockResolvedValueOnce([
+        { name: "wechat", connectionIds: ["wechat-1"] },
+        { name: "email", connectionIds: [] },
+      ]);
+    const { server } = makeServer({ channelsService: { list } });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
 
@@ -234,6 +237,58 @@ describe("WorkerRpcServer param validation", () => {
     expect(first.result).toEqual([{ connectionId: "discord-1", service: "discord" }]);
     expect(second.result).toEqual([{ connectionId: "wechat-1", service: "wechat" }]);
     expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  describe("channels.*", () => {
+    it("serves the channel list, sends and reads by channel name", async () => {
+      const service = {
+        list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+        history: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const listed = await rpc(fake, "channels.list", {});
+      const sent = await rpc(fake, "channels.send", {
+        channel: "discord",
+        conversationId: "c1",
+        message: { text: "hi" },
+        connectionId: "discord-1",
+      });
+      await rpc(fake, "channels.query", {
+        channel: "discord",
+        since: "2026-09-29T10:00:00.000Z",
+        limit: 5,
+      });
+      await rpc(fake, "channels.history", { channel: "discord", conversationId: "c1" });
+
+      expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
+      expect(sent.result).toEqual({ messageId: "m1" });
+      expect(service.send).toHaveBeenCalledWith(
+        "discord",
+        "c1",
+        { text: "hi" },
+        { connectionId: "discord-1" },
+      );
+      expect(service.query).toHaveBeenCalledWith("discord", {
+        since: new Date("2026-09-29T10:00:00.000Z"),
+        limit: 5,
+      });
+      expect(service.history).toHaveBeenCalledWith("discord", { conversationId: "c1" });
+    });
+
+    it("rejects a read with no channel", async () => {
+      const { server } = makeServer({ channelsService: { query: rs.fn() } });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "channels.query", {});
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+    });
   });
 
   describe("talk.history.query", () => {
@@ -254,15 +309,28 @@ describe("WorkerRpcServer param validation", () => {
         { id: "wa-1", service: "whatsapp" },
       ],
     };
+    // The real service over the registry's Connections, so these read what
+    // `fetch_channel_history` reads.
+    const channelsService = (feature: ReturnType<typeof rs.fn>, channels: unknown[] = []) =>
+      createChannelsService({
+        channels: () => channels as Channels,
+        router: {
+          list: async () =>
+            connectionRegistry.all().map(({ id, service }) => ({ connectionId: id, service })),
+          feature: feature as never,
+          send: rs.fn() as never,
+        },
+      });
 
     it("reads a channel with no store from the connection it names", async () => {
       const feature = rs.fn((connectionId: string) => ({
         query: async () => [line(`from-${connectionId}`, 1_000)],
       }));
       const { server } = makeServer({
-        talkRouter: { feature },
+        channelsService: channelsService(feature, [
+          { name: "email", send: null, inbound: null, accounts: null, messages: null },
+        ]),
         connectionRegistry,
-        channels: [{ name: "email", send: null, inbound: null, accounts: null, messages: null }],
       });
       const fake = makeFakeWorker();
       server.attach(fake.worker);
@@ -279,17 +347,19 @@ describe("WorkerRpcServer param validation", () => {
     it("reads a store's channel through its query, oldest first", async () => {
       const query = rs.fn(async () => [line("newer", 2_000), line("older", 1_000)]);
       const { server } = makeServer({
-        talkRouter: { feature: rs.fn(() => null) },
+        channelsService: channelsService(
+          rs.fn(() => null),
+          [
+            {
+              name: "whatsapp",
+              send: null,
+              inbound: null,
+              accounts: null,
+              messages: { query, byAccount: null },
+            },
+          ],
+        ),
         connectionRegistry,
-        channels: [
-          {
-            name: "whatsapp",
-            send: null,
-            inbound: null,
-            accounts: null,
-            messages: { query, byAccount: null },
-          },
-        ],
       });
       const fake = makeFakeWorker();
       server.attach(fake.worker);
@@ -305,7 +375,7 @@ describe("WorkerRpcServer param validation", () => {
 
     it("says an unknown connection has no history", async () => {
       const { server } = makeServer({
-        talkRouter: { feature: rs.fn(() => null) },
+        channelsService: channelsService(rs.fn(() => null)),
         connectionRegistry,
       });
       const fake = makeFakeWorker();

@@ -1,5 +1,6 @@
-// `talk.history.query` — the read `fetch_channel_history` makes from an action
-// worker — answered from the channel's `messages`.
+// `ChannelsService.history` — the read `fetch_channel_history` makes, in the
+// main process or over RPC from an action worker — answered from the
+// channel's `messages`.
 //
 // Each channel's Connection used to answer it with a history read of its own,
 // and those reads cut the window and the page each their own way. The reads
@@ -12,6 +13,7 @@
 import type { ChannelMessage, ConversationId, TalkHistory } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import { MAX_QUERY_LIMIT } from "../channels/messages.js";
+import { WECHAT_USER_CHANNEL } from "../channels/wechat-user-messages.js";
 import {
   historyQueryLimit,
   historyWindowHours,
@@ -35,10 +37,10 @@ export interface TalkHistoryInput {
 const RETIRED_READS: Record<string, "hours" | "newest"> = {
   whatsapp: "hours",
   linkedin: "hours",
-  wechat_user: "newest",
+  [WECHAT_USER_CHANNEL]: "newest",
 };
 
-/** Where `talk.history.query` reads for one connection. */
+/** Where a history read goes for one connection. */
 export interface TalkHistorySource {
   /** The channel of the connection's service, if the service has one. */
   channel: Channel | undefined;
@@ -47,7 +49,7 @@ export interface TalkHistorySource {
 }
 
 /**
- * What `talk.history.query` answers for one connection, oldest first.
+ * What a history read answers for one connection, oldest first.
  *
  * A channel with a store answers from it, cut the way its retired read cut.
  * A channel with no store answers from the named connection's own history,

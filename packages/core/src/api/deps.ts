@@ -43,6 +43,7 @@ import type { SystemUpgradeService } from "../system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
   ConversationSettingsControl,
+  ChannelsService,
   TalkRouter,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/types.js";
@@ -71,6 +72,8 @@ export interface ApiConfig {
  */
 export interface ApiDeps {
   talkRouter: TalkRouter;
+  /** The channels this Rome has, by name. */
+  channelsService: ChannelsService;
   conversationSettings: ConversationSettingsControl;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get">;

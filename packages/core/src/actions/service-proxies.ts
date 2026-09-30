@@ -50,7 +50,11 @@ import type {
   TalkFeatureMap,
   TalkFeatureName,
   TalkRouter,
+  ChannelHistoryRead,
   ChannelMessage,
+  ChannelMessageQuery,
+  ChannelSummary,
+  ChannelsService,
   InboundMessage,
   MessageReceipt,
   OutgoingMessage,
@@ -196,7 +200,59 @@ export class AppStoreProxy implements AppStoreReader {
   }
 }
 
-/** Worker-side proxy for the live main-process Talk router. */
+/** A history line as it crosses the worker RPC, its timestamp serialized. */
+type WireChannelMessage = Omit<ChannelMessage, "timestamp"> & { timestamp: Date | string };
+
+function fromWire(messages: WireChannelMessage[]): ChannelMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    timestamp: message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
+  }));
+}
+
+/** Worker-side proxy for the main process's channels service. */
+export class ChannelsServiceProxy implements ChannelsService {
+  list(): Promise<ChannelSummary[]> {
+    return getWorkerRpc().call("channels.list", {});
+  }
+
+  send(
+    channel: string,
+    conversationId: ConversationId,
+    message: OutgoingMessage,
+    options?: { connectionId?: string },
+  ): Promise<MessageReceipt> {
+    return getWorkerRpc().call<MessageReceipt>("channels.send", {
+      channel,
+      conversationId,
+      message,
+      ...(options?.connectionId ? { connectionId: options.connectionId } : {}),
+    });
+  }
+
+  async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+    return fromWire(
+      await getWorkerRpc().call<WireChannelMessage[]>("channels.query", {
+        channel,
+        ...query,
+        ...(query.since ? { since: query.since.toISOString() } : {}),
+      }),
+    );
+  }
+
+  async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
+    return fromWire(
+      await getWorkerRpc().call<WireChannelMessage[]>("channels.history", {
+        channel,
+        ...input,
+        ...(input.since ? { since: input.since.toISOString() } : {}),
+      }),
+    );
+  }
+}
+
+/** Worker-side proxy for the live main-process Talk router.
+ *  @deprecated App actions reach channels through {@link ChannelsServiceProxy}. */
 export class TalkRouterProxy implements TalkRouter {
   list(): Promise<Array<{ connectionId: string; service: string }>> {
     return getWorkerRpc().call("talk.list", {});
@@ -229,18 +285,13 @@ export class TalkRouterProxy implements TalkRouter {
         since?: Date;
         limit?: number;
       }): Promise<ChannelMessage[]> => {
-        const messages = await getWorkerRpc().call<
-          Array<Omit<ChannelMessage, "timestamp"> & { timestamp: Date | string }>
-        >("talk.history.query", {
-          connectionId,
-          ...input,
-          ...(input.since ? { since: input.since.toISOString() } : {}),
-        });
-        return messages.map((message) => ({
-          ...message,
-          timestamp:
-            message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
-        }));
+        return fromWire(
+          await getWorkerRpc().call<WireChannelMessage[]>("talk.history.query", {
+            connectionId,
+            ...input,
+            ...(input.since ? { since: input.since.toISOString() } : {}),
+          }),
+        );
       },
     } as unknown as TalkFeatureMap[K];
   }

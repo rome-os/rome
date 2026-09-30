@@ -60,6 +60,7 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
+import { createChannelsService, sendApprovalCard } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
@@ -311,6 +312,9 @@ async function main() {
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     }),
   );
+  // How app actions — here and, over RPC, in workers — send and read on
+  // channels by name. The channel list is built further down.
+  const channelsService = createChannelsService({ channels: () => channels, router: talkRouter });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
@@ -499,36 +503,7 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   // The "openai" provider runs over the codex app-server JSON-RPC surface
@@ -762,7 +737,9 @@ async function main() {
   const appActionDeps = {
     agentRunner,
     resolveArtifactReference,
+    // Deprecated for app actions; `channels` replaces it.
     talkRouter,
+    channels: channelsService,
     conversationSettings,
     capabilityDiscovery,
     personMappingRepo,
@@ -786,11 +763,11 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === "email",
-        );
-        if (matches.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-        return (await connectionRegistry.ingest(matches[0]!.connectionId, {
+        const email = (await channelsService.list()).find((channel) => channel.name === "email");
+        if (email?.connectionIds.length !== 1) {
+          return { status: "skipped", reason: "channel_inactive" };
+        }
+        return (await connectionRegistry.ingest(email.connectionIds[0]!, {
           rawBody,
           signature,
         })) as EmailInboundResult;
@@ -1146,8 +1123,7 @@ async function main() {
   });
 
   const workerRpcServer = new WorkerRpcServer({
-    talkRouter,
-    channels,
+    channelsService,
     connectionRegistry,
     conversationSettings,
     routinesRepo,
@@ -1280,6 +1256,7 @@ async function main() {
       provisionNodeCaller,
       nodeDevices,
       talkRouter,
+      channelsService,
       conversationSettings,
       actionEngine,
       actionLoader,
@@ -1461,9 +1438,9 @@ async function main() {
   await runJournalCleanup();
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
-  const activeChannels = [
-    ...new Set((await talkRouter.list()).map((connection) => connection.service)),
-  ];
+  const activeChannels = (await channelsService.list())
+    .filter((channel) => channel.connectionIds.length > 0)
+    .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
   const agentNames = Array.from(agentLoader.getAll().keys());
   const discoveredServers = Object.keys(capabilityDiscovery.getCdpMcpServers());

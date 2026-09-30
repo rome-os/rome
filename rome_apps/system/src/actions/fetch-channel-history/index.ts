@@ -1,12 +1,12 @@
-import { createAppLogger, WHATSAPP_UNKNOWN_SENDER } from "@rome-os/app-runtime";
+import { createAppLogger } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
   ActionResult,
   Attachment,
   ChannelMessage,
+  ChannelsService,
   ConversationId,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("fetch_channel_history");
@@ -48,7 +48,7 @@ interface StructuredMessage {
 function senderLabel(channel: string, m: ChannelMessage): string {
   if (channel === "whatsapp") {
     if (m.direction === "outbound") return "You";
-    return m.senderDisplayName ?? (m.senderId === WHATSAPP_UNKNOWN_SENDER ? "Unknown" : m.senderId);
+    return m.senderDisplayName ?? (m.senderId === "" ? "Unknown" : m.senderId);
   }
   if (channel === "linkedin") return m.senderDisplayName ?? "";
   return m.senderDisplayName ?? m.senderId;
@@ -123,8 +123,8 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
     : header + "(No readable messages found.)";
 }
 
-export function createAction(config: ActionConfig, deps: { talkRouter: TalkRouter }): Action {
-  const { talkRouter } = deps;
+export function createAction(config: ActionConfig, deps: { channels: ChannelsService }): Action {
+  const { channels } = deps;
 
   return {
     config,
@@ -160,7 +160,8 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
-      const connections = (await talkRouter.list()).filter((item) => item.service === channel);
+      const connections =
+        (await channels.list()).find((item) => item.name === channel)?.connectionIds ?? [];
       if (connections.length === 0) {
         return {
           status: "error",
@@ -174,19 +175,12 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
           error: `Channel "${channel}" has multiple connections; connectionId is required.`,
         };
       }
-      const history = talkRouter.feature(connections[0]!.connectionId, "history");
-      if (!history) {
-        return {
-          status: "error",
-          error: `Channel "${channel}" does not support history fetching.`,
-        };
-      }
 
       log.info("fetching channel history", { channel, threadId, windowHours });
 
       let messages: ChannelMessage[];
       try {
-        messages = await history.query({
+        messages = await channels.history(channel, {
           ...(threadId ? { conversationId: threadId as ConversationId } : {}),
           since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
         });

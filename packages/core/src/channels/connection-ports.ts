@@ -5,7 +5,12 @@
  * Contract: `Channel` and `Inbound` (channel.ts), `Messages` (messages.ts).
  */
 
-import type { InboundMessage, TalkDirectMessaging, TalkRouter } from "@rome-os/app-runtime";
+import type {
+  ChannelMessage,
+  InboundMessage,
+  TalkDirectMessaging,
+  TalkRouter,
+} from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
 import {
@@ -66,16 +71,60 @@ export function connectionPorts(
  * keep the oldest lines after their cutoff, so reaching further back trades
  * the newest lines for older ones. A caller wanting more names a `since`.
  *
- * Every query is a live platform read, and nothing here caches or throttles
- * it. One naming no conversation is the costly kind: a Telegram account reads
- * its fifty newest chats and fifty lines of each, Discord every channel of
- * every server the bot is in, and email hydrates up to a thousand message
- * bodies. A caller that reads often names a conversation, or keeps what it
- * read. Rome's own `fetch_channel_history` does not read through this port.
+ * A query is a live platform read, and one naming no conversation is the
+ * costly kind: a Telegram account reads its fifty newest chats and fifty lines
+ * of each, Discord every channel of every server the bot is in, and email
+ * hydrates up to a thousand message bodies. So a read is shared for
+ * {@link LIVE_READ_TTL_MS}: a query for the same conversation, or for every
+ * conversation, reuses a read already made or under way whose window covers
+ * it, as long as that read was not cut short at the thousand-line cap. A
+ * reused read answers what a fresh one would, older by at most that long.
+ * Rome's own `fetch_channel_history` does not read through this port.
+ *
+ * The port reads the first Connection backing the channel. A channel several
+ * Connections back (two Telegram accounts) reads one of them;
+ * `ChannelsService.history` and `send` name the one they mean.
  */
 export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
 
+/** How long a live read is shared among the queries its window covers. */
+export const LIVE_READ_TTL_MS = 30_000;
+
+/** One live read, shared while it is fresh. */
+interface SharedRead {
+  at: number;
+  /** The instant the read reached back to. */
+  since: number;
+  lines: Promise<ChannelMessage[]>;
+}
+
 function connectionMessages(deps: ConnectionPortsDeps, service: string): Messages {
+  const shared = new Map<string, SharedRead>();
+
+  /** A read reaching back to `from`, shared with a fresh one that covers it. */
+  async function read(
+    key: string,
+    from: Date,
+    fresh: () => Promise<ChannelMessage[]>,
+  ): Promise<ChannelMessage[]> {
+    const now = Date.now();
+    for (const [held, entry] of shared) {
+      if (now - entry.at >= LIVE_READ_TTL_MS) shared.delete(held);
+    }
+    const hit = shared.get(key);
+    if (hit && hit.since <= from.getTime()) {
+      const lines = await hit.lines.catch(() => null);
+      // A read cut at the cap may have left out lines newer than it kept.
+      if (lines && lines.length < MAX_QUERY_LIMIT) return lines;
+    }
+    const entry: SharedRead = { at: now, since: from.getTime(), lines: fresh() };
+    shared.set(key, entry);
+    entry.lines.catch(() => {
+      if (shared.get(key) === entry) shared.delete(key);
+    });
+    return entry.lines;
+  }
+
   return {
     async query({ conversationId, since, limit }) {
       const connectionId = connectionIdFor(deps, service);
@@ -85,12 +134,14 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       // degraded) backs nothing, the same as no Connection at all.
       if (!history) throw new ChannelNotConnected(service);
       const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
-      const read = await history.query({
-        ...(conversationId ? { conversationId } : {}),
-        since: from,
-        limit: MAX_QUERY_LIMIT,
-      });
-      return read
+      const lines = await read(`${connectionId}\n${conversationId ?? ""}`, from, () =>
+        history.query({
+          ...(conversationId ? { conversationId } : {}),
+          since: from,
+          limit: MAX_QUERY_LIMIT,
+        }),
+      );
+      return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
         .reverse()
         .slice(0, queryLimit(limit));

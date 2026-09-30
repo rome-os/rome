@@ -61,6 +61,7 @@ import type { Channel, Channels } from "../channels/channel.js";
 import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
+import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -639,6 +640,7 @@ export async function buildTestDeps(
 
   return {
     talkRouter,
+    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,

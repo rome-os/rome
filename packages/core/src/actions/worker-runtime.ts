@@ -31,6 +31,7 @@ import {
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   TalkRouterProxy,
+  ChannelsServiceProxy,
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
@@ -45,6 +46,7 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
+import { sendApprovalCard } from "../channels/channels-service.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -109,7 +111,9 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
+  // Deprecated for app actions; `channels` replaces it.
   const talkRouter = new TalkRouterProxy();
+  const channels = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
 
@@ -121,36 +125,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     executionJournalRepo,
     {
       processRole: "worker",
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channels, approval),
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -176,6 +151,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       agentRunner,
       resolveArtifactReference,
       talkRouter,
+      channels,
       conversationSettings,
       capabilityDiscovery,
       personMappingRepo,

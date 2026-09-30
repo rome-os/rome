@@ -60,4 +60,6 @@ The decision above unified credentials, capabilities and webhook ingestion under
 
 A Connection's Talk may back a channel's `send` and `inbound`. The correspondence is incidental. WhatsApp's `accounts` and `messages` are answered by Rome's synced tables, the WeChat personal account's by its Connection's client reader, and webchat's turns start from its own route rather than from its Connection. The `messages` of a Telegram user account, Discord, email and webchat are answered by their Connection's history read, since no store of Rome's holds them for the channel. A channel whose ports have several backers is still one channel.
 
+App actions reach channels by name through one service, not through Connections. It picks the Connection a send or a history read goes to, and it answers the same way in the main process and in a worker ([Channels for app actions](../architecture/channels.md#channels-for-app-actions)).
+
 This amends one "future diffs must respect" rule: a new conversational surface does not have to be a Connection. A new credentialed API or webhook stream still does.

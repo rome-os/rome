@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ActionConfig, TalkRouter } from "@rome-os/app-runtime";
+import type { ActionConfig, ChannelsService } from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
 import type { SendMessageInput } from "./index.js";
 
@@ -11,12 +11,13 @@ let tempDir = "";
 let projectsRoot = "";
 let outsideRoot = "";
 
-function makeAdapter(service = "discord"): TalkRouter {
+/** A channels service with one channel, `service`, backed by one Connection. */
+function makeAdapter(service = "discord"): ChannelsService {
   return {
-    list: async () => [{ connectionId: `test:${service}`, service }],
-    subscribe: () => () => {},
-    send: rs.fn(async (_connectionId, conversationId) => ({ conversationId })),
-    feature: () => null,
+    list: async () => [{ name: service, connectionIds: [`test:${service}`] }],
+    send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+    query: async () => [],
+    history: async () => [],
   };
 }
 
@@ -50,12 +51,17 @@ describe("send_message attachments", () => {
       attachments: [{ type: "document", source, caption: "Report" }],
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:discord", "thread-1", {
-      text: undefined,
-      attachments: [{ type: "document", source: safeSource, caption: "Report" }],
-      replyToMessageId: undefined,
-      turnId: undefined,
-    });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "discord",
+      "thread-1",
+      {
+        text: undefined,
+        attachments: [{ type: "document", source: safeSource, caption: "Report" }],
+        replyToMessageId: undefined,
+        turnId: undefined,
+      },
+      { connectionId: "test:discord" },
+    );
   });
 
   it("rejects absolute paths outside allowed attachment roots", async () => {
@@ -95,7 +101,7 @@ describe("send_message attachments", () => {
 });
 
 describe("send_message email union", () => {
-  function makeEmailAdapter(): TalkRouter {
+  function makeEmailAdapter(): ChannelsService {
     return makeAdapter("email");
   }
 
@@ -110,9 +116,10 @@ describe("send_message email union", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [connectionId, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock
+    const [channel, threadId, message, options] = (adapter.send as ReturnType<typeof rs.fn>).mock
       .calls[0];
-    expect(connectionId).toBe("test:email");
+    expect(channel).toBe("email");
+    expect(options).toEqual({ connectionId: "test:email" });
     expect(threadId).toBe("");
     expect(message.kind).toBe("email");
     expect(message.text).toBe("body");
@@ -173,13 +180,18 @@ describe("send_message chat recipient aliases", () => {
       turnId: "turn-1",
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:webchat", "session-1", {
-      text: "Final answer",
-      parts,
-      attachments: undefined,
-      replyToMessageId: undefined,
-      turnId: "turn-1",
-    });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "webchat",
+      "session-1",
+      {
+        text: "Final answer",
+        parts,
+        attachments: undefined,
+        replyToMessageId: undefined,
+        turnId: "turn-1",
+      },
+      { connectionId: "test:webchat" },
+    );
   });
 
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
@@ -206,13 +218,18 @@ describe("send_message chat recipient aliases", () => {
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith("test:whatsapp", "15551234567@s.whatsapp.net", {
-      text: "hello guardian",
-      parts: undefined,
-      attachments: undefined,
-      replyToMessageId: undefined,
-      turnId: undefined,
-    });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "whatsapp",
+      "15551234567@s.whatsapp.net",
+      {
+        text: "hello guardian",
+        parts: undefined,
+        attachments: undefined,
+        replyToMessageId: undefined,
+        turnId: undefined,
+      },
+      { connectionId: "test:whatsapp" },
+    );
   });
 
   it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {

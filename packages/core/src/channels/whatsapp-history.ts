@@ -1,11 +1,7 @@
 // A row of the WhatsApp mirror as the message it records, for the channel's
 // `query` and its account reads (whatsapp-messages.ts).
 
-import {
-  type ChannelMessage,
-  type ConversationId,
-  WHATSAPP_UNKNOWN_SENDER,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
 import type { WaHistoryMessage } from "./whatsapp-sync.js";
 
@@ -63,7 +59,8 @@ export const WHATSAPP_SELF_SENDER = "whatsapp:self";
  *
  * The sender is named by what the mirror recorded for them — the contact's
  * name, the name they set on WhatsApp, or their number — and left unnamed
- * otherwise. A caller that has to show a line from an unnamed sender picks its
+ * otherwise. A group line with no recorded sender has an empty `senderId`:
+ * the chat's JID names the group, not whoever spoke in it. A caller that has to show a line from an unnamed sender picks its
  * own fallback.
  */
 export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
@@ -71,7 +68,7 @@ export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
   const senderId = row.fromMe
     ? (row.senderJid ?? WHATSAPP_SELF_SENDER)
     : isGroup
-      ? (row.senderJid ?? WHATSAPP_UNKNOWN_SENDER)
+      ? (row.senderJid ?? "")
       : row.chatJid;
   const threadName = row.chatName ?? row.chatPhoneNumber ?? undefined;
   const senderName = row.senderName ?? row.pushName ?? row.senderPhoneNumber;

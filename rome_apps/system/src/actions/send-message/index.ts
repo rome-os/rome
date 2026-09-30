@@ -9,8 +9,8 @@ import type {
   ConversationId,
   ConversationRepository,
   MessageReceipt,
+  ChannelsService,
   PreviewPayload,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 import type { SendMessageInput, SendMessageChatInput, SendMessageEmailInput } from "./types.js";
 export type { SendMessageInput, SendMessageOutput } from "./types.js";
@@ -236,11 +236,13 @@ async function resolveChatThreadId(
 }
 
 async function resolveConnectionIdForService(
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   service: string,
   requested?: string,
 ): Promise<string> {
-  const matches = (await talkRouter.list()).filter((connection) => connection.service === service);
+  const matches = (
+    (await channels.list()).find((channel) => channel.name === service)?.connectionIds ?? []
+  ).map((connectionId) => ({ connectionId }));
   if (requested) {
     if (!matches.some((connection) => connection.connectionId === requested)) {
       throw new Error(`Connection "${requested}" does not provide channel "${service}"`);
@@ -255,7 +257,7 @@ async function resolveConnectionIdForService(
 }
 
 export async function executeSendMessage(
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   input: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
@@ -263,7 +265,7 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  const connectionId = await resolveConnectionIdForService(talkRouter, channel, input.connectionId);
+  const connectionId = await resolveConnectionIdForService(channels, channel, input.connectionId);
 
   const safeInput = await validateAttachmentSources(input);
 
@@ -285,19 +287,24 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
-      kind: "email",
-      text,
-      parts,
-      attachments: safeInput.attachments,
-      turnId,
-      to: email.to,
-      cc: email.cc,
-      bcc: email.bcc,
-      subject: email.subject,
-      html: email.html,
-      inReplyToMessageId: replyTarget,
-    });
+    const delivery = await channels.send(
+      channel,
+      threadId as ConversationId,
+      {
+        kind: "email",
+        text,
+        parts,
+        attachments: safeInput.attachments,
+        turnId,
+        to: email.to,
+        cc: email.cc,
+        bcc: email.bcc,
+        subject: email.subject,
+        html: email.html,
+        inReplyToMessageId: replyTarget,
+      },
+      { connectionId },
+    );
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
     return delivery.messageId
@@ -318,13 +325,18 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
-    text,
-    parts,
-    attachments: safeInput.attachments,
-    replyToMessageId: chat.replyToMessageId,
-    turnId,
-  });
+  const delivery = await channels.send(
+    channel,
+    threadId as ConversationId,
+    {
+      text,
+      parts,
+      attachments: safeInput.attachments,
+      replyToMessageId: chat.replyToMessageId,
+      turnId,
+    },
+    { connectionId },
+  );
   await recordDeliveredConversationMessageBestEffort(
     deps,
     input,
@@ -341,7 +353,7 @@ export async function executeSendMessage(
  */
 export function createSendMessageAction(
   config: ActionConfig,
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   deps: SendMessageRuntimeDeps = {},
 ): Action {
   return {
@@ -436,7 +448,7 @@ export function createSendMessageAction(
       required: ["channel"],
     },
     execute: async (input: Record<string, unknown>): Promise<ActionResult> =>
-      executeSendMessage(talkRouter, input as unknown as SendMessageInput, deps),
+      executeSendMessage(channels, input as unknown as SendMessageInput, deps),
     // Ground-truth render of the bound call. Pure over args (no I/O), so it
     // surfaces the message body and channel — the decision-relevant facts — but
     // deliberately omits the raw threadId/channelUserId recipient, which would
@@ -458,11 +470,11 @@ export function createSendMessageAction(
 
 export function createAction(
   config: ActionConfig,
-  deps: { talkRouter: TalkRouter } & SendMessageRuntimeDeps & {
+  deps: { channels: ChannelsService } & SendMessageRuntimeDeps & {
       appContext?: { repositories?: { conversations?: ConversationRepository } };
     },
 ): Action {
-  return createSendMessageAction(config, deps.talkRouter, {
+  return createSendMessageAction(config, deps.channels, {
     ...deps,
     conversations: deps.conversations ?? deps.appContext?.repositories?.conversations,
   });

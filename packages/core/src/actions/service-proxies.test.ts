@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { BackendTurnRunnerProxy, NotifyServiceProxy, TalkRouterProxy } from "./service-proxies.js";
+import {
+  BackendTurnRunnerProxy,
+  ChannelsServiceProxy,
+  NotifyServiceProxy,
+  TalkRouterProxy,
+} from "./service-proxies.js";
 import {
   setWorkerRpcInProcessDispatcher,
   WorkerRpcDisconnectError,
@@ -52,6 +57,82 @@ describe("TalkRouterProxy", () => {
 
     expect(messages?.[0]?.timestamp).toBeInstanceOf(Date);
     expect(messages?.[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
+  });
+});
+
+describe("ChannelsServiceProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  const wireLine = {
+    channel: "discord",
+    direction: "inbound",
+    messageId: "message-1",
+    conversationId: "conversation-1",
+    senderId: "user-1",
+    text: "hello",
+    attachments: [],
+    timestamp: "2026-08-04T10:00:00.000Z",
+  };
+
+  it("sends a read's since as an instant and rehydrates the answer", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return [wireLine];
+    });
+    const proxy = new ChannelsServiceProxy();
+    const since = new Date("2026-08-04T09:00:00.000Z");
+
+    const queried = await proxy.query("discord", { since, limit: 2 });
+    const read = await proxy.history("discord", { since, connectionId: "discord-1" });
+
+    for (const page of [queried, read]) {
+      expect(page[0]?.timestamp).toBeInstanceOf(Date);
+      expect(page[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
+    }
+    expect(calls).toEqual([
+      {
+        method: "channels.query",
+        params: { channel: "discord", since: "2026-08-04T09:00:00.000Z", limit: 2 },
+      },
+      {
+        method: "channels.history",
+        params: {
+          channel: "discord",
+          since: "2026-08-04T09:00:00.000Z",
+          connectionId: "discord-1",
+        },
+      },
+    ]);
+  });
+
+  it("names the Connection a send means only when the action does", async () => {
+    process.send = undefined;
+    const calls: unknown[] = [];
+    setWorkerRpcInProcessDispatcher(async (_method, params) => {
+      calls.push(params);
+      return { messageId: "m1" };
+    });
+    const proxy = new ChannelsServiceProxy();
+
+    await proxy.send("discord", "c1" as never, { text: "a" });
+    await proxy.send("discord", "c1" as never, { text: "b" }, { connectionId: "discord-1" });
+
+    expect(calls).toEqual([
+      { channel: "discord", conversationId: "c1", message: { text: "a" } },
+      {
+        channel: "discord",
+        conversationId: "c1",
+        message: { text: "b" },
+        connectionId: "discord-1",
+      },
+    ]);
   });
 });
 

@@ -1,5 +1,11 @@
 import { describe, it, expect, rs } from "@rstest/core";
-import type { Attachment, ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type {
+  Attachment,
+  ChannelMessage,
+  ChannelsService,
+  ConversationId,
+  InboundMessage,
+} from "@rome-os/app-runtime";
 import { createAction } from "./index.js";
 
 const actionConfig = {
@@ -30,27 +36,25 @@ interface HistoryAdapter {
   fetchHistory?: (conversationId: string | null, windowHours: number) => Promise<InboundMessage[]>;
 }
 
-function makeDeps(adapters: Map<string, HistoryAdapter>): { talkRouter: TalkRouter } {
+function makeDeps(adapters: Map<string, HistoryAdapter>): { channels: ChannelsService } {
   return {
-    talkRouter: {
+    channels: {
       list: async () =>
-        [...adapters.keys()].map((service) => ({ connectionId: `test:${service}`, service })),
-      subscribe: () => () => {},
-      async send(_connectionId, conversationId) {
+        [...adapters.keys()].map((name) => ({ name, connectionIds: [`test:${name}`] })),
+      async send(_channel, conversationId) {
         return { conversationId };
       },
-      feature(connectionId, name) {
-        if (name !== "history") return null;
-        const adapter = adapters.get(connectionId.slice("test:".length));
-        if (!adapter?.fetchHistory) return null;
-        return {
-          query: ({ conversationId, since }) => {
-            const hours = since
-              ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
-              : 24;
-            return adapter.fetchHistory?.(conversationId ?? null, hours) ?? Promise.resolve([]);
-          },
-        } as never;
+      query: async () => [],
+      async history(channel, { conversationId, since }) {
+        const adapter = adapters.get(channel);
+        // What the channels service says of a channel that reads no history.
+        if (!adapter?.fetchHistory) {
+          throw new Error(`Talk history is unavailable for connection "test:${channel}"`);
+        }
+        const hours = since
+          ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
+          : 24;
+        return (await adapter.fetchHistory(conversationId ?? null, hours)) as ChannelMessage[];
       },
     },
   };
@@ -87,7 +91,7 @@ describe("fetch_channel_history", () => {
     expect(result.error).toContain("not configured");
   });
 
-  it("returns error when adapter has no fetchHistory", async () => {
+  it("returns error when the channel reads no history", async () => {
     const adapter: HistoryAdapter = {};
     const deps = makeDeps(new Map([["telegram", adapter]]));
 
@@ -95,7 +99,9 @@ describe("fetch_channel_history", () => {
     const result = await action.execute({ channel: "telegram" });
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toContain("does not support history fetching");
+    expect(result.error).toBe(
+      'Failed to fetch history from "telegram": Talk history is unavailable for connection "test:telegram"',
+    );
   });
 
   it("returns error when fetchHistory throws", async () => {

@@ -1152,6 +1152,8 @@ export interface Attachment {
   mimeType?: string;
   fileName?: string;
   caption?: string;
+  /** @deprecated Nothing reads it: an attachment's bytes come through the
+   *  channel's `inbound.media`. Removed in the next breaking release. */
   data?: Buffer;
   /** Absolute local path after an inbound channel attachment has been saved. */
   localPath?: string;
@@ -1460,7 +1462,11 @@ export interface ConversationDescriptor {
 }
 
 /** Provider-neutral message delivered by Talk. Provider-native data is an
- * opaque pass-through token reserved for a feature on the same provider. */
+ * opaque pass-through token reserved for a feature on the same provider.
+ *
+ * @deprecated Read {@link ChannelMessage}, the record every channel read
+ * answers. Inbound events carry a `ChannelMessage` in the next breaking
+ * release, which removes this name. */
 export interface InboundMessage {
   messageId: string;
   conversationId: ConversationId;
@@ -1492,12 +1498,80 @@ export interface ChannelMessage extends InboundMessage {
   /** The channel's name, as every stored row and link spells it. */
   channel: string;
   direction: "inbound" | "outbound";
+  /** Who said it, as the channel addresses them. Empty when the channel
+   *  recorded no sender for the line. */
+  senderId: string;
+}
+
+/** What {@link ChannelsService.query} asks for. Every field narrows it, and
+ *  none is required: a query naming nothing asks for the channel's newest
+ *  messages. A channel read live through its Connection reaches back a bounded
+ *  default (the last day) when no `since` is named. */
+export interface ChannelMessageQuery {
+  /** One conversation, by the platform's own id for it. Absent for every
+   *  conversation the channel can read. */
+  conversationId?: ConversationId;
+  /** Only messages said at or after this instant. */
+  since?: Date;
+  /** At most this many, newest first. Defaults to 100, capped at 1,000. */
+  limit?: number;
+}
+
+/** A channel as {@link ChannelsService.list} names it. */
+export interface ChannelSummary {
+  /** The channel's name, as every stored row and link spells it. */
+  name: string;
+  /** The Connections backing the channel now. `send` and `history` pick among
+   *  them, and need one named when there are several. */
+  connectionIds: string[];
+}
+
+/** What {@link ChannelsService.history} reads. */
+export interface ChannelHistoryRead {
+  conversationId?: ConversationId;
+  since?: Date;
+  limit?: number;
+  /** The Connection to read, needed when several back the channel. */
+  connectionId?: string;
 }
 
 /**
- * The sender id a WhatsApp group line carries when the channel recorded no
- * sender for it: the chat's own id names the group, not whoever spoke in it.
- * A reader that shows such a line under a name picks its own fallback for it.
+ * The channels this Rome has, by name: how an app action sends on a channel
+ * and reads what was said there. The same service in the main process and in
+ * an action worker, so an action never branches on where it runs.
+ */
+export interface ChannelsService {
+  /** Every channel this Rome has, with the Connections backing each now. */
+  list(): Promise<ChannelSummary[]>;
+  /**
+   * Send on a channel, through the one Connection backing it, or through
+   * `options.connectionId` when several do. Rejects when no Connection backs
+   * the channel, or when several do and none is named.
+   */
+  send(
+    channel: string,
+    conversationId: ConversationId,
+    message: OutgoingMessage,
+    options?: { connectionId?: string },
+  ): Promise<MessageReceipt>;
+  /** The channel's `messages.query`: its newest messages, newest first. */
+  query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  /**
+   * What `fetch_channel_history` has always read: each channel's history
+   * window cut as its Connection's retired history read cut it, oldest first.
+   * Kept apart from `query` because those windows differ from `query`'s. Read
+   * `query` for anything new.
+   */
+  history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
+}
+
+/**
+ * The sender id a WhatsApp group line carried when the channel recorded no
+ * sender for it.
+ *
+ * @deprecated Such a line now carries an empty `senderId`, the
+ * provider-neutral way to say no sender was recorded
+ * ({@link ChannelMessage.senderId}). Removed in the next breaking release.
  */
 export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
 
@@ -1543,6 +1617,9 @@ export interface MessageReceipt {
  * The platform's own history of a Connection's conversations: at most `limit`
  * of them at or after `since`, oldest first, each saying which channel carried
  * it and which way it went.
+ *
+ * @deprecated Read a channel's messages through {@link ChannelsService}.
+ * Removed from this package in the next breaking release.
  */
 export interface TalkHistory {
   query(input: {
@@ -1612,6 +1689,8 @@ export interface TalkDirectMessaging {
   conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
 
+/** @deprecated Reach a channel through {@link ChannelsService} or the
+ *  `channels` a hook is given. Removed in the next breaking release. */
 export interface TalkFeatureMap {
   history: TalkHistory;
   inboundMedia: TalkInboundMedia;
@@ -1622,13 +1701,21 @@ export interface TalkFeatureMap {
 
 export type TalkFeatureName = keyof TalkFeatureMap;
 
+/** @deprecated Reach a channel through {@link ChannelsService} or the
+ *  `channels` a hook is given. Removed in the next breaking release. */
 export interface Talk {
   subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
   feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
 }
 
-/** Stable provider-neutral routing surface exposed to Core consumers and Apps. */
+/**
+ * Provider-neutral routing surface keyed by Connection id.
+ *
+ * @deprecated Send and read through {@link ChannelsService}, keyed by channel
+ * name; a hook subscribes through its `channels`. Removed from this package in
+ * the next breaking release.
+ */
 export interface TalkRouter {
   list(): Promise<Array<{ connectionId: string; service: string }>>;
   subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
@@ -1715,10 +1802,12 @@ export interface Channel {
 /**
  * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
  * hears inbound messages through `channels`, one subscription per channel that
- * can receive; `talkRouter` stays for hooks that still address Connections.
+ * can receive.
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
+  /** @deprecated A hook hears and answers through `channels`. Removed in the
+   *  next breaking release. */
   talkRouter: TalkRouter;
   conversationSettings: ConversationSettingsControl;
   chatStop: ChatStopHandler;
