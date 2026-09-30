@@ -185,7 +185,8 @@
   },
   "desktop": {
     "iframeTitle": "Rome Desktop",
-    "namedIframeTitle": "Rome desktop “{{name}}”"
+    "namedIframeTitle": "Rome desktop “{{name}}”",
+    "notFound": "There is no desktop called “{{name}}”."
   },
   "chat": {
     "add": "Open an app",

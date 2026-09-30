@@ -58,4 +58,24 @@ describe("DesktopPage", () => {
       "/desktop-vnc.html?resize=scale&path=desktop-proxy/notes/websockify",
     );
   });
+
+  it.each([
+    "/desktop/websockify",
+    "/desktop/%3F",
+    "/desktop/%23",
+    "/desktop/Wechat",
+  ])("shows no desktop at %s, a path that cannot name one", async (path) => {
+    await i18n.changeLanguage("en");
+
+    const { container } = render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/desktop/:name" element={<NamedDesktopPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(screen.getByText(/There is no desktop called/)).toBeTruthy();
+  });
 });

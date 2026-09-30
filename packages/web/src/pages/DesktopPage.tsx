@@ -38,8 +38,21 @@ export default function DesktopPage({ name }: { name?: string }) {
   );
 }
 
+/** A name `rome-start-desktop.sh` accepts. `websockify` is the shared desktop's
+ *  proxy path, and characters such as `?` or `#` would end the path early, so
+ *  either would open the shared desktop under this name's title. */
+const DESKTOP_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+
 /** `/desktop/:name`. */
 export function NamedDesktopPage() {
-  const { name } = useParams<{ name: string }>();
+  const { t } = useTranslation("common");
+  const { name = "" } = useParams<{ name: string }>();
+  if (!DESKTOP_NAME.test(name) || name === "websockify") {
+    return (
+      <div className="flex h-[var(--rome-mobile-content-height)] items-center justify-center p-6 text-muted-foreground md:h-dvh">
+        {t("desktop.notFound", { name })}
+      </div>
+    );
+  }
   return <DesktopPage name={name} />;
 }

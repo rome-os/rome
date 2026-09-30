@@ -86,7 +86,8 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("rome-start-desktop.sh", () => {
+// The script and these tests read /proc and use setsid and pgrep, so they need Linux.
+describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
   it("starts the desktop detached, then reuses it", () => {
     const first = run("/rc.xml");
     expect(first.stderr).toBe("");
@@ -142,15 +143,32 @@ describe("rome-start-desktop.sh", () => {
     }
   }, 60_000);
 
-  it("refuses a display whose X lock a live process holds", () => {
+  it("clears an X lock whose pid now belongs to a program other than an X server", () => {
+    // After a container restart the lock's pid can name any new process.
     writeFileSync(`/tmp/.X${display}-lock`, `${process.pid}\n`);
 
     const result = run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      `the existing X server on :${display} is not Rome's TigerVNC process`,
-    );
-    expect(started()).toEqual([]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`Removing stale X lock /tmp/.X${display}-lock.`);
+  }, 60_000);
+
+  it("refuses a display whose X lock a live X server holds", async () => {
+    writeFileSync(join(dir, "Xvfb"), "#!/bin/sh\nwhile :; do sleep 1; done\n");
+    chmodSync(join(dir, "Xvfb"), 0o755);
+    const foreign = spawn(join(dir, "Xvfb"));
+    await once(foreign, "spawn");
+    try {
+      writeFileSync(`/tmp/.X${display}-lock`, `${foreign.pid}\n`);
+
+      const result = run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `the existing X server on :${display} is not Rome's TigerVNC process`,
+      );
+      expect(started()).toEqual([]);
+    } finally {
+      foreign.kill("SIGKILL");
+    }
   });
 
   it("refuses an RFB port another process holds", async () => {

@@ -185,7 +185,8 @@
   },
   "desktop": {
     "iframeTitle": "Rome 桌面",
-    "namedIframeTitle": "Rome 桌面“{{name}}”"
+    "namedIframeTitle": "Rome 桌面“{{name}}”",
+    "notFound": "没有名为“{{name}}”的桌面。"
   },
   "chat": {
     "add": "打开一个应用",

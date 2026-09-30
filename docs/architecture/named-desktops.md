@@ -21,12 +21,12 @@ Desktops are static. A fixed table in [`packages/core/src/desktops.ts`](../../pa
 
 ## Contracts
 
-- `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop. Any other first segment names a desktop. `/desktop-proxy/<name>` and every path under it go to that desktop's websockify port, and answer 404 when the table has no such desktop. `/desktop/<name>` therefore never shows the shared desktop under another name.
+- `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop. Any other first segment names a desktop. `/desktop-proxy/<name>` and every path under it go to that desktop's websockify port, and answer 404 when the table has no such desktop. `/desktop/<name>` shows no desktop for a name outside `^[a-z][a-z0-9-]{0,31}$` or for `websockify`, because characters such as `?` and `#` would end the proxy path early and reach the shared desktop. Together these mean `/desktop/<name>` never shows the shared desktop under another name.
 - The start script is idempotent. It reuses a running X server with the same display and RFB port, an Openbox on that display, and a websockify with the same ports, and it starts only what is missing. It exits 1 with the reason on stderr, and 2 on malformed arguments.
 
 ## Invariants
 
 1. **Desktops outlive Rome.** The script starts each program with `setsid`, so it runs in its own session and outlives the script and whoever ran it. A Rome restart leaves the display running, so the WeChat client on it keeps its sign-in. The programs end with the container.
-2. **No borrowed displays.** The script refuses a display whose X lock a live process holds when that process is not a matching X server, and a port another process listens on. It removes a lock whose owner has exited, including an unreaped zombie. A slot never moves: a conflict fails the start.
+2. **No borrowed displays.** The script refuses a display whose X lock a live X server holds when that server is not the matching Xtigervnc, and a port another process listens on. A lock survives a container restart, when its pid can name any new process, so a lock whose owner is not a live X server counts as stale and is removed. That includes an owner that has exited and an unreaped zombie. A slot never moves: a conflict fails the start.
 3. **Loopback only.** The VNC server and websockify listen on loopback only. The only way in from outside is the guardian-gated upgrade on `/desktop-proxy/<name>/`.
 4. **Viewing never starts anything.** The proxy only forwards to the table's port. A desktop in the table that is not running answers 502 (connection refused).

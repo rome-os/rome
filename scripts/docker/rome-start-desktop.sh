@@ -60,11 +60,15 @@ process_env_contains() {
   return 1
 }
 
-# A lock owner that has exited, or that nobody reaped and is a zombie, is dead.
-pid_alive() {
-  local state
+# True when pid $1 is a live X server (Xtigervnc, Xvfb, Xorg and the like).
+# A lock survives a container restart, and its pid can then name any new
+# process, so a live owner that is not an X server leaves the lock stale. So
+# does an owner that has exited, or a zombie nobody reaped.
+x_server_alive() {
+  local state comm
   state="$(sed -E 's/^.*\) (.).*$/\1/' "/proc/$1/stat" 2>/dev/null || true)"
-  [ -n "$state" ] && [ "$state" != "Z" ] && [ "$state" != "X" ]
+  comm="$(cat "/proc/$1/comm" 2>/dev/null || true)"
+  [ -n "$state" ] && [ "$state" != "Z" ] && [ "$state" != "X" ] && [[ "$comm" == X* ]]
 }
 
 fail() {
@@ -97,7 +101,7 @@ else
   LOCK="/tmp/.X${DISPLAY_NUM}-lock"
   if [ -f "$LOCK" ]; then
     OWNER="$(tr -cd '0-9' <"$LOCK" 2>/dev/null || true)"
-    if [ -n "$OWNER" ] && pid_alive "$OWNER"; then
+    if [ -n "$OWNER" ] && x_server_alive "$OWNER"; then
       fail "the existing X server on ${DISPLAY_ID} is not Rome's TigerVNC process."
     fi
     echo "Removing stale X lock ${LOCK}."
