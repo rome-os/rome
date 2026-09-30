@@ -350,6 +350,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // A lost SSE connection is not proof that its server turn ended. Keep its
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
+  const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   // Per-session FIFO queue of in-flight turnIds; the session's
@@ -1077,6 +1078,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
         if (!turns.length) {
+          suppressedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
           // The lookup may have started before a foreground send replaced the
           // recovering turn. Never settle a turn we did not query for.
@@ -1109,6 +1111,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
+        const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
+        if (target.turnId === suppressedTurnId) return;
+        if (suppressedTurnId) suppressedTurnIdsRef.current.delete(reattachSessionId);
         if (observedTurnId && target.turnId !== observedTurnId) {
           // A missed message_insert may be the only durable copy of the old
           // turn's answer. Load it before replacing that turn's live preview.
@@ -1144,6 +1149,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
 
         setStreamError(null);
+        setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
         streamOpened = true;
         finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId);
         if (finished) noteRecoverySuccess();
@@ -1159,7 +1165,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             streamController = null;
           }
           const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
-          if (!currentTurnId || currentTurnId === attachedTurnId) {
+          if (suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+          } else if (!currentTurnId || currentTurnId === attachedTurnId) {
             if (finished || reattachSessionId !== floorSessionIdRef.current) {
               recoveringSessionIdsRef.current.delete(reattachSessionId);
               endSessionStream(reattachSessionId, attachedTurnId);
@@ -1562,6 +1570,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     if (!recoveryNotice) return;
     const { sessionId, turnId } = recoveryNotice;
     if (streamingSessionsRef.current.get(sessionId)?.turnId !== turnId) return;
+    suppressedTurnIdsRef.current.set(sessionId, turnId);
+    turnStreamControllersRef.current.get(turnId)?.abort();
     recoveringSessionIdsRef.current.delete(sessionId);
     endSessionStream(sessionId, turnId);
     setRecoveryNotice(null);

@@ -947,6 +947,24 @@ describe("Chat turn stream lifecycle", () => {
     fireEvent.click(screen.getByTestId("reset-recovery"));
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
     expect(screen.queryByTestId("recovery-notice")).toBeNull();
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    const attachesBeforeRetry = rs.mocked(openTurnStream).mock.calls.length;
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(30_000);
+    });
+    expect(rs.mocked(openTurnStream).mock.calls.length).toBe(attachesBeforeRetry);
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-2", status: "running" }]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
   });
 
   it("retries recovery immediately when connectivity returns", async () => {
@@ -1105,6 +1123,18 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(openTurnStream).toHaveBeenCalledTimes(4);
     expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start() {} }))),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(5);
+    expect(screen.queryByTestId("recovery-notice")).toBeNull();
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
