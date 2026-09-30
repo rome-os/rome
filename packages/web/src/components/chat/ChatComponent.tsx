@@ -73,6 +73,9 @@ export function ChatComponent({
   }, []);
 
   const draftComposerRef = useRef<ChatComposerHandle>(null);
+  useEffect(() => {
+    if (!sessionId) draftComposerRef.current?.focus();
+  }, [sessionId]);
   const draftDragDepthRef = useRef(0);
   const [draftStreamError, setDraftStreamError] = useState<string | ChatErrorNotice | null>(null);
   const [isDraggingDraftFiles, setIsDraggingDraftFiles] = useState(false);

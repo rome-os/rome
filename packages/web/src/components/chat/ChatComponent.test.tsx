@@ -156,6 +156,17 @@ describe("ChatComponent agent identity", () => {
 });
 
 describe("ChatComponent empty home", () => {
+  it("focuses the draft composer so typing works without a click", async () => {
+    const user = userEvent.setup();
+    renderChatComponent();
+
+    const composer = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(composer);
+
+    await user.keyboard("Hello Rome");
+    expect((composer as HTMLTextAreaElement).value).toBe("Hello Rome");
+  });
+
   it("shows horizontally scrollable pinned chats and Rome News above a bottom composer", async () => {
     const user = userEvent.setup();
     const homeData = {
