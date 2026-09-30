@@ -281,4 +281,39 @@ describe("pinned built-in page context menu", () => {
         .map((item) => item.textContent),
     ).toEqual(["Open in new tab"]);
   });
+
+  it("opens no menu on a required pin where there are no tabs, since Open would only repeat a click", async () => {
+    window.rome = {};
+    renderSidebar(false, "/projects");
+
+    fireEvent.contextMenu(await findBuiltinLink("/chat"));
+
+    // A menu that would open does so synchronously on the contextmenu event.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it.each([
+    ["in the browser", false],
+    ["in the Mac app", true],
+  ] as const)("offers only unpin on the App Store row %s", async (_name, inDesktopApp) => {
+    if (inDesktopApp) window.rome = {};
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ type: "builtin", id: "store" }]));
+    renderSidebar(false);
+
+    let trigger: Element | null = null;
+    await waitFor(() => {
+      trigger = document.querySelector('nav [title="App Store"]');
+      expect(trigger).toBeTruthy();
+    });
+    expect((trigger as unknown as Element).tagName).toBe(inDesktopApp ? "BUTTON" : "A");
+    fireEvent.contextMenu(trigger as unknown as Element);
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Unpin from sidebar"]);
+  });
 });

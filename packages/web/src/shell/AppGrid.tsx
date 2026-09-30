@@ -344,8 +344,10 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     entry: BuiltinNavEntry,
     trigger: React.ReactNode,
   ): React.ReactNode => {
-    const canOpen = entry.id !== "store";
     const canUnpin = !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id);
+    // Without tabs the open item is a plain Open, which a menu earns only
+    // beside Unpin; alone it would repeat a click and take over a long-press.
+    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
     if (!canOpen && !canUnpin) return trigger;
     return (
       <ContextMenu>
