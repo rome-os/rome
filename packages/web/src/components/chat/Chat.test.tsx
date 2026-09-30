@@ -763,6 +763,7 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
     });
     expect(postSessionTurn).toHaveBeenCalled();
+    expect(listSessionTurns).toHaveBeenCalledTimes(3);
 
     await act(async () => resolveTurns([]));
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
@@ -1138,14 +1139,6 @@ describe("Chat turn stream lifecycle", () => {
     const firstError = screen.getByTestId("chat-composer").dataset.error;
     expect(firstError).toBe("stream.errors.reconnectStatus");
 
-    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-2" } });
-    fireEvent.click(screen.getByTestId("send-button"));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByTestId("chat-composer").dataset.error).toBe(firstError);
-
     await act(async () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
@@ -1164,6 +1157,43 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("keeps reconnect errors visible while an accepted follow-up retries immediately", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 503 }));
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-2" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    const error = screen.getByTestId("chat-composer").dataset.error;
+    expect(error).toBe("stream.errors.reconnectStatus");
+    const checksBeforeSend = rs.mocked(listSessionTurns).mock.calls.length;
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(checksBeforeSend);
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe(error);
   });
 
   it("does not show a reconnect error for a stream-open 404 race", async () => {

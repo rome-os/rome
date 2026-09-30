@@ -1329,6 +1329,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Late follow-up turns are discovered by the existing reattach loop.
       if (turnsForSession.size || streamingSessionsRef.current.has(sendingSessionId)) {
         if (!turnsForSession.size) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        if (recoveringSessionIdsRef.current.has(sendingSessionId)) {
+          setStreamReconnectRevision((revision) => revision + 1);
+        }
         return;
       }
       if (!pendingTurnId) {
