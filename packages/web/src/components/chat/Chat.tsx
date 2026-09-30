@@ -714,14 +714,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const loadMessages = useCallback(
     async (
       id: string,
-      options: { force?: boolean; dropLocalOptimistic?: boolean; shouldApply?: () => boolean } = {},
+      options: {
+        force?: boolean;
+        dropLocalOptimistic?: boolean;
+        shouldApply?: () => boolean;
+        bounded?: boolean;
+      } = {},
     ): Promise<boolean> => {
       if (!options.force && loadedSessionsRef.current.has(id)) return true;
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
       try {
-        const data = await listSessionMessages(id);
+        const controller = options.bounded ? new AbortController() : null;
+        const request = listSessionMessages(id, controller?.signal);
+        const data = controller
+          ? await withRequestTimeout(request, () => controller.abort())
+          : await request;
         if (data === null) {
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
@@ -1014,7 +1023,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // A disconnected reader may still own a live preview. Reloading now can
       // render its persisted copy beside that preview until recovery settles.
       if (shouldStop) {
-        return await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+        return await loadMessages(sessionId, {
+          force: true,
+          dropLocalOptimistic: true,
+          bounded: true,
+        });
       }
       return false;
     },
@@ -1148,6 +1161,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               force: true,
               dropLocalOptimistic: true,
               shouldApply: stillObserving,
+              bounded: true,
             });
             if (!loaded) {
               if (stillObserving()) noteRecoveryFailure();
@@ -1181,6 +1195,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             force: true,
             dropLocalOptimistic: true,
             shouldApply: stillObserving,
+            bounded: true,
           });
           if (!loaded) {
             if (stillObserving()) noteRecoveryFailure();

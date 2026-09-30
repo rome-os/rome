@@ -136,9 +136,13 @@ export async function getSession(sessionId: string): Promise<ChatSession | null>
  * doesn't exist" (HTTP 404) so callers can distinguish a stale URL from a
  * transient failure. Any other non-OK response throws `ChatApiError`.
  */
-export async function listSessionMessages(sessionId: string): Promise<ChatMessage[] | null> {
+export async function listSessionMessages(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<ChatMessage[] | null> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
     credentials: "include",
+    signal,
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessage[]>(res);
