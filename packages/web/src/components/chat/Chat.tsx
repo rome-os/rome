@@ -652,8 +652,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
   // Fetch messages for a session
   const loadMessages = useCallback(
-    async (id: string, options: { force?: boolean; dropLocalOptimistic?: boolean } = {}) => {
-      if (!options.force && loadedSessionsRef.current.has(id)) return;
+    async (
+      id: string,
+      options: { force?: boolean; dropLocalOptimistic?: boolean } = {},
+    ): Promise<boolean> => {
+      if (!options.force && loadedSessionsRef.current.has(id)) return true;
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
@@ -664,7 +667,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           // to the host so they can redirect to the draft surface instead of
           // leaving the user staring at an empty active-chat shell.
           onSessionNotFoundRef.current?.(id);
-          return;
+          return false;
         }
         const fetchedMessages = orderChatMessages(data);
         const dropMessageIds = options.dropLocalOptimistic
@@ -685,9 +688,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
         }
+        return true;
       } catch {
         // Leave the session unmarked so callers (auto-load + post-stream
         // refresh) can retry on the next trigger.
+        return false;
       }
     },
     [isReadVisibleSession, markSessionRead],
@@ -1021,6 +1026,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
+        if (observedTurnId && target.turnId !== observedTurnId) {
+          // A missed message_insert may be the only durable copy of the old
+          // turn's answer. Load it before replacing that turn's live preview.
+          const loaded = await loadMessages(reattachSessionId, {
+            force: true,
+            dropLocalOptimistic: true,
+          });
+          if (
+            !loaded ||
+            cancelled ||
+            locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
+            streamingSessionsRef.current.get(reattachSessionId)?.turnId !== observedTurnId
+          ) {
+            return;
+          }
+        }
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
         setStreamError(null);
@@ -1251,6 +1272,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       scrollToBottom,
       createTurnStreamController,
       releaseTurnStreamController,
+      loadMessages,
     ],
   );
 

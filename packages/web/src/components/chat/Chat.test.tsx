@@ -89,8 +89,10 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({
     live,
     actions,
+    rows,
   }: {
     live: { identity: { name: string }; isStreaming: boolean; text: string };
+    rows: { key: string }[];
     actions: {
       onSubmitAppComponent: (
         sessionId: string,
@@ -103,6 +105,7 @@ rs.mock("@/components/chat/MessageList", () => ({
       data-testid="message-list"
       data-streaming={String(live.isStreaming)}
       data-live-text={live.text}
+      data-row-keys={rows.map((row) => row.key).join(",")}
     >
       {live.identity.name}
       <button
@@ -389,6 +392,51 @@ describe("Chat session events", () => {
 });
 
 describe("Chat turn stream lifecycle", () => {
+  it("reloads the prior answer before replacing its preview with the next running turn", async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllers.push(controller);
+            },
+          }),
+        ),
+      ),
+    );
+    let turnLookups = 0;
+    rs.mocked(listSessionTurns).mockImplementation(async () =>
+      ++turnLookups === 1
+        ? [{ turnId: "turn-1", status: "running" }]
+        : [{ turnId: "turn-2", status: "running" }],
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "answer-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Completed answer" }]),
+        createdAt: "2026-09-30T14:00:00.000Z",
+      },
+    ]);
+
+    rs.useFakeTimers();
+    await act(async () => {
+      controllers[0]!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-1");
+  });
+
   it("releases a cancelled reattachment after the floor moves away", async () => {
     rs.mocked(listSessionTurns).mockImplementation(async (sid) =>
       sid === "session-1" ? [{ turnId: "turn-1", status: "running" }] : [],
