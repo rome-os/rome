@@ -59,14 +59,18 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
             CASE WHEN m.from_me THEN 1 ELSE 0 END AS outbound,
             m.chat_jid || ':' || m.id AS ref,
             m.text AS body,
-            ${waHistoryJson()} AS detail
+            m.rowid AS detail_key
           FROM wa_messages m
-          ${WA_HISTORY_JOINS}
           WHERE ${chats}
             AND m.chat_jid NOT LIKE '%@g.us'
             AND coalesce(m.type, '') <> 'reaction'`;
       },
-      detail: (raw) => channelMessageDetail(whatsAppHistoryMessage(waHistoryRow(raw))),
+      detail: {
+        of: (key) => sql`(
+          SELECT ${waHistoryJson()} FROM wa_messages m ${WA_HISTORY_JOINS} WHERE m.rowid = ${key}
+        )`,
+        map: (raw) => channelMessageDetail(whatsAppHistoryMessage(waHistoryRow(raw))),
+      },
     }),
   };
 }

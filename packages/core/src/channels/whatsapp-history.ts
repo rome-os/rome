@@ -59,8 +59,10 @@ export const WHATSAPP_SELF_SENDER = "whatsapp:self";
 /**
  * A mirrored row as a {@link ChannelMessage}.
  *
- * The guardian's own lines are named "You", the name the channel's history has
- * always given them.
+ * The sender is named by what the mirror recorded for them — the contact's
+ * name, the name they set on WhatsApp, or their number — and left unnamed
+ * otherwise. A caller that has to show a line from an unnamed sender picks its
+ * own fallback.
  */
 export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
   const isGroup = row.isGroup || row.chatJid.endsWith("@g.us");
@@ -70,15 +72,14 @@ export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
       ? (row.senderJid ?? row.chatJid)
       : row.chatJid;
   const threadName = row.chatName ?? row.chatPhoneNumber ?? undefined;
+  const senderName = row.senderName ?? row.pushName ?? row.senderPhoneNumber;
   return {
     channel: "whatsapp",
     direction: row.fromMe ? "outbound" : "inbound",
     messageId: row.id,
     conversationId: row.chatJid as ConversationId,
     senderId,
-    senderDisplayName: row.fromMe
-      ? "You"
-      : (row.senderName ?? row.pushName ?? row.senderPhoneNumber ?? row.senderJid ?? "Unknown"),
+    ...(senderName ? { senderDisplayName: senderName } : {}),
     text: historyText(row),
     attachments: historyAttachments(row),
     timestamp: row.timestamp,

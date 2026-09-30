@@ -3,6 +3,7 @@
 
 import { sql } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
+import type { Message } from "@rome/api-types/message";
 import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 
@@ -37,8 +38,6 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
             AND s.source_thread_id = l.thread_id
             AND s.source_thread_type = 'group'
         )`;
-      // The log keeps the thread's id but not its name, and the reply's sender
-      // is Rome, which it does not record.
       return sql`
         SELECT
           l.channel AS source,
@@ -47,11 +46,7 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
           0 AS outbound,
           'sentinel:' || l.id AS ref,
           l.text AS body,
-          json_object(
-            'senderId', l.channel_user_id,
-            'senderName', l.display_name,
-            'threadId', l.thread_id
-          ) AS detail
+          l.id AS detail_key
         FROM sentinel_log l
         WHERE ${direct}
         UNION ALL
@@ -62,21 +57,35 @@ export function sentinelLogMessages(db: DrizzleDb): AccountMessages {
           1,
           'sentinel:' || l.id || ':reply',
           l.response,
-          json_object('threadId', l.thread_id)
+          l.id
         FROM sentinel_log l
         WHERE ${direct} AND l.response IS NOT NULL AND l.response <> ''`;
     },
-    detail: logDetail,
+    detail: {
+      of: (key) => sql`(
+        SELECT json_object(
+          'senderId', l.channel_user_id,
+          'senderName', l.display_name,
+          'threadId', l.thread_id
+        )
+        FROM sentinel_log l
+        WHERE l.id = ${key}
+      )`,
+      map: logDetail,
+    },
   });
 }
 
 /** Who a log line names as its sender and the thread it names, as recorded.
- *  The log keeps neither the thread's name nor whether it is a group. */
-function logDetail(raw: Record<string, unknown>): MessageDetail {
+ *  The log keeps neither the thread's name nor whether it is a group. Rome's
+ *  reply shares its row, and the log does not record Rome as a sender. */
+function logDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
   const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
   const detail: MessageDetail = {};
   const sender = { id: text(raw.senderId), name: text(raw.senderName) };
-  if (sender.id !== null || sender.name !== null) detail.sender = sender;
+  if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
+    detail.sender = sender;
+  }
   const threadId = text(raw.threadId);
   if (threadId !== null) detail.conversation = { id: threadId, name: null, kind: null };
   return detail;

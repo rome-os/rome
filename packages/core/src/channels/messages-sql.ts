@@ -16,17 +16,16 @@ import type { AccountMessages, MessageAccount, MessageDetail, MessageRead } from
 
 /**
  * A store's rows as timeline entries: a SELECT producing exactly the columns
- * `source`, `key`, `at`, `outbound`, `ref`, `body` and `detail`.
+ * `source`, `key`, `at`, `outbound`, `ref`, `body` and `detail_key`.
  *
  * - `source` is the channel an entry arrived on, and `key` the scope entry the
  *   row answers for — one of the strings the view was handed, an address of
  *   the account a message belongs to.
  * - `at` is epoch seconds, `outbound` is 1 for something Rome said and 0 for
  *   something it was told, `body` is the line to render or NULL.
- * - `detail` describes the message and selects nothing: a JSON object of the
- *   row's own fields, which the store's `detail` option turns into who said it,
- *   where and with what attached. One column, so a store reads it with the same
- *   mapper its `query` uses.
+ * - `detail_key` names the stored row, for the store's `detail` option to look
+ *   the message up by. The lookup runs only for the rows a call returns, never
+ *   for the history a count or a ranking passes over.
  * - `ref` must be unique across everything the store can put on one person's
  *   timeline. Ids unique only within a conversation (a WhatsApp message id, a
  *   LinkedIn message id) are qualified by the conversation.
@@ -80,9 +79,18 @@ export interface SqlMessagesOptions {
    * as expensive as the parse it wraps.
    */
   body?(raw: string | null): string | null;
-  /** The view's `detail` object as what a timeline entry says about the
-   *  message beyond its line. */
-  detail(raw: Record<string, unknown>): MessageDetail;
+  /**
+   * What a timeline entry says about the message beyond its line: who said
+   * it, where, and with what attached.
+   */
+  detail: {
+    /** A scalar subquery answering one JSON object for the row `key` names —
+     *  the view's `detail_key`. */
+    of(key: SQL): SQL;
+    /** That object as the entry's detail, for the entry it describes. A store
+     *  answering `query` too maps it with the same mapper. */
+    map(raw: Record<string, unknown>, entry: Message): MessageDetail;
+  };
 }
 
 /**
@@ -215,7 +223,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
         held.outbound AS outbound,
         held.ref AS ref,
         held.body AS body,
-        held.detail AS detail
+        held.detail_key AS detail_key
       FROM (${rows}) held
       -- The pair, never the key alone: a store holding several channels side by
       -- side would otherwise hand one channel's message to a job that asked
@@ -238,7 +246,7 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
         scoped.outbound AS outbound,
         scoped.ref AS ref,
         scoped.body AS body,
-        scoped.detail AS detail,
+        scoped.detail_key AS detail_key,
         ask.cap AS cap,
         row_number() OVER w AS position,
         count(*) OVER w AS total
@@ -252,8 +260,10 @@ async function runBatch(options: SqlMessagesOptions, jobs: Job[]): Promise<JobRe
       )
     )
     -- Never fewer than one row per job: a job that asked for no page still has
-    -- to be told how long the history it did not ask for is.
-    SELECT rq, source, at, outbound, ref, body, detail, position, total
+    -- to be told how long the history it did not ask for is. The detail is
+    -- looked up here, for the rows a job keeps and no others.
+    SELECT rq, source, at, outbound, ref, body, position, total,
+      CASE WHEN position <= cap THEN ${options.detail.of(sql`ranked.detail_key`)} END AS detail
     FROM ranked
     WHERE position <= max(cap, 1)
     ORDER BY rq ASC, position ASC
@@ -313,7 +323,8 @@ function toEntry(row: Record<string, unknown>, options: SqlMessagesOptions): Mes
     ref: String(row.ref),
     body: options.body ? options.body(raw) : raw,
   };
-  const detail = typeof row.detail === "string" ? options.detail(JSON.parse(row.detail)) : {};
+  const detail =
+    typeof row.detail === "string" ? options.detail.map(JSON.parse(row.detail), entry) : {};
   return { ...entry, ...detail };
 }
 

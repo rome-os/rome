@@ -59,7 +59,7 @@ export function linkedInMessages(db: DrizzleDb): Messages {
             CASE WHEN m.sender_is_self THEN 1 ELSE 0 END AS outbound,
             m.thread_id || ':' || m.message_id AS ref,
             m.text AS body,
-            ${linkedInHistoryJson()} AS detail
+            m.rowid AS detail_key
           FROM linkedin_messages m
           JOIN linkedin_threads t ON t.thread_id = m.thread_id
           JOIN linkedin_thread_participants tp
@@ -69,7 +69,15 @@ export function linkedInMessages(db: DrizzleDb): Messages {
               SELECT count(*) FROM linkedin_thread_participants x WHERE x.thread_id = m.thread_id
             ) <= 2`;
       },
-      detail: (raw) => channelMessageDetail(linkedInHistoryMessage(linkedInHistoryRow(raw))),
+      detail: {
+        of: (key) => sql`(
+          SELECT ${linkedInHistoryJson()}
+          FROM linkedin_messages m
+          LEFT JOIN linkedin_threads t ON t.thread_id = m.thread_id
+          WHERE m.rowid = ${key}
+        )`,
+        map: (raw) => channelMessageDetail(linkedInHistoryMessage(linkedInHistoryRow(raw))),
+      },
     }),
   };
 }

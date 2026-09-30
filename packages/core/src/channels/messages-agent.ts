@@ -76,13 +76,7 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
           ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
           m.content AS body,
-          json_object(
-            'senderId', m.sender_id,
-            'senderName', m.sender_name,
-            'threadId', s.source_thread_id,
-            'threadName', s.source_thread_name,
-            'threadType', s.source_thread_type
-          ) AS detail
+          m.id AS detail_key
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
@@ -95,7 +89,21 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
     body: messageContentText,
-    detail: transcriptDetail,
+    detail: {
+      of: (key) => sql`(
+        SELECT json_object(
+          'senderId', m.sender_id,
+          'senderName', m.sender_name,
+          'threadId', s.source_thread_id,
+          'threadName', s.source_thread_name,
+          'threadType', s.source_thread_type
+        )
+        FROM rome_agent_messages m
+        JOIN rome_sessions s ON s.id = m.session_id
+        WHERE m.id = ${key}
+      )`,
+      map: transcriptDetail,
+    },
   });
 }
 

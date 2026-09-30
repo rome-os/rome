@@ -109,7 +109,8 @@ describe("whatsAppMessages", () => {
       direction: "inbound",
       ref: `${PHONE}:e`,
       body: "latest",
-      sender: { id: PHONE, name: PHONE },
+      // The mirror holds no name for this contact, so none is given.
+      sender: { id: PHONE, name: null },
       conversation: { id: PHONE, name: null, kind: "dm" },
     });
   });
@@ -178,7 +179,7 @@ describe("whatsAppMessages", () => {
     // The guardian's line in a direct chat, which the sync stores with no sender.
     expect(read.find((entry) => entry.ref === `${PHONE}:c`)?.sender).toEqual({
       id: WHATSAPP_SELF_SENDER,
-      name: "You",
+      name: null,
     });
   });
 
@@ -215,11 +216,9 @@ describe("whatsAppMessages", () => {
       .then((page) => page.filter((entry) => entry.messageId === "c"));
     // The sync records no sender for the guardian's line in a direct chat, and
     // the chat's JID is the contact's, so the line is marked as the guardian's.
-    expect(answered).toMatchObject({
-      direction: "outbound",
-      senderId: WHATSAPP_SELF_SENDER,
-      senderDisplayName: "You",
-    });
+    expect(answered).toMatchObject({ direction: "outbound", senderId: WHATSAPP_SELF_SENDER });
+    // Nobody recorded a name for the guardian's line, so it carries none.
+    expect(answered?.senderDisplayName).toBeUndefined();
     const [group] = await store.query({ conversationId: groupChat, limit: 1 });
     expect(group?.thread).toEqual({ kind: "group", name: "Book club" });
 
