@@ -108,8 +108,10 @@ export function isInterruptedAccounting(accounting: AgentAccounting | undefined)
  * A user interrupt wins over what the provider reported. An `error` terminal
  * reports `error` even when the model itself finished (for example, when Rome
  * rejected its structured output). A `result` terminal never reports `error`:
- * a provider error that still arrived as a result reports `other`. Returns
- * undefined when the turn produced no terminal block.
+ * a provider error that still arrived as a result reports `other`. An
+ * interrupted turn reports `interrupted` even without a terminal block.
+ * Returns undefined only when the turn was neither interrupted nor produced a
+ * terminal block.
  */
 export function resolveTurnStop(params: {
   accounting: AgentAccounting | undefined;

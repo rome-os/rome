@@ -2281,6 +2281,63 @@ describe("AgentRunner", () => {
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
     });
 
+    it("treats a provider-reported interrupt as interrupted and skips its checkpoint", async () => {
+      // What CodexAppServerProvider emits when codex reports
+      // `turn/completed { status: "interrupted" }` and Rome did not interrupt:
+      // a result whose accounting stop is `interrupted` (the deprecated string
+      // still says `end_turn`), with a checkpoint for that turn available.
+      const lifecycle = createLifecycleRecorder();
+      const provider: ModelProvider = {
+        id: "openai",
+        displayName: "Codex",
+        builtinTools: new Set(),
+        async openSession(params) {
+          const session = createSessionFromRun(
+            "openai",
+            async function* () {
+              yield {
+                type: "result",
+                content: "partial answer",
+                accounting: {
+                  provider: "openai",
+                  model: params.model,
+                  usage: {
+                    cacheReadTokens: 0,
+                    cacheWriteTokens: 0,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                  },
+                  stop: { reason: "interrupted", raw: "interrupted" },
+                  stopReason: "end_turn",
+                },
+              };
+            },
+            params,
+          );
+          return {
+            ...session,
+            providerThreadId: "codex-thread",
+            lastCompletedTurnCheckpoint: "codex-turn-1",
+          };
+        },
+      };
+      const runner = createRunner(provider, lifecycle);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+      const start = messages.find((message) => message.type === "turn_start");
+      expect(start).toBeDefined();
+      if (!start || start.type !== "turn_start") return;
+
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
+      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(lifecycle.finished[0]).toMatchObject({
+        status: "interrupted",
+        output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
+      });
+    });
+
     it("persists the session model pin for a completed Rome turn", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const runner = createRunner(provider);

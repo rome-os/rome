@@ -1391,6 +1391,43 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("reports a codex-initiated interrupt as an interrupted stop on the result", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "partial", phase: "final_answer" },
+          threadId: "thr-1",
+          turnId: "turn-1",
+          completedAtMs: 0,
+        });
+        // Codex ends the turn itself; Rome never calls interrupt().
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "interrupted" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go" });
+    const result = (await collected).find((m) => m.type === "result");
+
+    expect(requestMock).not.toHaveBeenCalledWith("turn/interrupt", expect.anything());
+    expect(result).toMatchObject({
+      type: "result",
+      accounting: { stop: { reason: "interrupted", raw: "interrupted" }, stopReason: "end_turn" },
+    });
+    // The adapter still offers this turn as a checkpoint; AgentSession is
+    // what declines to persist it for an interrupted turn.
+    expect(session.lastCompletedTurnCheckpoint).toBe("turn-1");
+    await session.close();
+  });
+
   it("treats a missing cache-write field in compatibility usage notifications as zero", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
