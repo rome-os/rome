@@ -943,8 +943,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
       }
 
-      // After stream ends, reload messages from DB (gets both trace + assistant)
-      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      // A disconnected reader may still own a live preview. Reloading now can
+      // render its persisted copy beside that preview until recovery settles.
+      if (shouldStop) {
+        await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      }
       return shouldStop;
     },
     [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
@@ -1043,9 +1046,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
           if (!currentTurnId || currentTurnId === attachedTurnId) {
-            if (finished) {
+            if (finished || reattachSessionId !== floorSessionIdRef.current) {
               recoveringSessionIdsRef.current.delete(reattachSessionId);
               endSessionStream(reattachSessionId, attachedTurnId);
+              if (!finished) {
+                void loadMessages(reattachSessionId, {
+                  force: true,
+                  dropLocalOptimistic: true,
+                });
+              }
             } else {
               // Cleanup aborts the reader too. The next effect must reattach
               // rather than skip this retained entry forever.
@@ -1217,7 +1226,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               const canRecover = !finished && sendingSessionId === floorSessionIdRef.current;
               if (canRecover) recoveringSessionIdsRef.current.add(sendingSessionId);
               else recoveringSessionIdsRef.current.delete(sendingSessionId);
-              if (!canRecover) endSessionStream(sendingSessionId, pendingTurnId);
+              if (!canRecover) {
+                endSessionStream(sendingSessionId, pendingTurnId);
+                if (!finished) {
+                  void loadMessages(sendingSessionId, {
+                    force: true,
+                    dropLocalOptimistic: true,
+                  });
+                }
+              }
             }
             setStreamReconnectRevision((revision) => revision + 1);
           }
@@ -1393,6 +1410,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (!stillOwnsStream()) return;
         }
         targetController?.abort();
+        recoveringSessionIdsRef.current.delete(sid);
         endSessionStream(sid, turnId);
         void loadMessages(sid, { force: true, dropLocalOptimistic: true });
       }, delayMs);
