@@ -30,7 +30,7 @@ Each process carries `ROME_DESKTOP=<name>` in its environment. Rome finds its de
 3. **Pins.** A pinned name always uses its pin. Legacy `WECHAT_USER_DISPLAY` pins `wechat`, with `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT`. A pinned name adopts a matching X server that has no marker, which is how Rome takes over the display the entrypoint started for WeChat. When something else holds the pin, `acquire` fails rather than move. No other name takes a slot that overlaps a pin.
 4. **No borrowed displays.** Rome never adopts an X server or a port it did not start for that name. A lock whose owner has exited is removed before a start.
 5. **Desktops outlive Rome.** The processes run in their own sessions, detached from Rome, so a Rome restart or a `tsx --watch` reload leaves them running. They end with the container.
-6. **Loopback only.** The X server's VNC port and websockify listen on `127.0.0.1` only. The only way in from outside is the guardian-gated upgrade on `/desktop-proxy/<name>/`.
+6. **Loopback only.** The X server's VNC port and websockify listen on loopback only. The only way in from outside is the guardian-gated upgrade on `/desktop-proxy/<name>/`.
 7. **Small environment.** The processes get `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG` and the marker, and none of Rome's configuration or credentials.
 
 Outside the container, where the desktop programs are not installed, `acquire` throws `DesktopUnavailable`.
