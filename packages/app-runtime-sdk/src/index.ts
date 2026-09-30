@@ -1558,7 +1558,13 @@ export interface ChannelsService {
     message: OutgoingMessage,
     options?: { connectionId?: string },
   ): Promise<MessageReceipt>;
-  /** The channel's `messages.query`: its newest messages, newest first. */
+  /**
+   * The channel's `messages.query`: its newest messages, newest first.
+   *
+   * A channel read live through its Connection shares one read for 30 seconds
+   * among the queries over the same window, so a message just sent through
+   * `send` may not appear until that read expires.
+   */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
   /**
    * What `fetch_channel_history` has always read: each channel's history

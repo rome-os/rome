@@ -23,15 +23,16 @@ import type { Channels } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
 
 export interface ChannelsServiceDeps {
-  /** The channel list. A function, because the list is built after the
-   *  services that hand this one out. */
-  channels: () => Channels;
+  /** The channel list, or undefined until it is built. It is built after the
+   *  services that hand this one out, and until then `list` names only the
+   *  channels a Connection backs, `send` works, and nothing reads messages. */
+  channels: () => Channels | undefined;
   /** The Connections that back sending and live history. */
   router: Pick<TalkRouter, "list" | "send" | "feature">;
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
-  const find = (name: string) => deps.channels().find((channel) => channel.name === name);
+  const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
 
   /** The Connection an action means: the one it names, which must back the
    *  channel, or else the only one that does. */
@@ -60,7 +61,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         summary.connectionIds.push(connectionId);
         summaries.set(service, summary);
       }
-      for (const channel of deps.channels()) {
+      for (const channel of deps.channels() ?? []) {
         if (!summaries.has(channel.name)) {
           summaries.set(channel.name, { name: channel.name, connectionIds: [] });
         }

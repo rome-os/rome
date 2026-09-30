@@ -469,6 +469,14 @@ export class WorkerRpcServer {
     );
     const channel = this.channelOf(connectionId);
     if (!channel) throw new Error(`unknown connection "${connectionId}"`);
+    // A Connection whose service has no Talk backs no channel. Say so as the
+    // router did, rather than that it does not provide its own channel.
+    const backing = (await this.services.channelsService.list()).find(
+      (candidate) => candidate.name === channel,
+    );
+    if (!backing?.connectionIds.includes(connectionId)) {
+      throw new Error(`Talk is unavailable for connection "${connectionId}"`);
+    }
     return await this.services.channelsService.send(
       channel,
       conversationId as ConversationId,

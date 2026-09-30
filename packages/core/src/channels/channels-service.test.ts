@@ -57,6 +57,24 @@ describe("createChannelsService", () => {
     ]);
   });
 
+  // The main process hands the service out before it builds the channel list,
+  // and startup hooks and approval cards can reach it in between.
+  it("lists and sends from the Connections alone before the channel list exists", async () => {
+    const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
+    const early = createChannelsService({
+      channels: () => undefined,
+      router: { list: async () => CONNECTIONS, send, feature: rs.fn(() => null) as never },
+    });
+
+    expect((await early.list()).map((channel) => channel.name)).toEqual([
+      "discord",
+      "telegram_user",
+    ]);
+    await early.send("discord", "c1" as ConversationId, { text: "hi" });
+    expect(send).toHaveBeenCalledWith("discord-1", "c1", { text: "hi" });
+    await expect(early.query("discord")).rejects.toThrow('Channel "discord" reads no messages');
+  });
+
   it("sends through a channel's only Connection", async () => {
     const { channelsService, send } = service();
 

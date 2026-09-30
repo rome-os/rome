@@ -163,6 +163,9 @@ export function createAction(
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
+      // The service applies the same none/several rule in `history`, but with
+      // `send_message`'s error texts. These are the texts this tool has always
+      // answered, which the parity snapshot pins, so the check stays here.
       const connections =
         (await channels.list()).find((item) => item.name === channel)?.connectionIds ?? [];
       if (connections.length === 0) {

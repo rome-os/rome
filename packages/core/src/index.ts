@@ -314,8 +314,13 @@ async function main() {
     }),
   );
   // How app actions — here and, over RPC, in workers — send and read on
-  // channels by name. The channel list is built further down.
-  const channelsService = createChannelsService({ channels: () => channels, router: talkRouter });
+  // channels by name. The channel list is built further down, and the service
+  // answers from the Connections alone until then (startup hooks, approvals).
+  let builtChannels: ReturnType<typeof channelList> | undefined;
+  const channelsService = createChannelsService({
+    channels: () => builtChannels,
+    router: talkRouter,
+  });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
@@ -1012,6 +1017,7 @@ async function main() {
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
   });
+  builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();

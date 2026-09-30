@@ -306,6 +306,25 @@ describe("WorkerRpcServer param validation", () => {
     });
   });
 
+  it("says a Connection with no Talk cannot send, as the router did", async () => {
+    const send = rs.fn();
+    const { server } = makeServer({
+      channelsService: { list: async () => [{ name: "github", connectionIds: [] }], send },
+      connectionRegistry: { all: () => [{ id: "gh-1", service: "github" }] },
+    });
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+
+    const response = await rpc(fake, "talk.send", {
+      connectionId: "gh-1",
+      conversationId: "c1",
+      message: { text: "hi" },
+    });
+
+    expect(response.error).toContain('Talk is unavailable for connection "gh-1"');
+    expect(send).not.toHaveBeenCalled();
+  });
+
   describe("talk.history.query", () => {
     const line = (messageId: string, at: number) => ({
       messageId,
