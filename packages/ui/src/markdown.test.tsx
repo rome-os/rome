@@ -211,6 +211,15 @@ describe("Markdown", () => {
     expect(container.querySelectorAll("li")).toHaveLength(3);
   });
 
+  it("lets a table grow to its full height instead of scrolling inside a cap", () => {
+    const rows = Array.from({ length: 20 }, (_, i) => `| row ${i} | value ${i} |`).join("\n");
+    const { container } = renderMd(`| Key | Value |\n| --- | --- |\n${rows}`);
+    const scroller = container.querySelector('[data-streamdown="table"]')?.parentElement;
+
+    expect(scroller).not.toBeNull();
+    expect(scroller?.style.maxHeight).toBe("");
+  });
+
   it("marks compact mode without changing semantic element roles", () => {
     const { container } = renderMd("# Title\n\nBody", {
       compact: true,
