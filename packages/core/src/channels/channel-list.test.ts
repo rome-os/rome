@@ -181,6 +181,8 @@ describe("channelList", () => {
     );
 
     const connection = await registry.connect("telegram");
+    // The Connection exists but its Talk is not built until a credential backs it.
+    await expect(telegram.messages!.query({})).rejects.toBeInstanceOf(ChannelNotConnected);
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },
       expiresAt: "never",
@@ -215,6 +217,37 @@ describe("channelList", () => {
       service: "telegram",
       declared: false,
       offered: true,
+    });
+  });
+
+  it("builds a Talk whose history cannot be checked, and says so", async () => {
+    testDb = createTestDb();
+    const warn = rs.fn();
+    const logger = { debug: rs.fn(), info: rs.fn(), warn, error: rs.fn() };
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(testDb.db),
+      logger: logger as never,
+    });
+    const service = talkService("telegram");
+    const build = service.descriptor.capabilities.talker!.build;
+    service.descriptor.capabilities.talker!.build = (creds, kit) => ({
+      ...build(creds, kit),
+      feature: () => {
+        throw new Error("not started");
+      },
+    });
+    registry.register(service.descriptor);
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+
+    expect(service.epochs).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith("could not check the talker's history flag", {
+      connectionId: connection.id,
+      service: "telegram",
+      error: "not started",
     });
   });
 

@@ -10,6 +10,7 @@ import type {
   TalkHistory,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
+import type { HistoryLine } from "../../channels/types.js";
 
 /** Adapters still normalize their provider SDK events into the established
  * internal shape. The integration owns the one-way projection into Talk's
@@ -142,15 +143,33 @@ export function historyFeature(
   },
   record: { channel: string; isOwn?(message: NormalizedMessage): boolean },
 ): TalkHistory {
+  return historyLinesFeature(
+    {
+      async fetchHistoryLines(conversationId, windowHours) {
+        const messages = await adapter.fetchHistory(conversationId, windowHours);
+        return messages.map((message) => ({ message, own: record.isOwn?.(message) ?? false }));
+      },
+    },
+    record.channel,
+  );
+}
+
+/** History over an adapter whose read says itself which lines it wrote. */
+export function historyLinesFeature(
+  adapter: {
+    fetchHistoryLines(conversationId: string | null, windowHours: number): Promise<HistoryLine[]>;
+  },
+  channel: string,
+): TalkHistory {
   return {
     async query(input) {
-      const messages = await adapter.fetchHistory(
+      const lines = await adapter.fetchHistoryLines(
         input.conversationId ?? null,
         historyWindowHours(input.since),
       );
-      return messages
+      return lines
         .slice(0, historyQueryLimit(input.limit))
-        .map((message) => toHistoryMessage(message, record.channel, record.isOwn?.(message)));
+        .map((line) => toHistoryMessage(line.message, channel, line.own));
     },
   };
 }

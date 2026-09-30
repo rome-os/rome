@@ -65,6 +65,13 @@ export function connectionPorts(
  * wider default would not answer newer lines: some platforms' reads (Discord's)
  * keep the oldest lines after their cutoff, so reaching further back trades
  * the newest lines for older ones. A caller wanting more names a `since`.
+ *
+ * Every query is a live platform read, and nothing here caches or throttles
+ * it. One naming no conversation is the costly kind: a Telegram account reads
+ * its fifty newest chats and fifty lines of each, Discord every channel of
+ * every server the bot is in, and email hydrates up to a thousand message
+ * bodies. A caller that reads often names a conversation, or keeps what it
+ * read. Rome's own `fetch_channel_history` does not read through this port.
  */
 export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
 
@@ -74,7 +81,9 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       const connectionId = connectionIdFor(deps, service);
       if (!connectionId) throw new ChannelNotConnected(service);
       const history = deps.router.feature(connectionId, "history");
-      if (!history) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
+      // A Connection whose Talk is not built yet (a credential missing or
+      // degraded) backs nothing, the same as no Connection at all.
+      if (!history) throw new ChannelNotConnected(service);
       const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
       const read = await history.query({
         ...(conversationId ? { conversationId } : {}),

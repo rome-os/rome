@@ -574,9 +574,9 @@ describe("EmailAdapter.fetchHistory", () => {
     // The configured address in display-name form, with capitals.
     const adapter = makeAdapter(provider, { address: "Rome <Slug@Mail.RomeOS.cc>" });
 
-    const messages = await adapter.fetchHistory(null, 24);
+    const lines = await adapter.fetchHistoryLines(null, 24);
 
-    expect(messages.map((m) => [m.id, adapter.sentByThisInbox(m)])).toEqual([
+    expect(lines.map((line) => [line.message.id, line.own])).toEqual([
       ["mine", true],
       ["theirs", false],
     ]);
@@ -591,9 +591,9 @@ describe("EmailAdapter.fetchHistory", () => {
     });
     const adapter = makeAdapter(provider, { address: "" });
 
-    const [line] = await adapter.fetchHistory(null, 24);
+    const [line] = await adapter.fetchHistoryLines(null, 24);
 
-    expect(line && adapter.sentByThisInbox(line)).toBe(true);
+    expect(line?.own).toBe(true);
   });
 
   it("filters to a single thread when threadId is given", async () => {

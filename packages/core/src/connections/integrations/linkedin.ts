@@ -19,12 +19,7 @@
 // Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type {
-  ConversationId,
-  NormalizedMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ConversationId, TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -36,7 +31,7 @@ import {
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
 import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {

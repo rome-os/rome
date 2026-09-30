@@ -51,7 +51,7 @@ import type {
   Talker,
 } from "../types.js";
 import {
-  historyFeature,
+  historyLinesFeature,
   inboundMediaFeature,
   toInboundMessage,
   toMessageReceipt,
@@ -300,10 +300,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter, {
-                  channel: "email",
-                  isOwn: (message) => adapter.sentByThisInbox(message),
-                }),
+                history: historyLinesFeature(adapter, "email"),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },

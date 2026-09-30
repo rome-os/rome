@@ -1004,7 +1004,18 @@ class ConnectionImpl implements Connection {
     const capDef = this.descriptor.capabilities[slot.kind];
     if (!capDef) return;
     const instance = capDef.build(creds, kit);
-    if (slot.kind === "talker") this.checkHistoryDeclared(instance as Talker);
+    if (slot.kind === "talker") {
+      try {
+        this.checkHistoryDeclared(instance as Talker);
+      } catch (err) {
+        // A diagnostic that cannot run says so, and never fails the build.
+        this.log.warn("could not check the talker's history flag", {
+          connectionId: this.id,
+          service: this.service,
+          error: errMsg(err),
+        });
+      }
+    }
     const epoch: Epoch = {
       token: ++this.epochCounter,
       instance,
