@@ -216,3 +216,69 @@ it("unpins the app from its context menu", async () => {
     );
   });
 });
+
+describe("pinned built-in page context menu", () => {
+  beforeEach(() => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { type: "builtin", id: "people" },
+        { type: "app", id: "recipe-box" },
+      ]),
+    );
+  });
+
+  async function findBuiltinLink(href: string): Promise<HTMLAnchorElement> {
+    let link: HTMLAnchorElement | null = null;
+    await waitFor(() => {
+      link = document.querySelector(`nav a[href="${href}"]`);
+      expect(link).toBeTruthy();
+    });
+    return link as HTMLAnchorElement;
+  }
+
+  it.each([
+    ["expanded sidebar", false],
+    ["collapsed rail", true],
+  ] as const)("offers new-tab and unpin, like an app row, in the %s", async (_name, collapsed) => {
+    renderSidebar(collapsed);
+
+    fireEvent.contextMenu(await findBuiltinLink("/people"));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab", "Unpin from sidebar"]);
+    expect(
+      within(menu).getByRole("menuitem", { name: "Open in new tab" }).getAttribute("href"),
+    ).toBe("/people");
+  });
+
+  it("unpins the page from its context menu and keeps the app pin", async () => {
+    const user = userEvent.setup();
+    renderSidebar(false);
+
+    fireEvent.contextMenu(await findBuiltinLink("/people"));
+    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+
+    expect(document.querySelector('nav a[href="/people"]')).toBeNull();
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    expect(stored).not.toContainEqual({ type: "builtin", id: "people" });
+    expect(stored).toContainEqual({ type: "app", id: "recipe-box" });
+  });
+
+  it("offers no unpin on a required pin", async () => {
+    renderSidebar(false, "/projects");
+
+    fireEvent.contextMenu(await findBuiltinLink("/chat"));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab"]);
+  });
+});
