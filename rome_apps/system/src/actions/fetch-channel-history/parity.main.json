@@ -5001,5 +5001,25 @@
         ]
       }
     }
+  },
+  {
+    "args": {
+      "channel": "telegram"
+    },
+    "result": {
+      "status": "error",
+      "error": "Failed to fetch history from \"telegram\": Talk history is unavailable for connection \"c-tgbot\""
+    }
+  },
+  {
+    "args": {
+      "channel": "telegram",
+      "threadId": "42",
+      "includeMessages": true
+    },
+    "result": {
+      "status": "error",
+      "error": "Failed to fetch history from \"telegram\": Talk history is unavailable for connection \"c-tgbot\""
+    }
   }
 ]

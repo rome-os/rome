@@ -19,9 +19,8 @@ import type {
   OutgoingMessage,
   TalkRouter,
 } from "@rome-os/app-runtime";
-import type { ApprovalCreatedEvent } from "../actions/engine.js";
-import { readTalkHistory } from "../actions/talk-history.js";
 import type { Channels } from "./channel.js";
+import { readTalkHistory } from "./talk-history.js";
 
 export interface ChannelsServiceDeps {
   /** The channel list. A function, because the list is built after the
@@ -101,44 +100,4 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       );
     },
   };
-}
-
-/**
- * Put an approval's card in the conversation the approval came from, through
- * the Connection that conversation arrived on, or the channel's only one.
- * Nothing is sent for an approval with no conversation, or on a channel where
- * that Connection cannot be told.
- */
-export async function sendApprovalCard(
-  channels: Pick<ChannelsService, "list" | "send">,
-  { approvalId, actionName, preview, channelContext }: ApprovalCreatedEvent,
-): Promise<void> {
-  if (!channelContext) return;
-  const backing =
-    (await channels.list()).find((channel) => channel.name === channelContext.channel)
-      ?.connectionIds ?? [];
-  const connectionId =
-    channelContext.connectionId ?? (backing.length === 1 ? backing[0] : undefined);
-  if (!connectionId) return;
-  const payload = preview ?? {
-    kind: "generic" as const,
-    title: actionName,
-    summary: `The agent wants to run "${actionName}" and needs your approval.`,
-  };
-  await channels.send(
-    channelContext.channel,
-    channelContext.threadId as ConversationId,
-    {
-      parts: [
-        {
-          type: "approval_card",
-          approvalId,
-          actionName,
-          preview: payload,
-          status: "pending",
-        },
-      ],
-    },
-    { connectionId },
-  );
 }

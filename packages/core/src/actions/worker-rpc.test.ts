@@ -289,6 +289,21 @@ describe("WorkerRpcServer param validation", () => {
 
       expect(response.error).toMatch(/channels\.query: invalid params/);
     });
+
+    it("refuses a query naming a Connection, which it cannot honour", async () => {
+      const query = rs.fn(async () => []);
+      const { server } = makeServer({ channelsService: { query } });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "channels.query", {
+        channel: "telegram_user",
+        connectionId: "tg-b",
+      });
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+      expect(query).not.toHaveBeenCalled();
+    });
   });
 
   describe("talk.history.query", () => {

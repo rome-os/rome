@@ -46,7 +46,7 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { sendApprovalCard } from "../channels/channels-service.js";
+import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -111,9 +111,9 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
-  // Deprecated for app actions; `channels` replaces it.
+  // Deprecated for app actions; `channelsService` replaces it.
   const talkRouter = new TalkRouterProxy();
-  const channels = new ChannelsServiceProxy();
+  const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
 
@@ -125,7 +125,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     executionJournalRepo,
     {
       processRole: "worker",
-      onApprovalCreated: (approval) => sendApprovalCard(channels, approval),
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -151,7 +151,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       agentRunner,
       resolveArtifactReference,
       talkRouter,
-      channels,
+      channelsService,
       conversationSettings,
       capabilityDiscovery,
       personMappingRepo,

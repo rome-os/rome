@@ -1539,6 +1539,10 @@ export interface ChannelHistoryRead {
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
  * an action worker, so an action never branches on where it runs.
+ *
+ * An action receives it as `deps.channelsService`. A hook's `channels`
+ * ({@link ChannelMessageHookDeps.channels}) is the channel list itself, which
+ * it subscribes through.
  */
 export interface ChannelsService {
   /** Every channel this Rome has, with the Connections backing each now. */
@@ -1569,9 +1573,11 @@ export interface ChannelsService {
  * The sender id a WhatsApp group line carried when the channel recorded no
  * sender for it.
  *
- * @deprecated Such a line now carries an empty `senderId`, the
- * provider-neutral way to say no sender was recorded
- * ({@link ChannelMessage.senderId}). Removed in the next breaking release.
+ * @deprecated No longer emitted: such a line now carries an empty `senderId`,
+ * the provider-neutral way to say no sender was recorded
+ * ({@link ChannelMessage.senderId}), so a comparison against this constant
+ * no longer matches. Compare against `""` instead. Removed in the next
+ * breaking release.
  */
 export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
 

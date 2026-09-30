@@ -450,11 +450,11 @@ export function createSendMessageAction(
 
 export function createAction(
   config: ActionConfig,
-  deps: { channels: ChannelsService } & SendMessageRuntimeDeps & {
+  deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
       appContext?: { repositories?: { conversations?: ConversationRepository } };
     },
 ): Action {
-  return createSendMessageAction(config, deps.channels, {
+  return createSendMessageAction(config, deps.channelsService, {
     ...deps,
     conversations: deps.conversations ?? deps.appContext?.repositories?.conversations,
   });

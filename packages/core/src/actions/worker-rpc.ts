@@ -65,6 +65,10 @@ const ChannelsReadParams = z.object({
   connectionId: z.string().min(1).optional(),
 });
 
+// `query` reads the channel's own `messages`, which names no Connection, so a
+// request naming one is refused rather than answered from another account.
+const ChannelsQueryParams = ChannelsReadParams.omit({ connectionId: true }).strict();
+
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
 });
@@ -426,7 +430,7 @@ export class WorkerRpcServer {
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
     const { channel, conversationId, since, limit } = parseParams(
       "channels.query",
-      ChannelsReadParams,
+      ChannelsQueryParams,
       params,
     );
     return await this.services.channelsService.query(channel, {

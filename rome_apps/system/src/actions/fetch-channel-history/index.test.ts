@@ -36,9 +36,9 @@ interface HistoryAdapter {
   fetchHistory?: (conversationId: string | null, windowHours: number) => Promise<InboundMessage[]>;
 }
 
-function makeDeps(adapters: Map<string, HistoryAdapter>): { channels: ChannelsService } {
+function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
   return {
-    channels: {
+    channelsService: {
       list: async () =>
         [...adapters.keys()].map((name) => ({ name, connectionIds: [`test:${name}`] })),
       async send(_channel, conversationId) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChannelMessage, ConversationId, TalkHistory } from "@rome-os/app-runtime";
-import type { Channel } from "../channels/channel.js";
+import type { Channel } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
 
 // The window and page each store's retired read answered are pinned end to end

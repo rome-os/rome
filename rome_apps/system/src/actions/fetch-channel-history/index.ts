@@ -123,8 +123,11 @@ function formatMessages(channel: string, messages: ChannelMessage[], windowHours
     : header + "(No readable messages found.)";
 }
 
-export function createAction(config: ActionConfig, deps: { channels: ChannelsService }): Action {
-  const { channels } = deps;
+export function createAction(
+  config: ActionConfig,
+  deps: { channelsService: ChannelsService },
+): Action {
+  const { channelsService: channels } = deps;
 
   return {
     config,

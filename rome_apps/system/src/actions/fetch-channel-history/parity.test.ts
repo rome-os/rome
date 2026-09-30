@@ -3,9 +3,12 @@
 // on main, before the channel read replaced those Connection reads, over this
 // file's seeded mirrors, WeChat reader and Telegram account at a fixed clock:
 // main's WhatsApp, LinkedIn and WeChat history features and a Telegram history
-// over the same fake account. This test runs the same scenarios through the
-// channels service app actions read history through, and asks for the same
-// output.
+// over the same fake account. Its last two entries are main's answer for a
+// channel whose Connection has no history (a Telegram bot), recorded through
+// main's worker path: the action's TalkRouterProxy over RPC to the main
+// process, which is where actions run. This test runs the same scenarios
+// through the channels service app actions read history through, and asks
+// for the same output.
 
 import { expect, it, rs } from "@rstest/core";
 import { readFileSync } from "node:fs";
@@ -286,6 +289,7 @@ const CONNECTIONS = [
   { connectionId: "c-li", service: "linkedin" },
   { connectionId: "c-wx", service: "wechat_user" },
   { connectionId: "c-tg", service: "telegram_user" },
+  { connectionId: "c-tgbot", service: "telegram" },
 ];
 
 const SCENARIOS: Array<Record<string, unknown>> = [
@@ -304,10 +308,14 @@ const SCENARIOS: Array<Record<string, unknown>> = [
   { channel: "telegram_user", includeMessages: true },
   { channel: "telegram_user", threadId: "100", includeMessages: true },
   { channel: "telegram_user", windowHours: 1.5, includeMessages: true },
+  { channel: "telegram" },
+  { channel: "telegram", threadId: "42", includeMessages: true },
 ];
 
 async function runScenarios(channels: ChannelsService): Promise<unknown[]> {
-  const action = createAction({ name: "fetch_channel_history" } as never, { channels });
+  const action = createAction({ name: "fetch_channel_history" } as never, {
+    channelsService: channels,
+  });
   const out = [];
   for (const args of SCENARIOS)
     out.push({ args, result: await action.execute(args as never, {} as never) });
@@ -350,6 +358,7 @@ it("reads every channel's history exactly as main did", async () => {
         accounts: null,
         messages: null,
       },
+      { name: "telegram", send: null, inbound: null, accounts: null, messages: null },
     ];
     const telegramHistory = historyFeature(telegram, {
       channel: "telegram_user",

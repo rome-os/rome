@@ -14,7 +14,7 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 - Intentionally independent work starts **detached**: it becomes a new root execution with no parent. Cancelling the caller does not cancel it, and it can be cancelled separately by its own execution id.
 - A detached start returns only an acceptance receipt, never the eventual result. Acceptance is not durable across a restart.
 - Cancelling a root execution cancels everything under it.
-- An action reaches [channels](messaging.md#channels) by name through `deps.channels`. It sends and reads what was said the same way in the main process and in a worker, and names a Connection only to choose one when several back a channel ([channels for app actions](../architecture/channels.md#channels-for-app-actions)). The older `deps.talkRouter` is deprecated.
+- An action reaches [channels](messaging.md#channels) by name through `deps.channelsService`. It sends and reads what was said the same way in the main process and in a worker, and names a Connection only to choose one when several back a channel ([channels for app actions](../architecture/channels.md#channels-for-app-actions)). The older `deps.talkRouter` is deprecated.
 
 **Not to be confused with:**
 

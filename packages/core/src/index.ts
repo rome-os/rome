@@ -60,7 +60,8 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
-import { createChannelsService, sendApprovalCard } from "./channels/channels-service.js";
+import { sendApprovalCard } from "./actions/approval-card.js";
+import { createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
@@ -737,9 +738,9 @@ async function main() {
   const appActionDeps = {
     agentRunner,
     resolveArtifactReference,
-    // Deprecated for app actions; `channels` replaces it.
+    // Deprecated for app actions; `channelsService` replaces it.
     talkRouter,
-    channels: channelsService,
+    channelsService,
     conversationSettings,
     capabilityDiscovery,
     personMappingRepo,
