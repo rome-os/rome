@@ -383,6 +383,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
   const stopRetryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const stopRetryActiveTurnIdsRef = useRef<Set<string>>(new Set());
+  const stopRetryConfirmedTurnIdsRef = useRef<Set<string>>(new Set());
   const isChatMountedRef = useRef(true);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
@@ -649,6 +650,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       for (const timer of stopRetryTimersRef.current) clearTimeout(timer);
       stopRetryTimersRef.current.clear();
       stopRetryActiveTurnIdsRef.current.clear();
+      stopRetryConfirmedTurnIdsRef.current.clear();
       for (const timer of offFloorReconcileTimersRef.current.values()) clearTimeout(timer);
       offFloorReconcileTimersRef.current.clear();
       for (const controller of offFloorReconcileControllersRef.current.values()) controller.abort();
@@ -752,10 +754,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           ? await withRequestTimeout(request, () => controller.abort())
           : await request;
         if (data === null) {
+          if (options.shouldApply && !options.shouldApply()) return false;
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
-          // leaving the user staring at an empty active-chat shell.
-          onSessionNotFoundRef.current?.(id);
+          // leaving the user staring at an empty active-chat shell. A missing
+          // handoff child must not redirect its still-valid parent chat.
+          if (id === mainSessionIdRef.current) onSessionNotFoundRef.current?.(id);
           return false;
         }
         if (options.shouldApply && !options.shouldApply()) return false;
@@ -830,7 +834,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
           return;
         }
-        if (turns && !turns.some((turn) => turn.turnId === turnId)) {
+        // Another off-floor turn may have started while this one was pending.
+        // One empty lookup and reload reconciles all of their durable answers.
+        if (turns && turns.length === 0) {
           const loaded = await loadMessages(id, {
             force: true,
             dropLocalOptimistic: true,
@@ -1124,7 +1130,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           dropLocalOptimistic: true,
           bounded: true,
         });
-        if (loaded) pendingMessageReconciliationsRef.current.delete(sessionId);
+        // An off-floor child may already have another running turn. Its
+        // background reconciliation must continue until the turn list empties.
+        if (loaded && floorSessionIdRef.current === sessionId)
+          pendingMessageReconciliationsRef.current.delete(sessionId);
         return loaded;
       }
       return false;
@@ -1758,8 +1767,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       continuation = false,
     ): void => {
       if (!continuation) {
-        if (stopRetryActiveTurnIdsRef.current.has(turnId)) return;
+        if (stopRetryActiveTurnIdsRef.current.has(turnId)) {
+          if (confirmedFinished) stopRetryConfirmedTurnIdsRef.current.add(turnId);
+          return;
+        }
         stopRetryActiveTurnIdsRef.current.add(turnId);
+        if (confirmedFinished) stopRetryConfirmedTurnIdsRef.current.add(turnId);
       }
       const stillOwnsStream = () =>
         isChatMountedRef.current &&
@@ -1769,15 +1782,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         stopRetryTimersRef.current.delete(timer);
         if (!stillOwnsStream()) {
           stopRetryActiveTurnIdsRef.current.delete(turnId);
+          stopRetryConfirmedTurnIdsRef.current.delete(turnId);
           return;
         }
-        if (!confirmedFinished) {
+        if (!confirmedFinished && !stopRetryConfirmedTurnIdsRef.current.has(turnId)) {
           const lookupController = new AbortController();
           const turns = await withRequestTimeout(
             listSessionTurns(sid, lookupController.signal),
             () => lookupController.abort(),
           ).catch(() => null);
-          if (!turns) {
+          if (!turns && !stopRetryConfirmedTurnIdsRef.current.has(turnId)) {
             if (stillOwnsStream()) {
               forceReleaseIfStuck(
                 retryDelayMs,
@@ -1787,15 +1801,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               );
             } else {
               stopRetryActiveTurnIdsRef.current.delete(turnId);
+              stopRetryConfirmedTurnIdsRef.current.delete(turnId);
             }
             return;
           }
-          if (turns.some((turn) => turn.turnId === turnId)) {
+          if (
+            turns?.some((turn) => turn.turnId === turnId) &&
+            !stopRetryConfirmedTurnIdsRef.current.has(turnId)
+          ) {
             stopRetryActiveTurnIdsRef.current.delete(turnId);
+            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
             return;
           }
           if (!stillOwnsStream()) {
             stopRetryActiveTurnIdsRef.current.delete(turnId);
+            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
             return;
           }
         }
@@ -1818,11 +1838,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             );
           } else {
             stopRetryActiveTurnIdsRef.current.delete(turnId);
+            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
           }
           return;
         }
         if (!stillOwnsStream()) {
           stopRetryActiveTurnIdsRef.current.delete(turnId);
+          stopRetryConfirmedTurnIdsRef.current.delete(turnId);
           return;
         }
         targetController?.abort();
@@ -1834,6 +1856,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
         endSessionStream(sid, turnId);
         stopRetryActiveTurnIdsRef.current.delete(turnId);
+        stopRetryConfirmedTurnIdsRef.current.delete(turnId);
       }, delayMs);
       stopRetryTimersRef.current.add(timer);
     };

@@ -665,15 +665,15 @@ describe("Chat turn stream lifecycle", () => {
         ),
       ),
     );
-    let turnFinished = false;
+    let activeTurnIds = ["turn-1"];
     rs.mocked(listSessionTurns).mockImplementation((sid) =>
       Promise.resolve(
-        sid === "session-1" && !turnFinished ? [{ turnId: "turn-1", status: "running" }] : [],
+        sid === "session-1" ? activeTurnIds.map((turnId) => ({ turnId, status: "running" })) : [],
       ),
     );
     rs.mocked(listSessionMessages).mockImplementation((sid) =>
       Promise.resolve(
-        sid === "session-1" && turnFinished
+        sid === "session-1" && activeTurnIds.length === 0
           ? [
               {
                 id: "background-answer",
@@ -682,6 +682,14 @@ describe("Chat turn stream lifecycle", () => {
                 role: "assistant",
                 content: JSON.stringify([{ type: "text", content: "Finished" }]),
                 createdAt: "2026-09-30T14:00:00.000Z",
+              },
+              {
+                id: "second-background-answer",
+                sessionId: "session-1",
+                turnId: "turn-2",
+                role: "assistant",
+                content: JSON.stringify([{ type: "text", content: "Second finished" }]),
+                createdAt: "2026-09-30T14:01:00.000Z",
               },
             ]
           : [],
@@ -701,9 +709,16 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(rs.mocked(listSessionTurns).mock.calls.some(([sid]) => sid === "session-1")).toBe(true);
-    turnFinished = true;
+    activeTurnIds = ["turn-2"];
     await act(async () => {
       await rs.advanceTimersByTimeAsync(4_000);
+    });
+    expect(
+      rs.mocked(listSessionMessages).mock.calls.filter(([sid]) => sid === "session-1"),
+    ).toHaveLength(1);
+    activeTurnIds = [];
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(8_000);
     });
     expect(
       rs.mocked(listSessionMessages).mock.calls.filter(([sid]) => sid === "session-1"),
@@ -714,6 +729,9 @@ describe("Chat turn stream lifecycle", () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("background-answer");
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain(
+      "second-background-answer",
+    );
   });
 
   it("reattaches a still-running off-floor turn without waiting for message reconciliation", async () => {
@@ -1403,6 +1421,33 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
+  it("does not redirect for a stale main-session message 404", async () => {
+    let resolveOldMessages: ((messages: null) => void) | null = null;
+    rs.mocked(listSessionMessages).mockImplementation((sid) =>
+      sid === "session-1"
+        ? new Promise((resolve) => {
+            resolveOldMessages = resolve;
+          })
+        : Promise.resolve([]),
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    const onSessionNotFound = rs.fn();
+    const { rerender } = renderChat(
+      <Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />,
+    );
+    await waitFor(() => expect(resolveOldMessages).not.toBeNull());
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" onSessionNotFound={onSessionNotFound} />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      resolveOldMessages!(null);
+      await Promise.resolve();
+    });
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
   it("times out a stalled message reload while reconciling an ended turn", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
@@ -1937,6 +1982,26 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("uses a later Stop 404 to upgrade an active Stop reconciliation", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(interruptTurn)
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await Promise.resolve();
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_500);
+    });
+    expect(interruptTurn).toHaveBeenCalledTimes(2);
+    expect(listSessionTurns).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("stop-button")).toBeNull();
   });
 
   it("keeps a dropped turn's preview until Stop's persisted-message reload succeeds", async () => {
