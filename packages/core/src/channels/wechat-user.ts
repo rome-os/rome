@@ -6,7 +6,6 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import type { DesktopSlot } from "../desktops/manager.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("wechat-user");
@@ -224,31 +223,6 @@ export function wechatUserDisplay(env: NodeJS.ProcessEnv = process.env): string 
     throw new Error(`WECHAT_USER_DISPLAY must be a display like :100, other than ${shared}`);
   }
   return display;
-}
-
-/**
- * The fixed desktop slot legacy `WECHAT_USER_DISPLAY` gives the `wechat` desktop:
- * that display, with RFB `ROME_WECHAT_VNC_PORT` (5901) and websockify
- * `ROME_WECHAT_NOVNC_PORT` (6081), the triple the entrypoint starts. Empty when
- * `wechatUserDisplay` is null or rejects the value.
- */
-export function wechatDesktopPins(
-  env: NodeJS.ProcessEnv = process.env,
-): Record<string, DesktopSlot> {
-  let display: string | null;
-  try {
-    display = wechatUserDisplay(env);
-  } catch {
-    return {};
-  }
-  if (!display) return {};
-  return {
-    wechat: {
-      display: Number(display.slice(1)),
-      vncPort: Number(env.ROME_WECHAT_VNC_PORT ?? 5901),
-      novncPort: Number(env.ROME_WECHAT_NOVNC_PORT ?? 6081),
-    },
-  };
 }
 
 /** The client or its reader could not be run. Transient by assumption. */

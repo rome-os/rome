@@ -60,12 +60,11 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
-import { WechatUserReader, WechatUserRuntime, wechatDesktopPins } from "./channels/wechat-user.js";
+import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./computer-use/service.js";
-import { DesktopManager } from "./desktops/manager.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -254,7 +253,6 @@ async function main() {
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
   // The channel list and the Connection's Talk share this one client runtime.
-  const desktops = new DesktopManager({ pins: wechatDesktopPins() });
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
@@ -1309,7 +1307,6 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
-      desktops,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,

@@ -4,7 +4,7 @@ import net from "node:net";
 import type { DrizzleDb } from "./db/index.js";
 import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
-import { type DesktopManager, isDesktopName } from "./desktops/manager.js";
+import { desktopSlot } from "./desktops.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("desktop-proxy");
@@ -16,21 +16,17 @@ const SHARED_SEGMENT = "websockify";
  * The websockify port and the path it sees, for an upgrade under `/desktop-proxy`.
  * `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop,
  * whose websockify ignores the path. Any other first segment names a desktop:
- * it and everything under it go to that desktop, and resolve to null when the
- * segment is not a valid name or the desktop is not running.
+ * it and everything under it go to that desktop's websockify, and resolve to
+ * null when the table has no such desktop.
  */
-export async function desktopUpstream(
-  rawUrl: string,
-  desktops: Pick<DesktopManager, "get">,
-): Promise<{ port: number; path: string } | null> {
+export function desktopUpstream(rawUrl: string): { port: number; path: string } | null {
   const rest = rawUrl.slice(PREFIX.length);
   const named = /^\/([^/?]+)(.*)$/.exec(rest);
   if (named && named[1] !== SHARED_SEGMENT) {
-    if (!isDesktopName(named[1]!)) return null;
-    const desktop = await desktops.get(named[1]!);
-    if (!desktop) return null;
+    const slot = desktopSlot(named[1]!);
+    if (!slot) return null;
     const tail = named[2]!;
-    return { port: desktop.novncPort, path: tail.startsWith("/") ? tail : `/${tail}` };
+    return { port: slot.novncPort, path: tail.startsWith("/") ? tail : `/${tail}` };
   }
   return {
     port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
@@ -60,11 +56,7 @@ function buildUpstreamUpgradeRequest(
   return lines.join("\r\n") + "\r\n\r\n";
 }
 
-export function attachDesktopProxy(
-  httpServer: Server,
-  db: DrizzleDb,
-  desktops: Pick<DesktopManager, "get">,
-): { close(): void } {
+export function attachDesktopProxy(httpServer: Server, db: DrizzleDb): { close(): void } {
   const host = "127.0.0.1";
   const upstreams = new Set<net.Socket>();
 
@@ -84,10 +76,9 @@ export function attachDesktopProxy(
     socket.on("close", teardown);
 
     void gateGuardianUpgrade(req, socket, db)
-      .then(async (allowed) => {
+      .then((allowed) => {
         if (!allowed || socket.destroyed) return;
-        const target = await desktopUpstream(rawUrl, desktops);
-        if (socket.destroyed) return;
+        const target = desktopUpstream(rawUrl);
         if (!target) {
           rejectUpgrade(socket, 404, "Not Found");
           return;

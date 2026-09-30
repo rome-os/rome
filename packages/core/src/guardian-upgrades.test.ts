@@ -54,7 +54,7 @@ describe("guardian WebSocket upgrade handlers", () => {
   ])("owns socket errors before checking %s", async (path) => {
     const testDb = createTestDb();
     const server = createServer();
-    const desktop = attachDesktopProxy(server, testDb.db, { get: async () => null });
+    const desktop = attachDesktopProxy(server, testDb.db);
     const terminal = attachTerminalServer(server, testDb.db);
     const socket = new PassThrough();
     const req = {
@@ -96,7 +96,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     const previousPort = process.env.ROME_NOVNC_PORT;
     process.env.ROME_NOVNC_PORT = String(upstreamPort);
     const server = createServer();
-    const desktop = attachDesktopProxy(server, testDb.db, { get: async () => null });
+    const desktop = attachDesktopProxy(server, testDb.db);
     const terminal = attachTerminalServer(server, testDb.db);
 
     try {

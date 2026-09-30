@@ -711,7 +711,6 @@ export async function buildTestDeps(
         connections: [],
       }),
     },
-    desktops: { get: async () => null },
     favorService: unavailableFavorService,
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.

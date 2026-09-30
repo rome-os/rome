@@ -287,7 +287,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
-      const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.desktops);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });
