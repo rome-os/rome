@@ -53,15 +53,51 @@ describe("desktopUpstream", () => {
     }
   });
 
-  it("has no wechat upstream while WeChat has no display of its own", () => {
+  it("sends wechat to its own desktop whenever WeChat is enabled", () => {
     rs.stubEnv("WECHAT_USER_ENABLED", "true");
     rs.stubEnv("WECHAT_USER_DISPLAY", "");
+    expect(desktopUpstream("/desktop-proxy/wechat/websockify")).toEqual({
+      port: 6081,
+      path: "/websockify",
+    });
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
     expect(desktopUpstream("/desktop-proxy/wechat/websockify")).toBeNull();
     expect(desktopUpstream("/desktop-proxy/websockify")).toMatchObject({ path: "/websockify" });
   });
 });
 
+async function upgradeStatus(path: string): Promise<string> {
+  const testDb = createTestDb();
+  const server = createServer();
+  const proxy = attachDesktopProxy(server, testDb.db);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const socket = connect((server.address() as AddressInfo).port, "127.0.0.1");
+    await once(socket, "connect");
+    socket.write(
+      `GET ${path} HTTP/1.1\r\nHost: rome.local\r\n` +
+        "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
+        `Cookie: rome_session=${createSession("guardian")}\r\n` +
+        "Origin: http://rome.local\r\nX-Forwarded-For: 203.0.113.1\r\n\r\n",
+    );
+    const [reply] = (await once(socket, "data")) as [Buffer];
+    socket.destroy();
+    return reply.toString().split("\r\n")[0]!;
+  } finally {
+    proxy.close();
+    server.close();
+    testDb.close();
+  }
+}
+
 describe("attachDesktopProxy", () => {
+  it("answers 404, not 500, when a desktop's port is malformed", async () => {
+    wechatOwnDisplay();
+    rs.stubEnv("ROME_WECHAT_NOVNC_PORT", "abc");
+    expect(await upgradeStatus("/desktop-proxy/wechat/websockify")).toMatch(/^HTTP\/1\.1 404/);
+  });
+
   it("refuses a websocket for a desktop the table does not have", async () => {
     rs.stubEnv("WECHAT_USER_DISPLAY", "");
     const testDb = createTestDb();

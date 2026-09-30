@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  wechatUserDisplay,
   loginWindowId,
   WechatUserReader,
   WechatUserRuntime,
@@ -204,42 +203,25 @@ describe("WechatUserRuntime.start", () => {
   });
 });
 
-describe("wechatUserDisplay", () => {
-  it("names WeChat's own display only while WeChat is enabled with one set", () => {
-    expect(wechatUserDisplay({ WECHAT_USER_ENABLED: "true", WECHAT_USER_DISPLAY: ":100" })).toBe(
-      ":100",
-    );
-    expect(
-      wechatUserDisplay({ WECHAT_USER_ENABLED: "false", WECHAT_USER_DISPLAY: ":100" }),
-    ).toBeNull();
-    expect(wechatUserDisplay({ WECHAT_USER_DISPLAY: ":100" })).toBeNull();
-    expect(wechatUserDisplay({ WECHAT_USER_ENABLED: "true", WECHAT_USER_DISPLAY: "" })).toBeNull();
-  });
-
-  it.each(["100", "localhost:100", ":1a", ":99"])("rejects WECHAT_USER_DISPLAY=%s", (value) => {
-    expect(() =>
-      wechatUserDisplay({
-        WECHAT_USER_ENABLED: "true",
-        DISPLAY: ":99",
-        WECHAT_USER_DISPLAY: value,
-      }),
-    ).toThrow("WECHAT_USER_DISPLAY must be a display like :100, other than :99");
-  });
-});
-
 describe("WechatUserRuntime display", () => {
   afterEach(() => {
     rs.unstubAllEnvs();
   });
 
-  it("prefers WeChat's own display, and ignores it when empty", () => {
+  function wechatEnabled(display = "") {
     rs.stubEnv("WECHAT_USER_ENABLED", "true");
     rs.stubEnv("DISPLAY", ":99");
-    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
-    expect(new WechatUserRuntime().display).toBe(":100");
-    expect(new WechatUserRuntime({ display: ":7" }).display).toBe(":7");
-    rs.stubEnv("WECHAT_USER_DISPLAY", "");
-    expect(new WechatUserRuntime().display).toBe(":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", display);
+  }
+
+  it("runs on WeChat's own desktop whenever WeChat is enabled", () => {
+    wechatEnabled();
+    const runtime = new WechatUserRuntime();
+    expect([runtime.display, runtime.desktopPath]).toEqual([":100", "/desktop/wechat"]);
+    wechatEnabled(":120");
+    expect(new WechatUserRuntime().display).toBe(":120");
+    const fixed = new WechatUserRuntime({ display: ":7" });
+    expect([fixed.display, fixed.desktopPath]).toEqual([":7", "/desktop"]);
   });
 
   it("stays on the shared desktop while WeChat is disabled", () => {
@@ -250,37 +232,96 @@ describe("WechatUserRuntime display", () => {
     expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
   });
 
-  it("links sign-in to the desktop page that shows its display", () => {
-    rs.stubEnv("WECHAT_USER_ENABLED", "true");
-    rs.stubEnv("DISPLAY", ":99");
-    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
-    expect(new WechatUserRuntime().desktopPath).toBe("/desktop/wechat");
-    expect(new WechatUserRuntime({ display: ":99" }).desktopPath).toBe("/desktop");
-    rs.stubEnv("WECHAT_USER_DISPLAY", "");
-    expect(new WechatUserRuntime().desktopPath).toBe("/desktop");
-  });
-
-  it("looks for the login window and starts the client on that display", async () => {
-    rs.stubEnv("WECHAT_USER_ENABLED", "true");
-    rs.stubEnv("DISPLAY", ":99");
-    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+  async function installedRuntime(run: RunCommand, extra: { procDir?: string } = {}) {
     const h = await tempHome();
-    const envs: Array<[string, string | undefined]> = [];
-    const tree = '  0x1000007 "Weixin": ("wechat" "wechat")  280x380+0+0  +500+210\n';
     const runtime = new WechatUserRuntime({
       home: h,
       runtimeDir: join(h, "run"),
       canonicalPrefix: join(h, "opt-wechat"),
-      run: async (file, args, opts) => {
-        envs.push([`${file} ${args[0] ?? ""}`, opts?.env?.DISPLAY]);
-        return file === "xwininfo" ? ok(tree) : ok();
-      },
+      run,
+      ...extra,
     });
-    await runtime.captureLoginQr();
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
+    return runtime;
+  }
+
+  it("starts its desktop with the table's arguments before it starts the client", async () => {
+    wechatEnabled(":120");
+    rs.stubEnv("ROME_WECHAT_VNC_PORT", "5950");
+    rs.stubEnv("ROME_WECHAT_NOVNC_PORT", "6150");
+    const calls: Array<{ cmd: string[]; display?: string }> = [];
+    const runtime = await installedRuntime(async (file, args, opts) => {
+      calls.push({ cmd: [file, ...args], display: opts?.env?.DISPLAY });
+      return file === "pgrep" ? { code: 1, stdout: "", stderr: "" } : ok();
+    });
+
     await runtime.start();
-    expect(envs.find(([cmd]) => cmd.startsWith("xwininfo"))?.[1]).toBe(":100");
-    expect(envs.filter(([cmd]) => cmd === "sh -c").map(([, d]) => d)).toContain(":100");
+
+    const desktop = calls.findIndex(({ cmd }) => cmd[0] === "env");
+    const client = calls.findIndex(({ cmd }) => cmd[0] === "sh" && cmd[2]?.includes("wechat"));
+    expect(desktop).toBeGreaterThanOrEqual(0);
+    expect(desktop).toBeLessThan(client);
+    const cmd = calls[desktop]!.cmd;
+    expect(cmd[1]).toBe("-i");
+    expect(cmd.some((arg) => arg.startsWith("ROME_") || arg.startsWith("WECHAT_"))).toBe(false);
+    expect(cmd.slice(cmd.indexOf("bash"))).toEqual([
+      "bash",
+      "/opt/rome/scripts/docker/rome-start-desktop.sh",
+      "wechat",
+      ":120",
+      "5950",
+      "6150",
+      "/opt/rome/scripts/docker/wechat-openbox-rc.xml",
+    ]);
+    expect(calls[client]!.display).toBe(":120");
+    expect(runtime.desktopPath).toBe("/desktop/wechat");
+  });
+
+  it("keeps a running client on the display it runs on", async () => {
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    await writeFile(join(proc, "42", "environ"), "HOME=/home/rome\0DISPLAY=:99\0");
+    const { run, calls } = scriptedRun({ pgrep: () => ok("42\n") });
+    const runtime = await installedRuntime(run, { procDir: proc });
+
+    await runtime.start();
+
+    expect(calls.some(([file]) => file === "env")).toBe(false);
+    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
+    await rm(join(proc, ".."), { recursive: true, force: true });
+  });
+
+  it("stays on the shared desktop where the start script is not installed", async () => {
+    wechatEnabled();
+    const { run, calls } = scriptedRun({
+      pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
+      env: () => ({ code: 127, stdout: "", stderr: "No such file or directory" }),
+    });
+    const runtime = await installedRuntime(run);
+
+    await runtime.start();
+
+    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
+    expect(calls.some(([file, , script]) => file === "sh" && script?.includes("wechat"))).toBe(
+      true,
+    );
+  });
+
+  it("does not start the client when its desktop fails to start", async () => {
+    wechatEnabled();
+    const { run, calls } = scriptedRun({
+      pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
+      env: () => ({ code: 1, stdout: "", stderr: "Error: TCP port 5901 is already in use" }),
+    });
+    const runtime = await installedRuntime(run);
+
+    await expect(runtime.start()).rejects.toThrow(
+      "Could not start WeChat's desktop: Error: TCP port 5901 is already in use",
+    );
+    expect(calls.some(([file, , script]) => file === "sh" && script?.includes("wechat"))).toBe(
+      false,
+    );
   });
 });
 

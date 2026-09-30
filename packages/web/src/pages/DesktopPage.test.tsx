@@ -5,6 +5,11 @@ import i18n from "@/i18n";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import DesktopPage, { applyDesktopSafeAreaBottom, NamedDesktopPage } from "./DesktopPage";
 
+/** The websocket path `desktop-vnc.html` reads from an iframe's src. */
+function socketPath(iframe: HTMLElement): string | null {
+  return new URL(iframe.getAttribute("src")!, "http://rome.local").searchParams.get("path");
+}
+
 afterEach(() => {
   cleanup();
   document.documentElement.style.removeProperty("--rome-safe-area-bottom");
@@ -18,9 +23,8 @@ describe("DesktopPage", () => {
 
     const iframe = screen.getByTitle("Rome Desktop");
     expect(iframe.parentElement?.className).toContain("h-[var(--rome-mobile-content-height)]");
-    expect(iframe.getAttribute("src")).toBe(
-      "/desktop-vnc.html?resize=scale&path=desktop-proxy/websockify",
-    );
+    expect(iframe.getAttribute("src")).toMatch(/^\/desktop-vnc\.html\?resize=scale&path=/);
+    expect(socketPath(iframe)).toBe("desktop-proxy/websockify");
     expect(iframe.getAttribute("allow")).toBe("clipboard-read; clipboard-write");
 
     const setProperty = rs.fn();
@@ -38,8 +42,20 @@ describe("DesktopPage", () => {
 
     render(<DesktopPage name="wechat" />);
 
-    expect(screen.getByTitle("Rome desktop “wechat”").getAttribute("src")).toBe(
-      "/desktop-vnc.html?resize=scale&path=desktop-proxy/wechat/websockify",
+    expect(socketPath(screen.getByTitle("Rome desktop “wechat”"))).toBe(
+      "desktop-proxy/wechat/websockify",
+    );
+  });
+
+  it("keeps a name whole on its way to the proxy", async () => {
+    await i18n.changeLanguage("en");
+
+    render(<DesktopPage name="a?b#c" />);
+
+    // desktop-vnc.html decodes the query once. The name must still be encoded
+    // then, so `?` and `#` cannot cut the socket path short.
+    expect(socketPath(screen.getByTitle("Rome desktop “a?b#c”"))).toBe(
+      "desktop-proxy/a%3Fb%23c/websockify",
     );
   });
 
@@ -54,8 +70,8 @@ describe("DesktopPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByTitle("Rome desktop “notes”").getAttribute("src")).toBe(
-      "/desktop-vnc.html?resize=scale&path=desktop-proxy/notes/websockify",
+    expect(socketPath(screen.getByTitle("Rome desktop “notes”"))).toBe(
+      "desktop-proxy/notes/websockify",
     );
   });
 

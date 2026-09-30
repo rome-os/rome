@@ -30,20 +30,16 @@ The Rome image includes the client libraries, debugger, and QR screenshot tools.
 
 ## WeChat's own display
 
-By default the client runs on the shared desktop, `:99`, beside Rome's Chrome, and the guardian watches it at `/desktop`. Set `WECHAT_USER_DISPLAY` to give it a display of its own instead:
-
-```sh
-WECHAT_USER_DISPLAY=:100
-```
-
-With it set, the entrypoint starts that display as a second TigerVNC server at 1280x800 on `localhost:5901` (`ROME_WECHAT_VNC_PORT`). It also starts:
+The client runs on a display of its own, `:100`, not on the shared desktop beside Rome's Chrome. Before Rome starts the client or captures its keys, it starts that display with [`rome-start-desktop.sh`](../scripts/docker/rome-start-desktop.sh), or reuses it. That is a second TigerVNC server at 1280x800 on `localhost:5901`, plus:
 
 - An Openbox with no key bindings (`scripts/docker/wechat-openbox-rc.xml`), which keeps the client's main window maximized without a title bar.
-- A second websockify on `6081` (`ROME_WECHAT_NOVNC_PORT`).
+- A second websockify on `6081`.
 
-The guardian watches and signs in at `/desktop/wechat`, which is served the way `/desktop` is. The runtime starts the client, captures keys, detects the login window and runs its health check on that display. `/desktop` then shows no WeChat window.
+The display outlives Rome, so a Rome restart finds the client still running and signed in. The guardian watches and signs in at `/desktop/wechat`, which is served the way `/desktop` is. The runtime captures keys, detects the login window and runs its health check on the display the client runs on. [Named desktops](architecture/named-desktops.md) covers the mechanism.
 
-Moving a signed-in client to its own display needs one client restart and a sign-in confirmed on the phone. Open `/desktop/wechat` before restarting, so the login window is visible when it appears.
+`WECHAT_USER_DISPLAY`, `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT` still override the display and ports.
+
+A client that was already running on the shared desktop stays there until it next exits. It then starts on its own display, which can need one sign-in confirmed on the phone. Open `/desktop/wechat` then, so the login window is visible when it appears.
 
 ## Connect
 

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { wechatUserDisplay } from "./channels/wechat-user.js";
+import { wechatUserDisplay } from "./desktops.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**

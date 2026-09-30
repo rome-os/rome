@@ -298,8 +298,9 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       }
       await runtime.installReader(signal);
       // The client is deliberately not started here — recovery launches it under
-      // gdb to own it from birth and catch the first login. Only the session it
-      // draws into and the capture driver are readied.
+      // gdb to own it from birth and catch the first login. Only the desktop and
+      // session it draws into and the capture driver are readied.
+      await runtime.ensureDesktop(signal);
       await runtime.prepareSession();
       await deps.stageDriver();
       return null;

@@ -62,9 +62,37 @@ function runWith(env: Record<string, string>, ...extra: string[]) {
     {
       encoding: "utf8",
       timeout: 60_000,
-      env: { ...env, PATH: `${dir}:${process.env.PATH}`, FAKE_RECORD: record },
+      env: {
+        ...env,
+        PATH: `${dir}:${process.env.PATH}`,
+        FAKE_RECORD: record,
+        ROME_DESKTOP_LOG_DIR: dir,
+      },
     },
   );
+}
+
+/** Two runs at once, as when a WeChat retry overlaps a start. */
+async function runTwiceAtOnce() {
+  const runs = [0, 1].map(() => {
+    const child = spawn(
+      "bash",
+      [SCRIPT, "notes", `:${display}`, String(vncPort), String(novncPort)],
+      {
+        env: {
+          PATH: `${dir}:${process.env.PATH}`,
+          FAKE_RECORD: record,
+          ROME_DESKTOP_LOG_DIR: dir,
+        },
+      },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    return once(child, "exit").then(([code]) => ({ code: code as number, stderr }));
+  });
+  return Promise.all(runs);
 }
 
 beforeEach(async () => {
@@ -92,6 +120,56 @@ afterEach(() => {
 
 // The script and these tests read /proc and use setsid and pgrep, so they need Linux.
 describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
+  it("writes its logs to ROME_DESKTOP_LOG_DIR", () => {
+    expect(run().status).toBe(0);
+    for (const log of ["xtigervnc", "openbox", "novnc"]) {
+      expect(existsSync(join(dir, `${log}-notes.log`))).toBe(true);
+    }
+  }, 60_000);
+
+  it("starts each program once when two runs overlap", async () => {
+    const results = await runTwiceAtOnce();
+
+    expect(results).toEqual([
+      { code: 0, stderr: "" },
+      { code: 0, stderr: "" },
+    ]);
+    expect(started().map((proc) => proc.program)).toEqual(["Xtigervnc", "openbox", "websockify"]);
+  }, 60_000);
+
+  it("never reuses a matching process another user owns", async () => {
+    // A pgrep stand-in hides the "other user's" websockify from an owner-checked
+    // lookup (-u), the way the real pgrep hides another account's processes.
+    const realPgrep = spawnSync("sh", ["-c", "command -v pgrep"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    writeFileSync(
+      join(dir, "pgrep"),
+      `#!/bin/sh\ncase " $* " in\n  *" -u "*) ${realPgrep} "$@" | grep -vx "$FOREIGN_PID" ;;\n  *) exec ${realPgrep} "$@" ;;\nesac\n`,
+    );
+    chmodSync(join(dir, "pgrep"), 0o755);
+    const foreign = spawn(
+      join(dir, "websockify"),
+      [`127.0.0.1:${novncPort}`, `localhost:${vncPort}`],
+      {
+        env: { FAKE_RECORD: join(dir, "foreign-record") },
+      },
+    );
+    await once(foreign, "spawn");
+    for (let i = 0; i < 100 && !existsSync(join(dir, "foreign-record")); i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    try {
+      const result = runWith({ FOREIGN_PID: String(foreign.pid) });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`TCP port ${novncPort} is already in use by another process`);
+    } finally {
+      foreign.kill("SIGKILL");
+    }
+  }, 60_000);
+
   it("starts the desktop detached, then reuses it", () => {
     const first = run("/rc.xml");
     expect(first.stderr).toBe("");

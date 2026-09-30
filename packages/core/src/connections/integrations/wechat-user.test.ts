@@ -54,6 +54,7 @@ function fakeRuntime(opts: {
     install: rs.fn(async () => {}),
     installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
+    ensureDesktop: rs.fn(async () => {}),
     ensureAccessibility: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     start: rs.fn(async () => {}),
@@ -155,6 +156,15 @@ describe("makeWechatUserSetup", () => {
     expect(runtime.install).toHaveBeenCalledTimes(1);
     expect(runtime.installReader).toHaveBeenCalledTimes(1);
     expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
+    // Recovery launches the client on WeChat's own desktop, so it must be up first.
+    expect(runtime.ensureDesktop).toHaveBeenCalledTimes(1);
+    expect(
+      (runtime.ensureDesktop as unknown as { mock: { invocationCallOrder: number[] } }).mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      (recoverPassphrase as unknown as { mock: { invocationCallOrder: number[] } }).mock
+        .invocationCallOrder[0]!,
+    );
     // The client is launched by recovery under gdb, not started the ordinary way.
     expect(runtime.start).not.toHaveBeenCalled();
     expect(stageDriver).toHaveBeenCalledTimes(1);
