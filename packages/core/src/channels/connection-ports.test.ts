@@ -12,7 +12,6 @@ import {
   LIVE_READ_TTL_MS,
   type ConnectionPortsDeps,
 } from "./connection-ports.js";
-import { MAX_QUERY_LIMIT } from "./messages.js";
 import { testMessagesQueryContract } from "./messages-contract.js";
 
 // A channel with no store answers `query` through its Connection's history.
@@ -133,10 +132,10 @@ describe("connection-backed messages, shared reads", () => {
     };
   }
 
-  // A live read that counts itself, answering `lines()` oldest first.
-  function port(lines: () => ChannelMessage[] | Promise<ChannelMessage[]>) {
+  // A live read that counts itself, answering `lines(input)` oldest first.
+  function port(lines: (input: { since?: Date }) => ChannelMessage[] | Promise<ChannelMessage[]>) {
     rs.spyOn(Date, "now").mockImplementation(() => clock);
-    const query = rs.fn<TalkHistory["query"]>(async () => lines());
+    const query = rs.fn<TalkHistory["query"]>(async (input) => lines(input));
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
@@ -153,7 +152,7 @@ describe("connection-backed messages, shared reads", () => {
 
   const ids = (page: ChannelMessage[]) => page.map((m) => m.messageId);
 
-  it("answers a query its window covers from a fresh read", async () => {
+  it("shares a read over the same whole-hour window", async () => {
     const { messages, query } = port(() => [line("older", 50), line("newer", 5)]);
 
     await messages.query({ since: new Date(NOW - 60 * 60_000) });
@@ -194,13 +193,16 @@ describe("connection-backed messages, shared reads", () => {
     expect(query).toHaveBeenCalledTimes(2);
   });
 
-  it("does not share a read cut at the cap", async () => {
-    const full = Array.from({ length: MAX_QUERY_LIMIT }, (_, i) => line(`m${i}`, 50));
-    const { messages, query } = port(() => full);
+  // Discord keeps the oldest lines of each channel after its cutoff, so a
+  // day's read of a busy channel can hold none of the last hour's.
+  it("does not answer a narrower window from a wider read", async () => {
+    const said = [line("day-1", 20 * 60), line("day-2", 19 * 60), line("recent", 30)];
+    const oldestTwo = ({ since }: { since?: Date }) =>
+      said.filter((m) => m.timestamp.getTime() >= (since?.getTime() ?? 0)).slice(0, 2);
+    const { messages, query } = port(oldestTwo);
 
-    await messages.query({ since: new Date(NOW - 60 * 60_000) });
-    await messages.query({ since: new Date(NOW - 10 * 60_000) });
-
+    expect(ids(await messages.query({}))).toEqual(["day-2", "day-1"]);
+    expect(ids(await messages.query({ since: new Date(NOW - 60 * 60_000) }))).toEqual(["recent"]);
     expect(query).toHaveBeenCalledTimes(2);
   });
 

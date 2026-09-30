@@ -235,27 +235,6 @@ async function resolveChatThreadId(
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
-async function resolveConnectionIdForService(
-  channels: ChannelsService,
-  service: string,
-  requested?: string,
-): Promise<string> {
-  const matches = (
-    (await channels.list()).find((channel) => channel.name === service)?.connectionIds ?? []
-  ).map((connectionId) => ({ connectionId }));
-  if (requested) {
-    if (!matches.some((connection) => connection.connectionId === requested)) {
-      throw new Error(`Connection "${requested}" does not provide channel "${service}"`);
-    }
-    return requested;
-  }
-  if (matches.length === 0) throw new Error(`No Talk connection registered for "${service}"`);
-  if (matches.length > 1) {
-    throw new Error(`Channel "${service}" has multiple connections; connectionId is required`);
-  }
-  return matches[0]!.connectionId;
-}
-
 export async function executeSendMessage(
   channels: ChannelsService,
   input: SendMessageInput,
@@ -265,7 +244,8 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  const connectionId = await resolveConnectionIdForService(channels, channel, input.connectionId);
+  // The channels service chooses the Connection, and refuses when it cannot.
+  const via = input.connectionId ? { connectionId: input.connectionId } : undefined;
 
   const safeInput = await validateAttachmentSources(input);
 
@@ -303,7 +283,7 @@ export async function executeSendMessage(
         html: email.html,
         inReplyToMessageId: replyTarget,
       },
-      { connectionId },
+      via,
     );
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
@@ -335,7 +315,7 @@ export async function executeSendMessage(
       replyToMessageId: chat.replyToMessageId,
       turnId,
     },
-    { connectionId },
+    via,
   );
   await recordDeliveredConversationMessageBestEffort(
     deps,

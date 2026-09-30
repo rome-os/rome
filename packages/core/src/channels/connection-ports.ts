@@ -11,6 +11,7 @@ import type {
   TalkDirectMessaging,
   TalkRouter,
 } from "@rome-os/app-runtime";
+import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
 import {
@@ -76,9 +77,11 @@ export function connectionPorts(
  * of each, Discord every channel of every server the bot is in, and email
  * hydrates up to a thousand message bodies. So a read is shared for
  * {@link LIVE_READ_TTL_MS}: a query for the same conversation, or for every
- * conversation, reuses a read already made or under way whose window covers
- * it, as long as that read was not cut short at the thousand-line cap. A
- * reused read answers what a fresh one would, older by at most that long.
+ * conversation, reuses a read already made or under way over the same
+ * whole-hour window. Only the same window will do. A Connection cuts what it
+ * answers within its window (Discord keeps the oldest hundred lines of each
+ * channel), so a wider read can hold none of the lines a narrower one would.
+ * A reused read answers what a fresh one would, older by at most that long.
  * Rome's own `fetch_channel_history` does not read through this port.
  *
  * The port reads the first Connection backing the channel. A channel several
@@ -93,31 +96,21 @@ export const LIVE_READ_TTL_MS = 30_000;
 /** One live read, shared while it is fresh. */
 interface SharedRead {
   at: number;
-  /** The instant the read reached back to. */
-  since: number;
   lines: Promise<ChannelMessage[]>;
 }
 
 function connectionMessages(deps: ConnectionPortsDeps, service: string): Messages {
   const shared = new Map<string, SharedRead>();
 
-  /** A read reaching back to `from`, shared with a fresh one that covers it. */
-  async function read(
-    key: string,
-    from: Date,
-    fresh: () => Promise<ChannelMessage[]>,
-  ): Promise<ChannelMessage[]> {
+  /** The read `key` names, shared while it is fresh. */
+  function read(key: string, fresh: () => Promise<ChannelMessage[]>): Promise<ChannelMessage[]> {
     const now = Date.now();
     for (const [held, entry] of shared) {
       if (now - entry.at >= LIVE_READ_TTL_MS) shared.delete(held);
     }
     const hit = shared.get(key);
-    if (hit && hit.since <= from.getTime()) {
-      const lines = await hit.lines.catch(() => null);
-      // A read cut at the cap may have left out lines newer than it kept.
-      if (lines && lines.length < MAX_QUERY_LIMIT) return lines;
-    }
-    const entry: SharedRead = { at: now, since: from.getTime(), lines: fresh() };
+    if (hit) return hit.lines;
+    const entry: SharedRead = { at: now, lines: fresh() };
     shared.set(key, entry);
     entry.lines.catch(() => {
       if (shared.get(key) === entry) shared.delete(key);
@@ -134,7 +127,10 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       // degraded) backs nothing, the same as no Connection at all.
       if (!history) throw new ChannelNotConnected(service);
       const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
-      const lines = await read(`${connectionId}\n${conversationId ?? ""}`, from, () =>
+      // The Connection reads whole hours back, so the window it will read
+      // names the read along with the conversation.
+      const hours = historyWindowHours(from);
+      const lines = await read(`${connectionId}\n${conversationId ?? ""}\n${hours}`, () =>
         history.query({
           ...(conversationId ? { conversationId } : {}),
           since: from,

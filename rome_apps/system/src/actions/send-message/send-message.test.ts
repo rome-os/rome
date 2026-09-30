@@ -14,7 +14,7 @@ let outsideRoot = "";
 /** A channels service with one channel, `service`, backed by one Connection. */
 function makeAdapter(service = "discord"): ChannelsService {
   return {
-    list: async () => [{ name: service, connectionIds: [`test:${service}`] }],
+    list: rs.fn(async () => [{ name: service, connectionIds: [`test:${service}`] }]),
     send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
     query: async () => [],
     history: async () => [],
@@ -60,7 +60,7 @@ describe("send_message attachments", () => {
         replyToMessageId: undefined,
         turnId: undefined,
       },
-      { connectionId: "test:discord" },
+      undefined,
     );
   });
 
@@ -119,7 +119,7 @@ describe("send_message email union", () => {
     const [channel, threadId, message, options] = (adapter.send as ReturnType<typeof rs.fn>).mock
       .calls[0];
     expect(channel).toBe("email");
-    expect(options).toEqual({ connectionId: "test:email" });
+    expect(options).toBeUndefined();
     expect(threadId).toBe("");
     expect(message.kind).toBe("email");
     expect(message.text).toBe("body");
@@ -190,7 +190,7 @@ describe("send_message chat recipient aliases", () => {
         replyToMessageId: undefined,
         turnId: "turn-1",
       },
-      { connectionId: "test:webchat" },
+      undefined,
     );
   });
 
@@ -228,7 +228,7 @@ describe("send_message chat recipient aliases", () => {
         replyToMessageId: undefined,
         turnId: undefined,
       },
-      { connectionId: "test:whatsapp" },
+      undefined,
     );
   });
 
@@ -263,6 +263,27 @@ describe("send_message chat recipient aliases", () => {
       } as unknown as SendMessageInput),
     ).rejects.toThrow('Channel "whatsapp" only supports to: "guardian"');
     expect(adapter.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("send_message connection choice", () => {
+  // The channels service owns the rule for which Connection a send goes
+  // through, so the action asks it nothing first: in a worker every question
+  // is an RPC round trip.
+  it("leaves the Connection to the channels service", async () => {
+    const adapter = makeAdapter("telegram_user");
+
+    await executeSendMessage(adapter, { channel: "telegram_user", threadId: "t1", text: "a" });
+    await executeSendMessage(adapter, {
+      channel: "telegram_user",
+      threadId: "t1",
+      text: "b",
+      connectionId: "tg-b",
+    });
+
+    const calls = (adapter.send as ReturnType<typeof rs.fn>).mock.calls;
+    expect(calls.map((call) => call[3])).toEqual([undefined, { connectionId: "tg-b" }]);
+    expect(adapter.list).not.toHaveBeenCalled();
   });
 });
 

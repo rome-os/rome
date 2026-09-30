@@ -14,7 +14,7 @@
  */
 
 import type { Message } from "@rome/api-types/message";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
 
 /**
  * One account a store reads for, named by every address it answers to —
@@ -43,22 +43,9 @@ export interface MessageRead {
   limit: number;
 }
 
-/**
- * What `query` asks for. Every field narrows it, and none is required: a query
- * naming nothing asks for the channel's newest messages. A channel read live
- * through its Connection reaches back a bounded default when no `since` is
- * named (connection-ports.ts), and a caller wanting more names one.
- */
-export interface MessageQuery {
-  /** One conversation, by the platform's own id for it. Absent for every
-   *  conversation the channel can read. */
-  conversationId?: ConversationId;
-  /** Only messages said at or after this instant. */
-  since?: Date;
-  /** At most this many. Defaults to {@link DEFAULT_QUERY_LIMIT} and is capped
-   *  at {@link MAX_QUERY_LIMIT}. */
-  limit?: number;
-}
+/** What `query` asks for: the SDK's {@link ChannelMessageQuery}, so the
+ *  defaults and the cap are stated once. `queryLimit` applies them. */
+export type MessageQuery = ChannelMessageQuery;
 
 const DEFAULT_QUERY_LIMIT = 100;
 export const MAX_QUERY_LIMIT = 1_000;
