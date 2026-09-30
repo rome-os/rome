@@ -380,14 +380,12 @@ export interface PostSessionTurnOptions {
 export async function listSessionTurns(
   sessionId: string,
   signal?: AbortSignal,
-  onHttpError?: (status: number) => void,
 ): Promise<TurnInfo[] | null> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/turns`, {
     credentials: "include",
     signal,
   });
   if (!res.ok) {
-    onHttpError?.(res.status);
     return null;
   }
   return (await res.json()) as TurnInfo[];

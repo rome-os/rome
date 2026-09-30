@@ -374,6 +374,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
   const pendingMessageReconciliationsRef = useRef<Map<string, string>>(new Map());
+  const offFloorReconcileTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const offFloorReconcileControllersRef = useRef<Map<string, AbortController>>(new Map());
   const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
@@ -647,6 +649,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       for (const timer of stopRetryTimersRef.current) clearTimeout(timer);
       stopRetryTimersRef.current.clear();
       stopRetryActiveTurnIdsRef.current.clear();
+      for (const timer of offFloorReconcileTimersRef.current.values()) clearTimeout(timer);
+      offFloorReconcileTimersRef.current.clear();
+      for (const controller of offFloorReconcileControllersRef.current.values()) controller.abort();
+      offFloorReconcileControllersRef.current.clear();
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -784,11 +790,66 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   );
   const queueOffFloorReconciliation = useCallback(
     (id: string, turnId: string) => {
-      // Keep this marker even if the first fetch succeeds: the turn may still
-      // be running, so a floor-return lookup must refresh its final answer.
       if (pendingMessageReconciliationsRef.current.has(id)) return;
       pendingMessageReconciliationsRef.current.set(id, turnId);
-      void loadMessages(id, { force: true, dropLocalOptimistic: true, bounded: true });
+      // An off-floor handoff child receives no message_insert subscription.
+      // Check its turn until it ends, then fetch its durable answer; otherwise
+      // a one-shot reload can miss an answer produced after the floor changed.
+      const schedule = (delayMs: number) => {
+        if (
+          !isChatMountedRef.current ||
+          pendingMessageReconciliationsRef.current.get(id) !== turnId
+        )
+          return;
+        const previousTimer = offFloorReconcileTimersRef.current.get(id);
+        if (previousTimer) clearTimeout(previousTimer);
+        const timer = setTimeout(() => {
+          if (offFloorReconcileTimersRef.current.get(id) === timer)
+            offFloorReconcileTimersRef.current.delete(id);
+          void check(delayMs);
+        }, delayMs);
+        offFloorReconcileTimersRef.current.set(id, timer);
+      };
+      const check = async (delayMs: number) => {
+        const stillPending = () =>
+          isChatMountedRef.current && pendingMessageReconciliationsRef.current.get(id) === turnId;
+        if (!stillPending()) return;
+        if (floorSessionIdRef.current === id) {
+          schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+          return;
+        }
+        const controller = new AbortController();
+        offFloorReconcileControllersRef.current.set(id, controller);
+        const turns = await withRequestTimeout(listSessionTurns(id, controller.signal), () =>
+          controller.abort(),
+        ).catch(() => null);
+        if (offFloorReconcileControllersRef.current.get(id) === controller)
+          offFloorReconcileControllersRef.current.delete(id);
+        if (!stillPending()) return;
+        if (floorSessionIdRef.current === id) {
+          schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+          return;
+        }
+        if (turns && !turns.some((turn) => turn.turnId === turnId)) {
+          const loaded = await loadMessages(id, {
+            force: true,
+            dropLocalOptimistic: true,
+            bounded: true,
+            shouldApply: () => stillPending() && floorSessionIdRef.current !== id,
+          });
+          if (!stillPending()) return;
+          if (floorSessionIdRef.current === id) {
+            schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+            return;
+          }
+          if (loaded) {
+            pendingMessageReconciliationsRef.current.delete(id);
+            return;
+          }
+        }
+        schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+      };
+      schedule(RECONNECT_BASE_DELAY_MS);
     },
     [loadMessages],
   );
@@ -1183,37 +1244,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
         lookupController = new AbortController();
-        let lookupHttpStatus: number | null = null;
         const turns = await withRequestTimeout(
-          listSessionTurns(
-            reattachSessionId,
-            lookupController.signal,
-            (status) => (lookupHttpStatus = status),
-          ),
+          listSessionTurns(reattachSessionId, lookupController.signal),
           () => lookupController?.abort(),
         );
         lookupController = null;
         if (cancelled) return;
         if (!turns) {
-          if (
-            (lookupHttpStatus === 404 || lookupHttpStatus === 401 || lookupHttpStatus === 403) &&
-            stillObserving()
-          ) {
-            recoveringSessionIdsRef.current.delete(reattachSessionId);
-            if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
-            setRecoveryNotice((current) =>
-              current?.sessionId === reattachSessionId ? null : current,
-            );
-            if (lookupHttpStatus === 404) {
-              onSessionNotFoundRef.current?.(reattachSessionId);
-            } else {
-              setStreamError(t("stream.errors.reconnectStatus", { status: lookupHttpStatus }));
-            }
-            // This is an authoritative access/session failure, not a transient
-            // network gap. Wait for navigation or a fresh effect to retry.
-            cancelled = true;
-            return;
-          }
           noteRecoveryFailure();
           return;
         }
@@ -1235,9 +1272,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             recoveringSessionIdsRef.current.has(reattachSessionId) &&
             stillObserving()
           ) {
-            if (!recoveringSessionIdsRef.current.has(reattachSessionId)) {
-              return;
-            }
             recoveringSessionIdsRef.current.delete(reattachSessionId);
             if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
             noteRecoverySuccess();
@@ -1797,6 +1831,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         setRecoveryNotice((current) =>
           current?.sessionId === sid && current.turnId === turnId ? null : current,
         );
+        setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
         endSessionStream(sid, turnId);
         stopRetryActiveTurnIdsRef.current.delete(turnId);
       }, delayMs);

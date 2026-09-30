@@ -6,11 +6,9 @@ afterEach(() => {
 });
 
 describe("listSessionTurns", () => {
-  it("reports a non-OK HTTP status separately from the null result", async () => {
+  it("treats a non-OK HTTP status as an inconclusive lookup", async () => {
     rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 404 })));
-    const onHttpError = rs.fn();
-    await expect(listSessionTurns("session-1", undefined, onHttpError)).resolves.toBeNull();
-    expect(onHttpError).toHaveBeenCalledWith(404);
+    await expect(listSessionTurns("session-1")).resolves.toBeNull();
   });
 });
 
