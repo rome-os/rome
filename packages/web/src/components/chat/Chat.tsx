@@ -129,7 +129,12 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 // (and the Stop button's turnId) stuck on a stale turn. Three missed
 // keepalives + margin.
 const STREAM_STALL_TIMEOUT_MS = 50_000;
+const FOREGROUND_STALE_STREAM_MS = 30_000;
 const RECONNECT_REQUEST_TIMEOUT_MS = 10_000;
+const RECONNECT_BASE_DELAY_MS = 2_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const RECOVERY_NOTICE_FAILURES = 3;
+const RECONNECT_STABLE_STREAM_MS = 5_000;
 
 async function withRequestTimeout<T>(request: Promise<T>, onTimeout: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -372,6 +377,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
@@ -544,12 +550,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     const retryRecoveringFloor = () => {
       const sid = floorSessionIdRef.current;
-      if (
-        sid &&
-        (recoveringSessionIdsRef.current.has(sid) || !streamingSessionsRef.current.has(sid))
-      ) {
-        setStreamReconnectRevision((revision) => revision + 1);
+      if (!sid) return;
+      const activeTurnId = streamingSessionsRef.current.get(sid)?.turnId;
+      if (activeTurnId && !recoveringSessionIdsRef.current.has(sid)) {
+        const lastActivity = lastStreamActivityAtRef.current.get(activeTurnId);
+        if (lastActivity === undefined || Date.now() - lastActivity < FOREGROUND_STALE_STREAM_MS) {
+          return;
+        }
+        // A mobile browser can resume with reader.read() still pending. Its
+        // controller belongs to this turn; abort it before revalidating.
+        recoveringSessionIdsRef.current.add(sid);
+        turnStreamControllersRef.current.get(activeTurnId)?.abort();
       }
+      setStreamReconnectRevision((revision) => revision + 1);
     };
     const onVisible = () => {
       if (document.visibilityState === "visible") retryRecoveringFloor();
@@ -619,6 +632,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const releaseTurnStreamController = useCallback((turnId: string, controller: AbortController) => {
     if (turnStreamControllersRef.current.get(turnId) === controller) {
       turnStreamControllersRef.current.delete(turnId);
+      lastStreamActivityAtRef.current.delete(turnId);
     }
   }, []);
 
@@ -807,15 +821,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       const reader = res.body.getReader();
+      lastStreamActivityAtRef.current.set(turnId, Date.now());
       const decoder = new TextDecoder();
       let buffer = "";
       // Live snapshot mirror: server emits segment_upsert + summary_update;
       // we upsert by id and replace the summary. Insertion order in segArr
       // matches the server's segment ordinals because the server emits each
       // segment's first upsert in ordinal order.
-      const segArr: TraceSegment[] = [];
-      const segIdx = new Map<string, number>();
-      let summary: TraceSnapshot["summary"] = {
+      const retained = streamingSessionsRef.current.get(sessionId);
+      const retainedSnapshot = retained?.turnId === turnId ? retained.snapshot : null;
+      const segArr: TraceSegment[] = [...(retainedSnapshot?.segments ?? [])];
+      const segIdx = new Map(segArr.map((segment, index) => [segment.id, index]));
+      let summary: TraceSnapshot["summary"] = retainedSnapshot?.summary ?? {
         distinctApps: [],
         totalSteps: 0,
         invocationCounts: {},
@@ -846,6 +863,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         const { done, value } = result;
         if (done) break;
+        lastStreamActivityAtRef.current.set(turnId, Date.now());
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -1000,7 +1018,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
       return false;
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
+    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText, streamingSessionsRef],
   );
 
   useEffect(() => {
@@ -1035,13 +1053,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let lookupController: AbortController | null = null;
     let streamController: AbortController | null = null;
-    let retryDelayMs = 2000;
+    let retryDelayMs = RECONNECT_BASE_DELAY_MS;
     let failedChecks = 0;
 
     const noteRecoveryFailure = () => {
-      retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
+      retryDelayMs = Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS);
       failedChecks += 1;
-      if (failedChecks < 3 || !recoveringSessionIdsRef.current.has(reattachSessionId)) return;
+      if (
+        failedChecks < RECOVERY_NOTICE_FAILURES ||
+        !recoveringSessionIdsRef.current.has(reattachSessionId)
+      )
+        return;
       const turnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
       if (turnId) {
         setRecoveryNotice((current) =>
@@ -1053,7 +1075,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     };
 
     const noteRecoverySuccess = () => {
-      retryDelayMs = 2000;
+      retryDelayMs = RECONNECT_BASE_DELAY_MS;
       failedChecks = 0;
       setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
     };
@@ -1080,7 +1102,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         (streamingSessionsRef.current.has(reattachSessionId) &&
           !recoveringSessionIdsRef.current.has(reattachSessionId))
       ) {
-        schedule(2000);
+        schedule(RECONNECT_BASE_DELAY_MS);
         return;
       }
       const observedTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null;
@@ -1113,6 +1135,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         if (!turns.length) {
           suppressedTurnIdsRef.current.delete(reattachSessionId);
+          releasedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
           // The lookup may have started before a foreground send replaced the
           // recovering turn. Never settle a turn we did not query for.
@@ -1145,6 +1168,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
+        if (releasedTurnIdsRef.current.get(reattachSessionId) !== target.turnId) {
+          releasedTurnIdsRef.current.delete(reattachSessionId);
+        }
         const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
         if (target.turnId === suppressedTurnId) return;
         if (suppressedTurnId) suppressedTurnIdsRef.current.delete(reattachSessionId);
@@ -1175,8 +1201,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
             if (streamRes.status === 404) {
-              retryDelayMs = 2000;
-              failedChecks = 0;
+              noteRecoveryFailure();
             } else {
               noteRecoveryFailure();
               const reconnectError = t("stream.errors.reconnectStatus", {
@@ -1227,9 +1252,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               // rather than skip this retained entry forever.
               recoveringSessionIdsRef.current.add(reattachSessionId);
               if (!finished && !cancelled && wasRecovering && streamOpened) {
-                if (Date.now() - streamOpenedAt >= 5000) {
+                if (Date.now() - streamOpenedAt >= RECONNECT_STABLE_STREAM_MS) {
                   failedChecks = 0;
-                  retryDelayMs = 2000;
+                  retryDelayMs = RECONNECT_BASE_DELAY_MS;
                 }
                 noteRecoveryFailure();
               }
@@ -1380,7 +1405,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         const streamController = createTurnStreamController(pendingTurnId);
         let finished = false;
         try {
-          const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
+          const streamRes = await withRequestTimeout(
+            openTurnStream(pendingTurnId, streamController.signal),
+            () => streamController.abort(),
+          );
           if (!streamRes.ok || !streamRes.body) {
             setStreamError(
               t("stream.errors.attachStreamStatus", {
@@ -1411,7 +1439,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             inflightTurnsRef.current.delete(sendingSessionId);
             locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
             if (!currentEntry || currentEntry.turnId === pendingTurnId) {
-              const canRecover = !finished && sendingSessionId === floorSessionIdRef.current;
+              const canRecover =
+                !finished &&
+                sendingSessionId === floorSessionIdRef.current &&
+                releasedTurnIdsRef.current.get(sendingSessionId) !== pendingTurnId;
               if (canRecover) recoveringSessionIdsRef.current.add(sendingSessionId);
               else recoveringSessionIdsRef.current.delete(sendingSessionId);
               if (!canRecover) {
@@ -1637,7 +1668,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     recoveringSessionIdsRef.current.delete(sessionId);
     endSessionStream(sessionId, turnId);
     setRecoveryNotice(null);
-    setStreamError(null);
+    setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
+    setStreamReconnectRevision((revision) => revision + 1);
     void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
   }, [recoveryNotice, streamingSessionsRef, endSessionStream, loadMessages]);
 

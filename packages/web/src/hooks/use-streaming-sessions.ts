@@ -66,6 +66,14 @@ export function updateAssistantText(
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
   if (blockIx < existing.assistantBlockIx) return prev;
+  // Reattached SSE streams replay from the beginning. A shorter prefix in
+  // the same block is older than the live preview already on screen.
+  if (
+    blockIx === existing.assistantBlockIx &&
+    assistantText.length < existing.assistantText.length
+  ) {
+    return prev;
+  }
   if (blockIx === existing.assistantBlockIx && existing.assistantText === assistantText) {
     return prev;
   }

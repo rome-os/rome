@@ -924,6 +924,31 @@ describe("Chat turn stream lifecycle", () => {
     expect(openTurnStream).toHaveBeenCalledTimes(2);
   });
 
+  it("hands off a foreground send when opening its stream hangs", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-local" } });
+    rs.mocked(openTurnStream).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="session-1" />);
+    rs.useFakeTimers();
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-local", status: "running" }]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(12_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledWith("turn-local", expect.any(Object));
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
   it("keeps the live turn and Stop visible while reconnecting after a mobile stream drop", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
@@ -1120,6 +1145,39 @@ describe("Chat turn stream lifecycle", () => {
     expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(checksBeforeVisible);
   });
 
+  it("revalidates a silent active stream on foreground before its stall watchdog", async () => {
+    rs.mocked(openTurnStream).mockImplementationOnce((_turnId: string, signal?: AbortSignal) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener(
+                "abort",
+                () => controller.error(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    const originalSignal = rs.mocked(openTurnStream).mock.calls[0]?.[1];
+
+    rs.useFakeTimers();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(30_001);
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(originalSignal?.aborted).toBe(true);
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
   it("allows a new accepted send to reattach a previously reset turn", async () => {
     const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     rs.mocked(openTurnStream).mockImplementation(() =>
@@ -1279,6 +1337,35 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("shows recovery controls after repeated stream-open 404 mismatches", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 404 }));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(15_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(4);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
   });
 

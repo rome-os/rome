@@ -112,6 +112,13 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.assistantText).toBe("current block");
   });
 
+  it("keeps a longer same-block preview while a reattached stream replays older text", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world");
+    expect(updateAssistantText(state, "A", "turn-1", 0, "Hello")).toBe(state);
+    expect(state.get("A")?.assistantText).toBe("Hello world");
+  });
+
   it("updateAssistantText ignores writes from a stale turn", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
     state = startStream(state, "A", "turn-2");
