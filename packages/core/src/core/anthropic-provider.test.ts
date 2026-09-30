@@ -527,6 +527,100 @@ describe("AnthropicProvider", () => {
       expect(steerTurn.at(-1)).toMatchObject({ type: "result", content: "BANANA" });
     });
 
+    // A live SDK stream stays open after its last message; a turn that never
+    // ends then shows as a read that times out.
+    const terminalsOf = async (events: AsyncIterator<AgentMessage>) =>
+      Promise.race([
+        nextTurn(events).then((turn) =>
+          turn
+            .filter((m) => m.type === "result" || m.type === "error")
+            .map((m) =>
+              m.type === "error" ? `error: ${m.error}` : (m as { content: string }).content,
+            ),
+        ),
+        new Promise<string>((resolve) => setTimeout(() => resolve("no terminal"), 1000)),
+      ]);
+
+    it("loses only the pending reply when a frameless SDK error ends its turn", async () => {
+      const q = "00000000-0000-4000-8000-0000000000f1";
+      const r = "00000000-0000-4000-8000-0000000000f2";
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield result("DONE", [first.uuid], "human");
+        const pending = await sent();
+        // An SDK-started turn fails before streaming: no frames, no echo, no origin.
+        yield {
+          type: "result",
+          subtype: "error_during_execution",
+          errors: ["overloaded"],
+          num_turns: 0,
+          stop_reason: null,
+          total_cost_usd: 0,
+          duration_ms: 1,
+        };
+        yield { ...pending, isReplay: true };
+        yield say("P-REPLY", pending.uuid);
+        yield result("P-REPLY", [pending.uuid], "human");
+        for (const reply of ["Q-REPLY", "R-REPLY"]) {
+          const next = await sent();
+          yield { ...next, isReplay: true };
+          yield say(reply, next.uuid);
+          yield result(reply, [next.uuid], "human");
+        }
+        await new Promise(() => {});
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "start", inputId: a });
+      await terminalsOf(events);
+      await session.sendUserInput({ text: "P", inputId: p });
+      const pTurn = await terminalsOf(events);
+      await session.sendUserInput({ text: "Q", inputId: q });
+      const qTurn = await terminalsOf(events);
+      await session.sendUserInput({ text: "R", inputId: r });
+      const rTurn = await terminalsOf(events);
+      await session.close();
+
+      expect([pTurn, qTurn, rTurn]).toEqual([["error: overloaded"], ["Q-REPLY"], ["R-REPLY"]]);
+    });
+
+    it("ends every turn when another caller's turn opens before a carried steer", async () => {
+      const steer = "00000000-0000-4000-8000-0000000000e1";
+      const other = "00000000-0000-4000-8000-0000000000e2";
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("counting", first.uuid);
+        const s = await sent();
+        yield result("counting", [first.uuid], "human");
+        const b = await sent();
+        // The SDK answers the carried steer first, then the other caller's send.
+        yield { ...s, isReplay: true };
+        yield say("S-REPLY", s.uuid);
+        yield result("S-REPLY", [s.uuid], "human");
+        yield { ...b, isReplay: true };
+        yield say("B-REPLY", b.uuid);
+        yield result("B-REPLY", [b.uuid], "human");
+        await new Promise(() => {});
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "count", inputId: a });
+      await session.steerUserInput!({ text: "steer", inputId: steer });
+      await terminalsOf(events);
+      // Another caller's turn opens before the input lane adopts the steer.
+      await session.sendUserInput({ text: "other caller", inputId: other });
+      const bTurn = await terminalsOf(events);
+      await session.sendUserInput({ text: "steer", inputId: steer });
+      const steerTurn = await terminalsOf(events);
+      await session.close();
+
+      // The two swap replies, as on main; neither turn is left without a terminal.
+      expect([bTurn, steerTurn]).toEqual([["S-REPLY"], ["B-REPLY"]]);
+    });
+
     it("stamps sends without an inputId and reports no input status for them", async () => {
       const sends: { uuid?: string; origin?: unknown }[] = [];
       scripted(async function* (sent) {

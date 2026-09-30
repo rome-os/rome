@@ -560,6 +560,8 @@ export class AnthropicProvider implements ModelProvider {
     // pause ends because the provider reported that send as queued, and
     // Rome's next turn adopts a queued input before anything else; interrupt
     // and close also end it.
+    // The send that opened the current Rome turn.
+    let turnSendId: string | undefined;
     let resumeReading: (() => void) | undefined;
     const openRomeTurn = () => {
       resumeReading?.();
@@ -784,9 +786,16 @@ export class AnthropicProvider implements ModelProvider {
                 yield { type: "input_status", inputId, state: "queued" };
               }
               pendingSteers.clear();
-              // Only sends the SDK still holds can be answered later.
-              for (const id of romeSendIds) if (!deferredInputs.has(id)) romeSendIds.delete(id);
-              mintedSendIds.clear();
+              // Forget the sends this result answered. A send it didn't answer
+              // may still get a reply, which must reach a Rome turn. A result
+              // that answers none (a frameless SDK error) takes the place of
+              // this turn's own reply, so that send is forgotten instead.
+              const answered = echoed.length > 0 ? echoed : turnSendId ? [turnSendId] : [];
+              for (const id of answered) {
+                if (deferredInputs.has(id)) continue;
+                romeSendIds.delete(id);
+                mintedSendIds.delete(id);
+              }
               // The turn is ending: any text still held was the closing answer.
               if (!params.outputSchema && pendingText !== null) {
                 yield { type: "text", content: pendingText, turnPhase: "final" };
@@ -990,7 +999,10 @@ export class AnthropicProvider implements ModelProvider {
         lastCompletedTurnCheckpoint = undefined;
         running = true;
         openRomeTurn();
-        if (input.inputId && deferredInputs.delete(input.inputId)) return;
+        if (input.inputId && deferredInputs.delete(input.inputId)) {
+          turnSendId = input.inputId;
+          return;
+        }
         const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
         if (input.injectedToolResult) {
           content.push({
@@ -1007,6 +1019,7 @@ export class AnthropicProvider implements ModelProvider {
           running = true;
         }
         const uuid = input.inputId ?? randomUUID();
+        turnSendId = uuid;
         romeSendIds.add(uuid);
         if (!input.inputId) mintedSendIds.add(uuid);
         const sdkMsg: SDKUserMessage = {
