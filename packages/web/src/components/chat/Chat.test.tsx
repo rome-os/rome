@@ -129,7 +129,11 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   // Expose the streaming state + Stop wiring so tests can drive stopMessage
   // the way the real composer's Stop button does.
   ChatComposer: (props: ChatComposerProps) => (
-    <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+    <div
+      data-testid="chat-composer"
+      data-streaming={props.isStreaming ? "true" : "false"}
+      data-error={typeof props.streamError === "string" ? props.streamError : ""}
+    >
       <button
         type="button"
         data-testid="send-button"
@@ -145,6 +149,20 @@ rs.mock("@/components/chat/ChatComposer", () => ({
       {props.isStreaming && props.onStop ? (
         <button type="button" data-testid="stop-button" onClick={props.onStop} />
       ) : null}
+      {props.recoveryNotice && (
+        <div data-testid="recovery-notice">
+          <button
+            type="button"
+            data-testid="retry-recovery"
+            onClick={props.recoveryNotice.onRetry}
+          />
+          <button
+            type="button"
+            data-testid="reset-recovery"
+            onClick={props.recoveryNotice.onReset}
+          />
+        </div>
+      )}
     </div>
   ),
 }));
@@ -491,6 +509,8 @@ describe("Chat turn stream lifecycle", () => {
       streamController!.error(new Error("connection dropped"));
       await Promise.resolve();
       await Promise.resolve();
+    });
+    await act(async () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(sessionOneLookups).toBe(2);
@@ -731,6 +751,89 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("message-list").dataset.liveText).toBe("Partial reply");
   });
 
+  it("offers a local reset after repeated inconclusive recovery checks", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(14_000);
+    });
+
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+    const checksBeforeRetry = rs.mocked(listSessionTurns).mock.calls.length;
+    fireEvent.click(screen.getByTestId("retry-recovery"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(checksBeforeRetry);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("reset-recovery"));
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+    expect(screen.queryByTestId("recovery-notice")).toBeNull();
+  });
+
+  it("keeps the reconnect error stable and backs off repeated attach failures", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 503 }));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    const firstError = screen.getByTestId("chat-composer").dataset.error;
+    expect(firstError).toBe("stream.errors.reconnectStatus");
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe(firstError);
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe(firstError);
+  });
+
   it("settles a dropped stream only after the server confirms the turn ended", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
@@ -764,7 +867,7 @@ describe("Chat turn stream lifecycle", () => {
 
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     await act(async () => {
-      await rs.advanceTimersByTimeAsync(2_000);
+      await rs.advanceTimersByTimeAsync(4_000);
     });
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
     expect(screen.getByTestId("message-list").dataset.streaming).toBe("false");

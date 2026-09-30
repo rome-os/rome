@@ -349,6 +349,9 @@
     }
   },
   "stream": {
+    "recoveryUnavailable": "连接中断，暂时无法确认回复是否仍在进行。可重试连接，或重置本地显示（不会停止服务器任务）。",
+    "retryConnection": "重试连接",
+    "resetView": "重置显示",
     "errors": {
       "createChatFallback": "创建对话失败。",
       "createChatStatus": "创建对话失败({{status}})。",
