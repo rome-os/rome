@@ -641,6 +641,9 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(
+      rs.mocked(listSessionMessages).mock.calls.filter(([sid]) => sid === "session-1"),
+    ).toHaveLength(2);
     failOffFloorReload = false;
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     rerender(
@@ -1656,6 +1659,33 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(screen.queryByTestId("stop-button")).toBeNull();
+  });
+
+  it("backs off repeated Stop reconciliation failures", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionMessages).mockRejectedValue(new Error("messages unavailable"));
+    rs.mocked(listSessionMessages).mockClear();
+    rs.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await rs.advanceTimersByTimeAsync(0);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
   it("deletes a chat only after the app confirmation dialog is confirmed", async () => {

@@ -774,6 +774,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [isReadVisibleSession, markSessionRead],
   );
+  const queueOffFloorReconciliation = useCallback(
+    (id: string) => {
+      // Keep this marker even if the first fetch succeeds: the turn may still
+      // be running, so a floor-return lookup must refresh its final answer.
+      if (pendingMessageReconciliationsRef.current.has(id)) return;
+      pendingMessageReconciliationsRef.current.add(id);
+      void loadMessages(id, { force: true, dropLocalOptimistic: true, bounded: true });
+    },
+    [loadMessages],
+  );
 
   // Load messages when the main session changes (also covers initial mount).
   useEffect(() => {
@@ -1058,12 +1068,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
       if (turnId) {
         endSessionStream(recoveringSessionId, turnId);
-        pendingMessageReconciliationsRef.current.add(recoveringSessionId);
-        void loadMessages(recoveringSessionId, {
-          force: true,
-          dropLocalOptimistic: true,
-          bounded: true,
-        });
+        queueOffFloorReconciliation(recoveringSessionId);
       }
     }
 
@@ -1275,10 +1280,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               endSessionStream(reattachSessionId, attachedTurnId);
               noteRecoverySuccess();
               if (!finished) {
-                void loadMessages(reattachSessionId, {
-                  force: true,
-                  dropLocalOptimistic: true,
-                });
+                if (reattachSessionId !== floorSessionIdRef.current) {
+                  queueOffFloorReconciliation(reattachSessionId);
+                } else {
+                  void loadMessages(reattachSessionId, {
+                    force: true,
+                    dropLocalOptimistic: true,
+                  });
+                }
               }
             } else {
               // Cleanup aborts the reader too. The next effect must reattach
@@ -1315,6 +1324,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     startSessionStream,
     endSessionStream,
     loadMessages,
+    queueOffFloorReconciliation,
     createTurnStreamController,
     releaseTurnStreamController,
     t,
@@ -1651,7 +1661,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     // A dead SSE connection can miss `done`. Release it only after the server
     // confirms this turn ended; accepting Stop is not confirmation of exit.
-    const forceReleaseIfStuck = (delayMs: number, confirmedFinished = false): void => {
+    const forceReleaseIfStuck = (
+      delayMs: number,
+      confirmedFinished = false,
+      retryDelayMs = RECONNECT_BASE_DELAY_MS,
+    ): void => {
       const stillOwnsStream = () =>
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
@@ -1664,7 +1678,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             () => lookupController.abort(),
           ).catch(() => null);
           if (!turns) {
-            if (stillOwnsStream()) forceReleaseIfStuck(RECONNECT_BASE_DELAY_MS);
+            if (stillOwnsStream()) {
+              forceReleaseIfStuck(
+                retryDelayMs,
+                false,
+                Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+              );
+            }
             return;
           }
           if (turns.some((turn) => turn.turnId === turnId)) return;
@@ -1680,7 +1700,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             (acceptedSendRevisionsRef.current.get(sid) ?? 0) === observedSendRevision,
         });
         if (!loaded) {
-          if (stillOwnsStream()) forceReleaseIfStuck(RECONNECT_BASE_DELAY_MS, true);
+          if (stillOwnsStream()) {
+            forceReleaseIfStuck(
+              retryDelayMs,
+              true,
+              Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+            );
+          }
           return;
         }
         if (!stillOwnsStream()) return;
