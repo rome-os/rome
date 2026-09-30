@@ -1130,6 +1130,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       let attachedTurnId: string | null = null;
       let finished = false;
       let streamOpened = false;
+      let streamMissing = false;
       let streamOpenedAt = 0;
       try {
         // List in-flight turns by turnId. Reattach to the running
@@ -1244,6 +1245,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
             noteRecoveryFailure();
+            streamMissing = streamRes.status === 404;
             if (streamRes.status !== 404) {
               const reconnectError = t("stream.errors.reconnectStatus", {
                 status: streamRes.status,
@@ -1278,7 +1280,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           ) {
             recoveringSessionIdsRef.current.delete(reattachSessionId);
           } else if (!currentTurnId || currentTurnId === attachedTurnId) {
-            if (finished || reattachSessionId !== floorSessionIdRef.current) {
+            if (
+              finished ||
+              reattachSessionId !== floorSessionIdRef.current ||
+              (streamMissing && !wasRecovering && !streamOpened)
+            ) {
               recoveringSessionIdsRef.current.delete(reattachSessionId);
               endSessionStream(reattachSessionId, attachedTurnId);
               noteRecoverySuccess();

@@ -1381,6 +1381,16 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
   });
 
+  it("does not retain a live placeholder when an idle poll's stream open returns 404", async () => {
+    rs.mocked(openTurnStream).mockResolvedValue(new Response(null, { status: 404 }));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false"),
+    );
+    expect(screen.queryByTestId("stop-button")).toBeNull();
+  });
+
   it("shows recovery controls after repeated stream-open 404 mismatches", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream)
