@@ -62,17 +62,26 @@ describe("desktopUpstream", () => {
     expect(desktops.asked).toEqual(["notes", "notes"]);
   });
 
-  it("keeps paths that cannot name a desktop on the shared websockify", async () => {
+  it("keeps only the bare prefix and /websockify on the shared websockify", async () => {
     rs.stubEnv("ROME_NOVNC_PORT", "6080");
     const desktops = desktopsOf();
-    expect(await desktopUpstream("/desktop-proxy/Wechat/websockify", desktops)).toEqual({
-      port: 6080,
-      path: "/Wechat/websockify",
-    });
     expect(await desktopUpstream("/desktop-proxy/websockify?x=1", desktops)).toEqual({
       port: 6080,
       path: "/websockify?x=1",
     });
+    expect(await desktopUpstream("/desktop-proxy", desktops)).toEqual({ port: 6080, path: "/" });
+    expect(desktops.asked).toEqual([]);
+  });
+
+  it("has no upstream for a segment that cannot name a desktop", async () => {
+    const desktops = desktopsOf(wechat);
+    for (const path of [
+      "/desktop-proxy/Wechat/websockify",
+      "/desktop-proxy/my_desk/websockify",
+      `/desktop-proxy/${"a".repeat(33)}/websockify`,
+    ]) {
+      expect(await desktopUpstream(path, desktops)).toBeNull();
+    }
     expect(desktops.asked).toEqual([]);
   });
 });

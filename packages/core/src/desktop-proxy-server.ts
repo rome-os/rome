@@ -10,12 +10,14 @@ import { createLogger } from "./logger.js";
 const log = createLogger("desktop-proxy");
 
 const PREFIX = "/desktop-proxy";
+const SHARED_SEGMENT = "websockify";
 
 /**
  * The websockify port and the path it sees, for an upgrade under `/desktop-proxy`.
- * `/desktop-proxy/<name>` and everything under it go to that named desktop,
- * and resolve to null when it is not running. Every other path goes to the
- * shared desktop, whose websockify ignores the path.
+ * `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop,
+ * whose websockify ignores the path. Any other first segment names a desktop:
+ * it and everything under it go to that desktop, and resolve to null when the
+ * segment is not a valid name or the desktop is not running.
  */
 export async function desktopUpstream(
   rawUrl: string,
@@ -23,7 +25,8 @@ export async function desktopUpstream(
 ): Promise<{ port: number; path: string } | null> {
   const rest = rawUrl.slice(PREFIX.length);
   const named = /^\/([^/?]+)(.*)$/.exec(rest);
-  if (named && isDesktopName(named[1]!)) {
+  if (named && named[1] !== SHARED_SEGMENT) {
+    if (!isDesktopName(named[1]!)) return null;
     const desktop = await desktops.get(named[1]!);
     if (!desktop) return null;
     const tail = named[2]!;
