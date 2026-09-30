@@ -8,6 +8,7 @@ import {
   testMessagesQueryContract,
   WHOLE_HISTORY,
 } from "./messages-contract.js";
+import { WHATSAPP_SELF_SENDER } from "./whatsapp-history.js";
 import { whatsAppMessages } from "./whatsapp-messages.js";
 import type { AccountMessages, MessageAccount } from "./messages.js";
 
@@ -177,7 +178,13 @@ describe("whatsAppMessages", () => {
         since: new Date(300_000),
       })
       .then((page) => page.filter((entry) => entry.messageId === "c"));
-    expect(answered).toMatchObject({ direction: "outbound", senderDisplayName: "You" });
+    // The sync records no sender for the guardian's line in a direct chat, and
+    // the chat's JID is the contact's, so the line is marked as the guardian's.
+    expect(answered).toMatchObject({
+      direction: "outbound",
+      senderId: WHATSAPP_SELF_SENDER,
+      senderDisplayName: "You",
+    });
     const [group] = await store.query({ conversationId: groupChat, limit: 1 });
     expect(group?.thread).toEqual({ kind: "group", name: "Book club" });
 

@@ -76,7 +76,9 @@ export function whatsAppMessages(db: DrizzleDb): Messages {
 }
 
 /** A chat as the mirror keys it: a user JID with its device suffix dropped, the
- *  way the sync writes it. A group JID is already its own key. */
+ *  way the sync writes it. A group JID is already its own key. The sync also
+ *  folds the guardian's own `@lid` onto their phone JID, which takes the live
+ *  connection, so a chat with yourself is found by the phone JID only. */
 function canonicalChat(jid: string): string {
   return isJidGroup(jid) ? jid : jidNormalizedUser(jid);
 }

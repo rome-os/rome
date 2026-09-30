@@ -21,6 +21,7 @@ import {
   type WechatUserMessage,
 } from "./wechat-user.js";
 import type { AccountMessages } from "./messages.js";
+import { testMessagesQueryContract } from "./messages-contract.js";
 import { wechatUserAccounts, wechatUserMessages } from "./wechat-user-messages.js";
 
 const msg = (over: Partial<WechatUserMessage>): WechatUserMessage => ({
@@ -118,12 +119,14 @@ describe("wechatUserMessages", () => {
     expect(new Set(found.map((row) => row.ref)).size).toBe(651);
     expect(found.at(-1)?.ref).toBe("wxid_a:older");
   });
-  it("queries the reader and answers the channel's message record", async () => {
+  it("queries the reader and answers the channel's message record, newest first", async () => {
     const asked: unknown[] = [];
     const reader = {
+      // The reader's own order: oldest first.
       async messages(input: unknown) {
         asked.push(input);
         return [
+          msg({ id: "room@chatroom:1", conversationId: "room@chatroom", isSelf: true }),
           msg({
             id: "room@chatroom:2",
             conversationId: "room@chatroom",
@@ -133,7 +136,6 @@ describe("wechatUserMessages", () => {
             senderName: "Bob",
             timestamp: 2000,
           }),
-          msg({ id: "room@chatroom:1", conversationId: "room@chatroom", isSelf: true }),
         ];
       },
     } as unknown as WechatUserReader;
@@ -295,3 +297,51 @@ describe("wechatUserAccounts", () => {
     expect(await accounts.resolve("wxid_unknown")).toBeNull();
   });
 });
+
+/**
+ * A reader that answers `messages` the way the helper does: every conversation
+ * unless one is named, at or after `since`, the newest `limit` of them, oldest
+ * first.
+ */
+function helperOrderReader(rows: WechatUserMessage[]): WechatUserReader {
+  return {
+    async messages(input: { conversationId?: string; since?: Date; limit: number }) {
+      const since = input.since ? Math.floor(input.since.getTime() / 1000) : null;
+      const held = rows
+        .filter((row) => !input.conversationId || row.conversationId === input.conversationId)
+        .filter((row) => since === null || row.timestamp >= since)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      return held.slice(-input.limit);
+    },
+  } as unknown as WechatUserReader;
+}
+
+testMessagesQueryContract("wechatUserMessages", () => ({
+  messages: wechatUserMessages(
+    helperOrderReader([
+      msg({
+        id: "room@chatroom:1",
+        conversationId: "room@chatroom",
+        isGroup: true,
+        timestamp: 100,
+      }),
+      msg({
+        id: "room@chatroom:2",
+        conversationId: "room@chatroom",
+        isGroup: true,
+        timestamp: 200,
+      }),
+      msg({
+        id: "room@chatroom:3",
+        conversationId: "room@chatroom",
+        isGroup: true,
+        isSelf: true,
+        timestamp: 300,
+      }),
+      msg({ id: "wxid_a:1", conversationId: "wxid_a", timestamp: 250 }),
+    ]),
+  ),
+  channel: "wechat_user",
+  conversation: "room@chatroom" as ConversationId,
+  silentConversation: "quiet@chatroom" as ConversationId,
+}));

@@ -120,7 +120,10 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
         ...(since ? { since } : {}),
         limit: queryLimit(limit),
       });
-      return messages.map(toWechatUserChannelMessage);
+      // The reader answers oldest first; the port answers newest first.
+      return messages
+        .map(toWechatUserChannelMessage)
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     },
     byAccount: wechatUserAccountMessages(reader),
   };

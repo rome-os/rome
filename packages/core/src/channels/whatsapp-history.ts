@@ -1,6 +1,7 @@
-// A row of the WhatsApp mirror as the message it records. Shared by the
-// channel's `query` (whatsapp-messages.ts) and the adapter's history read, so
-// the two cannot render one row two ways.
+// A row of the WhatsApp mirror as the message it records, for the channel's
+// `query` (whatsapp-messages.ts). The adapter's history read shares the line and
+// the attachments, but still names the sender and the chat through its live
+// connection until that read is removed.
 
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { Attachment } from "./types.js";
@@ -50,16 +51,24 @@ function historyAttachmentType(type: string | null): Attachment["type"] | null {
   }
 }
 
+/** The sender id of a line the guardian sent, when the mirror recorded no
+ *  address for it. The sync leaves a direct chat's outbound sender empty, and
+ *  the chat's own JID names the other person. */
+export const WHATSAPP_SELF_SENDER = "whatsapp:self";
+
 /**
  * A mirrored row as a {@link ChannelMessage}.
  *
  * The guardian's own lines are named "You", the name the channel's history has
- * always given them. The mirror does not record the guardian's own address, so
- * their sender id is the address the row names, or the chat's.
+ * always given them.
  */
 export function whatsAppHistoryMessage(row: WaHistoryMessage): ChannelMessage {
   const isGroup = row.isGroup || row.chatJid.endsWith("@g.us");
-  const senderId = row.fromMe || isGroup ? (row.senderJid ?? row.chatJid) : row.chatJid;
+  const senderId = row.fromMe
+    ? (row.senderJid ?? WHATSAPP_SELF_SENDER)
+    : isGroup
+      ? (row.senderJid ?? row.chatJid)
+      : row.chatJid;
   const threadName = row.chatName ?? row.chatPhoneNumber ?? undefined;
   return {
     channel: "whatsapp",
