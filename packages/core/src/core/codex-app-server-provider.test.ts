@@ -1916,7 +1916,60 @@ describe("CodexAppServerProvider", () => {
     // The tool_result output is the unwrapped MCP result, so the webchat drain
     // loop can read pendingInteraction off it.
     const result = msgs.find((m) => m.type === "tool_result");
-    expect(result).toMatchObject({ tool: "ask_question", output: mcpResult });
+    expect(result).toMatchObject({ tool: "ask_question", output: mcpResult, isError: false });
+    await session.close();
+  });
+
+  it("marks a command that exited non-zero as a failed tool result", async () => {
+    const provider = new CodexAppServerProvider();
+    const commandItem = (id: string, exitCode: number | null, status: string) => ({
+      type: "commandExecution",
+      id,
+      command: "/bin/sh -lc 'pnpm app:install'",
+      cwd: "/workspace",
+      status,
+      commandActions: [],
+      aggregatedOutput: exitCode === 0 ? "ok" : "boom",
+      exitCode,
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        for (const [id, exitCode, status] of [
+          ["cmd_ok", 0, "completed"],
+          ["cmd_fail", 3, "failed"],
+        ] as const) {
+          n("item/started", {
+            item: commandItem(id, null, "inProgress"),
+            threadId: "thr-1",
+            turnId: "turn-1",
+            startedAtMs: 0,
+          });
+          n("item/completed", {
+            item: commandItem(id, exitCode, status),
+            threadId: "thr-1",
+            turnId: "turn-1",
+            completedAtMs: 0,
+          });
+        }
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "install" });
+    const results = (await collected).filter((m) => m.type === "tool_result");
+
+    expect(results).toMatchObject([
+      { toolUseId: "cmd_ok", tool: "Bash", isError: false },
+      { toolUseId: "cmd_fail", tool: "Bash", isError: true },
+    ]);
     await session.close();
   });
 

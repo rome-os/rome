@@ -699,8 +699,17 @@ export interface ToolResultMessage {
   type: "tool_result";
   toolUseId: string;
   tool: string;
+  /** The provider's own result payload. Its shape differs by provider and tool. */
   output: unknown;
   endedAt?: string;
+  /**
+   * Whether the tool call failed, decided by the provider adapter from the
+   * provider's own failure signal: Claude's `is_error`, a failed status or
+   * non-zero exit code from Codex, or a Rome tool's error result. Read this
+   * instead of inspecting `output`. Absent when the producer cannot tell,
+   * including on results recorded before this field existed.
+   */
+  isError?: boolean;
 }
 
 export interface SubagentStartMessage {

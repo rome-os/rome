@@ -385,16 +385,15 @@ function pickResult(
 
 function toolStepStatus(result: StreamBlock | null): ToolStepStatus {
   if (!result || result.type !== "tool_result") return "running";
-  return isErrorOutput(result.output) ? "error" : "ok";
+  if (result.isError !== undefined) return result.isError ? "error" : "ok";
+  return isLegacyErrorOutput(result.output) ? "error" : "ok";
 }
 
-// A tool_result is an error when its output declares failure. Providers signal
-// this differently — Claude sets `isError: true`; Codex's shell tool emits
-// `status: "failed"` and a non-zero `exit_code`/`exitCode`; Codex's MCP tool
-// wrapper surfaces a failed call's `error` (see codex-app-server-provider.ts
-// `mcpToolCall`). We accept all of these so the trace row's status dot stays
-// accurate regardless of provider.
-function isErrorOutput(output: unknown): boolean {
+// Results recorded before `tool_result.isError` existed carry no flag, so read
+// each provider's own failure signal from the output: Claude's `isError`,
+// Codex's `status: "failed"` and non-zero `exit_code`/`exitCode`, and a
+// Codex MCP call's `error`.
+function isLegacyErrorOutput(output: unknown): boolean {
   const normalized = normalizeTracePayload(output);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
     return false;

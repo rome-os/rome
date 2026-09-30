@@ -297,6 +297,9 @@ function extractToolResultMessages(
       tool: normalizeToolName(toolUseNames.get(block.tool_use_id) ?? "unknown"),
       output,
       endedAt: new Date().toISOString(),
+      // The Messages API marks a failed tool result with `is_error`; its
+      // absence means success.
+      isError: block.is_error === true,
     };
   });
   if (contentResults.length > 0) {

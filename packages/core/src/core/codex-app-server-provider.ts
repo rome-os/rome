@@ -76,6 +76,8 @@ import {
 } from "./codex/common.js";
 import type { AgentMessage, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import { codexToolItemIsError } from "./codex/tool-result-error.js";
+import type { FacadeToolResult } from "./mcp-facade.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-revoked.js";
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
@@ -509,7 +511,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
     let appliedReasoningEffort: string | undefined;
-    const dynamicToolOutputs = new Map<string, unknown>();
+    const dynamicToolOutputs = new Map<string, FacadeToolResult>();
     const usageByTurnId = new Map<
       string,
       { usage: ThreadTokenUsage; hasNewRequestUsage: boolean }
@@ -628,6 +630,7 @@ export class CodexAppServerProvider implements ModelProvider {
             ? (rec.result ?? rec.error ?? item)
             : item,
         endedAt: new Date().toISOString(),
+        isError: codexToolItemIsError(item, dynamicOutput?.isError),
       });
     };
 

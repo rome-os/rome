@@ -188,6 +188,7 @@ export class ApprovalHandler {
         toolUseId: traceId,
         tool: payload.actionName,
         output: result,
+        isError: result.status === "error",
         agent: agentName,
       });
 
@@ -226,6 +227,7 @@ export class ApprovalHandler {
         toolUseId: traceId,
         tool: payload.actionName,
         output: { error: "Action execution failed. See server logs for details." },
+        isError: true,
         agent: agentName,
       });
       try {

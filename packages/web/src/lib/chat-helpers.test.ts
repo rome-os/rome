@@ -159,6 +159,33 @@ describe("detectAppInstalls", () => {
 
     expect(detectAppInstalls(blocks)).toEqual([{ appId: "cli-app" }]);
   });
+
+  const bashInstall = (result: Record<string, unknown>): TraceBlockDto[] => [
+    {
+      type: "tool_use",
+      tool: "Bash",
+      id: "use-7",
+      input: { command: "pnpm app:install --source ~/projects/apps/cli-app/" },
+    } as unknown as TraceBlockDto,
+    { type: "tool_result", tool: "Bash", toolUseId: "use-7", ...result } as TraceBlockDto,
+  ];
+
+  it("reads the normalized isError flag on any provider's Bash result", () => {
+    // Claude's output is text, with no exit code to read.
+    expect(detectAppInstalls(bashInstall({ output: "installed", isError: false }))).toEqual([
+      { appId: "cli-app" },
+    ]);
+    expect(detectAppInstalls(bashInstall({ output: "Exit code 1", isError: true }))).toEqual([]);
+    // The flag wins over an exit code in the output.
+    expect(detectAppInstalls(bashInstall({ output: { exitCode: 0 }, isError: true }))).toEqual([]);
+  });
+
+  it("reads Codex's camelCase exit code on a result recorded before isError", () => {
+    expect(
+      detectAppInstalls(bashInstall({ output: { exitCode: 0, aggregatedOutput: "installed" } })),
+    ).toEqual([{ appId: "cli-app" }]);
+    expect(detectAppInstalls(bashInstall({ output: { exitCode: 1 } }))).toEqual([]);
+  });
 });
 
 describe("resolveAppToOpen", () => {

@@ -88,12 +88,19 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
     const appId = match[1];
     const resultBlock = resultMap.get(block.id);
     if (!resultBlock || resultBlock.type !== "tool_result") continue;
-    const out = resultBlock.output as Record<string, unknown> | null;
-    if (out?.exit_code !== 0) continue;
+    if (!bashSucceeded(resultBlock)) continue;
     results.push({ appId });
   }
 
   return results;
+}
+
+/** Whether a Bash tool result succeeded. Results recorded before
+ *  `tool_result.isError` existed only carry the shell's exit code. */
+function bashSucceeded(result: Extract<TraceBlockDto, { type: "tool_result" }>): boolean {
+  if (result.isError !== undefined) return !result.isError;
+  const out = result.output as Record<string, unknown> | null;
+  return (out?.exit_code ?? out?.exitCode) === 0;
 }
 
 // A few apps are carriers, not destinations: their own page is just a redirect.

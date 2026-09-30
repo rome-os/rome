@@ -12,6 +12,17 @@ describe("decodeAppIdPathSegment", () => {
 });
 
 describe("toTraceBlock", () => {
+  it("keeps a tool result's isError flag, including false", () => {
+    for (const isError of [true, false]) {
+      expect(
+        toTraceBlock({ type: "tool_result", toolUseId: "t1", tool: "Bash", output: "x", isError }),
+      ).toMatchObject({ type: "tool_result", toolUseId: "t1", isError });
+    }
+    expect(
+      toTraceBlock({ type: "tool_result", toolUseId: "t1", tool: "Bash", output: "x" }),
+    ).not.toHaveProperty("isError");
+  });
+
   it("preserves an opaque Rome session reference on session_init", () => {
     expect(
       toTraceBlock({
