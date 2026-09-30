@@ -432,6 +432,7 @@ describe("Chat turn stream lifecycle", () => {
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    rs.mocked(listSessionMessages).mockRejectedValueOnce(new Error("transient reload failure"));
     rs.mocked(listSessionMessages).mockResolvedValue([
       {
         id: "answer-1",
@@ -451,8 +452,64 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
 
+    expect(openTurnStream).not.toHaveBeenCalledWith("turn-2", expect.any(Object));
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(4_000);
+    });
     expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
     expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-1");
+  });
+
+  it("keeps the live preview when terminal message reload fails", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    await act(async () => {
+      streamController!.enqueue(
+        new TextEncoder().encode('event: assistant_text\ndata: {"blockIx":0,"text":"Done"}\n\n'),
+      );
+    });
+    rs.mocked(listSessionMessages).mockRejectedValueOnce(new Error("reload failed"));
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "answer-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Done" }]),
+        createdAt: "2026-09-30T14:00:00.000Z",
+      },
+    ]);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.enqueue(
+        new TextEncoder().encode('event: done\ndata: {"success":true}\n\n'),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("message-list").dataset.liveText).toBe("Done");
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-1");
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
   });
 
   it("releases a cancelled reattachment after the floor moves away", async () => {
@@ -1004,6 +1061,50 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
     });
     expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(checksBeforeVisible);
+  });
+
+  it("allows a new accepted send to reattach a previously reset turn", async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllers.push(controller);
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    rs.useFakeTimers();
+    await act(async () => {
+      controllers[0]!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(14_000);
+    });
+    fireEvent.click(screen.getByTestId("reset-recovery"));
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-1" } });
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      controllers[1]!.error(new Error("connection dropped again"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
   it("keeps the reconnect error stable and backs off repeated attach failures", async () => {

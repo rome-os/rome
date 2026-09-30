@@ -978,9 +978,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // A disconnected reader may still own a live preview. Reloading now can
       // render its persisted copy beside that preview until recovery settles.
       if (shouldStop) {
-        await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+        return await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
       }
-      return shouldStop;
+      return false;
     },
     [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
   );
@@ -1132,7 +1132,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             dropLocalOptimistic: true,
             shouldApply: stillObserving,
           });
-          if (!loaded || !stillObserving()) {
+          if (!loaded) {
+            if (stillObserving()) noteRecoveryFailure();
+            return;
+          }
+          if (!stillObserving()) {
             return;
           }
         }
@@ -1288,6 +1292,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       const createResp: CreateTurnResponse = result.data;
+      suppressedTurnIdsRef.current.delete(sendingSessionId);
       acceptedSendRevisionsRef.current.set(
         sendingSessionId,
         (acceptedSendRevisionsRef.current.get(sendingSessionId) ?? 0) + 1,
@@ -2043,7 +2048,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                       onStop={() => void stopMessage()}
                       streamError={streamError}
                       recoveryNotice={
-                        recoveryNotice?.sessionId === floorSessionId
+                        recoveryNotice?.sessionId === floorSessionId &&
+                        recoveryNotice.turnId === floorSessionStream?.turnId
                           ? {
                               message: t("stream.recoveryUnavailable"),
                               onRetry: () => setStreamReconnectRevision((revision) => revision + 1),
