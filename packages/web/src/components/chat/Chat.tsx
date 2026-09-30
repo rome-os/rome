@@ -379,6 +379,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
+  const stopRetryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const isChatMountedRef = useRef(true);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
@@ -638,7 +640,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, []);
 
   useEffect(() => {
+    isChatMountedRef.current = true;
     return () => {
+      isChatMountedRef.current = false;
+      for (const timer of stopRetryTimersRef.current) clearTimeout(timer);
+      stopRetryTimersRef.current.clear();
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -1493,10 +1499,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               if (!canRecover) {
                 endSessionStream(sendingSessionId, pendingTurnId);
                 if (!finished) {
-                  void loadMessages(sendingSessionId, {
-                    force: true,
-                    dropLocalOptimistic: true,
-                  });
+                  if (sendingSessionId !== floorSessionIdRef.current) {
+                    queueOffFloorReconciliation(sendingSessionId);
+                  } else {
+                    void loadMessages(sendingSessionId, {
+                      force: true,
+                      dropLocalOptimistic: true,
+                    });
+                  }
                 }
               }
             }
@@ -1516,6 +1526,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       createTurnStreamController,
       releaseTurnStreamController,
       loadMessages,
+      queueOffFloorReconciliation,
     ],
   );
 
@@ -1669,9 +1680,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       retryDelayMs = RECONNECT_BASE_DELAY_MS,
     ): void => {
       const stillOwnsStream = () =>
+        isChatMountedRef.current &&
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
-      setTimeout(async () => {
+      const timer = setTimeout(async () => {
+        stopRetryTimersRef.current.delete(timer);
         if (!stillOwnsStream()) return;
         if (!confirmedFinished) {
           const lookupController = new AbortController();
@@ -1720,6 +1733,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         );
         endSessionStream(sid, turnId);
       }, delayMs);
+      stopRetryTimersRef.current.add(timer);
     };
 
     try {
