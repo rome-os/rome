@@ -78,8 +78,6 @@ const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const INSTALL_TIMEOUT_MS = 20 * 60_000;
 /** The start script waits up to 30 s for each of its ports and 5 s for Openbox. */
 const DESKTOP_START_TIMEOUT_MS = 90_000;
-/** bash's exit code when the script it was asked to run does not exist. */
-const SCRIPT_NOT_FOUND = 127;
 
 function sharedDisplay(): string {
   return process.env.DISPLAY || ":99";
@@ -392,21 +390,22 @@ export class WechatUserRuntime {
   async ensureDesktop(signal?: AbortSignal): Promise<void> {
     const desktop = this.desktop;
     if (!desktop) return;
+    if (!(await exists(this.desktopScript))) {
+      log.warn("wechat_user.desktop_unavailable", { script: this.desktopScript });
+      this.currentDisplay = sharedDisplay();
+      return;
+    }
     // env -i: the desktop's programs outlive Rome and need none of its
-    // configuration or credentials.
-    const env = ["PATH", "HOME", "USER", "LOGNAME", "LANG"].flatMap((key) =>
-      process.env[key] === undefined ? [] : [`${key}=${process.env[key]}`],
+    // configuration or credentials. ROME_DESKTOP_LOG_DIR passes through so this
+    // run and the entrypoint's take the same lock.
+    const env = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "ROME_DESKTOP_LOG_DIR"].flatMap(
+      (key) => (process.env[key] === undefined ? [] : [`${key}=${process.env[key]}`]),
     );
     const result = await this.run(
       "env",
       ["-i", ...env, "bash", this.desktopScript, ...startDesktopArgs("wechat", desktop)],
       { timeoutMs: DESKTOP_START_TIMEOUT_MS, ...(signal ? { signal } : {}) },
     );
-    if (result.code === SCRIPT_NOT_FOUND) {
-      log.warn("wechat_user.desktop_unavailable", { script: this.desktopScript });
-      this.currentDisplay = sharedDisplay();
-      return;
-    }
     if (result.code !== 0) {
       throw new WechatUserRuntimeError(
         `Could not start WeChat's desktop: ${result.stderr.trim() || `exit ${result.code}`}`,

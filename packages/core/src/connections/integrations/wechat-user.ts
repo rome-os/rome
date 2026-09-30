@@ -298,9 +298,8 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       }
       await runtime.installReader(signal);
       // The client is deliberately not started here — recovery launches it under
-      // gdb to own it from birth and catch the first login. Only the desktop and
-      // session it draws into and the capture driver are readied.
-      await runtime.ensureDesktop(signal);
+      // gdb to own it from birth and catch the first login. Only the session it
+      // draws into and the capture driver are readied.
       await runtime.prepareSession();
       await deps.stageDriver();
       return null;
@@ -317,6 +316,10 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         // A cached account store makes the client show a sign-in button, which
         // needs the desktop, so that case skips the QR stream.
         const remembered = (await runtime.status()).loggedIn;
+        // Recovery replaces any running client, so it starts on WeChat's own
+        // desktop. Bring that up after the status read: a legacy client still on
+        // the shared display would have pulled `display` and the links there.
+        await runtime.ensureDesktop(signal);
         interact.show(
           remembered ? rememberedView(runtime.desktopPath) : scanView(runtime.desktopPath),
         );

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { wechatUserDisplay } from "./desktops.js";
+import { desktopSlot, wechatUserDisplay } from "./desktops.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**
@@ -239,12 +239,19 @@ export function loadConfig(): Config {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
   }
-  // WeChat's own display has one rule, shared with the runtime and the desktop
+  // WeChat's own desktop has one rule, shared with the runtime and the desktop
   // proxy; a bad value fails boot here rather than when WeChat first starts.
+  // Without this, the runtime would read a missing row as "no own desktop" and
+  // quietly run the client beside Chrome.
   try {
     wechatUserDisplay(process.env);
   } catch (error) {
     throw new Error(`Invalid configuration:\n${(error as Error).message}`);
+  }
+  if (process.env.WECHAT_USER_ENABLED === "true" && !desktopSlot("wechat")) {
+    throw new Error(
+      "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535, and a display other than DISPLAY",
+    );
   }
 
   return result.data;

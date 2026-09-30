@@ -156,15 +156,16 @@ describe("makeWechatUserSetup", () => {
     expect(runtime.install).toHaveBeenCalledTimes(1);
     expect(runtime.installReader).toHaveBeenCalledTimes(1);
     expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
-    // Recovery launches the client on WeChat's own desktop, so it must be up first.
+    // Recovery launches the client on WeChat's own desktop, so it must be up
+    // first, and after the last status read: a legacy client still running on
+    // the shared display would have pulled `display` back there.
+    type Mocked = { mock: { invocationCallOrder: number[] } };
+    const order = (fn: unknown) => (fn as Mocked).mock.invocationCallOrder;
+    const recovery = order(recoverPassphrase)[0]!;
+    const lastStatus = Math.max(...order(runtime.status).filter((at) => at < recovery));
     expect(runtime.ensureDesktop).toHaveBeenCalledTimes(1);
-    expect(
-      (runtime.ensureDesktop as unknown as { mock: { invocationCallOrder: number[] } }).mock
-        .invocationCallOrder[0],
-    ).toBeLessThan(
-      (recoverPassphrase as unknown as { mock: { invocationCallOrder: number[] } }).mock
-        .invocationCallOrder[0]!,
-    );
+    expect(order(runtime.ensureDesktop)[0]).toBeGreaterThan(lastStatus);
+    expect(order(runtime.ensureDesktop)[0]).toBeLessThan(recovery);
     // The client is launched by recovery under gdb, not started the ordinary way.
     expect(runtime.start).not.toHaveBeenCalled();
     expect(stageDriver).toHaveBeenCalledTimes(1);

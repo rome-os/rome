@@ -232,13 +232,19 @@ describe("WechatUserRuntime display", () => {
     expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
   });
 
-  async function installedRuntime(run: RunCommand, extra: { procDir?: string } = {}) {
+  async function installedRuntime(
+    run: RunCommand,
+    extra: { procDir?: string; desktopScript?: string } = {},
+  ) {
     const h = await tempHome();
+    const desktopScript = join(h, "rome-start-desktop.sh");
+    await writeFile(desktopScript, "#!/bin/bash\n");
     const runtime = new WechatUserRuntime({
       home: h,
       runtimeDir: join(h, "run"),
       canonicalPrefix: join(h, "opt-wechat"),
       run,
+      desktopScript,
       ...extra,
     });
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
@@ -266,7 +272,7 @@ describe("WechatUserRuntime display", () => {
     expect(cmd.some((arg) => arg.startsWith("ROME_") || arg.startsWith("WECHAT_"))).toBe(false);
     expect(cmd.slice(cmd.indexOf("bash"))).toEqual([
       "bash",
-      "/opt/rome/scripts/docker/rome-start-desktop.sh",
+      join(home, "rome-start-desktop.sh"),
       "wechat",
       ":120",
       "5950",
@@ -294,18 +300,42 @@ describe("WechatUserRuntime display", () => {
 
   it("stays on the shared desktop where the start script is not installed", async () => {
     wechatEnabled();
-    const { run, calls } = scriptedRun({
-      pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
-      env: () => ({ code: 127, stdout: "", stderr: "No such file or directory" }),
-    });
-    const runtime = await installedRuntime(run);
+    const { run, calls } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });
+    const runtime = await installedRuntime(run, { desktopScript: "/nonexistent/start.sh" });
 
     await runtime.start();
 
+    expect(calls.some(([file]) => file === "env")).toBe(false);
     expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
     expect(calls.some(([file, , script]) => file === "sh" && script?.includes("wechat"))).toBe(
       true,
     );
+  });
+
+  it("treats exit 127 from an installed script as a failure, not a missing script", async () => {
+    // A command missing inside the script, such as flock, also exits 127.
+    wechatEnabled();
+    const { run } = scriptedRun({
+      pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
+      env: () => ({ code: 127, stdout: "", stderr: "flock: command not found" }),
+    });
+    const runtime = await installedRuntime(run);
+
+    await expect(runtime.start()).rejects.toThrow(
+      "Could not start WeChat's desktop: flock: command not found",
+    );
+    expect(runtime.display).toBe(":100");
+  });
+
+  it("gives the script the log directory the entrypoint's run uses", async () => {
+    wechatEnabled();
+    rs.stubEnv("ROME_DESKTOP_LOG_DIR", "/var/log/rome");
+    const { run, calls } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });
+    const runtime = await installedRuntime(run);
+
+    await runtime.start();
+
+    expect(calls.find(([file]) => file === "env")).toContain("ROME_DESKTOP_LOG_DIR=/var/log/rome");
   });
 
   it("does not start the client when its desktop fails to start", async () => {

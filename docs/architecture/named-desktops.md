@@ -6,7 +6,7 @@ Desktops are static. A fixed table in [`packages/core/src/desktops.ts`](../../pa
 
 | Name | Display | RFB port | websockify port | Present when |
 | --- | --- | --- | --- | --- |
-| `wechat` | `:100`, or legacy `WECHAT_USER_DISPLAY` | 5901, or `ROME_WECHAT_VNC_PORT` | 6081, or `ROME_WECHAT_NOVNC_PORT` | WeChat is enabled. A display `wechatUserDisplay` rejects, or a port that is not an integer from 1 to 65535, removes the row |
+| `wechat` | `:100`, or legacy `WECHAT_USER_DISPLAY` | 5901, or `ROME_WECHAT_VNC_PORT` | 6081, or `ROME_WECHAT_NOVNC_PORT` | WeChat is enabled. A display `wechatUserDisplay` rejects, a port that is not an integer from 1 to 65535, or a display equal to `DISPLAY` fails boot, so WeChat never runs without its row |
 
 ## Components
 
