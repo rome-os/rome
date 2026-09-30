@@ -351,6 +351,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
   const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
+  const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   // Per-session FIFO queue of in-flight turnIds; the session's
@@ -525,7 +526,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     const retryRecoveringFloor = () => {
       const sid = floorSessionIdRef.current;
-      if (sid && recoveringSessionIdsRef.current.has(sid)) {
+      if (
+        sid &&
+        (recoveringSessionIdsRef.current.has(sid) || !streamingSessionsRef.current.has(sid))
+      ) {
         setStreamReconnectRevision((revision) => revision + 1);
       }
     };
@@ -1035,6 +1039,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
     };
 
+    const noteRecoveryConnected = () => {
+      recoveringSessionIdsRef.current.delete(reattachSessionId);
+      setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
+    };
+
     const schedule = (delayMs: number) => {
       if (cancelled) return;
       pollTimer = setTimeout(() => {
@@ -1066,6 +1075,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       let attachedTurnId: string | null = null;
       let finished = false;
       let streamOpened = false;
+      let streamOpenedAt = 0;
       try {
         // List in-flight turns by turnId. Reattach to the running
         // one (or the first queued one) — its events stream is keyed by
@@ -1149,15 +1159,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
 
         setStreamError(null);
-        setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
+        noteRecoveryConnected();
         streamOpened = true;
+        streamOpenedAt = Date.now();
         finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId);
         if (finished) noteRecoverySuccess();
-        else if (!cancelled && wasRecovering) noteRecoveryFailure();
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
-        if (!cancelled && (!streamOpened || wasRecovering)) noteRecoveryFailure();
+        if (!cancelled && !streamOpened) noteRecoveryFailure();
       } finally {
         if (attachedTurnId) {
           if (streamController) {
@@ -1165,7 +1175,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             streamController = null;
           }
           const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
-          if (suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId) {
+          if (
+            suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId ||
+            releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId
+          ) {
             recoveringSessionIdsRef.current.delete(reattachSessionId);
           } else if (!currentTurnId || currentTurnId === attachedTurnId) {
             if (finished || reattachSessionId !== floorSessionIdRef.current) {
@@ -1182,6 +1195,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               // Cleanup aborts the reader too. The next effect must reattach
               // rather than skip this retained entry forever.
               recoveringSessionIdsRef.current.add(reattachSessionId);
+              if (!finished && !cancelled && wasRecovering && streamOpened) {
+                if (Date.now() - streamOpenedAt >= 5000) {
+                  failedChecks = 0;
+                  retryDelayMs = 2000;
+                }
+                noteRecoveryFailure();
+              }
             }
           }
         }
@@ -1538,6 +1558,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (!stillOwnsStream()) return;
         }
         targetController?.abort();
+        releasedTurnIdsRef.current.set(sid, turnId);
         recoveringSessionIdsRef.current.delete(sid);
         setRecoveryNotice((current) =>
           current?.sessionId === sid && current.turnId === turnId ? null : current,
