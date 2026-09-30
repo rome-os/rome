@@ -287,7 +287,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           body: [
             "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
           ],
-          links: [{ label: "Open Rome's desktop", url: runtime.desktopPath }],
+          links: [{ label: "Open Rome's desktop", url: initial.desktopPath }],
           progress: true,
         });
         await runtime.start(signal);
@@ -318,23 +318,20 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
         // needs the desktop, so that case skips the QR stream.
         const remembered = (await runtime.status()).loggedIn;
         // Recovery replaces any running client, so it starts on WeChat's own
-        // desktop. Bring that up after the status read: a legacy client still on
-        // the shared display would have pulled `display` and the links there.
-        // Recovery gets the returned display rather than reading `display`,
-        // which the Talker's probe could move back while the driver is staged.
+        // desktop. Recovery, the QR capture and the links all use the display
+        // this returns, never a legacy client's that a status() reports.
         const display = await runtime.ensureDesktop(signal);
-        interact.show(
-          remembered ? rememberedView(runtime.desktopPath) : scanView(runtime.desktopPath),
-        );
+        const desktopPath = runtime.desktopPathFor(display);
+        interact.show(remembered ? rememberedView(desktopPath) : scanView(desktopPath));
         const recovery = deps.recoverPassphrase(signal, display);
         const qr = { stop: remembered };
         const qrLoop = (async () => {
           let last: string | undefined;
           while (!qr.stop && !signal.aborted) {
-            const shot = await runtime.captureLoginQr().catch(() => null);
+            const shot = await runtime.captureLoginQr(display).catch(() => null);
             if (shot && shot !== last) {
               last = shot;
-              interact.show(scanView(runtime.desktopPath, shot));
+              interact.show(scanView(desktopPath, shot));
             }
             await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
           }
@@ -343,7 +340,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           const passphrase = await recovery;
           qr.stop = true;
           await qrLoop;
-          interact.show(keysView(remembered, runtime.desktopPath));
+          interact.show(keysView(remembered, desktopPath));
           await waitFor(signal, (s) => s.loggedIn);
           // Derive and verify the per-database keys from the captured passphrase.
           const deadline = Date.now() + loginTimeoutMs;

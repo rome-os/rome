@@ -26,7 +26,12 @@ import {
   wechatUserGrantProfileSchema,
 } from "./wechat-user.js";
 
-const READY: WechatUserStatus = {
+/** A status as a test writes it; `display` and `desktopPath` default to
+ *  WeChat's own desktop. */
+type StatusInput = Omit<WechatUserStatus, "display" | "desktopPath"> &
+  Partial<Pick<WechatUserStatus, "display" | "desktopPath">>;
+
+const READY: StatusInput = {
   state: "ready",
   installed: true,
   running: true,
@@ -42,28 +47,32 @@ const READY: WechatUserStatus = {
  * Only the methods the setup and reader touch are implemented.
  */
 function fakeRuntime(opts: {
-  statuses: WechatUserStatus[];
+  statuses: StatusInput[];
   readerJson?: unknown;
   onDerive?: (passphrase: string) => void;
   qr?: string | null;
-  desktopPath?: string;
 }): WechatUserRuntime {
   const statuses = [...opts.statuses];
   const runtime = {
-    desktopPath: opts.desktopPath ?? "/desktop",
+    desktopPathFor: rs.fn((display: string) =>
+      display === ":100" ? "/desktop/wechat" : "/desktop",
+    ),
     install: rs.fn(async () => {}),
     installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
-    // A concurrent status() can move `display` to a legacy client's display,
-    // so the fake reports the shared one; the setup must use what this returns.
-    display: ":99",
     ensureDesktop: rs.fn(async () => ":100"),
     ensureAccessibility: rs.fn(async () => {}),
     repairDesktop: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
     start: rs.fn(async () => {}),
     stop: rs.fn(async () => {}),
-    status: rs.fn(async () => (statuses.length > 1 ? statuses.shift()! : statuses[0]!)),
+    status: rs.fn(
+      async (): Promise<WechatUserStatus> => ({
+        display: ":100",
+        desktopPath: "/desktop/wechat",
+        ...(statuses.length > 1 ? statuses.shift()! : statuses[0]!),
+      }),
+    ),
     readerCommand: rs.fn(async (args: string[]) => {
       if (args[0] === "derive") {
         opts.onDerive?.(args[2] ?? "");
@@ -130,6 +139,7 @@ describe("makeWechatUserSetup", () => {
     const runtime = fakeRuntime({
       statuses: [
         { state: "absent", installed: false, running: false, loggedIn: false, keysReady: false },
+        // A legacy client still on the shared display when capture begins.
         {
           state: "awaiting-scan",
           installed: true,
@@ -137,6 +147,8 @@ describe("makeWechatUserSetup", () => {
           loggedIn: false,
           keysReady: false,
           pid: 42,
+          display: ":99",
+          desktopPath: "/desktop",
         },
         {
           state: "awaiting-keys",
@@ -174,7 +186,10 @@ describe("makeWechatUserSetup", () => {
     expect(runtime.start).not.toHaveBeenCalled();
     expect(stageDriver).toHaveBeenCalledTimes(1);
     // The scan step polls the login window so the QR can be shown inline.
+    // It captures, and links to, the display recovery launches on, not the
+    // legacy client's that status() reported.
     expect(runtime.captureLoginQr).toHaveBeenCalled();
+    for (const call of rs.mocked(runtime.captureLoginQr).mock.calls) expect(call[0]).toBe(":100");
     expect(recoverPassphrase).toHaveBeenCalledTimes(1);
     // Recovery launches on the display ensureDesktop prepared, not whatever
     // `display` reads by the time recovery gets to it.
@@ -259,7 +274,6 @@ describe("makeWechatUserSetup", () => {
   it("links a resuming client to the desktop that shows it", async () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, state: "stopped", running: false }, READY],
-      desktopPath: "/desktop/wechat",
     });
     let started!: () => void;
     rs.mocked(runtime.start).mockImplementation(
@@ -283,7 +297,6 @@ describe("makeWechatUserSetup", () => {
     const runtime = fakeRuntime({
       statuses: [signedOut, signedOut, READY],
       qr: "data:image/png;base64,button",
-      desktopPath: "/desktop/wechat",
     });
     let finishLogin!: (passphrase: string) => void;
     const recoverPassphrase = rs.fn(
@@ -491,7 +504,7 @@ describe("the WeChat personal Talker", () => {
     );
     const { talker } = buildTalker(runtime, undefined, 1);
     const stopped = talker.stop();
-    resolve({ ...READY, running: false });
+    resolve({ display: ":100", desktopPath: "/desktop/wechat", ...READY, running: false });
     await stopped;
     expect(runtime.start).not.toHaveBeenCalled();
     expect(runtime.status).toHaveBeenCalledTimes(1);

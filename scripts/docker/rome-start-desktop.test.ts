@@ -3,6 +3,7 @@ import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -82,10 +83,10 @@ function runWith(env: Record<string, string>, ...extra: string[]) {
       encoding: "utf8",
       timeout: 60_000,
       env: {
-        ...env,
         PATH: `${dir}:${process.env.PATH}`,
         FAKE_RECORD: record,
         ROME_DESKTOP_LOG_DIR: dir,
+        ...env,
       },
     },
   );
@@ -157,6 +158,55 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     expect(statSync(state).mode & 0o777).toBe(0o700);
     for (const file of [".rome-desktop-notes.lock", "xtigervnc-notes.log", "novnc-notes.log"]) {
       expect(existsSync(join(state, file))).toBe(true);
+    }
+  }, 60_000);
+
+  it.each([
+    "777",
+    "770",
+    "1777",
+  ])("refuses a ROME_DESKTOP_LOG_DIR others can write to (mode %s)", (mode) => {
+    // Another account could pre-create the lock there, or plant a symlink the
+    // lock and log redirects would follow.
+    const shared = join(dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, Number.parseInt(mode, 8));
+
+    const result = runWith({ ROME_DESKTOP_LOG_DIR: shared });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${shared} must be a directory only this user can write`);
+    expect(started()).toEqual([]);
+  });
+
+  it("gives up quickly when another start holds the lock", () => {
+    const holder = spawn("flock", [join(dir, ".rome-desktop-notes.lock"), "sleep", "30"]);
+    try {
+      for (let i = 0; i < 100 && !existsSync(join(dir, ".rome-desktop-notes.lock")); i++) {
+        spawnSync("sleep", ["0.02"]);
+      }
+      const began = Date.now();
+      const result = spawnSync(
+        "bash",
+        [SCRIPT, "notes", `:${display}`, String(vncPort), String(novncPort)],
+        {
+          encoding: "utf8",
+          timeout: 20_000,
+          env: {
+            PATH: `${dir}:${process.env.PATH}`,
+            FAKE_RECORD: record,
+            ROME_DESKTOP_LOG_DIR: dir,
+            ROME_DESKTOP_LOCK_WAIT: "1",
+          },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("another start of notes is still running");
+      expect(Date.now() - began).toBeLessThan(10_000);
+      expect(started()).toEqual([]);
+    } finally {
+      holder.kill("SIGKILL");
     }
   }, 60_000);
 

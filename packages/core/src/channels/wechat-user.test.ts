@@ -217,11 +217,12 @@ describe("WechatUserRuntime display", () => {
   it("runs on WeChat's own desktop whenever WeChat is enabled", () => {
     wechatEnabled();
     const runtime = new WechatUserRuntime();
-    expect([runtime.display, runtime.desktopPath]).toEqual([":100", "/desktop/wechat"]);
+    expect(runtime.display).toBe(":100");
+    expect(runtime.desktopPathFor(runtime.display)).toBe("/desktop/wechat");
     wechatEnabled(":120");
     expect(new WechatUserRuntime().display).toBe(":120");
     const fixed = new WechatUserRuntime({ display: ":7" });
-    expect([fixed.display, fixed.desktopPath]).toEqual([":7", "/desktop"]);
+    expect([fixed.display, fixed.desktopPathFor(fixed.display)]).toEqual([":7", "/desktop"]);
   });
 
   it("stays on the shared desktop while WeChat is disabled", () => {
@@ -229,7 +230,7 @@ describe("WechatUserRuntime display", () => {
     rs.stubEnv("DISPLAY", ":99");
     rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
     const runtime = new WechatUserRuntime();
-    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
+    expect([runtime.display, runtime.desktopPathFor(runtime.display)]).toEqual([":99", "/desktop"]);
   });
 
   async function installedRuntime(
@@ -280,7 +281,6 @@ describe("WechatUserRuntime display", () => {
       "/opt/rome/scripts/docker/wechat-openbox-rc.xml",
     ]);
     expect(calls[client]!.display).toBe(":120");
-    expect(runtime.desktopPath).toBe("/desktop/wechat");
   });
 
   it("keeps a running client on the display it runs on", async () => {
@@ -292,9 +292,54 @@ describe("WechatUserRuntime display", () => {
     const runtime = await installedRuntime(run, { procDir: proc });
 
     await runtime.start();
+    const status = await runtime.status();
 
     expect(calls.some(([file]) => file === "env")).toBe(false);
-    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
+    expect([status.display, status.desktopPath]).toEqual([":99", "/desktop"]);
+    await rm(join(proc, ".."), { recursive: true, force: true });
+  });
+
+  it("reports a legacy client's display without moving where others look", async () => {
+    // status() runs from the probe, the setup and readers at once. A legacy
+    // client it finds must not move the QR capture or new starts off :100.
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:99\0");
+    const displays: Array<string | undefined> = [];
+    const runtime = await installedRuntime(
+      async (file, _args, opts) => {
+        if (file === "pgrep") return ok("42\n");
+        if (file === "xwininfo") displays.push(opts?.env?.DISPLAY);
+        return ok();
+      },
+      { procDir: proc },
+    );
+
+    expect((await runtime.status()).display).toBe(":99");
+    expect(displays).toEqual([":99"]);
+    await runtime.captureLoginQr();
+
+    expect(runtime.display).toBe(":100");
+    expect(displays).toEqual([":99", ":100"]);
+    await rm(join(proc, ".."), { recursive: true, force: true });
+  });
+
+  it("keeps a running client's display when a repair finds no start script", async () => {
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:100\0");
+    const { run } = scriptedRun({ pgrep: () => ok("42\n") });
+    const runtime = await installedRuntime(run, {
+      procDir: proc,
+      desktopScript: "/nonexistent/start.sh",
+    });
+
+    await runtime.repairDesktop();
+
+    expect(runtime.display).toBe(":100");
+    expect((await runtime.status()).desktopPath).toBe("/desktop/wechat");
     await rm(join(proc, ".."), { recursive: true, force: true });
   });
 
@@ -309,15 +354,17 @@ describe("WechatUserRuntime display", () => {
   it("stays on the shared desktop where the start script is not installed", async () => {
     wechatEnabled();
     const { run, calls } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });
-    const runtime = await installedRuntime(run, { desktopScript: "/nonexistent/start.sh" });
+    const displays: Array<string | undefined> = [];
+    const recording: RunCommand = async (file, args, opts) => {
+      if (file === "sh" && args[1]?.includes("wechat")) displays.push(opts?.env?.DISPLAY);
+      return run(file, args, opts);
+    };
+    const onShared = await installedRuntime(recording, { desktopScript: "/nonexistent/start.sh" });
 
-    await runtime.start();
+    await onShared.start();
 
     expect(calls.some(([file]) => file === "env")).toBe(false);
-    expect([runtime.display, runtime.desktopPath]).toEqual([":99", "/desktop"]);
-    expect(calls.some(([file, , script]) => file === "sh" && script?.includes("wechat"))).toBe(
-      true,
-    );
+    expect(displays).toEqual([":99"]);
   });
 
   it("treats exit 127 from an installed script as a failure, not a missing script", async () => {

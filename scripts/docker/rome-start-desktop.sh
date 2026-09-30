@@ -8,9 +8,11 @@
 # these ports is reused, and only a missing one is started. Runs for the same
 # desktop take turns. Each program starts in its own session, so it outlives this
 # script and whoever ran it. Run it as the user the desktop belongs to. Its lock
-# and logs go to ROME_DESKTOP_LOG_DIR, by default ~/.cache/rome-desktop. Exits 1,
-# with the reason on stderr, when the display or a port belongs to something
-# else or a program fails to start.
+# and logs go to ROME_DESKTOP_LOG_DIR, by default ~/.cache/rome-desktop, which
+# must be private to this user. A run waits up to ROME_DESKTOP_LOCK_WAIT seconds
+# (60) for another run of the same desktop. Exits 1, with the reason on stderr,
+# when the display or a port belongs to something else, the lock stays busy, or
+# a program fails to start.
 set -euo pipefail
 
 if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
@@ -37,13 +39,24 @@ if [ ! -d "$LOG_DIR" ]; then
   mkdir -p "$(dirname "$LOG_DIR")"
   mkdir -m 700 "$LOG_DIR" 2>/dev/null || [ -d "$LOG_DIR" ]
 fi
+# A caller-set ROME_DESKTOP_LOG_DIR must be as private as the default: another
+# account that can write there could create the lock first, or plant a symlink
+# that the lock and the log redirects would follow.
+if [ ! -O "$LOG_DIR" ] || [ $((8#$(stat -L -c %a "$LOG_DIR") & 8#022)) -ne 0 ]; then
+  echo "Error: ${LOG_DIR} must be a directory only this user can write." >&2
+  exit 1
+fi
 OWNER_UID="$(id -u)"
 
 # Every check below reads, then starts. A second run for the same desktop would
 # otherwise see nothing running and start a duplicate that fails.
 # The programs close fd 9, or they would hold the lock for their whole life.
 exec 9>"${LOG_DIR}/.rome-desktop-${NAME}.lock"
-flock 9
+# Bounded, so a stuck run fails the next one clearly instead of hanging it.
+if ! flock -w "${ROME_DESKTOP_LOCK_WAIT:-60}" 9; then
+  echo "Error: another start of ${NAME} is still running." >&2
+  exit 1
+fi
 
 tcp_port_listening() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
