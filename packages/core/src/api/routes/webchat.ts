@@ -3309,7 +3309,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   emitToStream(
                     stream,
                     "assistant_text",
-                    { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                    {
+                      turnId,
+                      blockIx: stream.assistantBlockIx,
+                      text: stream.assistantText,
+                      finalized: true,
+                    },
                     "assistant_text",
                   );
                 }

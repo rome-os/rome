@@ -119,6 +119,13 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.assistantText).toBe("Hello world");
   });
 
+  it("accepts a shorter finalized correction to the current text block", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world ");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world", true);
+    expect(state.get("A")?.assistantText).toBe("Hello world");
+  });
+
   it("updateAssistantText ignores writes from a stale turn", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
     state = startStream(state, "A", "turn-2");

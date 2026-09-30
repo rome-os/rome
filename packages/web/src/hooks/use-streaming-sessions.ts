@@ -62,6 +62,7 @@ export function updateAssistantText(
   turnId: string,
   blockIx: number,
   assistantText: string,
+  finalized = false,
 ): StreamingSessionMap {
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
@@ -69,6 +70,7 @@ export function updateAssistantText(
   // Reattached SSE streams replay from the beginning. A shorter prefix in
   // the same block is older than the live preview already on screen.
   if (
+    !finalized &&
     blockIx === existing.assistantBlockIx &&
     assistantText.length < existing.assistantText.length
   ) {
@@ -119,8 +121,16 @@ export function useStreamingSessions() {
     setStreams((prev) => updateSnapshot(prev, sessionId, turnId, snapshot));
   }, []);
   const updateText = useCallback(
-    (sessionId: string, turnId: string, blockIx: number, assistantText: string) => {
-      setStreams((prev) => updateAssistantText(prev, sessionId, turnId, blockIx, assistantText));
+    (
+      sessionId: string,
+      turnId: string,
+      blockIx: number,
+      assistantText: string,
+      finalized = false,
+    ) => {
+      setStreams((prev) =>
+        updateAssistantText(prev, sessionId, turnId, blockIx, assistantText, finalized),
+      );
     },
     [],
   );

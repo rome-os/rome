@@ -961,11 +961,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             // block's index within the turn; each event replaces the
             // previous one, and a higher blockIx replaces the block.
             try {
-              const { blockIx, text } = JSON.parse(evt.data) as {
+              const { blockIx, text, finalized } = JSON.parse(evt.data) as {
                 blockIx?: number;
                 text?: string;
+                finalized?: boolean;
               };
-              updateSessionAssistantText(sessionId, turnId, blockIx ?? 0, text ?? "");
+              updateSessionAssistantText(sessionId, turnId, blockIx ?? 0, text ?? "", finalized);
             } catch {
               // ignore parse errors
             }
@@ -1147,6 +1148,20 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
         if (!turns.length) {
+          const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
+          if (suppressedTurnId) {
+            const loaded = await loadMessages(reattachSessionId, {
+              force: true,
+              dropLocalOptimistic: true,
+              shouldApply: stillObserving,
+              bounded: true,
+            });
+            if (!loaded) {
+              if (stillObserving()) noteRecoveryFailure();
+              return;
+            }
+            if (!stillObserving()) return;
+          }
           suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
@@ -1187,7 +1202,20 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
         if (target.turnId === suppressedTurnId) return;
-        if (suppressedTurnId) suppressedTurnIdsRef.current.delete(reattachSessionId);
+        if (suppressedTurnId) {
+          const loaded = await loadMessages(reattachSessionId, {
+            force: true,
+            dropLocalOptimistic: true,
+            shouldApply: stillObserving,
+            bounded: true,
+          });
+          if (!loaded) {
+            if (stillObserving()) noteRecoveryFailure();
+            return;
+          }
+          if (!stillObserving()) return;
+          suppressedTurnIdsRef.current.delete(reattachSessionId);
+        }
         if (observedTurnId && target.turnId !== observedTurnId) {
           // A missed message_insert may be the only durable copy of the old
           // turn's answer. Load it before replacing that turn's live preview.
@@ -1215,10 +1243,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         );
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
-            if (streamRes.status === 404) {
-              noteRecoveryFailure();
-            } else {
-              noteRecoveryFailure();
+            noteRecoveryFailure();
+            if (streamRes.status !== 404) {
               const reconnectError = t("stream.errors.reconnectStatus", {
                 status: streamRes.status,
               });

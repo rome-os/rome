@@ -1040,10 +1040,21 @@ describe("Chat turn stream lifecycle", () => {
     expect(rs.mocked(openTurnStream).mock.calls.length).toBe(attachesBeforeRetry);
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
 
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "reset-answer",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Completed after reset" }]),
+        createdAt: "2026-09-30T14:00:00.000Z",
+      },
+    ]);
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     await act(async () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("reset-answer");
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-2", status: "running" }]);
     await act(async () => {
       await rs.advanceTimersByTimeAsync(2_000);
