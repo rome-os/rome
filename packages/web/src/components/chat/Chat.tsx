@@ -983,6 +983,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         schedule(2000);
         return;
       }
+      const observedTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null;
+      const wasRecovering = recoveringSessionIdsRef.current.has(reattachSessionId);
       let attachedTurnId: string | null = null;
       let finished = false;
       try {
@@ -993,11 +995,25 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         const turns = await listSessionTurns(reattachSessionId);
         if (cancelled) return;
         if (!turns?.length) {
-          if (turns && recoveringSessionIdsRef.current.delete(reattachSessionId)) {
-            const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
-            if (currentTurnId) endSessionStream(reattachSessionId, currentTurnId);
+          // The lookup may have started before a foreground send replaced the
+          // recovering turn. Never settle a turn we did not query for.
+          if (
+            turns &&
+            wasRecovering &&
+            recoveringSessionIdsRef.current.has(reattachSessionId) &&
+            !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
+            (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId
+          ) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+            if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
             void loadMessages(reattachSessionId, { force: true, dropLocalOptimistic: true });
           }
+          return;
+        }
+        if (
+          locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
+          (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) !== observedTurnId
+        ) {
           return;
         }
 
@@ -1025,12 +1041,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             releaseTurnStreamController(attachedTurnId, streamController);
             streamController = null;
           }
-          if (finished) {
-            recoveringSessionIdsRef.current.delete(reattachSessionId);
-            // A newer turn may have replaced this one while it drained.
-            endSessionStream(reattachSessionId, attachedTurnId);
-          } else if (!cancelled) {
-            recoveringSessionIdsRef.current.add(reattachSessionId);
+          const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+          if (!currentTurnId || currentTurnId === attachedTurnId) {
+            if (finished) {
+              recoveringSessionIdsRef.current.delete(reattachSessionId);
+              endSessionStream(reattachSessionId, attachedTurnId);
+            } else {
+              // Cleanup aborts the reader too. The next effect must reattach
+              // rather than skip this retained entry forever.
+              recoveringSessionIdsRef.current.add(reattachSessionId);
+            }
           }
         }
         if (!cancelled) {
@@ -1052,6 +1072,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     streamReconnectRevision,
     startSessionStream,
     endSessionStream,
+    loadMessages,
     createTurnStreamController,
     releaseTurnStreamController,
     t,
@@ -1192,10 +1213,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (!turns || turns.size === 0) {
             inflightTurnsRef.current.delete(sendingSessionId);
             locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
-            if (finished) recoveringSessionIdsRef.current.delete(sendingSessionId);
-            else recoveringSessionIdsRef.current.add(sendingSessionId);
+            if (!currentEntry || currentEntry.turnId === pendingTurnId) {
+              const canRecover = !finished && sendingSessionId === floorSessionIdRef.current;
+              if (canRecover) recoveringSessionIdsRef.current.add(sendingSessionId);
+              else recoveringSessionIdsRef.current.delete(sendingSessionId);
+              if (!canRecover) endSessionStream(sendingSessionId, pendingTurnId);
+            }
             setStreamReconnectRevision((revision) => revision + 1);
-            if (finished) endSessionStream(sendingSessionId, pendingTurnId);
           }
           releaseTurnStreamController(pendingTurnId, streamController);
         }
