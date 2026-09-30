@@ -775,6 +775,59 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
   });
 
+  it("replaces optimistic input when a recovered turn settles", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(postSessionTurn).mockResolvedValue({
+      ok: true,
+      data: { turnId: "turn-1", inputId: "optimistic-1" },
+    });
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("optimistic-1");
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "server-input-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "Hello" }]),
+        createdAt: "2026-09-30T14:00:00.000Z",
+      },
+      {
+        id: "answer-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Done" }]),
+        createdAt: "2026-09-30T14:00:01.000Z",
+      },
+    ]);
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-1");
+    expect(screen.getByTestId("message-list").dataset.rowKeys).not.toContain("optimistic-1");
+  });
+
   it("keeps a foreground send live when its stream drops", async () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-local" } });
@@ -975,6 +1028,45 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(openTurnStream).toHaveBeenCalledTimes(2);
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("reports repeated HTTP-200 streams whose readers fail immediately", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.error(new Error("reader failed"));
+              },
+            }),
+          ),
+        ),
+      );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(14_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(4);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
   it("returns idle polling to two seconds after a successful empty lookup", async () => {

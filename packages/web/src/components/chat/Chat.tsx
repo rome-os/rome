@@ -660,7 +660,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const loadMessages = useCallback(
     async (
       id: string,
-      options: { force?: boolean; dropLocalOptimistic?: boolean } = {},
+      options: { force?: boolean; dropLocalOptimistic?: boolean; shouldApply?: () => boolean } = {},
     ): Promise<boolean> => {
       if (!options.force && loadedSessionsRef.current.has(id)) return true;
       // Only mark loaded once we have data in hand. Marking before the await
@@ -675,6 +675,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           onSessionNotFoundRef.current?.(id);
           return false;
         }
+        if (options.shouldApply && !options.shouldApply()) return false;
         const fetchedMessages = orderChatMessages(data);
         const dropMessageIds = options.dropLocalOptimistic
           ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
@@ -1039,6 +1040,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const observedTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null;
       const observedSendRevision = acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0;
       const wasRecovering = recoveringSessionIdsRef.current.has(reattachSessionId);
+      const stillObserving = () =>
+        !cancelled &&
+        !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
+        (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) === observedSendRevision &&
+        (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId;
       let attachedTurnId: string | null = null;
       let finished = false;
       let streamOpened = false;
@@ -1060,25 +1066,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (
             wasRecovering &&
             recoveringSessionIdsRef.current.has(reattachSessionId) &&
-            !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
-            (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) ===
-              observedSendRevision &&
-            (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId
+            stillObserving()
           ) {
-            const loaded = await loadMessages(reattachSessionId, { force: true });
+            const loaded = await loadMessages(reattachSessionId, {
+              force: true,
+              dropLocalOptimistic: true,
+              shouldApply: stillObserving,
+            });
             if (!loaded) {
-              noteRecoveryFailure();
+              if (stillObserving()) noteRecoveryFailure();
               return;
             }
-            if (
-              cancelled ||
-              !recoveringSessionIdsRef.current.has(reattachSessionId) ||
-              locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
-              (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) !==
-                observedSendRevision ||
-              (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) !==
-                observedTurnId
-            ) {
+            if (!recoveringSessionIdsRef.current.has(reattachSessionId) || !stillObserving()) {
               return;
             }
             recoveringSessionIdsRef.current.delete(reattachSessionId);
@@ -1088,10 +1087,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           return;
         }
-        if (
-          locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
-          (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) !== observedTurnId
-        ) {
+        if (!stillObserving()) {
           return;
         }
 
@@ -1102,13 +1098,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           const loaded = await loadMessages(reattachSessionId, {
             force: true,
             dropLocalOptimistic: true,
+            shouldApply: stillObserving,
           });
-          if (
-            !loaded ||
-            cancelled ||
-            locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
-            streamingSessionsRef.current.get(reattachSessionId)?.turnId !== observedTurnId
-          ) {
+          if (!loaded || !stillObserving()) {
             return;
           }
         }
@@ -1119,8 +1111,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
-            noteRecoveryFailure();
-            if (streamRes.status !== 404) {
+            if (streamRes.status === 404) {
+              retryDelayMs = 2000;
+              failedChecks = 0;
+            } else {
+              noteRecoveryFailure();
               const reconnectError = t("stream.errors.reconnectStatus", {
                 status: streamRes.status,
               });
@@ -1131,14 +1126,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
 
-        noteRecoverySuccess();
         setStreamError(null);
         streamOpened = true;
         finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        if (finished) noteRecoverySuccess();
+        else if (!cancelled && wasRecovering) noteRecoveryFailure();
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
-        if (!cancelled && !streamOpened) noteRecoveryFailure();
+        if (!cancelled && (!streamOpened || wasRecovering)) noteRecoveryFailure();
       } finally {
         if (attachedTurnId) {
           if (streamController) {
