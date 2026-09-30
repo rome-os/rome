@@ -938,6 +938,62 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(openTurnStream).toHaveBeenCalledTimes(3);
     expect(screen.getByTestId("chat-composer").dataset.error).toBe(firstError);
+
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(8_000);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("does not show a reconnect error for a stream-open 404 race", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 404 }));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("returns idle polling to two seconds after a successful empty lookup", async () => {
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.useFakeTimers();
+    renderChat(<Chat sessionId="session-1" />);
+    await act(async () => {
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(4_000);
+    });
+    expect(listSessionTurns).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object));
   });
 
   it("settles a dropped stream only after the server confirms the turn ended", async () => {

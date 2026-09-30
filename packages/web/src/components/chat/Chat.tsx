@@ -309,6 +309,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
+  const reconnectErrorRef = useRef<string | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<{
     sessionId: string;
     turnId: string;
@@ -1053,6 +1054,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
         if (!turns.length) {
+          if (!wasRecovering) noteRecoverySuccess();
           // The lookup may have started before a foreground send replaced the
           // recovering turn. Never settle a turn we did not query for.
           if (
@@ -1082,6 +1084,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             recoveringSessionIdsRef.current.delete(reattachSessionId);
             if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
             noteRecoverySuccess();
+            setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
           }
           return;
         }
@@ -1117,7 +1120,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
             noteRecoveryFailure();
-            setStreamError(t("stream.errors.reconnectStatus", { status: streamRes.status }));
+            if (streamRes.status !== 404) {
+              const reconnectError = t("stream.errors.reconnectStatus", {
+                status: streamRes.status,
+              });
+              reconnectErrorRef.current = reconnectError;
+              setStreamError(reconnectError);
+            }
           }
           return;
         }
