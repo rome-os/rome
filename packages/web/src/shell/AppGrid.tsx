@@ -54,7 +54,7 @@ import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useApps, useInvalidateApps } from "@/hooks/use-apps";
-import { useRecentApps } from "@/hooks/use-recent-apps";
+import { useRecentApps, useRecordPageVisited } from "@/hooks/use-recent-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import {
   Sortable,
@@ -127,6 +127,36 @@ const REQUIRED_BUILTIN_PINS: PinnedEntry[] = [
 
 function pinKey(p: PinnedEntry): string {
   return `${p.type}:${p.id}`;
+}
+
+// The pages a visit can bring into the Recent zone. The required pins are
+// always pinned, and the store row opens Rome Cloud, not a page here.
+const RECENT_PAGE_ENTRIES = APP_NAV.filter(
+  (entry) => entry.id !== "store" && !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id),
+);
+
+/** The built-in page `pathname` belongs to, by the same rule that lights its
+ *  sidebar row; the longest href wins, so /apps/store never counts as /apps. */
+function builtinPageAt(pathname: string): BuiltinNavEntry | null {
+  let best: BuiltinNavEntry | null = null;
+  for (const entry of APP_NAV) {
+    if (!isEntryActive(pathname, entry.href)) continue;
+    if (best === null || entry.href.length > best.href.length) best = entry;
+  }
+  return best;
+}
+
+// One row of the Recent zone. `pin` is what pinning the row adds, and exactly
+// one of `app` and `page` says which kind of row it is.
+interface RecentRow {
+  key: string;
+  displayName: string;
+  iconUrl: string | null;
+  href: string | null;
+  icon?: React.ReactNode;
+  pin: PinnedEntry;
+  app?: InstalledAppCard | CachedApp;
+  page?: BuiltinNavEntry;
 }
 
 interface CachedApp {
@@ -267,7 +297,44 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
     () => new Set(pins.filter((pin) => pin.type === "app").map((pin) => pin.id)),
     [pins],
   );
-  const { recent: recentApps, unopenedIds } = useRecentApps(installedApps, pinnedAppIds);
+  const pinnedPageIds = useMemo(
+    () => new Set(pins.filter((pin) => pin.type === "builtin").map((pin) => pin.id)),
+    [pins],
+  );
+  const recentPageCandidates = useMemo(
+    () => RECENT_PAGE_ENTRIES.map((entry) => ({ ...entry, displayName: t(entry.labelKey) })),
+    [t],
+  );
+  const { recent, unopenedIds } = useRecentApps(
+    installedApps,
+    pinnedAppIds,
+    recentPageCandidates,
+    pinnedPageIds,
+  );
+  // After useRecentApps on purpose: effects run in call order, so the zone is
+  // already listening when a first load straight onto a page records it.
+  useRecordPageVisited(builtinPageAt(location.pathname)?.id ?? null);
+  const recentRows: RecentRow[] = recent.map((item) =>
+    item.kind === "app"
+      ? {
+          key: pinKey({ type: "app", id: item.app.id }),
+          displayName: item.app.displayName,
+          iconUrl: item.app.iconUrl,
+          href: item.app.href,
+          pin: { type: "app", id: item.app.id },
+          app: item.app,
+        }
+      : {
+          key: pinKey({ type: "builtin", id: item.page.id }),
+          displayName: item.page.displayName,
+          iconUrl: null,
+          href: item.page.href,
+          icon: renderBuiltinIcon(item.page),
+          pin: { type: "builtin", id: item.page.id },
+          page: item.page,
+        },
+  );
+  const unopenedKeys = new Set([...unopenedIds].map((id) => pinKey({ type: "app", id })));
 
   useEffect(() => {
     if (!appsFromQuery) return;
@@ -340,22 +407,24 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   // a right-click the same way. Split view is the one app action they lack:
   // the chat's side panel hosts app widgets only. The store row already leaves
   // the page, so it offers just Unpin, and the required pins offer no Unpin.
+  // A page in the Recent zone is unpinned, so its menu offers Pin instead.
   const withBuiltinContextMenu = (
     entry: BuiltinNavEntry,
     trigger: React.ReactNode,
+    pinned = true,
   ): React.ReactNode => {
-    const canUnpin = !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id);
+    const canTogglePin = !pinned || !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id);
     // Without tabs the open item is a plain Open, which a menu earns only
     // beside Unpin; alone it would repeat a click and take over a long-press.
-    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
-    if (!canOpen && !canUnpin) return trigger;
+    const canOpen = entry.id !== "store" && (canOpenNewTab || canTogglePin);
+    if (!canOpen && !canTogglePin) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
           {canOpen ? renderOpenMenuItem(entry.href) : null}
-          {canOpen && canUnpin ? <ContextMenuSeparator /> : null}
-          {canUnpin ? (
+          {canOpen && canTogglePin ? <ContextMenuSeparator /> : null}
+          {canTogglePin && pinned ? (
             <ContextMenuItem
               onSelect={() =>
                 persistPins(pins.filter((pin) => !(pin.type === "builtin" && pin.id === entry.id)))
@@ -363,6 +432,14 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             >
               <PinOff aria-hidden />
               {tApps("installed.unpin")}
+            </ContextMenuItem>
+          ) : null}
+          {canTogglePin && !pinned ? (
+            <ContextMenuItem
+              onSelect={() => persistPins([...pins, { type: "builtin", id: entry.id }])}
+            >
+              <Pin aria-hidden />
+              {tApps("installed.pin")}
             </ContextMenuItem>
           ) : null}
         </ContextMenuContent>
@@ -404,6 +481,12 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         </ContextMenuContent>
       </ContextMenu>
     );
+  };
+
+  const wrapRecentRow = (row: RecentRow, trigger: React.ReactNode): React.ReactNode => {
+    if (row.app) return withAppContextMenu(row.app, trigger, false);
+    if (row.page) return withBuiltinContextMenu(row.page, trigger, false);
+    return trigger;
   };
 
   const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
@@ -560,10 +643,10 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             );
           })}
           <RecentAppsRail
-            apps={recentApps}
-            unopenedIds={unopenedIds}
+            apps={recentRows}
+            unopenedIds={unopenedKeys}
             pathname={location.pathname}
-            wrapWithContextMenu={(app, trigger) => withAppContextMenu(app, trigger, false)}
+            wrapWithContextMenu={wrapRecentRow}
           />
           {onSearch ? (
             <>
@@ -841,11 +924,11 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             })}
           </nav>
           <RecentAppsZone
-            apps={recentApps}
-            unopenedIds={unopenedIds}
+            apps={recentRows}
+            unopenedIds={unopenedKeys}
             pathname={location.pathname}
-            onPin={(appId) => persistPins([...pins, { type: "app", id: appId }])}
-            wrapWithContextMenu={(app, trigger) => withAppContextMenu(app, trigger, false)}
+            onPin={(row) => persistPins([...pins, row.pin])}
+            wrapWithContextMenu={wrapRecentRow}
           />
         </>
       )}

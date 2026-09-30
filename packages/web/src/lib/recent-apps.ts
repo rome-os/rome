@@ -1,9 +1,9 @@
 import type { AppOrigin } from "@rome/api-types/apps";
 
-// The sidebar's Recent zone is derived, never stored: which apps show is a pure
-// function of the installed cards, the pin set, and a per-app "last opened"
-// map that lives in this browser (see hooks/use-recent-apps.ts). Everything
-// here takes `now` as an argument so the expiry edge is testable.
+// The sidebar's Recent zone is derived, never stored: which apps and pages show
+// is a pure function of the installed cards, Rome's own pages, the pin set, and
+// a "last opened" map that lives in this browser (see hooks/use-recent-apps.ts).
+// Everything here takes `now` as an argument so the expiry edge is testable.
 
 /** Rows shown before "Show more". */
 export const RECENT_APPS_VISIBLE = 3;
@@ -11,8 +11,24 @@ export const RECENT_APPS_VISIBLE = 3;
  *  14 days, not 7: a weekly habit would otherwise expire an hour before its
  *  next use. */
 export const RECENT_APPS_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
-/** appId → ISO-8601 time of the last recorded open. */
+/** appId, or `pageVisitKey(pageId)` → ISO-8601 time of the last recorded open. */
 export type AppLastOpened = Record<string, string>;
+
+/** Where a visit to one of Rome's own pages sits in the last-opened map. App
+ *  ids are lowercase letters, digits, and hyphens, or `@handle/slug`, so no app
+ *  id contains a colon and the two kinds share one map without colliding. The
+ *  shape matches the sidebar's pin keys. */
+export function pageVisitKey(pageId: string): string {
+  return `builtin:${pageId}`;
+}
+
+/** One of Rome's own pages, as the Recent zone weighs it. */
+export interface RecentPageCandidate {
+  id: string;
+  displayName: string;
+}
+
+export type RecentEntry<A, P> = { kind: "app"; app: A } | { kind: "page"; page: P };
 
 export interface RecentAppCandidate {
   id: string;
@@ -71,21 +87,34 @@ export function isUnopened(app: RecentAppCandidate, lastOpened: AppLastOpened): 
   return installSignalMs(app) !== null && toMs(lastOpened[app.id]) === null;
 }
 
-export function selectRecentApps<T extends RecentAppCandidate>(
-  apps: readonly T[],
+// Apps and pages rank on one clock, so a page visited after an app was opened
+// sits above it. A page has no install signal: it earns a place only by being
+// visited, the same rule built-in apps follow.
+export function selectRecentEntries<A extends RecentAppCandidate, P extends RecentPageCandidate>(
+  apps: readonly A[],
   pinnedAppIds: ReadonlySet<string>,
+  pages: readonly P[],
+  pinnedPageIds: ReadonlySet<string>,
   lastOpened: AppLastOpened,
   now: number,
-): T[] {
-  const rows: Array<{ app: T; at: number }> = [];
+): RecentEntry<A, P>[] {
+  const rows: Array<{ entry: RecentEntry<A, P>; name: string; at: number }> = [];
+  const inWindow = (at: number | null): at is number =>
+    at !== null && now - at <= RECENT_APPS_WINDOW_MS;
   for (const app of apps) {
     if (!app.hasFrontend || !app.href) continue;
     if (app.status === "disabled") continue;
     if (pinnedAppIds.has(app.id)) continue;
     const at = lastActiveMs(app, lastOpened);
-    if (at === null || now - at > RECENT_APPS_WINDOW_MS) continue;
-    rows.push({ app, at });
+    if (!inWindow(at)) continue;
+    rows.push({ entry: { kind: "app", app }, name: app.displayName, at });
   }
-  rows.sort((x, y) => y.at - x.at || x.app.displayName.localeCompare(y.app.displayName));
-  return rows.map((row) => row.app);
+  for (const page of pages) {
+    if (pinnedPageIds.has(page.id)) continue;
+    const at = toMs(lastOpened[pageVisitKey(page.id)]);
+    if (!inWindow(at)) continue;
+    rows.push({ entry: { kind: "page", page }, name: page.displayName, at });
+  }
+  rows.sort((x, y) => y.at - x.at || x.name.localeCompare(y.name));
+  return rows.map((row) => row.entry);
 }

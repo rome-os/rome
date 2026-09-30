@@ -7,7 +7,8 @@ import {
   lastActiveMs,
   parseAppLastOpened,
   pruneAppLastOpened,
-  selectRecentApps,
+  pageVisitKey,
+  selectRecentEntries,
 } from "./recent-apps";
 
 const NOW = Date.parse("2026-09-17T12:00:00.000Z");
@@ -87,7 +88,19 @@ describe("isUnopened", () => {
   });
 });
 
-describe("selectRecentApps", () => {
+// The app-only view of selectRecentEntries, for the cases that predate pages.
+function selectRecentApps(
+  apps: readonly RecentAppCandidate[],
+  pinned: ReadonlySet<string>,
+  opened: Record<string, string>,
+  now: number,
+): RecentAppCandidate[] {
+  return selectRecentEntries(apps, pinned, [], new Set(), opened, now).flatMap((entry) =>
+    entry.kind === "app" ? [entry.app] : [],
+  );
+}
+
+describe("selectRecentEntries, apps", () => {
   const none = new Set<string>();
 
   it("orders by most recent activity first", () => {
@@ -125,5 +138,48 @@ describe("selectRecentApps", () => {
     const builtin = app("sys", { origin: "builtin", installedAt: iso(NOW) });
     expect(selectRecentApps([builtin], none, {}, NOW)).toEqual([]);
     expect(selectRecentApps([builtin], none, { sys: iso(NOW) }, NOW)).toEqual([builtin]);
+  });
+});
+
+describe("selectRecentEntries, pages", () => {
+  const none = new Set<string>();
+  const page = (id: string) => ({ id, displayName: id });
+  const ids = (entries: ReturnType<typeof selectRecentEntries>) =>
+    entries.map((entry) =>
+      entry.kind === "app" ? `app:${entry.app.id}` : `page:${entry.page.id}`,
+    );
+
+  it("ranks visited pages and opened apps on one clock", () => {
+    const opened = {
+      alpha: iso(NOW - 3 * HOUR),
+      [pageVisitKey("people")]: iso(NOW - HOUR),
+      [pageVisitKey("memory")]: iso(NOW - 5 * HOUR),
+    };
+    const entries = selectRecentEntries(
+      [app("alpha")],
+      none,
+      [page("people"), page("memory"), page("routines")],
+      none,
+      opened,
+      NOW,
+    );
+    expect(ids(entries)).toEqual(["page:people", "app:alpha", "page:memory"]);
+  });
+
+  it("drops pinned and out-of-window pages, and never reads an app's entry for a page", () => {
+    const opened = {
+      people: iso(NOW),
+      [pageVisitKey("memory")]: iso(NOW),
+      [pageVisitKey("routines")]: iso(NOW - (14 * DAY + 1000)),
+    };
+    const entries = selectRecentEntries(
+      [],
+      none,
+      [page("people"), page("memory"), page("routines")],
+      new Set(["memory"]),
+      opened,
+      NOW,
+    );
+    expect(entries).toEqual([]);
   });
 });

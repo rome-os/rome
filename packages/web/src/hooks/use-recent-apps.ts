@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type AppLastOpened,
   type RecentAppCandidate,
+  type RecentEntry,
+  type RecentPageCandidate,
   isUnopened,
+  pageVisitKey,
   parseAppLastOpened,
   pruneAppLastOpened,
-  selectRecentApps,
+  selectRecentEntries,
 } from "@/lib/recent-apps";
 
 // "Last opened" lives in this browser only, on purpose. It is cache-shaped
@@ -53,25 +56,42 @@ export function useAppLastOpened(): AppLastOpened {
   return value;
 }
 
-interface RecentApps<T> {
-  /** Unpinned apps active within the window, most recent first. */
-  recent: T[];
-  /** The subset of `recent` that was installed but never opened here. */
+interface RecentApps<A, P> {
+  /** Unpinned apps and pages active within the window, most recent first. */
+  recent: RecentEntry<A, P>[];
+  /** Ids of the recent apps that were installed but never opened here. */
   unopenedIds: ReadonlySet<string>;
 }
 
-export function useRecentApps<T extends RecentAppCandidate>(
-  apps: readonly T[],
+export function useRecentApps<A extends RecentAppCandidate, P extends RecentPageCandidate>(
+  apps: readonly A[],
   pinnedAppIds: ReadonlySet<string>,
-): RecentApps<T> {
+  pages: readonly P[],
+  pinnedPageIds: ReadonlySet<string>,
+): RecentApps<A, P> {
   const lastOpened = useAppLastOpened();
   return useMemo(() => {
-    const recent = selectRecentApps(apps, pinnedAppIds, lastOpened, Date.now());
+    const recent = selectRecentEntries(
+      apps,
+      pinnedAppIds,
+      pages,
+      pinnedPageIds,
+      lastOpened,
+      Date.now(),
+    );
     const unopenedIds = new Set(
-      recent.filter((app) => isUnopened(app, lastOpened)).map((app) => app.id),
+      recent.flatMap((entry) =>
+        entry.kind === "app" && isUnopened(entry.app, lastOpened) ? [entry.app.id] : [],
+      ),
     );
     return { recent, unopenedIds };
-  }, [apps, pinnedAppIds, lastOpened]);
+  }, [apps, pinnedAppIds, pages, pinnedPageIds, lastOpened]);
+}
+
+function recordOpened(key: string): void {
+  const now = Date.now();
+  writeLocal(pruneAppLastOpened({ ...readLocal(), [key]: new Date(now).toISOString() }, now));
+  window.dispatchEvent(new Event(APP_OPENED_EVENT));
 }
 
 // Records that the guardian opened `appId` on this device. `enabled` is false
@@ -79,10 +99,14 @@ export function useRecentApps<T extends RecentAppCandidate>(
 // still on its way), so a failed or foreign open never counts.
 export function useRecordAppOpened(appId: string | undefined, enabled: boolean): void {
   useEffect(() => {
-    if (!enabled || !appId) return;
-    const now = Date.now();
-    const next = pruneAppLastOpened({ ...readLocal(), [appId]: new Date(now).toISOString() }, now);
-    writeLocal(next);
-    window.dispatchEvent(new Event(APP_OPENED_EVENT));
+    if (enabled && appId) recordOpened(appId);
   }, [appId, enabled]);
+}
+
+// Records a visit to one of Rome's own pages, once per arrival: moving between
+// a page's own sub-routes keeps the same `pageId` and records nothing new.
+export function useRecordPageVisited(pageId: string | null): void {
+  useEffect(() => {
+    if (pageId) recordOpened(pageVisitKey(pageId));
+  }, [pageId]);
 }

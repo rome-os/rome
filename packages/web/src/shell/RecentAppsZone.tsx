@@ -20,14 +20,19 @@ import {
   isEntryActive,
 } from "./sidebar-shared";
 
+// A row in the zone: an installed app, or one of Rome's own pages. `key` is
+// unique across both kinds, which ids alone are not.
 interface RecentSidebarApp {
-  id: string;
+  key: string;
   displayName: string;
   iconUrl: string | null;
   href: string | null;
+  /** A page's own glyph, which replaces the image and the letter fallback. */
+  icon?: ReactNode;
 }
 
 function SidebarAppIcon({ app }: { app: RecentSidebarApp }) {
+  if (app.icon) return app.icon;
   if (app.iconUrl) {
     return (
       <img
@@ -50,14 +55,15 @@ function SidebarAppIcon({ app }: { app: RecentSidebarApp }) {
 interface RecentAppsZoneProps<T extends RecentSidebarApp> {
   /** Already filtered and ordered, most recent first. */
   apps: T[];
+  /** Keys of the rows that were installed but never opened. */
   unopenedIds: ReadonlySet<string>;
   pathname: string;
-  onPin: (appId: string) => void;
+  onPin: (app: T) => void;
   wrapWithContextMenu: (app: T, trigger: ReactNode) => ReactNode;
 }
 
 // The system-managed half of the sidebar: apps the guardian built or opened
-// lately and has not pinned. It owns no data. An empty list renders nothing at
+// lately, and Rome's own pages they visited, that they have not pinned. It owns no data. An empty list renders nothing at
 // all, divider included, so a sidebar with no recent apps is unchanged.
 export function RecentAppsZone<T extends RecentSidebarApp>({
   apps,
@@ -85,9 +91,9 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
         {visible.map((app) => {
           if (!app.href) return null;
           const active = isEntryActive(pathname, app.href);
-          const unopened = unopenedIds.has(app.id);
+          const unopened = unopenedIds.has(app.key);
           return (
-            <div key={app.id} className="group/recent relative">
+            <div key={app.key} className="group/recent relative">
               {wrapWithContextMenu(
                 app,
                 // Right padding reserves the pin button's slot. Touch devices
@@ -115,7 +121,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
               ) : null}
               <button
                 type="button"
-                onClick={() => onPin(app.id)}
+                onClick={() => onPin(app)}
                 aria-label={tApps("installed.pin")}
                 title={tApps("installed.pin")}
                 className="touch-show absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-4 text-subtle-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 group-hover/recent:opacity-100"
@@ -180,7 +186,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
         if (!app.href) return null;
         const active = isEntryActive(pathname, app.href);
         return (
-          <Tooltip key={app.id}>
+          <Tooltip key={app.key}>
             {wrapWithContextMenu(
               app,
               <TooltipTrigger asChild>
@@ -190,7 +196,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
                   className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
                 >
                   <SidebarAppIcon app={app} />
-                  {unopenedIds.has(app.id) ? (
+                  {unopenedIds.has(app.key) ? (
                     <span
                       role="img"
                       aria-label={t("sidebar.notOpened")}
@@ -223,7 +229,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
           <DropdownMenuContent side="right" align="start">
             {overflow.map((app) =>
               app.href ? (
-                <DropdownMenuItem key={app.id} asChild>
+                <DropdownMenuItem key={app.key} asChild>
                   <Link to={app.href}>
                     <SidebarAppIcon app={app} />
                     {app.displayName}

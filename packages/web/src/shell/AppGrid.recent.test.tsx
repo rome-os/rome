@@ -55,11 +55,11 @@ const fetchMock = rs.fn(
   },
 );
 
-function renderSidebar(collapsed = false) {
+function renderSidebar(collapsed = false, initialPath = "/chat") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/chat"]}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <AppGrid collapsed={collapsed} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -265,5 +265,95 @@ describe("Recent zone, collapsed rail", () => {
 
     await screen.findByRole("link", { name: "Bravo" });
     expect(screen.getByRole("img", { name: "Not opened on this device" })).toBeTruthy();
+  });
+});
+
+describe("Recent zone, Rome's own pages", () => {
+  it("ranks a visited page among recent apps on one clock", async () => {
+    seed([fixture("a", "Alpha"), fixture("b", "Bravo")], {
+      a: minutesAgo(30),
+      b: minutesAgo(1),
+      "builtin:memory": minutesAgo(10),
+    });
+    renderSidebar();
+
+    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    expect(
+      within(zone)
+        .getAllByRole("link")
+        .map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["Bravo", "/apps/b"],
+      ["Memory", "/memory"],
+      ["Alpha", "/apps/a"],
+    ]);
+  });
+
+  it("records a visit, so arriving on a page's sub-route puts the page in Recent", async () => {
+    seed([], {});
+    renderSidebar(false, "/people/directory");
+
+    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    expect(within(zone).getByRole("link", { name: "People" }).getAttribute("href")).toBe("/people");
+    expect(JSON.parse(localStorage.getItem(LAST_OPENED_KEY) ?? "{}")).toHaveProperty(
+      "builtin:people",
+    );
+  });
+
+  it("keeps a pinned page and the always-pinned Chat out of Recent", async () => {
+    seed([], { "builtin:people": minutesAgo(1) });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ type: "builtin", id: "people" }]));
+    renderSidebar();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/apps", expect.anything()));
+    expect(screen.queryByRole("navigation", { name: "Recent apps" })).toBeNull();
+  });
+
+  it("pins a page from its row button, moving it to the pinned list", async () => {
+    seed([], { "builtin:routines": minutesAgo(1) });
+    const user = userEvent.setup();
+    renderSidebar();
+
+    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    await user.click(within(zone).getByRole("button", { name: "Pin to sidebar" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("navigation", { name: "Recent apps" })).toBeNull(),
+    );
+    expect(document.querySelector('nav a[href="/routines"]')).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")).toContainEqual({
+      type: "builtin",
+      id: "routines",
+    });
+  });
+
+  it("offers new-tab and Pin, not Unpin, in a recent page's context menu", async () => {
+    seed([], { "builtin:activity": minutesAgo(1) });
+    const user = userEvent.setup();
+    renderSidebar();
+
+    const zone = await screen.findByRole("navigation", { name: "Recent apps" });
+    fireEvent.contextMenu(within(zone).getByRole("link", { name: "Activity" }));
+
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab", "Pin to sidebar"]);
+    await user.click(within(menu).getByRole("menuitem", { name: "Pin to sidebar" }));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")).toContainEqual({
+      type: "builtin",
+      id: "activity",
+    });
+  });
+
+  it("shows a recent page as a rail tile", async () => {
+    seed([], { "builtin:memory": minutesAgo(1) });
+    renderSidebar(true);
+
+    expect((await screen.findByRole("link", { name: "Memory" })).getAttribute("href")).toBe(
+      "/memory",
+    );
   });
 });

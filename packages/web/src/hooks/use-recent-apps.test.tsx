@@ -5,6 +5,7 @@ import {
   APP_LAST_OPENED_STORAGE_KEY,
   useAppLastOpened,
   useRecordAppOpened,
+  useRecordPageVisited,
 } from "./use-recent-apps";
 
 function stored(): Record<string, string> {
@@ -98,5 +99,29 @@ describe("useAppLastOpened", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(result.current).toEqual({});
+  });
+});
+
+describe("useRecordPageVisited", () => {
+  it("records a page under its own key, beside app entries, and nothing without a page", () => {
+    renderHook(() => useRecordAppOpened("people", true));
+    renderHook(() => useRecordPageVisited("people"));
+    renderHook(() => useRecordPageVisited(null));
+
+    expect(Object.keys(stored()).sort()).toEqual(["builtin:people", "people"]);
+  });
+
+  it("records once per arrival, not again for a re-render on the same page", () => {
+    const { rerender } = renderHook(({ id }) => useRecordPageVisited(id), {
+      initialProps: { id: "memory" },
+    });
+    const first = stored()["builtin:memory"];
+    localStorage.setItem(
+      APP_LAST_OPENED_STORAGE_KEY,
+      JSON.stringify({ "builtin:memory": "2026-01-01T00:00:00.000Z" }),
+    );
+    rerender({ id: "memory" });
+    expect(first).toBeTruthy();
+    expect(stored()["builtin:memory"]).toBe("2026-01-01T00:00:00.000Z");
   });
 });
