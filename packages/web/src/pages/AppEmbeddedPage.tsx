@@ -35,7 +35,7 @@ interface AppManifestResponse {
       mode: "embedded" | "full";
     };
     caller?:
-      | { kind: "guardian"; userId: string }
+      | { kind: "guardian"; userId: string; email?: string }
       | { kind: "visitor"; accountId: string; email: string }
       | { kind: "anonymous" };
     globalParams?: Record<string, never>;
