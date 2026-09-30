@@ -373,6 +373,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // A lost SSE connection is not proof that its server turn ended. Keep its
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
+  const pendingMessageReconciliationsRef = useRef<Set<string>>(new Set());
   const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
@@ -725,6 +726,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      // Snapshot optimistic IDs before the request. A follow-up accepted while
+      // this fetch is pending must not be dropped by an older response.
+      const dropMessageIds = options.dropLocalOptimistic
+        ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
+        : undefined;
       try {
         const controller = options.bounded ? new AbortController() : null;
         const request = listSessionMessages(id, controller?.signal);
@@ -740,9 +746,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         if (options.shouldApply && !options.shouldApply()) return false;
         const fetchedMessages = orderChatMessages(data);
-        const dropMessageIds = options.dropLocalOptimistic
-          ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
-          : undefined;
         setMessages((prev) => {
           const next = new Map(prev);
           next.set(
@@ -751,8 +754,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           );
           return next;
         });
-        if (options.dropLocalOptimistic) {
-          localOptimisticMessageIdsRef.current.delete(id);
+        if (dropMessageIds) {
+          const remaining = localOptimisticMessageIdsRef.current.get(id);
+          if (remaining) {
+            for (const messageId of dropMessageIds) remaining.delete(messageId);
+            if (!remaining.size) localOptimisticMessageIdsRef.current.delete(id);
+          }
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
@@ -1051,7 +1058,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
       if (turnId) {
         endSessionStream(recoveringSessionId, turnId);
-        void loadMessages(recoveringSessionId, { force: true, dropLocalOptimistic: true });
+        pendingMessageReconciliationsRef.current.add(recoveringSessionId);
+        void loadMessages(recoveringSessionId, {
+          force: true,
+          dropLocalOptimistic: true,
+          bounded: true,
+        });
       }
     }
 
@@ -1157,6 +1169,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!turns) {
           noteRecoveryFailure();
           return;
+        }
+        if (pendingMessageReconciliationsRef.current.has(reattachSessionId)) {
+          if (!(await reloadWhileObserving())) return;
+          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
         }
         if (!turns.length) {
           const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
@@ -1635,17 +1651,39 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     // A dead SSE connection can miss `done`. Release it only after the server
     // confirms this turn ended; accepting Stop is not confirmation of exit.
-    const forceReleaseIfStuck = (delayMs: number, confirmedFinished = false) => {
+    const forceReleaseIfStuck = (delayMs: number, confirmedFinished = false): void => {
       const stillOwnsStream = () =>
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
       setTimeout(async () => {
         if (!stillOwnsStream()) return;
         if (!confirmedFinished) {
-          const turns = await listSessionTurns(sid).catch(() => null);
-          if (!turns || turns.some((turn) => turn.turnId === turnId)) return;
+          const lookupController = new AbortController();
+          const turns = await withRequestTimeout(
+            listSessionTurns(sid, lookupController.signal),
+            () => lookupController.abort(),
+          ).catch(() => null);
+          if (!turns) {
+            if (stillOwnsStream()) forceReleaseIfStuck(RECONNECT_BASE_DELAY_MS);
+            return;
+          }
+          if (turns.some((turn) => turn.turnId === turnId)) return;
           if (!stillOwnsStream()) return;
         }
+        const observedSendRevision = acceptedSendRevisionsRef.current.get(sid) ?? 0;
+        const loaded = await loadMessages(sid, {
+          force: true,
+          dropLocalOptimistic: true,
+          bounded: true,
+          shouldApply: () =>
+            stillOwnsStream() &&
+            (acceptedSendRevisionsRef.current.get(sid) ?? 0) === observedSendRevision,
+        });
+        if (!loaded) {
+          if (stillOwnsStream()) forceReleaseIfStuck(RECONNECT_BASE_DELAY_MS, true);
+          return;
+        }
+        if (!stillOwnsStream()) return;
         targetController?.abort();
         releasedTurnIdsRef.current.set(sid, turnId);
         recoveringSessionIdsRef.current.delete(sid);
@@ -1653,7 +1691,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           current?.sessionId === sid && current.turnId === turnId ? null : current,
         );
         endSessionStream(sid, turnId);
-        void loadMessages(sid, { force: true, dropLocalOptimistic: true });
       }, delayMs);
     };
 

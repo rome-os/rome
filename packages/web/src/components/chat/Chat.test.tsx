@@ -592,6 +592,67 @@ describe("Chat turn stream lifecycle", () => {
     });
   });
 
+  it("retries an off-floor answer reload when that session regains the floor", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+    });
+    let failOffFloorReload = true;
+    rs.mocked(listSessionMessages).mockImplementation((sid) =>
+      sid === "session-1" && failOffFloorReload
+        ? Promise.reject(new Error("messages unavailable"))
+        : Promise.resolve(
+            sid === "session-1"
+              ? [
+                  {
+                    id: "off-floor-answer",
+                    sessionId: "session-1",
+                    turnId: "turn-1",
+                    role: "assistant",
+                    content: JSON.stringify([{ type: "text", content: "Finished" }]),
+                    createdAt: "2026-09-30T14:00:00.000Z",
+                  },
+                ]
+              : [],
+          ),
+    );
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    failOffFloorReload = false;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("off-floor-answer"),
+    );
+  });
+
   it("recovers a reattached turn after its effect is cancelled by a floor change", async () => {
     rs.mocked(listSessionTurns).mockImplementation(async (sid) =>
       sid === "session-1" ? [{ turnId: "turn-1", status: "running" }] : [],
@@ -1242,17 +1303,27 @@ describe("Chat turn stream lifecycle", () => {
       await Promise.resolve();
       await rs.advanceTimersByTimeAsync(14_000);
     });
+    let resolveResetReload!: (messages: []) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () => new Promise<[]>((resolve) => (resolveResetReload = resolve)),
+    );
     fireEvent.click(screen.getByTestId("reset-recovery"));
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
 
     rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
-    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-1" } });
+    rs.mocked(postSessionTurn).mockResolvedValue({
+      ok: true,
+      data: { turnId: "turn-1", inputId: "optimistic-new" },
+    });
     fireEvent.click(screen.getByTestId("send-button"));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("optimistic-new");
+    await act(async () => resolveResetReload([]));
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("optimistic-new");
     await act(async () => {
       controllers[1]!.error(new Error("connection dropped again"));
       await Promise.resolve();
@@ -1566,6 +1637,25 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(2_000);
     });
     expect(listSessionMessages).toHaveBeenCalledTimes(reloadsAfterStop);
+  });
+
+  it("keeps a dropped turn's preview until Stop's persisted-message reload succeeds", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionMessages)
+      .mockRejectedValueOnce(new Error("messages unavailable"))
+      .mockResolvedValue([]);
+    rs.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await rs.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.queryByTestId("stop-button")).toBeNull();
   });
 
   it("deletes a chat only after the app confirmation dialog is confirmed", async () => {
