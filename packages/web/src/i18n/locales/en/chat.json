@@ -181,7 +181,7 @@
       "context": "Context",
       "mainContext": "Main context"
     },
-    "reasoningHint": "Included in output. Claude's count is an estimate."
+    "reasoningHint": "Included in output. Some providers report an estimate, and a total counts only the runs that report it."
   },
   "approvals": {
     "headerPending": "Guardian approval needed",

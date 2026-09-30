@@ -181,7 +181,7 @@
       "context": "上下文",
       "mainContext": "主智能体上下文"
     },
-    "reasoningHint": "已计入输出。Claude 的数值为估算值。"
+    "reasoningHint": "已计入输出。部分提供方报告的是估算值；合计只包含报告了该数值的运行。"
   },
   "approvals": {
     "headerPending": "需要守护者批准",

@@ -81,6 +81,31 @@ describe("anthropicStop", () => {
     });
   });
 
+  it("explains an error with the loop's reason, not the last model stop reason", () => {
+    // Observed on SDK 0.3.281: a max-turns error still carries the last
+    // assistant message's `stop_reason: "tool_use"`.
+    expect(
+      anthropicStop(
+        { subtype: "error_max_turns", stop_reason: "tool_use", terminal_reason: "max_turns" },
+        false,
+      ),
+    ).toEqual({ reason: "error", raw: "max_turns" });
+    expect(
+      anthropicStop(
+        {
+          subtype: "success",
+          is_error: true,
+          stop_reason: "end_turn",
+          terminal_reason: "api_error",
+        },
+        false,
+      ),
+    ).toEqual({ reason: "error", raw: "api_error" });
+    expect(
+      anthropicStop({ subtype: "success", is_error: true, stop_reason: "end_turn" }, false),
+    ).toEqual({ reason: "error", raw: "success" });
+  });
+
   it("falls back to the loop outcome when the model sent no stop reason", () => {
     expect(
       anthropicStop({ subtype: "success", stop_reason: null, terminal_reason: "completed" }, false),

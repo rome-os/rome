@@ -44,7 +44,11 @@ export function anthropicStop(result: AnthropicResultStopInput, aborted: boolean
   ) {
     return withRaw("interrupted");
   }
-  if (result.subtype !== "success" || result.is_error === true) return withRaw("error");
+  if (result.subtype !== "success" || result.is_error === true) {
+    // The model's last `stop_reason` (for example `end_turn` or `tool_use`)
+    // does not explain a failure; the loop's reason, or else the subtype, does.
+    return { reason: "error", raw: result.terminal_reason ?? result.subtype };
+  }
   if (result.stop_reason) return withRaw(fromAnthropicStopReason(result.stop_reason));
   // No model stop reason: the loop ended without a final API response, for
   // example a local command. The SDK reports its own loop outcome instead.
