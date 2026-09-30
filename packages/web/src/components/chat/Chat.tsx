@@ -349,6 +349,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // A lost SSE connection is not proof that its server turn ended. Keep its
   // live UI while the reattach poll checks server truth and opens a new stream.
   const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
+  const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
@@ -796,10 +797,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }),
         ]).finally(() => clearTimeout(stallTimer));
         if (result === "stalled") {
-          // Dead connection. Release the reader and fall through to the
-          // final reload; the caller's finally block tears the streaming
-          // entry down and the floor reattach poll re-attaches from
-          // GET /turns if the turn is in fact still running server-side.
+          // A stalled reader cannot confirm the turn ended. The caller keeps
+          // its live projection while the floor reattach poll checks /turns.
           void reader.cancel().catch(() => {});
           break;
         }
@@ -1037,6 +1036,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         return;
       }
       const observedTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null;
+      const observedSendRevision = acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0;
       const wasRecovering = recoveringSessionIdsRef.current.has(reattachSessionId);
       let attachedTurnId: string | null = null;
       let finished = false;
@@ -1056,15 +1056,31 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           // The lookup may have started before a foreground send replaced the
           // recovering turn. Never settle a turn we did not query for.
           if (
-            turns &&
             wasRecovering &&
             recoveringSessionIdsRef.current.has(reattachSessionId) &&
             !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
+            (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) ===
+              observedSendRevision &&
             (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId
           ) {
+            const loaded = await loadMessages(reattachSessionId, { force: true });
+            if (!loaded) {
+              noteRecoveryFailure();
+              return;
+            }
+            if (
+              cancelled ||
+              !recoveringSessionIdsRef.current.has(reattachSessionId) ||
+              locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
+              (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) !==
+                observedSendRevision ||
+              (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) !==
+                observedTurnId
+            ) {
+              return;
+            }
             recoveringSessionIdsRef.current.delete(reattachSessionId);
             if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
-            void loadMessages(reattachSessionId, { force: true, dropLocalOptimistic: true });
             noteRecoverySuccess();
           }
           return;
@@ -1222,6 +1238,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       const createResp: CreateTurnResponse = result.data;
+      acceptedSendRevisionsRef.current.set(
+        sendingSessionId,
+        (acceptedSendRevisionsRef.current.get(sendingSessionId) ?? 0) + 1,
+      );
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 

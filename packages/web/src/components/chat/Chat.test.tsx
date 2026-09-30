@@ -669,6 +669,112 @@ describe("Chat turn stream lifecycle", () => {
     expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
+  it("does not settle recovery from an empty lookup predating an accepted follow-up", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-2" } });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+
+    let resolveTurns: (turns: []) => void = () => {};
+    rs.mocked(listSessionTurns).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveTurns = resolve;
+        }),
+    );
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    fireEvent.click(screen.getByTestId("send-button"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(postSessionTurn).toHaveBeenCalled();
+
+    await act(async () => resolveTurns([]));
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("true");
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+  });
+
+  it("keeps the live preview until the final answer reload succeeds", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    await act(async () => {
+      streamController!.enqueue(
+        new TextEncoder().encode(
+          'event: assistant_text\ndata: {"blockIx":0,"text":"Final answer"}\n\n',
+        ),
+      );
+    });
+
+    let rejectReload: (reason: Error) => void = () => {};
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectReload = reject;
+        }),
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("message-list").dataset.liveText).toBe("Final answer");
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    await act(async () => rejectReload(new Error("transient message load failure")));
+    expect(screen.getByTestId("message-list").dataset.liveText).toBe("Final answer");
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
+
+    rs.mocked(listSessionMessages).mockResolvedValue([
+      {
+        id: "answer-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "Final answer" }]),
+        createdAt: "2026-09-30T14:00:00.000Z",
+      },
+    ]);
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(4_000);
+    });
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-1");
+    expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+  });
+
   it("keeps a foreground send live when its stream drops", async () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     rs.mocked(postSessionTurn).mockResolvedValue({ ok: true, data: { turnId: "turn-local" } });
