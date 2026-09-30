@@ -31,16 +31,16 @@ tcp_port_listening() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
 }
 
-# True when a process matching $1 has every later argument as one of its argv entries.
+# True when a process matching $1 has every later argument as one of its argv
+# entries. The /proc files are read with grep -z and never piped: under
+# pipefail, grep -q closing a pipe early would fail the writer and read as a miss.
 process_cmdline_contains_all() {
-  local pattern="$1" pid cmdline needle missing
+  local pattern="$1" pid needle missing
   shift
   for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
-    cmdline="$(tr '\0' '\n' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
-    [ -n "$cmdline" ] || continue
     missing=""
     for needle in "$@"; do
-      if ! printf '%s\n' "$cmdline" | grep -Fxq -- "$needle"; then
+      if ! grep -zqFx -- "$needle" "/proc/${pid}/cmdline" 2>/dev/null; then
         missing=1
         break
       fi
@@ -53,7 +53,7 @@ process_cmdline_contains_all() {
 process_env_contains() {
   local pid
   for pid in $(pgrep -x "$1" 2>/dev/null || true); do
-    if tr '\0' '\n' <"/proc/${pid}/environ" 2>/dev/null | grep -Fxq -- "$2"; then
+    if grep -zqFx -- "$2" "/proc/${pid}/environ" 2>/dev/null; then
       return 0
     fi
   done

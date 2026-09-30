@@ -52,13 +52,17 @@ function started(): { program: string; pid: number; args: string }[] {
 }
 
 function run(...extra: string[]) {
+  return runWith({}, ...extra);
+}
+
+function runWith(env: Record<string, string>, ...extra: string[]) {
   return spawnSync(
     "bash",
     [SCRIPT, "notes", `:${display}`, String(vncPort), String(novncPort), ...extra],
     {
       encoding: "utf8",
       timeout: 60_000,
-      env: { PATH: `${dir}:${process.env.PATH}`, FAKE_RECORD: record },
+      env: { ...env, PATH: `${dir}:${process.env.PATH}`, FAKE_RECORD: record },
     },
   );
 }
@@ -108,6 +112,19 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     expect(second.status).toBe(0);
     expect(second.stdout).toContain(`Reusing TigerVNC for notes on :${display}.`);
     expect(started()).toHaveLength(3);
+  }, 60_000);
+
+  it("finds a running Openbox whose environment outgrows a pipe buffer", () => {
+    // Programs started from the entrypoint inherit its whole environment.
+    const big = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`ROME_TEST_PAD_${i}`, "x".repeat(8_000)]),
+    );
+    expect(runWith(big).status).toBe(0);
+    const second = runWith(big);
+
+    expect(second.stderr).toBe("");
+    expect(second.status).toBe(0);
+    expect(started().filter((proc) => proc.program === "openbox")).toHaveLength(1);
   }, 60_000);
 
   it("clears a stale X lock whose owner has exited", async () => {
