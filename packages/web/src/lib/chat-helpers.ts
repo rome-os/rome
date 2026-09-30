@@ -81,6 +81,9 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
   for (const block of blocks) {
     if (block.type !== "tool_use" || block.tool !== "Bash" || !block.id) continue;
     const input = block.input as Record<string, unknown> | null;
+    // A background run returns before the install finishes, so its result
+    // says nothing about whether the install succeeded.
+    if (input?.run_in_background === true) continue;
     const cmd = typeof input?.command === "string" ? input.command : "";
     if (!cmd.includes("app:install")) continue;
     const match = cmd.match(/\/apps\/([a-z][a-z0-9-]*)\//);
@@ -95,8 +98,9 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
   return results;
 }
 
-/** Whether a Bash tool result succeeded. Results recorded before
- *  `tool_result.isError` existed only carry the shell's exit code. */
+/** Whether a Bash tool result succeeded. A result without `isError` (recorded
+ *  before the flag existed, or from a producer that cannot tell) falls back
+ *  to the shell's exit code. */
 function bashSucceeded(result: Extract<TraceBlockDto, { type: "tool_result" }>): boolean {
   if (result.isError !== undefined) return !result.isError;
   const out = result.output as Record<string, unknown> | null;

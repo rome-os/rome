@@ -389,8 +389,9 @@ function toolStepStatus(result: StreamBlock | null): ToolStepStatus {
   return isLegacyErrorOutput(result.output) ? "error" : "ok";
 }
 
-// Results recorded before `tool_result.isError` existed carry no flag, so read
-// each provider's own failure signal from the output: Claude's `isError`,
+// A result without `tool_result.isError` (recorded before the flag existed, or
+// from a producer that cannot tell, such as Claude's subagent fallback or turn
+// middleware) falls back to each provider's own failure signal: Claude's `isError`,
 // Codex's `status: "failed"` and non-zero `exit_code`/`exitCode`, and a
 // Codex MCP call's `error`.
 function isLegacyErrorOutput(output: unknown): boolean {

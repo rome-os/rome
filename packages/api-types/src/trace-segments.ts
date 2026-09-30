@@ -89,7 +89,8 @@ export interface ToolResultBlock extends TraceBlockBase {
   /** Provider-issued ID of the corresponding tool use. */
   toolUseId?: string;
   endedAt?: string;
-  /** See `ToolResultMessage.isError`. Absent on blocks recorded before it existed. */
+  /** See `ToolResultMessage.isError`. Absent on blocks recorded before it
+   *  existed and from producers that cannot tell. */
   isError?: boolean;
 }
 

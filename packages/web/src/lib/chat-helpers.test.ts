@@ -180,6 +180,30 @@ describe("detectAppInstalls", () => {
     expect(detectAppInstalls(bashInstall({ output: { exitCode: 0 }, isError: true }))).toEqual([]);
   });
 
+  it("does not count a Bash install started in the background", () => {
+    // Claude returns at once for `run_in_background`, before the install ends.
+    const blocks = [
+      {
+        type: "tool_use",
+        tool: "Bash",
+        id: "use-8",
+        input: {
+          command: "pnpm app:install --source ~/projects/apps/cli-app/",
+          run_in_background: true,
+        },
+      } as unknown as TraceBlockDto,
+      {
+        type: "tool_result",
+        tool: "Bash",
+        toolUseId: "use-8",
+        output: "Command running in background with ID: bash_1",
+        isError: false,
+      } as TraceBlockDto,
+    ];
+
+    expect(detectAppInstalls(blocks)).toEqual([]);
+  });
+
   it("reads Codex's camelCase exit code on a result recorded before isError", () => {
     expect(
       detectAppInstalls(bashInstall({ output: { exitCode: 0, aggregatedOutput: "installed" } })),

@@ -86,8 +86,9 @@ function toolFailed(result: ToolResultBlock): boolean {
   return isLegacyErrorOutput(result.output);
 }
 
-// Results recorded before `tool_result.isError` existed carry no flag, so read
-// each provider's own failure signal from the output.
+// A result without `tool_result.isError` (recorded before the flag existed, or
+// from a producer that cannot tell) falls back to each provider's own failure
+// signal in the output.
 function isLegacyErrorOutput(output: unknown): boolean {
   const normalized = normalizeTracePayload(output);
   if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) return false;
