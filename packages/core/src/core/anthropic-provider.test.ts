@@ -288,6 +288,64 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("ends a Rome turn whose send the SDK replays in its own turn and answers in the next", async () => {
+      scripted(async function* (sent) {
+        // A background task's turn is running when Rome sends X.
+        yield say("The background command finished.");
+        const x = await sent();
+        yield { ...x, isReplay: true };
+        yield result("", [], "task-notification");
+        yield say("X-REPLY", x.uuid);
+        yield result("X-REPLY", [x.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const turn = nextTurn(session.events[Symbol.asyncIterator]());
+      await session.sendUserInput({ text: "Hi.", inputId: a });
+      const results = (await turn).filter((m) => m.type === "result");
+      await session.close();
+
+      expect(results).toEqual([expect.objectContaining({ type: "result", content: "X-REPLY" })]);
+    });
+
+    it("drops a carried steer's reply when its Rome turn ends without adopting it", async () => {
+      const steer = "00000000-0000-4000-8000-00000000000c";
+      const next = "00000000-0000-4000-8000-00000000000d";
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        await sent(); // the steer, carried past A's result
+        yield say("A-REPLY", first.uuid);
+        yield result("A-REPLY", [first.uuid], "human");
+        yield say("S-REPLY", steer);
+        yield result("S-REPLY", [steer], "human");
+        const y = await sent();
+        yield { ...y, isReplay: true };
+        yield say("Y-REPLY", y.uuid);
+        yield result("Y-REPLY", [y.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "A", inputId: a });
+      const turnA = nextTurn(events);
+      await session.steerUserInput!({ text: "S", inputId: steer });
+      expect((await turnA).filter((m) => m.type === "input_status")).toContainEqual(
+        expect.objectContaining({ inputId: steer, state: "queued" }),
+      );
+      // S's reply now waits for the turn that adopts S. That turn ends
+      // without sending (a middleware answered it).
+      const turnY = nextTurn(events);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      session.releaseInput!(steer);
+      await session.sendUserInput({ text: "Y", inputId: next });
+      const y = await turnY;
+      await session.close();
+
+      expect(y.filter((m) => m.type === "text").map((m) => m.content)).toEqual(["Y-REPLY"]);
+      expect(y.filter((m) => m.type === "result")).toEqual([
+        expect.objectContaining({ content: "Y-REPLY" }),
+      ]);
+    });
+
     it("keeps a turn the SDK starts while idle out of Rome's next turn", async () => {
       scripted(async function* (sent) {
         const first = await sent();

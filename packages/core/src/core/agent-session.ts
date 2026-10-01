@@ -3442,6 +3442,10 @@ class AgentSessionImpl implements AgentSession {
       }
       this.currentTurnCtx = null;
       throw err;
+    } finally {
+      // A provider may hold this input for the turn to adopt (a steer it
+      // carried past a result). The turn is over, adopted or not.
+      if (input.inputId) this.modelSession.releaseInput?.(input.inputId);
     }
   }
 

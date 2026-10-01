@@ -287,6 +287,13 @@ export interface ModelSession {
   interrupt(reason?: string): Promise<void>;
 
   /**
+   * Rome's turn for `inputId` has ended, whether or not it sent the input. A
+   * provider holding that input for a turn to adopt (a steer it carried past
+   * a result) stops waiting for one.
+   */
+  releaseInput?(inputId: string): void;
+
+  /**
    * Close the session. The events iterable terminates. Idempotent. After
    * close(), sendUserInput() rejects.
    */

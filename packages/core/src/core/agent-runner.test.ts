@@ -1670,6 +1670,35 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("releases a turn's input when a middleware answers it without the model", async () => {
+      const turnMiddleware = createTurnMiddlewareChain();
+      rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {
+        ctx.emit({ type: "result", content: "Scripted" });
+      });
+      const releaseInput = rs.fn();
+      const sendUserInput = rs.fn(async () => {});
+      rs.spyOn(mockProvider, "openSession").mockImplementation(async (params) => ({
+        ...createClosableModelSession(params),
+        releaseInput,
+        sendUserInput,
+      }));
+      const manager = createAgentSessionManager(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+          turnMiddleware,
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:release-input",
+      });
+      await collectMessages(session.sendTurn({ prompt: "Steer", inputId: "steer-1" }).events);
+      expect(sendUserInput).not.toHaveBeenCalled();
+      expect(releaseInput).toHaveBeenCalledWith("steer-1");
+      await manager.shutdown();
+    });
+
     it("cancels a turn before dispatch without sending its input", async () => {
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [mockProvider] })),
