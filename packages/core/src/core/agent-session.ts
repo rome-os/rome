@@ -462,8 +462,8 @@ export function createAgentSessionManager(
                 taskIds: tasks.map((task) => task.id),
               });
             } else if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) {
-              // Its last task just ended: give the SDK time to act on it. The
-              // sweep runs every idle TTL, so this is 1 to 2 idle TTLs.
+              // Its last task just ended: give the SDK time to act on it. That
+              // is one idle TTL plus up to one sweep interval.
               continue;
             }
             void session.close("idle").catch(() => {
