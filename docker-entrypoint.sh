@@ -457,21 +457,6 @@ else
 fi
 wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
 
-# WeChat's own display, shown at /desktop/wechat. Only with WECHAT_USER_DISPLAY:
-# unset, the client stays on the shared desktop above. The display is fixed at
-# 1280x800, the largest size the client's main window accepts.
-if [ "${WECHAT_USER_ENABLED:-false}" = "true" ] && [ -n "${WECHAT_USER_DISPLAY:-}" ]; then
-  if ! [[ "$WECHAT_USER_DISPLAY" =~ ^:[0-9]+$ ]] || [ "$WECHAT_USER_DISPLAY" = "$DISPLAY" ]; then
-    echo "Error: WECHAT_USER_DISPLAY must be a display like :100, other than ${DISPLAY}."
-    exit 1
-  fi
-  if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-desktop.sh wechat \
-    "$WECHAT_USER_DISPLAY" "${ROME_WECHAT_VNC_PORT:-5901}" "${ROME_WECHAT_NOVNC_PORT:-6081}" \
-    /opt/rome/scripts/docker/wechat-openbox-rc.xml; then
-    exit 1
-  fi
-fi
-
 CHROME_WRAPPER_PID=""
 if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
   echo "Warning: OpenCLI could not start. Browser connections are unavailable."

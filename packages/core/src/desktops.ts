@@ -28,6 +28,9 @@ export function wechatUserDisplay(env: Env = process.env): string | null {
   return display;
 }
 
+/** The `wechat` desktop's display when `WECHAT_USER_DISPLAY` is unset. */
+export const WECHAT_DEFAULT_DISPLAY = ":100";
+
 /** Where the container image ships the desktop scripts. */
 const DOCKER_SCRIPTS = "/opt/rome/scripts/docker";
 
@@ -53,7 +56,7 @@ function wechat(env: Env): DesktopSlot | null {
   if (env.WECHAT_USER_ENABLED !== "true") return null;
   let display: string;
   try {
-    display = wechatUserDisplay(env) ?? ":100";
+    display = wechatUserDisplay(env) ?? WECHAT_DEFAULT_DISPLAY;
   } catch {
     return null;
   }

@@ -39,7 +39,7 @@ The display outlives Rome, so a Rome restart finds the client still running and 
 
 `WECHAT_USER_DISPLAY`, `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT` still override the display and ports.
 
-A client that was already running on the shared desktop stays there until it next exits. It then starts on its own display, which can need one sign-in confirmed on the phone. Open `/desktop/wechat` then, so the login window is visible when it appears.
+A client that was already running on the shared desktop stays there until it next exits. Until then the connection's status says so: a client restart finishes the move. The client then starts on its own display, which can need one sign-in confirmed on the phone. Open `/desktop/wechat` then, so the login window is visible when it appears.
 
 ## Connect
 

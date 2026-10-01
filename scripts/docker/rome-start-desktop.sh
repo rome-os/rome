@@ -36,8 +36,11 @@ LOG_DIR="${ROME_DESKTOP_LOG_DIR:-${HOME:?}/.cache/rome-desktop}"
 # The lock lives in this directory, so first runs can race to create it: a
 # directory another run just made counts as success.
 if [ ! -d "$LOG_DIR" ]; then
-  mkdir -p "$(dirname "$LOG_DIR")"
-  mkdir -m 700 "$LOG_DIR" 2>/dev/null || [ -d "$LOG_DIR" ]
+  mkdir -p "$(dirname "$LOG_DIR")" 2>/dev/null || true
+  if ! mkdir -m 700 "$LOG_DIR" 2>/dev/null && [ ! -d "$LOG_DIR" ]; then
+    echo "Error: cannot create the desktop log directory ${LOG_DIR}." >&2
+    exit 1
+  fi
 fi
 # A caller-set ROME_DESKTOP_LOG_DIR must be as private as the default: another
 # account that can write there could create the lock first, or plant a symlink

@@ -210,6 +210,24 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     }
   }, 60_000);
 
+  it("names the log directory it cannot create", () => {
+    // ~/.cache exists but is read-only, as with a HOME another UID owns.
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".cache"), { recursive: true });
+    chmodSync(join(home, ".cache"), 0o500);
+    try {
+      const result = runWith({ HOME: home, ROME_DESKTOP_LOG_DIR: "" });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `cannot create the desktop log directory ${join(home, ".cache", "rome-desktop")}`,
+      );
+      expect(started()).toEqual([]);
+    } finally {
+      chmodSync(join(home, ".cache"), 0o700);
+    }
+  });
+
   it("writes its logs to ROME_DESKTOP_LOG_DIR", () => {
     expect(run().status).toBe(0);
     for (const log of ["xtigervnc", "openbox", "novnc"]) {

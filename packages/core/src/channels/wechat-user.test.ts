@@ -270,7 +270,12 @@ describe("WechatUserRuntime display", () => {
     expect(desktop).toBeLessThan(client);
     const cmd = calls[desktop]!.cmd;
     expect(cmd[1]).toBe("-i");
-    expect(cmd.some((arg) => arg.startsWith("ROME_") || arg.startsWith("WECHAT_"))).toBe(false);
+    // Only the runtime's own lock wait; none of Rome's configuration leaks.
+    expect(
+      cmd.filter(
+        (arg) => /^(ROME_|WECHAT_)/.test(arg) && !arg.startsWith("ROME_DESKTOP_LOCK_WAIT="),
+      ),
+    ).toEqual([]);
     expect(cmd.slice(cmd.indexOf("bash"))).toEqual([
       "bash",
       join(home, "rome-start-desktop.sh"),
@@ -365,6 +370,56 @@ describe("WechatUserRuntime display", () => {
 
     expect(calls.some(([file]) => file === "env")).toBe(false);
     expect(displays).toEqual([":99"]);
+  });
+
+  it("lets the script's own lock error arrive before the runtime's timeout", async () => {
+    // A run that waits out a busy lock must fail with the script's message,
+    // not be killed first and reported as "exit null".
+    wechatEnabled();
+    const seen: Array<{ args: string[]; timeoutMs?: number }> = [];
+    const runtime = await installedRuntime(async (file, args, opts) => {
+      if (file === "env") seen.push({ args, timeoutMs: opts?.timeoutMs });
+      return file === "pgrep" ? { code: 1, stdout: "", stderr: "" } : ok();
+    });
+
+    await runtime.ensureDesktop();
+
+    const wait = seen[0]!.args.find((arg) => arg.startsWith("ROME_DESKTOP_LOCK_WAIT="));
+    expect(wait).toBeDefined();
+    const lockWaitS = Number(wait!.split("=")[1]);
+    // The script then waits up to 30 s for each of two ports and 5 s for Openbox.
+    expect(seen[0]!.timeoutMs).toBeGreaterThan((lockWaitS + 30 + 30 + 5) * 1000);
+  });
+
+  it("links a stopped client to the shared desktop where the start script is missing", async () => {
+    wechatEnabled();
+    const { run } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });
+    const runtime = await installedRuntime(run, { desktopScript: "/nonexistent/start.sh" });
+
+    const status = await runtime.status();
+
+    expect([status.display, status.desktopPath]).toEqual([":99", "/desktop"]);
+  });
+
+  it("flags a client still on the shared display as waiting to move", async () => {
+    wechatEnabled();
+    const proc = join(await mkdtemp(join(tmpdir(), "wechat-proc-")), "proc");
+    await mkdir(join(proc, "42"), { recursive: true });
+    const { run } = scriptedRun({ pgrep: () => ok("42\n") });
+    const runtime = await installedRuntime(run, { procDir: proc });
+
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:99\0");
+    expect((await runtime.status()).movePending).toBe(true);
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:100\0");
+    expect((await runtime.status()).movePending).toBe(false);
+    // With no start script the shared display is where the client belongs.
+    const hosted = await installedRuntime(run, {
+      procDir: proc,
+      desktopScript: "/nonexistent/start.sh",
+    });
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:99\0");
+    expect((await hosted.status()).movePending).toBe(false);
+    await rm(join(proc, ".."), { recursive: true, force: true });
   });
 
   it("treats exit 127 from an installed script as a failure, not a missing script", async () => {

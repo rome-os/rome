@@ -76,8 +76,12 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 /** Installing downloads and unpacks the better part of a gigabyte. */
 const INSTALL_TIMEOUT_MS = 20 * 60_000;
-/** The start script waits up to 30 s for each of its ports and 5 s for Openbox. */
-const DESKTOP_START_TIMEOUT_MS = 90_000;
+/** How long the start script waits for another run of the same desktop. */
+const DESKTOP_LOCK_WAIT_S = 20;
+/** The start script's worst case: the lock wait, then up to 30 s for each of
+ *  its two ports and 5 s for Openbox. The timeout leaves a margin past that, so
+ *  a busy lock fails with the script's own message, not a kill. */
+const DESKTOP_START_TIMEOUT_MS = (DESKTOP_LOCK_WAIT_S + 30 + 30 + 5 + 15) * 1000;
 
 function sharedDisplay(): string {
   return process.env.DISPLAY || ":99";
@@ -169,6 +173,10 @@ export interface WechatUserStatus {
   display: string;
   /** The page that shows `display` to the guardian, for sign-in links. */
   desktopPath: string;
+  /** The running client is still on another display than WeChat's own desktop,
+   *  where it moves when it next starts. A client restart finishes the move,
+   *  and the phone may ask to confirm the sign-in again. */
+  movePending: boolean;
 }
 
 // ── reader shapes ─────────────────────────────────────────────────────────
@@ -417,11 +425,14 @@ export class WechatUserRuntime {
       return sharedDisplay();
     }
     // env -i: the desktop's programs outlive Rome and need none of its
-    // configuration or credentials. ROME_DESKTOP_LOG_DIR passes through so this
-    // run and the entrypoint's take the same lock.
-    const env = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "ROME_DESKTOP_LOG_DIR"].flatMap(
-      (key) => (process.env[key] === undefined ? [] : [`${key}=${process.env[key]}`]),
-    );
+    // configuration or credentials. ROME_DESKTOP_LOG_DIR passes through so an
+    // operator's override applies to every run, which then share one lock.
+    const env = [
+      `ROME_DESKTOP_LOCK_WAIT=${DESKTOP_LOCK_WAIT_S}`,
+      ...["PATH", "HOME", "USER", "LOGNAME", "LANG", "ROME_DESKTOP_LOG_DIR"].flatMap((key) =>
+        process.env[key] === undefined ? [] : [`${key}=${process.env[key]}`],
+      ),
+    ];
     const result = await this.run(
       "env",
       ["-i", ...env, "bash", this.desktopScript, ...startDesktopArgs("wechat", desktop)],
@@ -486,7 +497,14 @@ export class WechatUserRuntime {
   async status(): Promise<WechatUserStatus> {
     const installed = await exists(join(this.clientDir, "wechat"));
     const pid = installed ? await this.pid() : null;
-    const display = pid ? await this.clientDisplay(pid) : this.startDisplay;
+    const scriptInstalled = this.desktop ? await exists(this.desktopScript) : false;
+    // A stopped client reports where it will start: the shared display where
+    // the start script is missing, as ensureDesktop() falls back to.
+    const display = pid
+      ? await this.clientDisplay(pid)
+      : this.desktop && !scriptInstalled
+        ? sharedDisplay()
+        : this.startDisplay;
     const account = installed ? await this.accountDir() : null;
     let keysReady = false;
     if (account !== null && (await exists(this.keysFile))) {
@@ -519,6 +537,9 @@ export class WechatUserRuntime {
       ...(pid ? { pid } : {}),
       display,
       desktopPath: this.desktopPathFor(display),
+      movePending: Boolean(
+        pid && this.desktop && scriptInstalled && display !== this.desktop.display,
+      ),
     };
   }
 

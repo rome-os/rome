@@ -16,7 +16,7 @@ Desktops are static. A fixed table in [`packages/core/src/desktops.ts`](../../pa
   - `openbox` with `DISPLAY=:<n>`, the window manager
   - `websockify 127.0.0.1:<novnc> localhost:<vnc>`, the WebSocket bridge the dashboard's noVNC client connects to
 
-  WeChat's runtime runs it before it starts the client or captures keys, with the arguments `startDesktopArgs` builds from the table row. WeChat's health check also runs it for a client already on the desktop, so a part that died, such as websockify, comes back while the client keeps running. Until the entrypoint's own call is removed, the entrypoint also runs it at container start when `WECHAT_USER_DISPLAY` is set.
+  WeChat's runtime runs it before it starts the client or captures keys, with the arguments `startDesktopArgs` builds from the table row. WeChat's health check also runs it for a client already on the desktop, so a part that died, such as websockify, comes back while the client keeps running. Nothing else starts it: the entrypoint starts only the shared desktop. The runtime gives each run a 20 s `ROME_DESKTOP_LOCK_WAIT` and a timeout above the script's worst case, so a busy lock fails with the script's own message.
 - **The desktop proxy**: routes `/desktop-proxy/<name>/` to the table's websockify port.
 
 ## Contracts
