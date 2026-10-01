@@ -298,6 +298,7 @@ export class WechatUserRuntime {
   readonly accessibilityLauncher: string;
   private readonly run: RunCommand;
   private starting: Promise<void> | null = null;
+  private installing: Promise<void> | null = null;
 
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
@@ -536,7 +537,16 @@ export class WechatUserRuntime {
    * resolves its own resources against `/opt/wechat` regardless of where it
    * was started from.
    */
-  async install(signal?: AbortSignal): Promise<void> {
+  install(signal?: AbortSignal): Promise<void> {
+    // The WeChat app and the connection's setup both install. One download and
+    // unpack owns the client's files until it completes; a second caller joins it.
+    this.installing ??= this.installClient(signal).finally(() => {
+      this.installing = null;
+    });
+    return this.installing;
+  }
+
+  private async installClient(signal?: AbortSignal): Promise<void> {
     const deb = join(this.prefix, "wechat.deb");
     const clientRoot = join(this.prefix, "client");
     await mkdir(this.prefix, { recursive: true });

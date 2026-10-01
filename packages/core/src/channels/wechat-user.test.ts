@@ -528,6 +528,21 @@ describe("WechatUserRuntime.install", () => {
     expect(existsSync(join(h, ".local/share/wechat/wechat.deb.part"))).toBe(false);
   });
 
+  it("shares one download between overlapping installs", async () => {
+    // The WeChat app's Install button and the connection's setup each call
+    // install(); a second caller joins the first rather than writing the same
+    // files from a second download.
+    const h = await tempHome();
+    await mkdir(join(h, ".local/share/wechat"), { recursive: true });
+    const { run, calls } = scriptedDownload();
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    await Promise.all([runtime.install(), runtime.install()]);
+
+    expect(calls.filter((call) => call[0] === "curl")).toHaveLength(1);
+    expect(calls.filter((call) => call[0] === "dpkg-deb")).toHaveLength(1);
+  });
+
   it("keeps a cached archive that is the supported build", async () => {
     const h = await tempHome();
     const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));

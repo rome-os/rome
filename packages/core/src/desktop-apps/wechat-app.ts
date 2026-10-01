@@ -52,7 +52,7 @@ export class WechatApp {
     return this.run("starting", () => this.runtime.start());
   }
 
-  /** Resolves when no install or start is running. For tests and shutdown. */
+  /** Resolves when no install or start is running. For tests. */
   async settled(): Promise<void> {
     await this.job?.done;
   }
