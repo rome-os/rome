@@ -10,7 +10,7 @@ The main process wires Rome's object graph in `main()` in `packages/core/src/ind
 
 Hand-built copies drifted. On 2026-09-30, 35 of the 47 object constructions in `buildTestDeps` were verbatim copies of lines in `index.ts`. In the 90 days before, 8 of the 13 commits that touched `index.ts` also edited `test/helpers.ts`. The main process, the action worker, `buildTestDeps`, and `createTestRome` each built one repository bundle from one database handle. Each built a different subset of it.
 
-Every repository constructor takes the database handle and stores it, with no I/O. Boot in `main()` interleaved those constructions with I/O: seeding the instance token, applying stored app keys, recovering interrupted webchat inputs, and ensuring the sentinel persons. A test must not run those steps by accident.
+Every repository constructor takes the database handle and stores it, with no I/O. Boot in `main()` interleaved those constructions with I/O: seeding the instance token, applying stored app keys, recovering interrupted webchat inputs, and creating any missing sentinel persons. A test must not run those steps by accident.
 
 ## Decision
 
@@ -25,11 +25,11 @@ A test harness builds its object graph through the composition function the prod
 
 ## Consequences
 
-A new system repository is wired once and reaches the main process, the action worker, and every harness. Tests exercise production wiring rather than a copy of it. No consumer can opt out of a repository. The tier takes nothing but the database handle, so anything that needs I/O, configuration, or a booted app catalog stays outside it.
+A new system repository is wired once and reaches the main process, the action worker, and every harness that composes through the tier. Tests exercise production wiring rather than a copy of it. No consumer can opt out of a repository. The tier takes nothing but the database handle, so anything that needs I/O, configuration, or a booted app catalog stays outside it.
 
 Future diffs must respect:
 
 - A new system repository joins `createDataTier`, not one of its consumers.
-- A harness that needs a repository reads it from the tier instead of constructing it.
+- A harness that builds a deps graph reads its repositories from the tier instead of constructing them. A unit test of one repository still constructs it directly.
 - `createDataTier` stays synchronous and performs no I/O. A boot step goes in `main()` after composition.
 - A tier field that `ApiDeps` also names has the type `ApiDeps` declares. The `satisfies` check in `createDataTier` enforces it at compile time.
