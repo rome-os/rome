@@ -1,19 +1,12 @@
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
+import { createDataTier } from "../composition/data-tier.js";
 import { AgentLoader } from "../core/agent-loader.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ActionLoader } from "./loader.js";
 import { ActionEngine } from "./engine.js";
 import { emitAgentMessage } from "./runtime-events.js";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { ApprovalsRepository } from "../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { SettingsRepository } from "../db/repositories/settings.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PolicyEngine } from "../core/policy-engine.js";
@@ -34,14 +27,12 @@ import {
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
-import { createAppRuntimeRepositories } from "../apps/repositories.js";
 import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
 } from "../capabilities/image-generation/index.js";
-import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
@@ -58,6 +49,17 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const config = loadConfig();
   ensureProfileMemoryInitialized();
   const db = getDb(config.database);
+  const dataTier = createDataTier(db);
+  const {
+    settingsRepo,
+    personMappingRepo,
+    sentinelLogRepo,
+    approvalsRepo,
+    policiesRepo,
+    routinesRepo,
+    actionExecutionsRepo,
+    executionJournalRepo,
+  } = dataTier;
 
   // Read-only worker view of the apps domain: hydrate one complete catalog
   // snapshot, then load its artifacts. Loading on every incremental hydration
@@ -80,7 +82,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     getInFlight: () => undefined,
     markBroken: async () => {},
   });
-  const settingsRepo = new SettingsRepository(db);
   const artifactIdentity = {
     legacyBindings: parseLegacyArtifactBindings(
       await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
@@ -100,15 +101,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   await actionLoader.loadFromCatalog(appCatalog);
   await skillCatalog.loadFromCatalog(appCatalog);
 
-  const personMappingRepo = new PersonMappingRepository(db);
-  const sentinelLogRepo = new SentinelLogRepository(db);
-  const approvalsRepo = new ApprovalsRepository(db);
-  const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
-  const policiesRepo = new PoliciesRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
-  const actionExecutionsRepo = new ActionExecutionsRepository(db);
-  const executionJournalRepo = new ExecutionJournalRepository(db);
+  const appRuntimeRepositories = dataTier.createAppRuntimeRepositories();
 
   const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();

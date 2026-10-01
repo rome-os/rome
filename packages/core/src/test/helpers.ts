@@ -44,31 +44,15 @@ import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
 import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
 import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
-import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
-import { OutboxRepository } from "../db/repositories/outbox.js";
-import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
-import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
-import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
-import { createAccountNames } from "../channels/account-names.js";
 import type { Channel, Channels } from "../channels/channel.js";
 import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
+import { createDataTier, type DataTier } from "../composition/data-tier.js";
 import { createChannelsService } from "../channels/channels-service.js";
-import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
-import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
-import { RoutinesRepository } from "../db/repositories/routines.js";
-import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionLoader } from "../actions/loader.js";
@@ -389,21 +373,11 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
 
 // buildTestDeps — wires real repos from a test DB plus mock channels
 
-export interface TestDeps extends ApiDeps {
-  // Test-owned extras not part of the ApiDeps surface.
-  /** The LinkedIn inbox mirror. No route reads it — the poller fills it and
-   *  the person timeline reads through it — so a test that wants LinkedIn
-   *  history seeds it here rather than through the API's own dependencies. */
-  linkedInStoreRepo: LinkedInStoreRepository;
-  /** The address books behind `channels`, kept reachable so a test can rebuild
-   *  the list against a different database handle. */
-  whatsAppAccounts: WhatsAppAccounts;
-  linkedInAccounts: LinkedInAccounts;
-  sessionsRepo: SessionsRepository;
-  policiesRepo: PoliciesRepository;
-  executionJournalRepo: ExecutionJournalRepository;
-  channelPortMap: Map<string, MockProviderAdapter>;
-}
+/** The deps bag plus the whole data tier it was built from. The tier carries
+ *  what no route reads but a test seeds or rebuilds through: the LinkedIn inbox
+ *  mirror, the address books behind `channels`, and repositories outside
+ *  `ApiDeps`. */
+export type TestDeps = ApiDeps & DataTier & { channelPortMap: Map<string, MockProviderAdapter> };
 
 export interface BuildTestDepsOptions {
   channels?: string[];
@@ -464,38 +438,28 @@ export async function buildTestDeps(
     channelPortMap.set(name, new MockProviderAdapter(name));
   }
 
-  const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
-  const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
-  const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
-  const linkedInStoreRepo = new LinkedInStoreRepository(db);
-  const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db);
-  const talkRouter = createMockTalkRouter(channelPortMap);
-  const channels = testChannels(
-    { db, whatsAppAccounts, linkedInAccounts, channelPortMap },
-    talkRouter,
-  );
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
-  const settingsRepo = new SettingsRepository(db);
-  // A private env object per deps bag: route tests exercise apply/remove
-  // without touching the real process.env of the test runner.
-  const appKeysRepo = new AppKeysRepository(db);
-  const appKeyInjector = new AppKeyInjector({});
-  const policiesRepo = new PoliciesRepository(db);
-  const webchatRepo = new WebChatRepository(db);
-  const appRuntimeRepositories = createAppRuntimeRepositories({
+  const dataTier = createDataTier(db);
+  const {
+    sessionsRepo,
+    approvalsRepo,
     settingsRepo,
     webchatRepo,
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+    actionExecutionsRepo,
+    executionJournalRepo,
+    routinesRepo,
+    routineRunsRepo,
+  } = dataTier;
+  const talkRouter = createMockTalkRouter(channelPortMap);
+  const channels = dataTier.channelList({
+    connections: mockConnections(talkRouter, channelPortMap),
   });
-  const actionExecutionsRepo = new ActionExecutionsRepository(db);
-  const executionJournalRepo = new ExecutionJournalRepository(db);
-  const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
-  const routineRunsRepo = new RoutineRunsRepository(db);
+  const accountNames = dataTier.createAccountNames(channels);
+  // A private env object per deps bag: route tests exercise apply/remove
+  // without touching the real process.env of the test runner.
+  const appKeyInjector = new AppKeyInjector({});
+  const appRuntimeRepositories = dataTier.createAppRuntimeRepositories({
+    reactivateFloating: () => routineEngine.reactivateFloating(),
+  });
 
   const actionRegistry = new ActionRegistryImpl([]);
   const actionEngine = new ActionEngine(
@@ -634,39 +598,22 @@ export async function buildTestDeps(
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
 
   return {
+    ...dataTier,
     talkRouter,
     channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
     db,
-    sessionsRepo,
-    personMappingRepo,
-    outboxRepo,
-    whatsAppStoreRepo,
-    whatsAppAccounts,
-    linkedInStoreRepo,
-    linkedInAccounts,
     channels,
     accountNames,
-    sentinelLogRepo,
-    approvalsRepo,
     approvalHandler,
     backendTurnRunner,
-    settingsRepo,
-    appKeysRepo,
     appKeyInjector,
     // Production's refresh also salts the module cache and reloads hook
     // chains; the deps bag has neither, so mirror the worker-pool slice.
     refreshAppRuntime: () => actionEngine.restartWorkerWarmPool(),
     appRuntimeRepositories,
-    policiesRepo,
-    webchatRepo,
-    actionExecutionsRepo,
-    executionJournalRepo,
-    webhookInvocationsRepo,
-    routinesRepo,
-    routineRunsRepo,
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,

@@ -16,16 +16,10 @@ import {
 } from "../helpers.js";
 import type { Accounts } from "../../channels/accounts.js";
 import { channelList } from "../../channels/channel-list.js";
+import { createDataTier, type DataTier } from "../../composition/data-tier.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { SessionsRepository } from "../../db/repositories/sessions.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
-import { SettingsRepository } from "../../db/repositories/settings.js";
-import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
@@ -92,15 +86,16 @@ export interface TestRomeOptions {
   };
 }
 
-export interface TestRomeRepos {
-  sessions: SessionsRepository;
-  approvals: ApprovalsRepository;
-  executionJournal: ExecutionJournalRepository;
-  actionExecutions: ActionExecutionsRepository;
-  settings: SettingsRepository;
-  personMapping: PersonMappingRepository;
-  policies: PoliciesRepository;
-}
+export type TestRomeRepos = Pick<
+  DataTier,
+  | "sessionsRepo"
+  | "approvalsRepo"
+  | "executionJournalRepo"
+  | "actionExecutionsRepo"
+  | "settingsRepo"
+  | "personMappingRepo"
+  | "policiesRepo"
+>;
 
 /** Loose on purpose: tests seed malformed payloads to exercise validation. */
 export type ActionExecutionPayload = Record<string, unknown> | null;
@@ -205,15 +200,7 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
-  const repos: TestRomeRepos = {
-    sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db),
-    executionJournal: new ExecutionJournalRepository(db),
-    actionExecutions: new ActionExecutionsRepository(db),
-    settings: new SettingsRepository(db),
-    personMapping: new PersonMappingRepository(db),
-    policies: new PoliciesRepository(db),
-  };
+  const repos: TestRomeRepos = createDataTier(db);
 
   // Agents: write YAML to a temp dir and load through the real AgentLoader so
   // schema validation and tier mapping run exactly as in production.
@@ -257,9 +244,9 @@ async function buildHarness(
   const actionEngine = new ActionEngine(
     actionRegistry,
     options.engine?.tracer,
-    repos.actionExecutions,
-    repos.approvals,
-    repos.executionJournal,
+    repos.actionExecutionsRepo,
+    repos.approvalsRepo,
+    repos.executionJournalRepo,
     {
       processRole: options.engine?.processRole ?? "worker",
       onApprovalCreated: options.engine?.onApprovalCreated,
@@ -268,7 +255,7 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions);
+  const sessionManager = new SessionManager(repos.sessionsRepo);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
@@ -306,8 +293,8 @@ async function buildHarness(
     ),
   });
   const approvalHandler = new ApprovalHandler(
-    repos.approvals,
-    repos.executionJournal,
+    repos.approvalsRepo,
+    repos.executionJournalRepo,
     actionEngine,
     agentRunner,
     backendTurnRunner,
@@ -317,7 +304,7 @@ async function buildHarness(
 
   const seed: TestRomeSeed = {
     pendingActionApproval: (payload) =>
-      repos.approvals.create({
+      repos.approvalsRepo.create({
         type: "action_execution",
         requestedBy: "testkit",
         description:
@@ -328,7 +315,7 @@ async function buildHarness(
       }),
     approvedActionApproval: async (payload) => {
       const id = await seed.pendingActionApproval(payload);
-      const resolved = await repos.approvals.resolvePending(id, "approve", "test-guardian");
+      const resolved = await repos.approvalsRepo.resolvePending(id, "approve", "test-guardian");
       if (resolved.outcome !== "resolved") {
         throw new Error(`Failed to approve seeded approval ${id}: ${resolved.outcome}`);
       }

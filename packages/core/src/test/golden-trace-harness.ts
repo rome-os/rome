@@ -17,7 +17,7 @@ import { SessionManager } from "../core/session-manager.js";
 import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
+import { createDataTier } from "../composition/data-tier.js";
 import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
 import type { Action } from "../actions/types.js";
@@ -63,7 +63,7 @@ export interface GoldenTraceOptions {
 
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
-  const sessionsRepo = new SessionsRepository(testDb.db);
+  const { sessionsRepo } = createDataTier(testDb.db);
   const sessionManager = new SessionManager(sessionsRepo);
   const promptBuilder = new PromptBuilder();
   const actionRegistry = new ActionRegistryImpl([]);

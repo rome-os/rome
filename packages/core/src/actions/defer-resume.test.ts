@@ -82,7 +82,7 @@ describe("defer session continuity", () => {
 
     const deferredSessionId = rome.model.sessions.at(-1)?.sessionId;
     const deferredSession = deferredSessionId
-      ? await rome.repos.sessions.findById(deferredSessionId)
+      ? await rome.repos.sessionsRepo.findById(deferredSessionId)
       : null;
 
     // Regression assertion: the old path created a second AgentSession whose

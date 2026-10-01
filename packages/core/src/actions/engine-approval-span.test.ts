@@ -38,12 +38,12 @@ it("stamps rome.action.approval_required=true and emits approval_required event 
   if (result.status !== "pending_approval") {
     throw new Error(`expected pending_approval, got ${result.status}`);
   }
-  const approval = await rome.repos.approvals.findById(result.approval.approvalId);
+  const approval = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
   expect(approval).toMatchObject({ type: "action_execution", status: "pending" });
   expect(approval!.payload).toMatchObject({ actionName: "risky", args: { target: "prod" } });
 
   // ...and the execution row is parked, not finished.
-  const [execution] = await rome.repos.actionExecutions.findByAction("risky");
+  const [execution] = await rome.repos.actionExecutionsRepo.findByAction("risky");
   expect(execution).toMatchObject({ status: "pending_approval" });
   expect(execution.finishedAt).toBeNull();
 

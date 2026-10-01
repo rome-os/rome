@@ -51,29 +51,13 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { SessionsRepository } from "./db/repositories/sessions.js";
-import { PersonMappingRepository } from "./db/repositories/person-mapping.js";
-import { LinkedInStoreRepository } from "./db/repositories/linkedin-store.js";
-import { OutboxRepository } from "./db/repositories/outbox.js";
-import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
-import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
-import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
-import { createAccountNames } from "./channels/account-names.js";
-import { channelList } from "./channels/channel-list.js";
+import { createDataTier } from "./composition/data-tier.js";
+import type { Channels } from "./channels/channel.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
-import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
-import { ApprovalsRepository } from "./db/repositories/approvals.js";
-import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./computer-use/service.js";
-import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
-import { PoliciesRepository } from "./db/repositories/policies.js";
-import { WebChatRepository } from "./db/repositories/webchat.js";
-import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
-import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
-import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
 import { ensureSentinelPersons } from "./db/ensure-sentinel-persons.js";
 import { AgentLoader } from "./core/agent-loader.js";
 import { SessionManager } from "./core/session-manager.js";
@@ -106,8 +90,6 @@ import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
-import { RoutinesRepository } from "./db/repositories/routines.js";
-import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { EventCatalog } from "./event-catalog.js";
 import { ScheduleTriggerProvider } from "./routines/schedule-trigger-provider.js";
@@ -169,7 +151,6 @@ import {
 import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
-import { createAppRuntimeRepositories } from "./apps/repositories.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -179,7 +160,6 @@ import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./conn
 import { SetupManager } from "./connections/setup/manager.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import {
-  ConversationSettingsRepository,
   ConversationSettingsService,
   cutoverConversationSettings,
 } from "./conversation-settings/index.js";
@@ -244,21 +224,31 @@ async function main() {
     throw err;
   }
 
-  const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
-  const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
-  const outboxRepo = new OutboxRepository(db);
-  const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
-  const linkedInStoreRepo = new LinkedInStoreRepository(db);
-  const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
-  const sentinelLogRepo = new SentinelLogRepository(db);
+  const dataTier = createDataTier(db);
+  const {
+    sessionsRepo,
+    personMappingRepo,
+    whatsAppStoreRepo,
+    outboxRepo,
+    linkedInStoreRepo,
+    sentinelLogRepo,
+    approvalsRepo,
+    settingsRepo,
+    appKeysRepo,
+    policiesRepo,
+    webchatRepo,
+    actionExecutionsRepo,
+    executionJournalRepo,
+    webhookInvocationsRepo,
+    routinesRepo,
+    routineRunsRepo,
+    conversationSettingsRepo,
+  } = dataTier;
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
   // The channel list and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
-  const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
 
   // Instance token: the DB is the single runtime read path. A cloud VM
@@ -276,27 +266,17 @@ async function main() {
   // App keys: guardian-entered values go live in process.env before any app
   // code, action worker, or route can read them. Operator-set env always wins;
   // the injector records those as overridden instead of clobbering.
-  const appKeysRepo = new AppKeysRepository(db);
   const appKeyInjector = new AppKeyInjector();
   for (const row of await appKeysRepo.listWithValues()) {
     appKeyInjector.apply(row.name, row.value);
   }
 
-  const policiesRepo = new PoliciesRepository(db);
-  const webchatRepo = new WebChatRepository(db);
   await webchatRepo.recoverInterruptedInputs();
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
-  const appRuntimeRepositories = createAppRuntimeRepositories({
-    settingsRepo,
-    webchatRepo,
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+  const appRuntimeRepositories = dataTier.createAppRuntimeRepositories({
+    reactivateFloating: () => routineEngine.reactivateFloating(),
   });
-  const actionExecutionsRepo = new ActionExecutionsRepository(db);
-  const executionJournalRepo = new ExecutionJournalRepository(db);
-  const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
-  const routinesRepo = new RoutinesRepository(db);
-  const routineRunsRepo = new RoutineRunsRepository(db);
 
   await ensureSentinelPersons(personMappingRepo);
 
@@ -316,7 +296,7 @@ async function main() {
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the service
   // answers from the Connections alone until then (startup hooks, approvals).
-  let builtChannels: ReturnType<typeof channelList> | undefined;
+  let builtChannels: Channels | undefined;
   const channelsService = createChannelsService({
     channels: () => builtChannels,
     router: talkRouter,
@@ -598,7 +578,7 @@ async function main() {
   // proxy and a main-process call resolve to identical behavior.
   const eventService = new EventService(eventBus, eventCatalog);
   const conversationSettings = new ConversationSettingsService({
-    repository: new ConversationSettingsRepository(db),
+    repository: conversationSettingsRepo,
     connections: connectionRegistry,
     listAgents: () => agentLoader.getAll().keys(),
     onChanged: async ({ ref, actor, fields, reset }) => {
@@ -1008,15 +988,12 @@ async function main() {
   });
   // Built after every descriptor is registered: each service with a Talk backs
   // its channel's send and inbound ports.
-  const channels = channelList({
-    db,
-    whatsAppAccounts,
-    linkedInAccounts,
+  const channels = dataTier.channelList({
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
   });
   builtChannels = channels;
-  const accountNames = createAccountNames({ channels, sentinelLogRepo });
+  const accountNames = dataTier.createAccountNames(channels);
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
