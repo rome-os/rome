@@ -34,7 +34,11 @@ async function openChat(page: Page) {
 async function measure(page: Page) {
   return page.evaluate((composerSelector) => {
     const composer = document.querySelector(composerSelector)!.getBoundingClientRect();
+    // The phone header; from the md breakpoint up the sidebar replaces it and
+    // the chat starts at the top of the screen.
     const header = document.querySelector('header[data-app-titlebar="header"]')!;
+    const headerRect = header.getBoundingClientRect();
+    const headerShown = getComputedStyle(header).display !== "none";
     // Timeline anchors wrap only the person's turns. Their parent is the
     // transcript, whose last child is the newest row whoever wrote it.
     const transcript = document.querySelector("[data-timeline-anchor]")!.parentElement!;
@@ -43,23 +47,27 @@ async function measure(page: Page) {
     return {
       composerTop: composer.top,
       composerBottom: composer.bottom,
-      headerTop: header.getBoundingClientRect().top,
+      headerTop: headerShown ? headerRect.top : 0,
+      contentTop: headerShown ? headerRect.bottom : 0,
       newestBottom: newest.bottom,
       transcriptOverflows: scroller.scrollHeight > scroller.clientHeight,
     };
   }, COMPOSER);
 }
 
-function expectComposerAboveKeyboard(geometry: Awaited<ReturnType<typeof measure>>) {
+function expectComposerAboveKeyboard(
+  geometry: Awaited<ReturnType<typeof measure>>,
+  keyboardTop = KEYBOARD_TOP,
+) {
   expect(geometry.transcriptOverflows).toBe(true);
   expect(geometry.headerTop).toBeCloseTo(0, 0);
-  expect(geometry.composerBottom).toBeLessThanOrEqual(KEYBOARD_TOP);
+  expect(geometry.composerBottom).toBeLessThanOrEqual(keyboardTop);
   // Directly above it: the gap is the composer floor's own 1rem padding.
-  expect(KEYBOARD_TOP - geometry.composerBottom).toBeLessThanOrEqual(24);
-  expect(geometry.composerTop).toBeGreaterThan(geometry.headerTop);
+  expect(keyboardTop - geometry.composerBottom).toBeLessThanOrEqual(24);
+  expect(geometry.composerTop).toBeGreaterThan(geometry.contentTop);
   // The newest message ends in the strip between the header and the composer.
   expect(geometry.newestBottom).toBeLessThanOrEqual(geometry.composerTop + 1);
-  expect(geometry.newestBottom).toBeGreaterThan(geometry.headerTop + 48);
+  expect(geometry.newestBottom).toBeGreaterThan(geometry.contentTop);
 }
 
 test("Android Chrome: the page shrinking to the keyboard keeps the composer and newest message in view", async ({
@@ -78,11 +86,9 @@ test("Android Chrome: the page shrinking to the keyboard keeps the composer and 
     .toBeCloseTo(before.composerBottom, 0);
 });
 
-test("iOS Safari: a visual viewport shrunk by the keyboard keeps the composer and newest message in view", async ({
-  page,
-}) => {
-  // Installed before the bundle runs, so the dashboard tracks this viewport.
-  await page.addInitScript(() => {
+// Installed before the bundle runs, so the dashboard tracks this viewport.
+function installIosVisualViewport(page: Page) {
+  return page.addInitScript(() => {
     // Reads the layout viewport live: at document start it is still the 980px
     // default page, before the viewport tag narrows it to the phone.
     let keyboardTop: number | null = null;
@@ -105,17 +111,20 @@ test("iOS Safari: a visual viewport shrunk by the keyboard keeps the composer an
       fake.dispatchEvent(new Event("resize"));
     };
   });
+}
+
+async function expectIosKeyboardRoundTrip(page: Page, keyboardTop: number) {
   await openChat(page);
   const before = await measure(page);
 
   await page.evaluate((top) => {
     (window as unknown as { setKeyboardTop: (top: number) => void }).setKeyboardTop(top);
-  }, KEYBOARD_TOP);
-  await expect.poll(async () => (await measure(page)).composerBottom).toBeLessThan(KEYBOARD_TOP);
-  expectComposerAboveKeyboard(await measure(page));
+  }, keyboardTop);
+  await expect.poll(async () => (await measure(page)).composerBottom).toBeLessThan(keyboardTop);
+  expectComposerAboveKeyboard(await measure(page), keyboardTop);
   // The layout viewport kept its full height, as on iOS, and the page did not:
   // nothing is left below the composer for iOS to pan to.
-  expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(KEYBOARD_TOP);
+  expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(keyboardTop);
 
   await page.evaluate(() => {
     (window as unknown as { setKeyboardTop: (top: null) => void }).setKeyboardTop(null);
@@ -123,6 +132,26 @@ test("iOS Safari: a visual viewport shrunk by the keyboard keeps the composer an
   await expect
     .poll(async () => (await measure(page)).composerBottom)
     .toBeCloseTo(before.composerBottom, 0);
+}
+
+test("iOS Safari: a visual viewport shrunk by the keyboard keeps the composer and newest message in view", async ({
+  page,
+}) => {
+  await installIosVisualViewport(page);
+  await expectIosKeyboardRoundTrip(page, KEYBOARD_TOP);
+});
+
+test.describe("on a landscape phone, past the md breakpoint", () => {
+  // An iPhone on its side is 844px wide, so it gets the desktop layout with the
+  // sidebar in flow. iPads get the same layout in both orientations.
+  test.use({ viewport: { width: 844, height: 390 } });
+
+  test("iOS Safari: the keyboard leaves the composer and newest message in view", async ({
+    page,
+  }) => {
+    await installIosVisualViewport(page);
+    await expectIosKeyboardRoundTrip(page, 220);
+  });
 });
 
 test("the viewport tag forbids zoom and asks Android to resize the page for the keyboard", async ({
