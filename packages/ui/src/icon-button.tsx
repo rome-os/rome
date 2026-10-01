@@ -15,10 +15,11 @@ export interface IconButtonProps
    * size are the same box. `xs` = 24×24px sits below the scale — the WCAG
    * 2.5.8 minimum, for an action inside a row rather than beside it.
    *
-   * Every step under 44px pairs with the `touch-target` class from
-   * `@rome-os/ui/styles.css` on a touch-reachable surface, which raises the
-   * control to the 44px floor where the device has no pointer. Only `lg`
-   * clears the floor on its own.
+   * Every step carries `touch-hit` from `@rome-os/ui/styles.css`, which
+   * extends the hit area to 44px where the device has no hover without
+   * changing the box. A caller packing icon buttons closer than 44px apart
+   * adds `touch-target`, which grows the box instead, since a hit area would
+   * land on the neighbour.
    */
   size?: IconButtonSize;
 }
@@ -87,7 +88,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
         // has to: the caller's class lands on the `<svg>` while this rule lives
         // on the button, and tailwind-merge reconciles one element at a time,
         // so it never sees the collision.
-        "inline-flex shrink-0 items-center justify-center rounded-8 border border-transparent text-ui text-foreground transition hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "touch-hit inline-flex shrink-0 items-center justify-center rounded-8 border border-transparent text-ui text-foreground transition hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         sizeClasses[size],
         className,
       )}

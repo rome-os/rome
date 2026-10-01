@@ -768,3 +768,41 @@
     }
   }
 }
+
+/* Extends a control's hit area to the 44px touch floor on pointerless devices
+   without changing the box it paints, which is what a bordered or filled
+   control needs: `touch-target` would grow the visible control instead.
+
+   The hit area is a `::before`, not an `::after`, because `::after` is where the
+   kit draws its indicators (the tab and page-nav underlines). It is centred on
+   the control and only ever grows it: a control already past the floor on an
+   axis keeps its own extent there. Like `touch-target`'s floor it is
+   unlayered, so it outranks a `before:*` utility on the same element. Do not
+   pair the two.
+
+   The extension can land on a neighbor. A later positioned control paints
+   over an earlier one, so two controls closer than 44px centre to centre
+   share the overlap, and the layout has to space them on touch. A control
+   that clips its own overflow clips the extension with it. */
+@media (hover: none) {
+  .touch-hit::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, var(--rome-size-44, 2.75rem));
+    height: max(100%, var(--rome-size-44, 2.75rem));
+    translate: -50% -50%;
+  }
+}
+
+/* The hit area is positioned against the control, so the control needs a
+   containing block. `relative` sits in `base` so an `absolute` or `sticky`
+   utility on the control still wins: those are containing blocks too. */
+@layer base {
+  @media (hover: none) {
+    .touch-hit {
+      position: relative;
+    }
+  }
+}

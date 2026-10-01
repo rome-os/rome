@@ -27,7 +27,7 @@ export function CopyMessageButton({ text, className }: { text: string; className
       label={copied ? t("message.copied", "Copied") : t("message.copy", "Copy message")}
       icon={copied ? <Check /> : <Copy />}
       onClick={handleCopy}
-      className={cn("text-muted-foreground hover:text-foreground", className)}
+      className={cn("touch-target text-muted-foreground hover:text-foreground", className)}
     />
   );
 }

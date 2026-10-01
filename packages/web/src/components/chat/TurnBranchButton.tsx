@@ -85,7 +85,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
             aria-expanded={open}
             disabled={submitting}
             onClick={() => setOpen((current) => !current)}
-            className="text-muted-foreground hover:text-foreground"
+            className="touch-target text-muted-foreground hover:text-foreground"
           />
         </div>
       </PopoverAnchor>

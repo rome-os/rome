@@ -134,7 +134,7 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
             disabled={locked || submitting}
             onClick={() => toggleDraft("positive")}
             className={cn(
-              "text-muted-foreground hover:text-foreground",
+              "touch-target text-muted-foreground hover:text-foreground",
               upActive && "text-foreground disabled:opacity-100",
             )}
           />
@@ -146,7 +146,7 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
             disabled={locked || submitting}
             onClick={() => toggleDraft("negative")}
             className={cn(
-              "text-muted-foreground hover:text-foreground",
+              "touch-target text-muted-foreground hover:text-foreground",
               downActive && "text-foreground disabled:opacity-100",
             )}
           />

@@ -196,8 +196,11 @@ function TriageActivitySection({
                   : "border-warning-border bg-warning-bg",
               )}
             >
-              <div className="mb-1 flex items-center justify-between">
-                <div className="flex items-center gap-2">
+              {/* Wraps rather than overflows: on a phone the sender, the action
+                  badge and the timestamp do not fit one line, and the
+                  timestamp is the part that moves down. */}
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="text-aux text-muted-foreground">{entry.channel}</span>
                   <span className="text-ui text-foreground">
                     {entry.displayName || entry.channelUserId}
@@ -406,7 +409,7 @@ function BondLevelToggle({
   return (
     <FieldLabel
       className={cn(
-        "flex items-center gap-3 text-left",
+        "touch-row flex items-center gap-3 text-left",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >

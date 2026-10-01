@@ -173,7 +173,10 @@ export function PageNavLink({
         data-slot="page-nav-link"
         aria-current={active ? "page" : undefined}
         className={cn(
-          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors",
+          // On touch the entry grows to the 44px floor itself rather than
+          // through a hit area: the strip scrolls, so it clips anything
+          // reaching past the entries, and the underline stays on its edge.
+          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors [@media(hover:none)]:min-h-11",
           // A 2px border on a zero-content pseudo-element, not a sized box, so
           // it authors no off-scale edge length.
           "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",

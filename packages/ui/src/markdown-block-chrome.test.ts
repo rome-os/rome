@@ -164,11 +164,37 @@ describe("Markdown fenced-block chrome", () => {
     expect(hoverCapable).not.toContain("display: none");
   });
 
+  it("raises every fence button to the touch floor where nothing hovers", () => {
+    // Streamdown sizes these for a pointer, 24px and 32px. The floor is the
+    // button's own box rather than a hit area, because the buttons sit closer
+    // than 44px apart and a hit area would land on the neighbor. It is not
+    // scoped to `.rome-markdown`, so a fullscreen diagram's zoom stack, which
+    // is portaled out of it, gets the floor too.
+    const touch = media("hover: none");
+    const buttons = [...touch.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) =>
+      selector.includes("button"),
+    );
+
+    expect(buttons).toBeDefined();
+    const [, selector, declarations] = buttons!;
+    for (const hook of [CODE_ACTIONS, DIAGRAM_ACTIONS, ZOOM_STACK, TABLE_ACTIONS]) {
+      expect(selector.replace(/\s+/g, " ")).toContain(hook);
+    }
+    expect(selector.trim().startsWith(".rome-markdown")).toBe(false);
+    expect(declarations).toContain("min-width: var(--rome-size-44, 2.75rem);");
+    expect(declarations).toContain("min-height: var(--rome-size-44, 2.75rem);");
+  });
+
   it("leaves a fullscreen diagram's zoom stack alone", () => {
     // Streamdown portals a fullscreen diagram to document.body, outside the
     // prose root. There the zoom stack is the whole interface, so every rule
-    // that hides it stays scoped to Markdown rendered in place.
-    const hiding = rules().filter(({ selector }) => selector.includes(ZOOM_STACK));
+    // that hides it stays scoped to Markdown rendered in place. A rule that
+    // only sizes it, as the touch floor below does, may reach it there too.
+    const hiding = rules().filter(
+      ({ selector, declarations }) =>
+        selector.includes(ZOOM_STACK) &&
+        /opacity: 0|display: none|visibility: hidden/.test(declarations),
+    );
 
     expect(hiding.length).toBeGreaterThan(0);
     for (const { selector } of hiding) expect(selector.startsWith(".rome-markdown")).toBe(true);

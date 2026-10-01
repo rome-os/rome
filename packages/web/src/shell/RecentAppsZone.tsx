@@ -118,7 +118,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                 onClick={() => onPin(app.id)}
                 aria-label={tApps("installed.pin")}
                 title={tApps("installed.pin")}
-                className="touch-show absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-4 text-subtle-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 group-hover/recent:opacity-100"
+                className="touch-show touch-target absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-4 text-subtle-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 group-hover/recent:opacity-100"
               >
                 <Pin className="size-3.5" aria-hidden />
               </button>

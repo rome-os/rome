@@ -621,7 +621,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       variant="ghost"
       size="xs"
       onClick={() => setEditing(false)}
-      className="text-subtle-foreground"
+      className="touch-target text-subtle-foreground"
     >
       {t("sidebar.done")}
     </Button>
@@ -631,7 +631,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         <button
           type="button"
           aria-label={t("sidebar.edit")}
-          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+          className="touch-target rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
         >
           <Ellipsis className="h-4 w-4" aria-hidden />
         </button>
