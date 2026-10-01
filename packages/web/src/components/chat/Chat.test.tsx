@@ -1365,6 +1365,55 @@ describe("Chat turn stream lifecycle", () => {
     expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
   });
 
+  it("Retry rechecks a recovery stream whose HTTP 200 reader has not yielded", async () => {
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controllers.push(controller);
+              signal?.addEventListener("abort", () => {
+                try {
+                  controller.error(new DOMException("Aborted", "AbortError"));
+                } catch {
+                  // The initial reader may already have failed.
+                }
+              });
+            },
+          }),
+        ),
+      ),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    rs.useFakeTimers();
+    await act(async () => {
+      controllers[0]!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(14_000);
+    });
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openTurnStream).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    const lookupsBeforeRetry = rs.mocked(listSessionTurns).mock.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("retry-recovery"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(lookupsBeforeRetry);
+    expect(openTurnStream).toHaveBeenCalledTimes(3);
+  });
+
   it("times out a stalled recovery lookup and keeps retry available", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>

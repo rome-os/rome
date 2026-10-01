@@ -1894,6 +1894,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
   }, [recoveryNotice, streamingSessionsRef, endSessionStream, loadMessages]);
 
+  const retryRecoveryView = useCallback(() => {
+    if (!recoveryNotice) return;
+    const { sessionId, turnId } = recoveryNotice;
+    if (streamingSessionsRef.current.get(sessionId)?.turnId !== turnId) return;
+    // A successful HTTP 200 can still have a reader that has yielded no data.
+    // Re-enter recovery before restarting the effect, or its active-stream
+    // guard will skip the lookup until the stale-reader watchdog fires.
+    recoveringSessionIdsRef.current.add(sessionId);
+    turnStreamControllersRef.current.get(turnId)?.abort();
+    setStreamReconnectRevision((revision) => revision + 1);
+  }, [recoveryNotice, streamingSessionsRef]);
+
   const displayedStreaming = isActiveSessionStreaming;
 
   // The grouped speaker rows. Memoized so a streaming turn never rebuilds the
@@ -2341,7 +2353,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                         recoveryNotice.turnId === floorSessionStream?.turnId
                           ? {
                               message: t("stream.recoveryUnavailable"),
-                              onRetry: () => setStreamReconnectRevision((revision) => revision + 1),
+                              onRetry: retryRecoveryView,
                               onReset: resetRecoveryView,
                             }
                           : null
