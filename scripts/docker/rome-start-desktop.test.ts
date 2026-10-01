@@ -210,7 +210,8 @@ describe.skipIf(process.platform !== "linux")("rome-start-desktop.sh", () => {
     }
   }, 60_000);
 
-  it("names the log directory it cannot create", () => {
+  // Root ignores the read-only mode this test relies on.
+  it.skipIf(process.getuid?.() === 0)("names the log directory it cannot create", () => {
     // ~/.cache exists but is read-only, as with a HOME another UID owns.
     const home = join(dir, "home");
     mkdirSync(join(home, ".cache"), { recursive: true });

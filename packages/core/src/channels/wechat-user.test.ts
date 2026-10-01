@@ -412,6 +412,10 @@ describe("WechatUserRuntime display", () => {
     expect((await runtime.status()).movePending).toBe(true);
     await writeFile(join(proc, "42", "environ"), "DISPLAY=:100\0");
     expect((await runtime.status()).movePending).toBe(false);
+    // Only the shared display is "beside Chrome". A client left on an older
+    // own display, after WECHAT_USER_DISPLAY changed, is not flagged.
+    await writeFile(join(proc, "42", "environ"), "DISPLAY=:101\0");
+    expect((await runtime.status()).movePending).toBe(false);
     // With no start script the shared display is where the client belongs.
     const hosted = await installedRuntime(run, {
       procDir: proc,

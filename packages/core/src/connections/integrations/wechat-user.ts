@@ -529,7 +529,7 @@ export function createWechatUserDescriptor(
                     // live client itself, since that can ask the phone to confirm.
                     degradation = {
                       reason:
-                        "WeChat still runs on the shared desktop beside Rome's Chrome. Restart the WeChat client to move it to its own desktop at /desktop/wechat. Your phone may ask you to confirm the sign-in.",
+                        "WeChat still runs on the shared desktop beside Rome's Chrome. To move it to its own desktop, quit WeChat at /desktop. Rome starts it again within a few minutes at /desktop/wechat, and your phone may ask you to confirm the sign-in.",
                     };
                   } else if (status.state === "ready") {
                     degradation = null;

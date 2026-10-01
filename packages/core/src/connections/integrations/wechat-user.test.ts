@@ -430,7 +430,10 @@ describe("the WeChat personal Talker", () => {
     const { talker, degradation } = buildTalker(runtime);
     try {
       await rs.waitFor(() => expect(degradation()?.reason).toContain("shared desktop"));
-      expect(degradation()?.reason).toContain("Restart the WeChat client");
+      // There is no restart button: quitting WeChat on the shared desktop lets
+      // the probe start it again on its own.
+      expect(degradation()?.reason).toContain("quit WeChat at /desktop");
+      expect(degradation()?.reason).toContain("/desktop/wechat");
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
       await talker.stop();

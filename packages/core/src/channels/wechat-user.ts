@@ -173,9 +173,10 @@ export interface WechatUserStatus {
   display: string;
   /** The page that shows `display` to the guardian, for sign-in links. */
   desktopPath: string;
-  /** The running client is still on another display than WeChat's own desktop,
-   *  where it moves when it next starts. A client restart finishes the move,
-   *  and the phone may ask to confirm the sign-in again. */
+  /** The running client is still on the shared display, beside Rome's Chrome,
+   *  though WeChat's own desktop can start. It moves there when it next starts:
+   *  quitting it lets the health probe start it again on its own desktop, and
+   *  the phone may ask to confirm the sign-in. */
   movePending: boolean;
 }
 
@@ -537,9 +538,7 @@ export class WechatUserRuntime {
       ...(pid ? { pid } : {}),
       display,
       desktopPath: this.desktopPathFor(display),
-      movePending: Boolean(
-        pid && this.desktop && scriptInstalled && display !== this.desktop.display,
-      ),
+      movePending: Boolean(pid && this.desktop && scriptInstalled && display === sharedDisplay()),
     };
   }
 
