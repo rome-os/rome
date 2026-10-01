@@ -1,3 +1,8 @@
+import {
+  isPhoneNative,
+  type PhoneVariant,
+  usePhoneVariant,
+} from "@/prototype/phone-variant.prototype";
 import { pairingPayload } from "@rome/api-types/approvals";
 import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
 import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
@@ -285,6 +290,18 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+// PROTOTYPE: how a card's body and its actions share a phone row. A keeps the
+// side-by-side row. B lets the actions wrap below once the text would drop
+// under 12rem. C and D always stack them, actions as a full-width row.
+function cardRowClass(variant: PhoneVariant) {
+  if (isPhoneNative(variant)) return "flex flex-col items-stretch gap-3";
+  if (variant === "b") return "flex flex-wrap items-start justify-between gap-3";
+  return "flex items-start justify-between gap-3";
+}
+function cardBodyClass(variant: PhoneVariant) {
+  return variant === "b" ? "min-w-[12rem] flex-1" : "min-w-0 flex-1";
+}
+
 function CardShell({ status, children }: { status: string; children: React.ReactNode }) {
   const m = STATUS_STYLE[status] ?? FALLBACK_STYLE;
   return (
@@ -336,10 +353,11 @@ function ApprovalCard({
     }
   }
 
+  const phoneVariant = usePhoneVariant();
   return (
     <CardShell status={displayStatus}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      <div className={cardRowClass(phoneVariant)}>
+        <div className={cardBodyClass(phoneVariant)}>
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <TypeTag type={approval.type} />
             <Separator className="h-3" orientation="vertical" />
@@ -394,9 +412,17 @@ function ApprovalCard({
             </Collapsible>
           )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
+        <div
+          className={
+            isPhoneNative(phoneVariant)
+              ? "flex flex-col gap-2 *:w-full"
+              : phoneVariant === "b"
+                ? "ml-auto flex shrink-0 flex-col items-end gap-2"
+                : "flex shrink-0 flex-col items-end gap-2"
+          }
+        >
           {isPending && (
-            <div className="flex gap-2">
+            <div className={isPhoneNative(phoneVariant) ? "flex gap-2 *:flex-1" : "flex gap-2"}>
               <Button
                 type="button"
                 variant="outline"
@@ -560,10 +586,11 @@ function ExecutionGroupCard({
     }
   }
 
+  const phoneVariant = usePhoneVariant();
   return (
     <CardShell status={root.status}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      <div className={cardRowClass(phoneVariant)}>
+        <div className={cardBodyClass(phoneVariant)}>
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <TypeTag type="action_execution" />
             <Separator className="h-3" orientation="vertical" />
@@ -701,6 +728,7 @@ function StatTile({
 
 export default function ActivityPage() {
   const { t } = useTranslation("activity");
+  const phoneVariant = usePhoneVariant();
   const approvalsQuery = useApprovals();
   const approvals = approvalsQuery.data ?? [];
   const resolveApproval = useResolveApproval();
@@ -893,25 +921,52 @@ export default function ActivityPage() {
           </button>
         )}
 
-        {/* Filter pills */}
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 [@media(hover:none)]:py-3">
-          {FILTER_VALUES.map((value) => {
-            const active = statusFilter === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
-                className={`touch-hit shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
-                }`}
-              >
-                {t(`page.filters.${value}`)}
-              </button>
-            );
-          })}
-        </div>
+        {/* PROTOTYPE: in C the pills become one native picker, which a phone
+            renders as its own wheel or sheet; in B they wrap rather than
+            scroll sideways. */}
+        {isPhoneNative(phoneVariant) ? (
+          <label className="flex items-center gap-3 text-ui text-muted-foreground">
+            Show
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+              className="h-11 min-w-0 flex-1 rounded-10 border border-border-strong bg-surface px-3 text-ui text-foreground"
+            >
+              {FILTER_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {t(`page.filters.${value}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div
+            className={
+              phoneVariant === "b"
+                ? "flex flex-wrap items-center gap-2"
+                : "-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 [@media(hover:none)]:py-3"
+            }
+          >
+            {FILTER_VALUES.map((value) => {
+              const active = statusFilter === value;
+              return (
+                <button
+                  key={value}
+                  onClick={() => setStatusFilter(value)}
+                  className={`touch-hit shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
+                    phoneVariant === "b" ? "min-h-11 px-4" : ""
+                  } ${
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
+                  }`}
+                >
+                  {t(`page.filters.${value}`)}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <ApprovalHistoryButton />
 

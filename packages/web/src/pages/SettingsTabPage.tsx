@@ -1,3 +1,4 @@
+import { isPhoneNative, usePhoneVariant } from "@/prototype/phone-variant.prototype";
 import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
@@ -237,6 +238,9 @@ export default function SettingsPage() {
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
   useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
+  // PROTOTYPE: in C, /settings is a grouped list of sections and each section
+  // is its own screen with a way back, instead of a sideways tab strip.
+  const phoneVariant = usePhoneVariant();
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -370,21 +374,63 @@ export default function SettingsPage() {
   // it hid the nav during the wait so no other tab was reachable.
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
+  if (isPhoneNative(phoneVariant) && !params.tab) {
+    return (
+      <Page>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle>{t("page.title")}</PageTitle>
+          </PageHeading>
+        </PageHeader>
+        <nav aria-label={t("page.title")}>
+          <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+            {VISIBLE_TABS.map((tab) => (
+              <li key={tab}>
+                <Link
+                  to={`/settings/${tabToSlug(tab)}`}
+                  className="flex min-h-12 items-center justify-between gap-3 px-4 text-ui text-foreground"
+                >
+                  {t(`tabs.${tab}` as const)}
+                  <span aria-hidden className="text-subtle-foreground">
+                    ›
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </Page>
+    );
+  }
+
   return (
     <Page>
+      {isPhoneNative(phoneVariant) ? (
+        <Link
+          to="/settings"
+          className="flex min-h-11 items-center gap-1 self-start text-ui text-primary"
+        >
+          <span aria-hidden>‹</span>
+          {t("page.title")}
+        </Link>
+      ) : null}
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
+          <PageTitle>
+            {isPhoneNative(phoneVariant) ? t(`tabs.${activeTab}` as const) : t("page.title")}
+          </PageTitle>
         </PageHeading>
       </PageHeader>
 
-      <PageNav aria-label={t("page.title")}>
-        {VISIBLE_TABS.map((tab) => (
-          <PageNavLink asChild key={tab} active={tab === activeTab}>
-            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
-          </PageNavLink>
-        ))}
-      </PageNav>
+      {isPhoneNative(phoneVariant) ? null : (
+        <PageNav aria-label={t("page.title")}>
+          {VISIBLE_TABS.map((tab) => (
+            <PageNavLink asChild key={tab} active={tab === activeTab}>
+              <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
+            </PageNavLink>
+          ))}
+        </PageNav>
+      )}
 
       {tabNeedsSettings && loading ? (
         <p className="text-ui text-muted-foreground">{t("page.loading")}</p>

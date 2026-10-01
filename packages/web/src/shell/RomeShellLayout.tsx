@@ -17,6 +17,9 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
 import { routeTitle } from "@/lib/page-title";
+import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
+import { PhoneTabBar } from "@/prototype/PhoneTabBar.prototype";
+import { useSwipeSidebar } from "@/prototype/swipe-sidebar.prototype";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -142,15 +145,57 @@ export function RomeShellLayout() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hideSidebar, navigate, toggleCollapsed]);
 
+  // PROTOTYPE: the phone redesign variant. C replaces the hamburger with a
+  // bottom tab bar, and outside chat drops the top header, so the page's own
+  // large title heads the screen.
+  const phoneVariant = usePhoneVariant();
+  const tabbed = phoneVariant === "c" && !hideSidebar;
+  const headerless = tabbed && !location.pathname.startsWith("/chat");
+  // D: no tab bar. Chat is home, and a swipe right drags the sidebar out over a
+  // dimmed page that slides right with it.
+  const swipe = phoneVariant === "d" && !hideSidebar;
+  const asideRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const scrimRef = useRef<HTMLButtonElement>(null);
+  useSwipeSidebar({
+    enabled: swipe,
+    open: sidebarOpen,
+    setOpen: setSidebarOpen,
+    aside: asideRef,
+    page: mainRef,
+    scrim: scrimRef,
+  });
+
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div
+      className="flex min-h-dvh flex-col bg-background"
+      data-proto-tabbed-page={headerless || undefined}
+      style={
+        headerless
+          ? ({ "--rome-mobile-header-height": "var(--rome-safe-area-top)" } as CSSProperties)
+          : undefined
+      }
+    >
       <UpgradeCountdownBanner />
-      <div className="relative flex flex-1">
-        {sidebarOpen && !hideSidebar ? (
+      <div className={swipe ? "relative flex flex-1 overflow-x-clip" : "relative flex flex-1"}>
+        {swipe ? (
+          // Always mounted so a swipe can fade it in under the finger.
+          <button
+            ref={scrimRef}
+            type="button"
+            aria-label={t("nav.closeSidebar")}
+            tabIndex={sidebarOpen ? 0 : -1}
+            onClick={() => setSidebarOpen(false)}
+            className={`fixed inset-0 z-30 bg-overlay transition-opacity duration-200 md:hidden ${
+              sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          />
+        ) : sidebarOpen && !hideSidebar ? (
           <MobileBackdrop label={t("nav.closeSidebar")} onDismiss={() => setSidebarOpen(false)} />
         ) : null}
         {!hideSidebar ? (
           <aside
+            ref={asideRef}
             className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
@@ -236,25 +281,35 @@ export function RomeShellLayout() {
             drawer can align to the chat column. The public share tree has no
             shell, so its drawer falls back to 0px. */}
         <main
+          ref={mainRef}
           className="flex min-w-0 flex-1 flex-col bg-background"
           style={
             {
               "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
+              ...(swipe
+                ? {
+                    translate: sidebarOpen ? "16rem 0" : undefined,
+                    transition: "translate 200ms ease-out",
+                  }
+                : {}),
             } as CSSProperties
           }
         >
           <div data-app-titlebar="strip" aria-hidden />
-          {!hideSidebar ? (
+          {headerless ? <div className="h-[var(--rome-safe-area-top)] md:hidden" /> : null}
+          {!hideSidebar && !headerless ? (
             <header
               data-app-titlebar="header"
               className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
             >
-              <IconButton
-                size="md"
-                label={t("nav.openSidebar")}
-                icon={<HamburgerMenuIcon aria-hidden />}
-                onClick={() => setSidebarOpen(true)}
-              />
+              {tabbed ? null : (
+                <IconButton
+                  size="md"
+                  label={t("nav.openSidebar")}
+                  icon={<HamburgerMenuIcon aria-hidden />}
+                  onClick={() => setSidebarOpen(true)}
+                />
+              )}
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}
@@ -276,6 +331,9 @@ export function RomeShellLayout() {
           <div className="flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>
+          {tabbed ? (
+            <PhoneTabBar onMore={() => setSidebarOpen(true)} moreOpen={sidebarOpen} />
+          ) : null}
         </main>
       </div>
     </div>
