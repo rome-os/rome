@@ -286,9 +286,13 @@ async function main(): Promise<void> {
   })) as Record<string, unknown>;
   client.notify("initialized", {});
   trace("codex.initialized", { userAgent: initialized.userAgent ?? null, envKeys: Object.keys(env) });
-  const account = (await client.request("account/read", { refreshToken: false })) as Record<string, unknown>;
-  const acct = isRecord(account.account) ? account.account : {};
-  trace("codex.account", { type: acct.type ?? null, planType: acct.planType ?? null });
+  try {
+    const account = (await client.request("account/read", { refreshToken: false })) as Record<string, unknown>;
+    const acct = isRecord(account.account) ? account.account : {};
+    trace("codex.account", { type: acct.type ?? null, planType: acct.planType ?? null });
+  } catch (error) {
+    trace("codex.accountReadFailed", { error: (error as Error).message });
+  }
 
   const startThread = async (label: string, config: Record<string, unknown>): Promise<string> => {
     try {
