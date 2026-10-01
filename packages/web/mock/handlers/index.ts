@@ -26,6 +26,7 @@ import type {
   ChatSession,
   ProjectCatalog,
   ProjectOption,
+  SkillSummary,
   StreamBlock,
   TurnInfo,
 } from "@/lib/chat-types";
@@ -69,6 +70,20 @@ const identity: DashboardIdentity = {
   displayName: "Rome Demo",
   avatarUrl: null,
 };
+
+const skills: SkillSummary[] = [
+  {
+    name: "@ray/scoped-app:identity_probe",
+    localName: "identity_probe",
+    description: "Scoped identity probe",
+    tools: [],
+    ownerType: "app",
+    ownerId: "@ray/scoped-app",
+    ownerLabel: "Scoped App",
+    ownerDescription: "Scoped app test fixture",
+    iconUrl: null,
+  },
+];
 
 const text = (content: string, turnPhase?: "commentary" | "final"): StreamBlock =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
@@ -916,9 +931,9 @@ const projectFileHandlers = fileBrowserHandlers({
 /**
  * The two remaining reads the Settings page makes. The page holds its
  * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. Left unhandled
- * the generic 503 fallback would hold those panels in an error state, so
- * these fixtures keep the page usable without a backend.
+ * waits on the Composio status alongside `/api/connections`. In strict E2E
+ * mode, unhandled reads hit the 503 fallback and leave those panels in an
+ * error state. These fixtures keep the page usable without a backend.
  */
 const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
 
@@ -1026,6 +1041,7 @@ export const handlers = [
     return HttpResponse.json(searchMatches(query));
   }),
   http.get("/api/chat/agents", () => HttpResponse.json(chatAgents)),
+  http.get("/api/skills", () => HttpResponse.json({ skills })),
   // The trace drawer's two loaders. Both answer `{ trace }` and both return a
   // null trace rather than a 404 for a turn that produced no run, which is the
   // drawer's "nothing recorded" state rather than its error state.

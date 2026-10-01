@@ -12,8 +12,8 @@
 
 The suite contains 38 AI-native cases in 15 YAML files. Every case starts with
 `app.open`, uses `aiAct` for user interaction, and uses `aiAssert` for its
-visible outcome. `app.expectUrl` checks the address bar when needed because
-the visual model cannot see it.
+visible outcome. Navigation checks rely on visible page state, not the browser
+address bar.
 
 The secret-free collector checks each case name and shard against
 `tests/midscene/case-manifest.json` and this catalog. Deleting, renaming, or
@@ -34,7 +34,7 @@ moving a case fails CI.
 | ID | Case | Shard |
 | --- | --- | --- |
 | CHAT-01 | Draft and clear a message from the home composer | shard-1 |
-| CHAT-02 | Exercise composer pickers and the failed-send state | shard-1 |
+| CHAT-02 | Open the skill picker after a failed send | shard-1 |
 | CHAT-03 | Open the agent mention picker | shard-1 |
 | CHAT-04 | Inspect a successful execution trace | shard-1 |
 | CHAT-05 | Draft an answer in an unanswered question card | shard-1 |
@@ -85,11 +85,12 @@ The case names and shard assignments above match the executable YAML. Run
 - CI pull requests run secret-free harness and mock-browser boundary checks. The six model-backed
   shards run on the upstream `main` branch or by manual dispatch in a fork
   using that fork's model secrets.
-- The `quanru/rome` fork uploads each shard's native report and publishes a
-  Summary table for abnormal cases, followed by a collapsed appendix of passed
-  cases. Each case has a screenshot and an exact report-step link when available.
-- The upstream repository runs the cases without uploading reports or
-  publishing the Summary.
+- Every model-backed run uploads its shard reports, including failed runs.
+  A repository with `MIDSCENE_PUBLISH_REPO` set to its full name also publishes
+  the combined Summary and recent reports through GitHub Pages. Each case has
+  a screenshot and an exact report-step link when available. If the native
+  merge is incomplete, the shard reports remain available and the Summary
+  does not link to a missing combined report.
 
 ## Local run
 

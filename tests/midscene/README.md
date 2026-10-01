@@ -32,10 +32,12 @@ Midscene agent calls the configured model endpoint.
 - The suite contains 38 AI-native cases. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
 - The collector checks every case name and shard against `case-manifest.json`
-  and the documented catalog. Missing, renamed, or moved cases fail CI.
-- The package registers `app.open` for isolated setup and `app.expectUrl` for
-  address-bar checks that the visual model cannot see. Run `npm run nodes` to
-  generate a local node reference with their parameters.
+  and the documented catalog. Missing, renamed, or moved cases fail CI. Keep
+  those two records independent of YAML so deleting or moving a case cannot
+  silently change its expected result.
+- The package registers `app.open` for isolated setup and
+  `app.expectRenameConflict` for FILE-03's transient response. Run
+  `npm run nodes` to generate a local node reference with their parameters.
 - All cases live in `cases/**/*.yaml`, organized by suite file, with tags for
   shard and topic.
 
@@ -108,15 +110,16 @@ HEADLESS=false npm test
   `.midscene/test-results/<runId>/summary.json` (includes collection-error
   details)
 - Both are covered by `.gitignore`.
-- Runs in `quanru/rome` upload each shard and a combined
-  `midscene-e2e-report` artifact. Each visual shard writes its own Markdown job
+- Every model-backed run uploads each shard report, including failed runs.
+  Repositories with `MIDSCENE_PUBLISH_REPO` set to their full name also upload a
+  combined `midscene-e2e-report` artifact. Each visual shard writes its own Markdown job
   Summary. The run Summary shows failed, not-run, and incomplete-shard results
   first; passed cases and their screenshots appear in a collapsed appendix.
   Midscene merges the six native Test reports into one report that lists every
-  case. The fork publishes that report through GitHub Pages, so report links
-  and images work from the Actions Summary.
-- Runs in `rome-os/rome` execute the cases without uploading reports or
-  publishing a Summary or GitHub Pages site.
+  case. The configured repository publishes that report through GitHub Pages,
+  so report links and images work from the Actions Summary. If the merge is
+  incomplete, it still publishes the available shard reports without a broken
+  combined-report link.
 - Pull requests run secret-free harness and mock-browser boundary jobs. The
   model-backed shard matrix runs on the upstream `main` branch or by manual
   dispatch in a fork using that fork's model secrets.
@@ -132,9 +135,9 @@ HEADLESS=false npm test
    outcome and quote stable UI text that separates success from nearby states.
 4. Every case must contain at least one `aiAct` and one `aiAssert`. The
    collection check rejects atomic AI nodes such as `aiTap` and operational
-   `app.*` nodes. `app.expectUrl` is allowed because the model cannot see the
-   browser address bar. Keep user interaction and visible outcomes in `aiAct`
-   and `aiAssert`.
+   `app.*` nodes. `app.open` initializes the page, and
+   `app.expectRenameConflict` checks the transient HTTP 409 response in FILE-03.
+   Keep user interaction and visible outcomes in `aiAct` and `aiAssert`.
 5. Use `wait` only for mock state that settles asynchronously. Do not use fixed
    waits as a substitute for an observable completion condition.
 6. Keep a case focused on one user goal. Put multiple checkpoints in the same

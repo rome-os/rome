@@ -22,7 +22,7 @@ cases:
           with an attachment icon is visible, along with the project picker, reasoning control, and
           arrow-shaped send button. The temporary "draft" text has been cleared and no message was
           sent.
-  - name: CHAT-02 Exercise composer pickers and the failed-send state
+  - name: CHAT-02 Open the skill picker after a failed send
     tags:
       - chat
       - shard-1
@@ -37,23 +37,20 @@ cases:
           successfully. Enter the text directly into the large rounded composer at the bottom;
           keyboard focus has no visible indicator, so do not repeatedly tap it or wait for a visual
           focus change before entering the text.
-      - app.expectUrl:
-          path: /chat
       - aiAssert: >-
           The message is not sent: an error above the composer reports the failed request to
           "/api/chat/sessions" (the standalone mock rejects session creation).
-          The typed text remains in the composer and the URL stays on /chat (no new conversation is
-          created).
+          The typed text remains in the composer. The Chat home greeting is still visible, and no new
+          conversation has opened.
       - aiAct: >-
           In the large rounded composer at the bottom, replace its entire current value "Book a
           focus block tomorrow morning" with "/". The visible old draft is the field value, not a
           placeholder. Use the input action to replace it directly; keyboard focus has no visible
           indicator, so do not repeatedly tap or wait for a visual focus change.
-      - app.expectUrl:
-          path: /chat
       - aiAssert: >-
-          The composer contains "/" and a visible error notice directly above it reads "Failed to
-          load skills.".
+          The composer contains "/" and the skill picker titled "Pick a skill to run" is open. It
+          lists the "Scoped App" group and its "/identity_probe" skill. The Chat home greeting is
+          still visible.
   - name: CHAT-03 Open the agent mention picker
     tags:
       - chat

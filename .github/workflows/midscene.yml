@@ -47,8 +47,8 @@ on:
 # bearing path (the `midscene` matrix) is restricted to the protected main
 # branch in the upstream repository. Fork owners may explicitly dispatch a
 # fork branch with their fork's own secrets. Pull requests run secret-free
-# harness and mock-browser boundary jobs. Only quanru/rome renders and
-# publishes reports.
+# harness and mock-browser boundary jobs. A configured publisher repository
+# renders and publishes reports.
 
 permissions:
   contents: read
@@ -302,7 +302,7 @@ jobs:
 
       - name: Upload Midscene shard report
         id: upload-shard
-        if: always() && github.repository == 'quanru/rome'
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: midscene-${{ matrix.shard }}
@@ -314,7 +314,7 @@ jobs:
           retention-days: 14
 
       - name: Add shard results to the job Summary
-        if: always() && github.repository == 'quanru/rome'
+        if: always() && github.repository == vars.MIDSCENE_PUBLISH_REPO
         working-directory: tests/midscene
         env:
           SHARD: ${{ matrix.shard }}
@@ -324,7 +324,7 @@ jobs:
             --reports-dir . \
             --expected-projects "web-$SHARD" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --pages-url "https://quanru.github.io/rome/runs/$GITHUB_RUN_ID/midscene-$SHARD/" \
+            --pages-url "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}/runs/$GITHUB_RUN_ID/midscene-$SHARD/" \
             --producer-result "$PRODUCER_RESULT" \
             --output "$GITHUB_STEP_SUMMARY"
 
@@ -343,7 +343,7 @@ jobs:
     if: >-
       always() && !cancelled() &&
       (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '') &&
-      github.repository == 'quanru/rome'
+      github.repository == vars.MIDSCENE_PUBLISH_REPO
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -351,7 +351,7 @@ jobs:
       contents: read
       pages: write
     outputs:
-      pages-artifact-name: ${{ steps.pages-artifact.outputs.name }}
+      pages-artifact-name: ${{ steps.upload-pages.outcome == 'success' && steps.pages-artifact.outputs.name || '' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -390,6 +390,7 @@ jobs:
 
       - name: Merge native Midscene Test reports
         id: native-report
+        continue-on-error: true
         working-directory: tests/midscene
         run: |
           node scripts/merge-native-reports.mjs \
@@ -399,6 +400,18 @@ jobs:
           if [ -f "$RUNNER_TEMP/midscene-report-shards/native-report/index.html" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Discard output from a failed native merge
+        if: steps.native-report.outcome == 'failure'
+        run: |
+          node --input-type=module <<'NODE'
+          import { rm } from 'node:fs/promises';
+          import path from 'node:path';
+          await rm(path.join(process.env.RUNNER_TEMP, 'midscene-report-shards', 'native-report'), {
+            recursive: true,
+            force: true,
+          });
+          NODE
 
       - name: Configure GitHub Pages
         id: pages
@@ -433,22 +446,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/previous-pages"
           tar -xf "$RUNNER_TEMP/previous-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/previous-pages"
 
-      - name: Download report for the affected historical run
-        if: steps.previous-report.outputs.run_id == '35816486576'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: midscene-e2e-report-pages-1
-          run-id: 35734638707
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/legacy-pages-artifact
-
-      - name: Extract report for the affected historical run
-        if: steps.previous-report.outputs.run_id == '35816486576'
-        run: |
-          mkdir -p "$RUNNER_TEMP/legacy-pages"
-          tar -xf "$RUNNER_TEMP/legacy-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/legacy-pages"
-
       - name: Render case table
+        id: case-table
+        continue-on-error: true
         env:
           PRODUCER_RESULT: ${{ inputs.report_source_run_id != '' && 'success' || needs.midscene.result }}
         run: |
@@ -462,26 +462,27 @@ jobs:
             --output "$RUNNER_TEMP/midscene-summary.md"
 
       - name: Prepare published report
-        if: steps.native-report.outputs.available == 'true'
         run: |
           node tests/midscene/scripts/prepare-pages-site.mjs \
             --site "$RUNNER_TEMP/midscene-pages" \
             --reports "$RUNNER_TEMP/midscene-report-shards" \
             --run-id "$GITHUB_RUN_ID" \
-            --previous "$RUNNER_TEMP/previous-pages" \
-            --previous-run-id "${{ steps.previous-report.outputs.run_id }}" \
-            --legacy "$RUNNER_TEMP/legacy-pages" \
-            --legacy-run-id "35734638707"
+            --previous "$RUNNER_TEMP/previous-pages"
 
       - name: Add case table to the run Summary
         env:
           REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
+          CASE_TABLE_RESULT: ${{ steps.case-table.outcome }}
         run: |
           if [ -n "$REPORT_SOURCE_RUN_ID" ]; then
             echo "Report rebuilt from [run $REPORT_SOURCE_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$REPORT_SOURCE_RUN_ID) without new model calls." >> "$GITHUB_STEP_SUMMARY"
             echo >> "$GITHUB_STEP_SUMMARY"
           fi
-          cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CASE_TABLE_RESULT" = "success" ]; then
+            cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Case table generation failed. [Download available shard reports]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts)." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload combined Midscene report
         if: always()
@@ -492,31 +493,32 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Require complete native report
-        if: steps.native-report.outputs.available != 'true'
-        run: |
-          echo "The native Midscene Test report is incomplete; see the run Summary and shard artifacts." >&2
-          exit 1
-
       - name: Name GitHub Pages artifact
-        if: steps.native-report.outputs.available == 'true'
         id: pages-artifact
         run: echo "name=midscene-e2e-report-pages-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Upload GitHub Pages report
-        if: steps.native-report.outputs.available == 'true'
+        id: upload-pages
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: ${{ steps.pages-artifact.outputs.name }}
           path: ${{ runner.temp }}/midscene-pages
           retention-days: 90
 
+      - name: Require complete native report
+        if: >-
+          steps.native-report.outcome != 'success' ||
+          steps.native-report.outputs.available != 'true' ||
+          steps.case-table.outcome != 'success'
+        run: |
+          echo "The native Midscene Test report is incomplete; see the run Summary and shard artifacts." >&2
+          exit 1
+
   deploy-report:
     name: Publish Midscene HTML report
     needs: report-summary
     if: >-
-      always() && github.repository == 'quanru/rome' &&
-      needs.report-summary.result == 'success' &&
+      always() && github.repository == vars.MIDSCENE_PUBLISH_REPO &&
       needs.report-summary.outputs.pages-artifact-name != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -379,6 +379,7 @@ export function renderMarkdown({
   const missingReports = missingNativeReports(projects);
   const reportPath = publishedReportPath ?? (projects.length === 1 ? projects[0].reportPath : null);
   const reportAvailable = Boolean(reportPath);
+  const shardReportsAvailable = Boolean(pagesUrl) && projects.some((project) => project.reportPath);
   const infrastructureFailures = incompleteProjects.filter(
     (project) => !failures.some((testCase) => testCase.project === project.name),
   );
@@ -446,7 +447,7 @@ export function renderMarkdown({
             pagesUrl,
             testCase,
             `${testCase.status === "not-run" ? "⏭️ Not run" : "❌ Failed"}: ${testCase.reason}`,
-            reportAvailable,
+            shardReportsAvailable,
           ),
         ),
       "",
@@ -463,11 +464,13 @@ export function renderMarkdown({
     "",
     "| Shard | Case | Screenshot | Status | Duration |",
     "|:--|:--|:--|:--|--:|",
-    ...passedCases.map((testCase) => caseRow(pagesUrl, testCase, "✅ Passed", reportAvailable)),
+    ...passedCases.map((testCase) =>
+      caseRow(pagesUrl, testCase, "✅ Passed", shardReportsAvailable),
+    ),
     "",
     "</details>",
     "",
-    ...(reportAvailable
+    ...(shardReportsAvailable
       ? ["Click a screenshot or case name to open its exact step in the native Midscene report."]
       : ["Download the artifact to inspect available native shard reports."]),
     "",
