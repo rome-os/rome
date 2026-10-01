@@ -317,8 +317,8 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
       let status = ready;
       if (!status) {
         status = await ctx.step("capture-login", async (signal) => {
-          // Held already when ensure-runtime took the capture path; taken here
-          // when this step runs on its own.
+          // Held already when the first step took the capture path; taken
+          // here when this step runs on its own.
           lease.release ??= runtime.holdCapture();
           // Recovery launches the client, so the login window appears once this
           // begins. While recovery waits for the guardian to sign in, poll that

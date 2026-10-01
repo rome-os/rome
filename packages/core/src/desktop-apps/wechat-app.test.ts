@@ -72,10 +72,17 @@ describe("WechatApp status", () => {
     });
   });
 
-  it("keeps WeChat's desktop on view while the connection's key capture relaunches the client", async () => {
+  it("reports starting while the connection's setup holds the client and none runs yet", async () => {
+    // The setup takes the lease minutes before its capture brings up the
+    // desktop; the page must not connect to a desktop that is not there.
     const { runtime } = fakeRuntime({ installed: true });
     runtime.captureInProgress = true;
-    expect(await new WechatApp(runtime).status()).toEqual({ state: "running" });
+    const app = new WechatApp(runtime);
+    expect(await app.status()).toEqual({ state: "starting" });
+
+    // The capture's own client is running.
+    runtime.pid.mockImplementation(async () => 51);
+    expect(await app.status()).toEqual({ state: "running" });
   });
 
   it("reports an install the connection's setup started, so the page offers no second one", async () => {

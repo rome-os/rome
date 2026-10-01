@@ -51,7 +51,7 @@ A client that was already running on the shared desktop stays there until it nex
 
 Rome does not keep the client running on its own. A connection starts it when it finds it missing. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it.
 
-Connect's key capture kills the client and relaunches it under the debugger. From the moment Connect's setup takes that path, through its install and preparation to the end of the capture, it holds a lease on the runtime, and `start()` launches nothing: not for the page, and not for the connection's health check. The page shows the desktop meanwhile, because the guardian signs in there. A client signed in from the app has not had its store key captured, so reading history still needs **Connect**, which can ask for one more confirmation on the phone.
+Connect's key capture kills the client and relaunches it under the debugger. From the moment Connect's setup takes that path, through its install and preparation to the end of the capture, it holds a lease on the runtime, and `start()` launches nothing: not for the page, and not for the connection's health check. The page reports starting until the capture's own client runs, then shows the desktop, where the guardian signs in. The desktop view reconnects whenever the client reaches running, because the VNC client does not reconnect by itself and may have connected before the desktop was up. A client signed in from the app has not had its store key captured, so reading history still needs **Connect**, which can ask for one more confirmation on the phone.
 
 ## Connect
 

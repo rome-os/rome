@@ -86,8 +86,8 @@ describe("WechatDesktopPage", () => {
     expect(posts).toEqual(["/api/wechat/app/start"]);
   });
 
-  it("keeps the same desktop mounted while the client restarts", async () => {
-    state = { state: "running" };
+  it("reconnects the desktop once the client runs, so an early connection cannot stay dead", async () => {
+    state = { state: "starting" };
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <MemoryRouter>
@@ -96,17 +96,17 @@ describe("WechatDesktopPage", () => {
         </QueryClientProvider>
       </MemoryRouter>,
     );
-    const iframe = await screen.findByTitle("Rome desktop “wechat”");
-
-    queryClient.setQueryData(["wechat-app"], { state: "starting" });
-    expect(await screen.findByRole("status", { name: "Starting WeChat" })).toBeTruthy();
-    expect(screen.getByTitle("Rome desktop “wechat”")).toBe(iframe);
+    // While starting, the desktop shows under the banner, but WeChat's display
+    // may not be up yet, and the VNC client does not reconnect on its own.
+    const early = await screen.findByTitle("Rome desktop “wechat”");
+    expect(screen.getByRole("status", { name: "Starting WeChat" })).toBeTruthy();
 
     queryClient.setQueryData(["wechat-app"], { state: "running" });
     await waitFor(() =>
       expect(screen.queryByRole("status", { name: "Starting WeChat" })).toBeNull(),
     );
-    expect(screen.getByTitle("Rome desktop “wechat”")).toBe(iframe);
+    const live = screen.getByTitle("Rome desktop “wechat”");
+    expect(live).not.toBe(early);
   });
 
   it("shows why the last install failed, with a retry", async () => {
