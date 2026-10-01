@@ -1556,11 +1556,7 @@ async function openSession(
         interactiveSurfaceDetached: true,
       },
       projectProviderMessage: async (msg) => {
-        if (
-          msg.type === "tool_input_delta" &&
-          msg.tool !== undefined &&
-          subagentToolNames.has(msg.tool)
-        ) {
+        if (msg.type === "tool_input_delta" && subagentToolNames.has(msg.tool)) {
           return [];
         }
         if (msg.type === "tool_use" && subagentToolNames.has(msg.tool)) {
@@ -2156,11 +2152,7 @@ class AgentSessionImpl implements AgentSession {
         if (isTransientDelta(msg)) {
           // A subagent call publishes `subagent_start` instead of its
           // `tool_use`, so its input preview would reference nothing.
-          if (
-            msg.type === "tool_input_delta" &&
-            msg.tool !== undefined &&
-            this.subagentToolNames.has(msg.tool)
-          ) {
+          if (msg.type === "tool_input_delta" && this.subagentToolNames.has(msg.tool)) {
             continue;
           }
           this.publishOutbound(sink, msg);

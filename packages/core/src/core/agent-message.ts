@@ -9,18 +9,16 @@ export function isTerminalBlock<T extends { type: string }>(
 
 /** Transient preview types. Each is followed by the complete block it
  *  previews, so traces, persistence, and accounting skip them. */
-export type TransientDeltaType =
-  | "text_delta"
-  | "thinking_delta"
-  | "tool_input_delta"
-  | "tool_output_delta";
-
-const TRANSIENT_DELTA_TYPES: ReadonlySet<string> = new Set<TransientDeltaType>([
+const TRANSIENT_DELTA_TYPE_LIST = [
   "text_delta",
   "thinking_delta",
   "tool_input_delta",
   "tool_output_delta",
-]);
+] as const;
+
+export type TransientDeltaType = (typeof TRANSIENT_DELTA_TYPE_LIST)[number];
+
+const TRANSIENT_DELTA_TYPES: ReadonlySet<string> = new Set(TRANSIENT_DELTA_TYPE_LIST);
 
 /** Whether `m` is a transient preview that a complete block still follows. */
 export function isTransientDelta<T extends { type: string }>(

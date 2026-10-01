@@ -764,9 +764,11 @@ export interface ThinkingMessage {
 
 /**
  * Incremental preview of an in-flight `thinking` block. Transient, like
- * `text_delta`: the complete `thinking` block still follows, so consumers that
- * only care about whole blocks must ignore this variant. Emitted only when the
- * provider streams reasoning text; a provider that keeps reasoning hidden
+ * `text_delta`: consumers that only care about whole blocks must ignore this
+ * variant. The complete `thinking` block normally follows; a turn interrupted
+ * or failed mid-block may end without it, so a consumer that renders previews
+ * discards any without a matching block when the turn ends. Emitted only when
+ * the provider streams reasoning text; a provider that keeps reasoning hidden
  * sends none.
  */
 export interface ThinkingDeltaMessage {
@@ -778,23 +780,28 @@ export interface ThinkingDeltaMessage {
 
 /**
  * Incremental preview of a tool call's input while the model is still writing
- * it, as a fragment of the input's JSON text. Transient: the `tool_use` with
- * the complete `input` still follows. Consumers that only care about whole
- * blocks must ignore this variant.
+ * it, as a fragment of the input's JSON text. Transient: consumers that only
+ * care about whole blocks must ignore this variant. The `tool_use` with the
+ * complete `input` normally follows; a turn interrupted or failed while the
+ * model is writing the input may end without it, so a consumer that renders
+ * previews discards any without a matching `tool_use` when the turn ends.
  */
 export interface ToolInputDeltaMessage {
   type: "tool_input_delta";
   /** The `id` of the `tool_use` this input belongs to. */
   toolUseId: string;
-  tool?: string;
+  /** The tool's name, as on the `tool_use` this input belongs to. */
+  tool: string;
   content: string;
 }
 
 /**
  * Incremental output of a running tool call, for example a shell command's
- * output as it is produced. Transient: the `tool_result` with the complete
- * output still follows. Consumers that only care about whole blocks must
- * ignore this variant.
+ * output as it is produced. Transient: consumers that only care about whole
+ * blocks must ignore this variant. The `tool_result` with the complete output
+ * normally follows; a turn interrupted or failed while the tool runs may end
+ * without it, so a consumer that renders previews discards any without a
+ * matching `tool_result` when the turn ends.
  */
 export interface ToolOutputDeltaMessage {
   type: "tool_output_delta";
