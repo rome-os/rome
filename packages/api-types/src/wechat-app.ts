@@ -22,6 +22,8 @@ export const wechatAppStatusSchema = z.object({
   state: wechatAppStateSchema,
   /** Why the last install or start failed. Cleared when the next one begins. */
   error: z.string().optional(),
+  /** The running client is on the shared desktop, `/desktop`, not WeChat's own. */
+  sharedDesktop: z.literal(true).optional(),
 });
 
 export type WechatAppState = z.infer<typeof wechatAppStateSchema>;

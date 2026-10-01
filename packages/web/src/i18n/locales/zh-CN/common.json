@@ -217,6 +217,11 @@
     "starting": {
       "title": "正在启动微信",
       "description": "Rome 正在微信自己的桌面上打开客户端。"
+    },
+    "sharedDesktop": {
+      "title": "微信正在共享桌面上运行",
+      "description": "微信在共享桌面上运行时，这个桌面是空的。",
+      "action": "打开共享桌面"
     }
   },
   "chat": {

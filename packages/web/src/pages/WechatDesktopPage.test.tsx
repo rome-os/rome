@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import WechatDesktopPage from "./WechatDesktopPage";
 
@@ -31,9 +32,11 @@ const fetchMock = rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <WechatDesktopPage />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <WechatDesktopPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -83,6 +86,14 @@ describe("WechatDesktopPage", () => {
     state = { state: "running" };
     renderPage();
     await waitFor(() => expect(screen.getByTitle("Rome desktop “wechat”")).toBeTruthy());
+  });
+
+  it("points to the shared desktop when the client still runs there", async () => {
+    state = { state: "running", sharedDesktop: true };
+    renderPage();
+    const link = await screen.findByRole("link", { name: "Open the shared desktop" });
+    expect(link.getAttribute("href")).toBe("/desktop");
+    expect(screen.queryByTitle("Rome desktop “wechat”")).toBeNull();
   });
 
   it("says when WeChat is not enabled on this instance", async () => {

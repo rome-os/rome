@@ -2,7 +2,9 @@ import { describe, expect, it, rs } from "@rstest/core";
 import { WechatApp, WechatAppNotInstalled, type WechatAppRuntime } from "./wechat-app.js";
 
 /** A runtime whose install and start wait until the test releases them. */
-function fakeRuntime(options: { installed?: boolean; pid?: number | null } = {}) {
+function fakeRuntime(
+  options: { installed?: boolean; pid?: number | null; clientDisplay?: string } = {},
+) {
   let installed = options.installed ?? false;
   let pid = options.pid ?? null;
   const gates: { release: () => void; fail: (error: Error) => void }[] = [];
@@ -17,6 +19,8 @@ function fakeRuntime(options: { installed?: boolean; pid?: number | null } = {})
       });
     });
   const runtime = {
+    display: ":100",
+    clientDisplay: rs.fn(async () => options.clientDisplay ?? ":100"),
     installed: rs.fn(async () => installed),
     pid: rs.fn(async () => pid),
     install: rs.fn(() =>
@@ -44,6 +48,14 @@ describe("WechatApp", () => {
     });
     expect(await new WechatApp(fakeRuntime({ installed: true, pid: 7 }).runtime).status()).toEqual({
       state: "running",
+    });
+  });
+
+  it("says when the client runs on the shared desktop instead of its own", async () => {
+    const onShared = fakeRuntime({ installed: true, pid: 7, clientDisplay: ":99" });
+    expect(await new WechatApp(onShared.runtime).status()).toEqual({
+      state: "running",
+      sharedDesktop: true,
     });
   });
 

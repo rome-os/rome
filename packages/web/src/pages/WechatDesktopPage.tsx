@@ -2,6 +2,7 @@ import { wechatAppStatusSchema, type WechatAppStatus } from "@rome/api-types/wec
 import { Spinner } from "@rome-os/ui/spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
@@ -50,7 +51,7 @@ export default function WechatDesktopPage() {
   });
 
   const data = status.data;
-  if (data?.state === "running") return <DesktopPage name="wechat" />;
+  if (data?.state === "running" && !data.sharedDesktop) return <DesktopPage name="wechat" />;
 
   const panel = (children: React.ReactNode) => (
     <div className="flex h-[var(--rome-mobile-content-height)] items-center justify-center md:h-dvh">
@@ -71,6 +72,20 @@ export default function WechatDesktopPage() {
       <EmptyStateIcon>
         <Spinner label={t("wechatApp.loading")} />
       </EmptyStateIcon>,
+    );
+  }
+
+  if (data.state === "running") {
+    return panel(
+      <>
+        <EmptyStateTitle>{t("wechatApp.sharedDesktop.title")}</EmptyStateTitle>
+        <EmptyStateDescription>{t("wechatApp.sharedDesktop.description")}</EmptyStateDescription>
+        <EmptyStateAction>
+          <Button asChild>
+            <Link to="/desktop">{t("wechatApp.sharedDesktop.action")}</Link>
+          </Button>
+        </EmptyStateAction>
+      </>,
     );
   }
 

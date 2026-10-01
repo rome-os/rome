@@ -137,6 +137,16 @@ export const runCommand: RunCommand = (file, args, opts = {}) =>
     );
   });
 
+/** `promise`, or `signal`'s reason as soon as it aborts. The work goes on. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 // ── status ────────────────────────────────────────────────────────────────
 
 /**
@@ -561,25 +571,26 @@ export class WechatUserRuntime {
    */
   install(signal?: AbortSignal): Promise<void> {
     // The WeChat app and the connection's setup both install. One download and
-    // unpack owns the client's files until it completes; a second caller joins it.
-    this.installing ??= this.installClient(signal).finally(() => {
+    // unpack owns the client's files until it completes; a second caller joins
+    // it. A caller's signal stops only its own wait, so cancelling one caller
+    // never fails another's install, and the download finishes in the background.
+    this.installing ??= this.installClient().finally(() => {
       this.installing = null;
     });
-    return this.installing;
+    return signal ? untilAborted(this.installing, signal) : this.installing;
   }
 
-  private async installClient(signal?: AbortSignal): Promise<void> {
+  private async installClient(): Promise<void> {
     const deb = join(this.prefix, "wechat.deb");
     const clientRoot = join(this.prefix, "client");
     await mkdir(this.prefix, { recursive: true });
 
     if (!(await exists(join(this.clientDir, "wechat")))) {
-      await this.fetchClientArchive(deb, signal);
+      await this.fetchClientArchive(deb);
       log.info("wechat_user.unpacking_client", { prefix: clientRoot });
       await mkdir(clientRoot, { recursive: true });
       const unpacked = await this.run("dpkg-deb", ["-x", deb, clientRoot], {
         timeoutMs: INSTALL_TIMEOUT_MS,
-        ...(signal ? { signal } : {}),
       });
       if (unpacked.code !== 0) {
         throw new WechatUserRuntimeError(

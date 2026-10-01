@@ -13,9 +13,13 @@ const log = createLogger("wechat-app");
 export interface WechatAppStatus {
   state: Exclude<WechatAppState, "unavailable">;
   error?: string;
+  sharedDesktop?: true;
 }
 
-export type WechatAppRuntime = Pick<WechatUserRuntime, "installed" | "install" | "start" | "pid">;
+export type WechatAppRuntime = Pick<
+  WechatUserRuntime,
+  "installed" | "install" | "start" | "pid" | "clientDisplay" | "display"
+>;
 
 /**
  * Installs and starts the WeChat client on demand. Both run in the background,
@@ -32,7 +36,13 @@ export class WechatApp {
     const error = this.error ? { error: this.error } : {};
     if (this.job) return { state: this.job.kind };
     if (!(await this.runtime.installed())) return { state: "absent", ...error };
-    if (!(await this.runtime.pid())) return { state: "stopped", ...error };
+    const pid = await this.runtime.pid();
+    if (!pid) return { state: "stopped", ...error };
+    // A client started before WeChat had its own desktop keeps the shared one
+    // until it next exits; WeChat's own desktop is empty until then.
+    if ((await this.runtime.clientDisplay(pid)) !== this.runtime.display) {
+      return { state: "running", sharedDesktop: true };
+    }
     return { state: "running" };
   }
 

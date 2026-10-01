@@ -217,6 +217,11 @@
     "starting": {
       "title": "Starting WeChat",
       "description": "Rome is opening the WeChat client on its own desktop."
+    },
+    "sharedDesktop": {
+      "title": "WeChat is running on the shared desktop",
+      "description": "This desktop stays empty while WeChat runs there.",
+      "action": "Open the shared desktop"
     }
   },
   "chat": {
