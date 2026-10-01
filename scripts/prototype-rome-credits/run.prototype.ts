@@ -514,6 +514,25 @@ async function main(): Promise<void> {
   plan.push({ kind: "text", text: "LIMA" });
   await runTurn("Q on credits", q, "Reply with exactly: LIMA");
 
+  // Q3 with one app-server per payer: thread/resume ignores the requested
+  // provider and uses the process default, so give the credits process
+  // `model_provider="rome_credits"` as its default and resume the threads the
+  // ChatGPT-default process created. Both share ~/.codex rollouts.
+  section("S9 a second app-server whose default provider is Rome credits resumes P and Q");
+  client.close();
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nexec "${process.execPath}" "${shim}" -c 'model_providers.rome_credits={${provider}}' -c 'model_provider="rome_credits"' -c 'web_search="disabled"' "$@"\n`,
+  );
+  await startClient({ ...env, ROME_CREDITS_TOKEN: INSTANCE_TOKEN });
+  await resume("P -> credits process", p, ownLoginConfig, null);
+  plan.push({ kind: "text", text: "MIKE" });
+  await runTurn("P in credits process", p, "Reply with exactly: MIKE");
+  await resume("Q -> credits process", q, ownLoginConfig, null);
+  plan.push({ kind: "text", text: "NOVEMBER" });
+  await runTurn("Q in credits process", q, "Reply with exactly: NOVEMBER");
+  await history("S9.Q", q);
+
   trace("done", { gatewayRequests: requestCount });
   client.close();
   server.close();
