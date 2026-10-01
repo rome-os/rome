@@ -59,6 +59,24 @@ describe("BackgroundTaskTracker", () => {
     expect(tracker.current[0]?.seenAt).toBe(firstSeen);
   });
 
+  it("reports a change of description or type for the same tasks", () => {
+    const tracker = new BackgroundTaskTracker();
+    const seen = follow(tracker);
+    tracker.observe(level({ id: "a" }));
+    const renamed = level({ id: "a" }) as unknown as {
+      tasks: { description: string; task_type: string }[];
+    };
+    renamed.tasks[0]!.description = "renamed";
+    tracker.observe(renamed as unknown as SDKMessage);
+    renamed.tasks[0]!.task_type = "local_agent";
+    tracker.observe(renamed as unknown as SDKMessage);
+    expect(seen.changes.map((tasks) => [tasks[0]?.description, tasks[0]?.type])).toEqual([
+      ["task a", "local_bash"],
+      ["renamed", "local_bash"],
+      ["renamed", "local_agent"],
+    ]);
+  });
+
   it("reports each end, including a worker restart, but not an ambient one", () => {
     const tracker = new BackgroundTaskTracker();
     const seen = follow(tracker);

@@ -64,7 +64,15 @@ export class BackgroundTaskTracker {
 
   private replace(tasks: readonly ModelBackgroundTask[]): void {
     const same =
-      tasks.length === this.tasks.length && tasks.every((task, i) => task.id === this.tasks[i]?.id);
+      tasks.length === this.tasks.length &&
+      tasks.every((task, i) => {
+        const prior = this.tasks[i];
+        return (
+          task.id === prior?.id &&
+          task.type === prior.type &&
+          task.description === prior.description
+        );
+      });
     if (same) return;
     this.tasks = tasks;
     this.emit((listener) => listener.onChange?.(tasks));
