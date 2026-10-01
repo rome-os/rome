@@ -1206,13 +1206,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     let failedChecks = 0;
 
     const noteRecoveryFailure = () => {
+      if (!recoveringSessionIdsRef.current.has(reattachSessionId)) {
+        // An idle floor must keep discovering backend-initiated turns at the
+        // usual cadence; no local live turn needs exponential recovery.
+        retryDelayMs = RECONNECT_BASE_DELAY_MS;
+        failedChecks = 0;
+        return;
+      }
       retryDelayMs = Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS);
       failedChecks += 1;
-      if (
-        failedChecks < RECOVERY_NOTICE_FAILURES ||
-        !recoveringSessionIdsRef.current.has(reattachSessionId)
-      )
-        return;
+      if (failedChecks < RECOVERY_NOTICE_FAILURES) return;
       const turnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
       if (turnId) {
         setRecoveryNotice((current) =>
