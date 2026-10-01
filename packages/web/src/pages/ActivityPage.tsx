@@ -1,4 +1,8 @@
-import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
+import {
+  isPhoneNative,
+  type PhoneVariant,
+  usePhoneVariant,
+} from "@/prototype/phone-variant.prototype";
 import { pairingPayload } from "@rome/api-types/approvals";
 import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
 import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
@@ -288,13 +292,13 @@ function JsonBlock({ value }: { value: unknown }) {
 
 // PROTOTYPE: how a card's body and its actions share a phone row. A keeps the
 // side-by-side row. B lets the actions wrap below once the text would drop
-// under 12rem. C always stacks them, actions as a full-width row.
-function cardRowClass(variant: "a" | "b" | "c") {
-  if (variant === "c") return "flex flex-col items-stretch gap-3";
+// under 12rem. C and D always stack them, actions as a full-width row.
+function cardRowClass(variant: PhoneVariant) {
+  if (isPhoneNative(variant)) return "flex flex-col items-stretch gap-3";
   if (variant === "b") return "flex flex-wrap items-start justify-between gap-3";
   return "flex items-start justify-between gap-3";
 }
-function cardBodyClass(variant: "a" | "b" | "c") {
+function cardBodyClass(variant: PhoneVariant) {
   return variant === "b" ? "min-w-[12rem] flex-1" : "min-w-0 flex-1";
 }
 
@@ -410,7 +414,7 @@ function ApprovalCard({
         </div>
         <div
           className={
-            phoneVariant === "c"
+            isPhoneNative(phoneVariant)
               ? "flex flex-col gap-2 *:w-full"
               : phoneVariant === "b"
                 ? "ml-auto flex shrink-0 flex-col items-end gap-2"
@@ -418,7 +422,7 @@ function ApprovalCard({
           }
         >
           {isPending && (
-            <div className={phoneVariant === "c" ? "flex gap-2 *:flex-1" : "flex gap-2"}>
+            <div className={isPhoneNative(phoneVariant) ? "flex gap-2 *:flex-1" : "flex gap-2"}>
               <Button
                 type="button"
                 variant="outline"
@@ -920,7 +924,7 @@ export default function ActivityPage() {
         {/* PROTOTYPE: in C the pills become one native picker, which a phone
             renders as its own wheel or sheet; in B they wrap rather than
             scroll sideways. */}
-        {phoneVariant === "c" ? (
+        {isPhoneNative(phoneVariant) ? (
           <label className="flex items-center gap-3 text-ui text-muted-foreground">
             Show
             <select

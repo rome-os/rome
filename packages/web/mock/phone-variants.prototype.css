@@ -30,13 +30,13 @@
     --rome-mobile-header-height: calc(3.5rem + var(--rome-safe-area-top));
   }
 
-  /* ── C: phone-native ───────────────────────────────────────────────────
+  /* ── C and D: phone-native ─────────────────────────────────────────────
+     D is C without the tab bar: chat is home and a swipe right opens the
+     sidebar.
      17px controls (iOS body), 15px annotations, a 28px large page title,
      44px controls, and a 56px bottom tab bar the safe-area inset now includes,
      so the composer and every safe-area-aware scroller clear it. */
-  html[data-phone-variant="c"] {
-    --proto-tabbar-h: 3.5rem;
-
+  html:is([data-phone-variant="c"], [data-phone-variant="d"]) {
     --text-ui: 1.0625rem;
     --text-ui--line-height: calc(22 / 17);
     --text-aux: 0.9375rem;
@@ -56,7 +56,12 @@
     --control-px-center-md: 18px;
     --control-px-start-sm: 14px;
     --control-px-start-md: 16px;
+  }
 
+  /* C only: the bottom tab bar, which the safe-area inset includes so the
+     composer and every safe-area-aware scroller clear it. D has no bar. */
+  html[data-phone-variant="c"] {
+    --proto-tabbar-h: 3.5rem;
     --rome-safe-area-bottom: calc(env(safe-area-inset-bottom) + var(--proto-tabbar-h));
   }
 
@@ -67,25 +72,25 @@
   }
 
   /* ── Shared by B and C: visible 44px boxes where a token does not reach ── */
-  html:is([data-phone-variant="b"], [data-phone-variant="c"]) [data-slot="button"][data-size="xs"] {
+  html:is([data-phone-variant="b"], [data-phone-variant="c"], [data-phone-variant="d"]) [data-slot="button"][data-size="xs"] {
     min-height: 2.75rem;
     padding-inline: 14px;
     font-size: var(--text-ui);
   }
 
-  html:is([data-phone-variant="b"], [data-phone-variant="c"]) [data-slot="filter-chip"] {
+  html:is([data-phone-variant="b"], [data-phone-variant="c"], [data-phone-variant="d"]) [data-slot="filter-chip"] {
     min-height: 2.75rem;
     padding-inline: 16px;
   }
 
   /* An iOS-sized switch: 48 by 28. */
-  html:is([data-phone-variant="b"], [data-phone-variant="c"])
+  html:is([data-phone-variant="b"], [data-phone-variant="c"], [data-phone-variant="d"])
     [data-slot="switch"][data-size="default"] {
     --switch-thumb: 1.625rem;
     --switch-w: 3rem;
   }
 
-  html:is([data-phone-variant="b"], [data-phone-variant="c"]) :is(input, textarea, select) {
+  html:is([data-phone-variant="b"], [data-phone-variant="c"], [data-phone-variant="d"]) :is(input, textarea, select) {
     font-size: max(1rem, var(--text-ui));
   }
 }

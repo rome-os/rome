@@ -12,7 +12,7 @@ import { chromium } from "@playwright/test";
 
 const BASE = process.env.BASE ?? "http://localhost:3200";
 const OUT = resolve(process.argv[2] ?? "phone-variants");
-const VARIANTS = ["a", "b", "c"];
+const VARIANTS = ["a", "b", "c", "d"];
 const SHOTS = [
   { key: "chat", path: "/chat/mock-chat-build-app", ready: '[data-streamdown="mermaid"] button' },
   { key: "activity", path: "/activity" },
@@ -188,7 +188,29 @@ for (const variant of VARIANTS) {
     await page.waitForLoadState("networkidle").catch(() => {});
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(800);
-    if (shot.nav) {
+    if (shot.nav && variant === "d") {
+      // A real touch swipe from mid-screen, through the browser's own touch
+      // pipeline: half way first (shot), then on to release.
+      const cdp = await context.newCDPSession(page);
+      const touch = (type, x) =>
+        cdp.send("Input.dispatchTouchEvent", {
+          type,
+          touchPoints: type === "touchEnd" ? [] : [{ x, y: 420 }],
+        });
+      await touch("touchStart", 120);
+      for (let x = 130; x <= 248; x += 12) await touch("touchMove", x);
+      await page.waitForTimeout(100);
+      await page.screenshot({ path: join(OUT, "d-swipe-half.png") });
+      for (let x = 260; x <= 330; x += 14) await touch("touchMove", x);
+      await touch("touchEnd", 330);
+      await page.waitForTimeout(600);
+      metrics["d-swipe"] = await page.evaluate(() => ({
+        sidebarLeft: Math.round(document.querySelector("aside").getBoundingClientRect().left),
+        pageShift: Math.round(document.querySelector("main").getBoundingClientRect().left),
+        overflowX:
+          Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - innerWidth,
+      }));
+    } else if (shot.nav) {
       const opener =
         variant === "c"
           ? page.locator('nav[aria-label="Tabs"] button')
@@ -205,7 +227,9 @@ for (const variant of VARIANTS) {
 }
 
 // One sheet per route: A | B | C side by side, at phone scale.
-const sheet = await browser.newPage({ viewport: { width: 1290, height: 960 } });
+const sheet = await browser.newPage({
+  viewport: { width: VARIANTS.length * 420 + 20, height: 960 },
+});
 for (const shot of SHOTS) {
   const cells = VARIANTS.map(
     (v) =>

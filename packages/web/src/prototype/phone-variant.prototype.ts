@@ -8,20 +8,26 @@
 // which is the dashboard as #584 leaves it.
 import { useSyncExternalStore } from "react";
 
-export type PhoneVariant = "a" | "b" | "c";
+export type PhoneVariant = "a" | "b" | "c" | "d";
 
 export const PHONE_VARIANTS: { key: PhoneVariant; name: string }[] = [
   { key: "a", name: "Today: small controls, hidden tap areas, slide-over" },
   { key: "b", name: "Scaled: 44px controls, 16px text, slide-over" },
   { key: "c", name: "Phone-native: 17px text, bottom tabs, reflowed pages" },
+  { key: "d", name: "C, no tabs: chat home, swipe right for the sidebar" },
 ];
+
+/** C and D share the phone-native sizes and page layouts; only navigation differs. */
+export function isPhoneNative(variant: PhoneVariant) {
+  return variant === "c" || variant === "d";
+}
 
 const STORAGE_KEY = "rome.prototype.phoneVariant";
 const EVENT = "rome:phone-variant";
 const PHONE_QUERY = "(max-width: 767px)";
 
 function isVariant(value: string | null): value is PhoneVariant {
-  return value === "a" || value === "b" || value === "c";
+  return value === "a" || value === "b" || value === "c" || value === "d";
 }
 
 function current(): PhoneVariant {

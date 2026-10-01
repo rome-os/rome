@@ -1,4 +1,4 @@
-import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
+import { isPhoneNative, usePhoneVariant } from "@/prototype/phone-variant.prototype";
 import { DevicesSection } from "@/components/devices-section";
 import {
   Measure,
@@ -374,7 +374,7 @@ export default function SettingsPage() {
   // it hid the nav during the wait so no other tab was reachable.
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
-  if (phoneVariant === "c" && !params.tab) {
+  if (isPhoneNative(phoneVariant) && !params.tab) {
     return (
       <Page>
         <PageHeader>
@@ -405,7 +405,7 @@ export default function SettingsPage() {
 
   return (
     <Page>
-      {phoneVariant === "c" ? (
+      {isPhoneNative(phoneVariant) ? (
         <Link
           to="/settings"
           className="flex min-h-11 items-center gap-1 self-start text-ui text-primary"
@@ -417,12 +417,12 @@ export default function SettingsPage() {
       <PageHeader>
         <PageHeading>
           <PageTitle>
-            {phoneVariant === "c" ? t(`tabs.${activeTab}` as const) : t("page.title")}
+            {isPhoneNative(phoneVariant) ? t(`tabs.${activeTab}` as const) : t("page.title")}
           </PageTitle>
         </PageHeading>
       </PageHeader>
 
-      {phoneVariant === "c" ? null : (
+      {isPhoneNative(phoneVariant) ? null : (
         <PageNav aria-label={t("page.title")}>
           {VISIBLE_TABS.map((tab) => (
             <PageNavLink asChild key={tab} active={tab === activeTab}>

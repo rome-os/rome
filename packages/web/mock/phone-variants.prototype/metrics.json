@@ -34,7 +34,7 @@
     "under44": [],
     "ownBoxTaken": [],
     "textPx": {
-      "13": 1850,
+      "13": 1847,
       "14": 1048,
       "15": 5,
       "18": 62
@@ -97,7 +97,7 @@
     "under44": [],
     "ownBoxTaken": [],
     "textPx": {
-      "13": 209,
+      "13": 206,
       "14": 1103,
       "15": 16,
       "18": 73
@@ -139,7 +139,7 @@
     "under44": [],
     "ownBoxTaken": [],
     "textPx": {
-      "14": 1850,
+      "14": 1847,
       "16": 1048,
       "17": 5,
       "20": 62
@@ -202,7 +202,7 @@
     "under44": [],
     "ownBoxTaken": [],
     "textPx": {
-      "14": 209,
+      "14": 206,
       "16": 1103,
       "17": 16,
       "20": 73
@@ -248,7 +248,7 @@
     "ownBoxTaken": [],
     "textPx": {
       "11": 28,
-      "15": 1784,
+      "15": 1781,
       "17": 1053,
       "28": 62
     },
@@ -311,12 +311,120 @@
     "ownBoxTaken": [],
     "textPx": {
       "11": 28,
-      "15": 209,
+      "15": 206,
       "17": 1066,
       "28": 76
     },
     "composerBottom": null,
     "tabBarTop": 788,
     "controlsUnderTabBarAtRest": []
+  },
+  "d-chat": {
+    "truncatedLabels": 5,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 112,
+      "n": 28
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 129,
+      "15": 66,
+      "16": 2008,
+      "17": 1486,
+      "20": 36,
+      "28": 4
+    },
+    "composerBottom": 828,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "d-activity": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 19
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "15": 1781,
+      "17": 1057,
+      "28": 62
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "d-routines": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 36,
+      "median": 44,
+      "max": 44,
+      "n": 13
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "15": 296,
+      "17": 447,
+      "28": 15
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "d-settings": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 6
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "15": 17,
+      "17": 277,
+      "28": 14
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "d-settings-connections": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 62,
+      "n": 22
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "15": 206,
+      "17": 1070,
+      "28": 76
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "d-swipe": {
+    "sidebarLeft": 0,
+    "pageShift": 256,
+    "overflowX": 0
   }
 }

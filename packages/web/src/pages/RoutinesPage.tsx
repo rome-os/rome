@@ -1,4 +1,4 @@
-import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
+import { isPhoneNative, usePhoneVariant } from "@/prototype/phone-variant.prototype";
 import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useForm } from "@tanstack/react-form";
@@ -1104,7 +1104,7 @@ function RoutineCard({
   return (
     <div
       className={
-        phoneVariant === "c"
+        isPhoneNative(phoneVariant)
           ? "flex flex-col items-stretch gap-3 rounded-12 border border-border bg-surface px-4 py-3 shadow-1"
           : phoneVariant === "b"
             ? "flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-12 border border-border bg-surface px-4 py-3 shadow-1"
@@ -1155,7 +1155,7 @@ function RoutineCard({
       {/* Right zone — actions; never navigates. */}
       <div
         className={
-          phoneVariant === "c"
+          isPhoneNative(phoneVariant)
             ? "flex items-center gap-3 [&>*:first-child]:flex-1"
             : phoneVariant === "b"
               ? "ml-auto flex flex-none items-center gap-3"
