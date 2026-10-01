@@ -115,6 +115,31 @@ describe("SdkTurnRouter", () => {
     expect(r.trackedSendCount).toBe(0);
   });
 
+  it("keeps a send replayed during an SDK turn until a turn echoes it", () => {
+    const r = new SdkTurnRouter();
+    expect(r.onMessage(frame(), false)).toEqual(skip);
+    r.openTurn("X");
+    // The SDK replays X inside its own turn but answers it in the next one.
+    expect(r.onMessage(replay("X"), true)).toEqual({ ...deliver, consumed: "X" });
+    expect(r.onResult(result({ origin: "task-notification" })).owner).toBe("sdk");
+    expect(r.onMessage(frame("X"), true)).toEqual(deliver);
+    expect(r.onResult(result({ echo: ["X"] })).owner).toBe("rome");
+    expect(r.trackedSendCount).toBe(0);
+  });
+
+  it("drops, and reports, a reply to a steer replayed before the result but answered after", () => {
+    const r = new SdkTurnRouter();
+    r.openTurn("A");
+    r.steer("S");
+    r.onMessage(frame("A"), true);
+    expect(r.onMessage(replay("S"), true)).toEqual({ ...deliver, consumed: "S" });
+    // S was consumed in A's turn, so it is not carried and no turn is coming.
+    expect(r.onResult(result({ echo: ["A"] }))).toEqual({ owner: "rome", carried: [] });
+    expect(r.onMessage(frame("S"), false)).toEqual({ ...skip, dropped: "S" });
+    expect(r.onResult(result({ echo: ["S"] })).owner).toBe("sdk");
+    expect(r.trackedSendCount).toBe(0);
+  });
+
   it("drops a late reply instead of waiting when no Rome turn is coming", () => {
     const r = new SdkTurnRouter();
     r.openTurn("A");

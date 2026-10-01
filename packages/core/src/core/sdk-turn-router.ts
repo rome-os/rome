@@ -25,10 +25,11 @@ import type {
 //   order and the adopting turn may sit behind another caller's. Without a
 //   queued steer no turn is coming, so the reply is dropped as the SDK's own
 //   instead of holding the stream.
-// - A send is forgotten once a result closes the SDK turn that answered it:
-//   the result or a frame echoed it, or its replay was consumed. A Rome result
-//   with no answered send at all (a frameless SDK error) answers the turn's
-//   own send.
+// - A send is forgotten once a result closes the SDK turn that answered it,
+//   that is, the result or a frame echoed it. A replay alone answers nothing:
+//   the SDK can replay a send in one turn and answer it in the next. A Rome
+//   result with no answered send at all (a frameless SDK error) answers the
+//   turn's own send.
 
 /** What to do with one SDK message. */
 export interface FrameDecision {
@@ -160,7 +161,6 @@ export class SdkTurnRouter {
     }
     if (romeReplay) {
       this.pendingSteers.delete(replayed);
-      this.answered.add(replayed);
       const consumed = this.minted.has(replayed) ? undefined : replayed;
       return { action: "deliver", waitForTurn, consumed };
     }
@@ -180,10 +180,8 @@ export class SdkTurnRouter {
       (ownerAtResult === "sdk" || result.origin?.kind === "task-notification");
     const answered = [...this.answered];
     this.answered.clear();
-    if (sdkOwned) {
-      for (const id of answered) this.forget(id);
-      return { owner: "sdk", carried: [] };
-    }
+    // The SDK's own turn answered no Rome send: any echo would have made it Rome's.
+    if (sdkOwned) return { owner: "sdk", carried: [] };
     const carried = [...this.pendingSteers];
     this.pendingSteers.clear();
     for (const id of carried) this.carried.add(id);

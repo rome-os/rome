@@ -288,6 +288,25 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("ends a Rome turn whose send the SDK replays in its own turn and answers in the next", async () => {
+      scripted(async function* (sent) {
+        // A background task's turn is running when Rome sends X.
+        yield say("The background command finished.");
+        const x = await sent();
+        yield { ...x, isReplay: true };
+        yield result("", [], "task-notification");
+        yield say("X-REPLY", x.uuid);
+        yield result("X-REPLY", [x.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const turn = nextTurn(session.events[Symbol.asyncIterator]());
+      await session.sendUserInput({ text: "Hi.", inputId: a });
+      const results = (await turn).filter((m) => m.type === "result");
+      await session.close();
+
+      expect(results).toEqual([expect.objectContaining({ type: "result", content: "X-REPLY" })]);
+    });
+
     it("keeps a turn the SDK starts while idle out of Rome's next turn", async () => {
       scripted(async function* (sent) {
         const first = await sent();
