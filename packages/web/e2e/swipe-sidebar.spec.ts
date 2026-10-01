@@ -16,10 +16,9 @@ test.use({ viewport: PHONE, isMobile: true, hasTouch: true });
 
 async function open(page: Page) {
   await page.goto("/settings/appearance");
-  // The settings heading, not the mobile header: from 768px up there is none.
-  await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
+  // The page's heading, not the mobile header: from 768px up there is none.
+  // Its text is left alone, since a phone titles a settings section by name.
+  await expect(page.locator("main h1")).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
   return page.context().newCDPSession(page);
 }
