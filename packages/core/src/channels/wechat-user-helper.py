@@ -7,6 +7,8 @@ Commands answer JSON on stdout:
                                 keys, verify each, and write them where the
                                 reader looks
     conversations --limit N [--query Q]
+    contacts --limit N [--query Q]   friends only
+    contact --username WXID    one record, with displayName and alias, or null
     messages [--conversation ID] [--since UNIX] --limit N
     count --conversation ID
     check                     verify stored keys against the current databases
@@ -298,6 +300,84 @@ def cmd_conversations(args):
     print(json.dumps({"conversations": out}, ensure_ascii=False))
 
 
+# WeChat's built-in service accounts. They sit in the contact table like friends,
+# but nobody is behind them, so none is a person the guardian can write to.
+SYSTEM_USERNAMES = frozenset({
+    "filehelper", "weixin", "fmessage", "medianote", "floatbottle", "qqmail", "qmessage",
+    "tmessage", "newsapp", "blogapp", "lbsapp", "shakeapp", "voiceinput", "voipapp",
+    "qqfriend", "masssendapp", "feedsapp", "facebookapp", "qqsync", "linkedinplugin",
+    "notification_messages", "notifymessage", "exmail_tool", "userexperience_alarm",
+    "brandsessionholder", "officialaccounts", "helper_entry", "pc_share",
+})
+# wechat-cli reads verify_flag >= 8 as an enterprise-verified (brand) account.
+VERIFIED_ACCOUNT_FLAG = 8
+
+
+def contact_record(row, self_username, names):
+    """One contact as the client shows it. `name` and `displayName` come from
+    wechat-cli's `get_contact_names`, the source of the store's `conversationName`,
+    so the send driver's name check and this record never disagree. A friend is
+    a person the account added: `local_type` 1, not a group, not an official or
+    verified account, not a built-in service account, not deleted, and not the
+    account itself. `alias` is the 微信号 the person chose, if any."""
+    username, alias, local_type, verify_flag, deleted = row
+    name = names.get(username, username)
+    group = username.endswith("@chatroom")
+    friend = (local_type == 1 and not group and not username.startswith("gh_")
+              and username not in SYSTEM_USERNAMES and (verify_flag or 0) < VERIFIED_ACCOUNT_FLAG
+              and not deleted and username != self_username)
+    return {"id": username, "name": name, "isGroup": group, "isFriend": friend,
+            "displayName": name, "alias": alias or None}
+
+
+def contact_db_path(app):
+    """The contact database copy wechat-cli's `get_contact_names` and
+    `get_self_username` read: the pre-decrypted file when it exists, else the
+    cache's. Rows and names then always come from one copy."""
+    pre_decrypted = os.path.join(app.decrypted_dir, "contact", "contact.db")
+    return pre_decrypted if os.path.exists(pre_decrypted) else app.cache.get(os.path.join("contact", "contact.db"))
+
+
+def contact_rows(where="", params=()):
+    app = app_context()
+    from wechat_cli.core.contacts import get_contact_names, get_self_username
+
+    path = contact_db_path(app)
+    if not path:
+        raise Unavailable("The WeChat contact database could not be decrypted.")
+    with closing(sqlite3.connect(path)) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(contact)")}
+        # A deletion mark is read only where the table has one; unverified on WeChat 4.x.
+        deleted = "delete_flag" if "delete_flag" in columns else "0"
+        rows = conn.execute(
+            f"SELECT username, alias, local_type, verify_flag, {deleted} FROM contact" + where, params
+        ).fetchall()
+        has_contacts = conn.execute("SELECT 1 FROM contact LIMIT 1").fetchone() is not None
+    # wechat-cli answers an empty map, and no self name, when its own read fails. Falling
+    # back to wxids would hide that, and would let the account itself pass as a friend.
+    names = get_contact_names(app.cache, app.decrypted_dir)
+    if has_contacts and not names:
+        raise Unavailable("The WeChat contact names could not be read.")
+    self_username = get_self_username(app.db_dir, app.cache, app.decrypted_dir)
+    if has_contacts and not self_username:
+        raise Unavailable("The signed-in WeChat account could not be found among its contacts.")
+    return [contact_record(row, self_username, names) for row in rows]
+
+
+def cmd_contacts(args):
+    needle = args.query.lower() if args.query else None
+    friends = sorted((c for c in contact_rows(" WHERE local_type = 1") if c["isFriend"]),
+                     key=lambda c: (c["name"].casefold(), c["id"]))
+    out = [{k: c[k] for k in ("id", "name", "isGroup", "isFriend")} for c in friends
+           if not needle or needle in c["name"].lower() or needle in c["id"].lower()]
+    print(json.dumps({"contacts": out[:args.limit]}, ensure_ascii=False))
+
+
+def cmd_contact(args):
+    found = contact_rows(" WHERE username = ?", (args.username,))
+    print(json.dumps({"contact": found[0] if found else None}, ensure_ascii=False))
+
+
 # WeChat's numeric message kinds, named so a caller never has to match on the
 # CLI's display language.
 TYPE_NAMES = {
@@ -493,6 +573,15 @@ def main():
     conversations.add_argument("--limit", type=int, default=50)
     conversations.add_argument("--query", default=None)
     conversations.set_defaults(func=cmd_conversations)
+
+    contacts = sub.add_parser("contacts")
+    contacts.add_argument("--limit", type=int, default=50)
+    contacts.add_argument("--query", default=None)
+    contacts.set_defaults(func=cmd_contacts)
+
+    contact = sub.add_parser("contact")
+    contact.add_argument("--username", required=True)
+    contact.set_defaults(func=cmd_contact)
 
     messages = sub.add_parser("messages")
     messages.add_argument("--conversation", default=None)

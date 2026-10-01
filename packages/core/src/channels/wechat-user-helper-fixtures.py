@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import signal
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import closing
 from unittest.mock import patch
 
 sys.dont_write_bytecode = True
@@ -78,6 +80,121 @@ class ReaderTests(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     helper.cmd_count(types.SimpleNamespace(conversation="friend"))
                 self.assertIn('"count": 1', output.getvalue())
+
+
+class ContactTests(unittest.TestCase):
+    """`contacts` and `contact` against a real contact table, as the client writes it."""
+    ROWS = [  # username, nick_name, remark, alias, local_type, verify_flag, delete_flag
+        ("wxid_self", "Me", "", "me_alias", 1, 0, 0),
+        ("wxid_li", "Li Wei", "", "liwei88", 1, 0, 0),
+        ("wxid_wang", "wang", "Wang Fang (work)", "", 1, 0, 0),
+        ("wxid_nick", "", "", None, 1, 0, 0),
+        ("12345@chatroom", "Family", "", "", 2, 0, 0),
+        ("gh_news", "News", "", "", 1, 0, 0),
+        ("wxid_stranger", "Stranger", "", "stranger1", 3, 0, 0),  # met in a group, never added
+        # WeChat's built-in service accounts, stored as local_type 1 like friends
+        ("filehelper", "File Transfer", "", "", 1, 0, 0),
+        ("weixin", "WeChat Team", "", "", 1, 0, 0),
+        ("fmessage", "Friend Recommendations", "", "", 1, 0, 0),
+        ("medianote", "Voice Notes", "", "", 1, 0, 0),
+        ("floatbottle", "Drift Bottle", "", "", 1, 0, 0),
+        ("wxid_brand", "Brand Service", "", "", 1, 24, 0),  # enterprise-verified
+        ("wxid_gone", "Old Friend", "", "", 1, 0, 1),  # deleted
+    ]
+    NOT_FRIENDS = ["filehelper", "weixin", "fmessage", "medianote", "floatbottle", "wxid_brand", "wxid_gone"]
+
+    def write_contacts(self, db, rows, delete_flag=True):
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE contact (id INTEGER PRIMARY KEY, username TEXT, nick_name TEXT,"
+                         " remark TEXT, alias TEXT, local_type INTEGER, verify_flag INTEGER"
+                         + (", delete_flag INTEGER)" if delete_flag else ")"))
+            rows = rows if delete_flag else [r[:6] for r in rows if not r[6]]
+            cols = "username, nick_name, remark, alias, local_type, verify_flag" + (", delete_flag" if delete_flag else "")
+            conn.executemany(f"INSERT INTO contact ({cols}) VALUES ({', '.join('?' * len(rows[0]))})", rows)
+            conn.commit()
+
+    def run_cmd(self, fn, delete_flag=True, names=None, self_username="wxid_self", pre_decrypted=None, **args):
+        with tempfile.TemporaryDirectory() as directory:
+            db = str(Path(directory) / "contact.db")
+            self.write_contacts(db, self.ROWS, delete_flag)
+            if pre_decrypted:  # the copy wechat-cli reads first, when it exists
+                os.makedirs(Path(directory) / "contact")
+                self.write_contacts(str(Path(directory) / "contact" / "contact.db"), pre_decrypted)
+            cache = types.SimpleNamespace(get=lambda rel: db if rel == os.path.join("contact", "contact.db") else None)
+            app = types.SimpleNamespace(cache=cache, decrypted_dir=directory, db_dir=directory)
+            contacts = types.ModuleType("wechat_cli.core.contacts")
+            contacts.get_self_username = lambda *a: self_username
+            # wechat-cli's own rule (remark, else nickname, else wxid), unless a test overrides it
+            contacts.get_contact_names = lambda *a: names if names is not None else {
+                r[0]: r[2] or r[1] or r[0] for r in self.ROWS}
+            with patch.dict(sys.modules, {"wechat_cli.core.contacts": contacts}), \
+                    patch.object(helper, "app_context", return_value=app), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                fn(types.SimpleNamespace(**args))
+            return json.loads(output.getvalue())
+
+    def test_contacts_lists_friends_only_by_display_name(self):
+        out = self.run_cmd(helper.cmd_contacts, limit=50, query=None)
+        self.assertEqual(out["contacts"], [
+            {"id": "wxid_li", "name": "Li Wei", "isGroup": False, "isFriend": True},
+            {"id": "wxid_wang", "name": "Wang Fang (work)", "isGroup": False, "isFriend": True},
+            {"id": "wxid_nick", "name": "wxid_nick", "isGroup": False, "isFriend": True},
+        ])
+
+    def test_contacts_filters_by_query_and_limit(self):
+        self.assertEqual([c["id"] for c in self.run_cmd(helper.cmd_contacts, limit=50, query="WANG")["contacts"]],
+                         ["wxid_wang"])
+        self.assertEqual([c["id"] for c in self.run_cmd(helper.cmd_contacts, limit=50, query="Fang")["contacts"]],
+                         ["wxid_wang"])  # by remark
+        self.assertEqual([c["id"] for c in self.run_cmd(helper.cmd_contacts, limit=50, query="Stranger")["contacts"]],
+                         [])
+        self.assertEqual(len(self.run_cmd(helper.cmd_contacts, limit=2, query=None)["contacts"]), 2)
+
+    def test_contact_answers_display_name_and_alias(self):
+        self.assertEqual(self.run_cmd(helper.cmd_contact, username="wxid_wang")["contact"], {
+            "id": "wxid_wang", "name": "Wang Fang (work)", "isGroup": False, "isFriend": True,
+            "displayName": "Wang Fang (work)", "alias": None})
+        self.assertEqual(self.run_cmd(helper.cmd_contact, username="wxid_li")["contact"]["alias"], "liwei88")
+
+    def test_contact_marks_groups_strangers_accounts_and_self_as_not_friends(self):
+        for username, group in (("12345@chatroom", True), ("wxid_stranger", False),
+                                ("gh_news", False), ("wxid_self", False)):
+            record = self.run_cmd(helper.cmd_contact, username=username)["contact"]
+            self.assertEqual((record["isGroup"], record["isFriend"]), (group, False), username)
+
+    def test_built_in_verified_and_deleted_accounts_are_not_friends(self):
+        listed = [c["id"] for c in self.run_cmd(helper.cmd_contacts, limit=50, query=None)["contacts"]]
+        for username in self.NOT_FRIENDS:
+            self.assertNotIn(username, listed)
+            record = self.run_cmd(helper.cmd_contact, username=username)["contact"]
+            self.assertEqual((record["isGroup"], record["isFriend"]), (False, False), username)
+
+    def test_a_table_without_a_deletion_mark_still_answers(self):
+        listed = [c["id"] for c in self.run_cmd(helper.cmd_contacts, delete_flag=False, limit=50, query=None)["contacts"]]
+        self.assertEqual(listed, ["wxid_li", "wxid_wang", "wxid_nick"])
+
+    def test_the_display_name_is_the_one_the_store_gives_the_chat(self):
+        # One source with conversationName: whatever get_contact_names answers, not a local rule.
+        record = self.run_cmd(helper.cmd_contact, names={"wxid_wang": "Wang F."}, username="wxid_wang")["contact"]
+        self.assertEqual((record["name"], record["displayName"]), ("Wang F.", "Wang F."))
+        record = self.run_cmd(helper.cmd_contact, names={"wxid_self": "Me"}, username="wxid_li")["contact"]
+        self.assertEqual(record["displayName"], "wxid_li")  # unknown to wechat-cli: the wxid, as conversationName
+
+    def test_rows_come_from_the_copy_wechat_cli_reads(self):
+        pre = [("wxid_self", "Me", "", "", 1, 0, 0), ("wxid_pre", "Pre Copy", "", "", 1, 0, 0)]
+        listed = [c["id"] for c in self.run_cmd(helper.cmd_contacts, pre_decrypted=pre, limit=50, query=None)["contacts"]]
+        self.assertEqual(listed, ["wxid_pre"])  # the pre-decrypted copy, not the cache's
+
+    def test_a_failed_name_load_is_an_error_not_wxids(self):
+        with self.assertRaisesRegex(helper.Unavailable, "contact names could not be read"):
+            self.run_cmd(helper.cmd_contacts, names={}, limit=50, query=None)
+
+    def test_an_unknown_self_is_an_error_not_a_friend(self):
+        with self.assertRaisesRegex(helper.Unavailable, "signed-in WeChat account could not be found"):
+            self.run_cmd(helper.cmd_contact, self_username="", username="wxid_self")
+
+    def test_an_unknown_contact_is_null(self):
+        self.assertEqual(self.run_cmd(helper.cmd_contact, username="wxid_nobody"), {"contact": None})
 
 
 class CaptureTests(unittest.TestCase):
