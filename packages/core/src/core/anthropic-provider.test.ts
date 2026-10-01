@@ -1632,7 +1632,7 @@ describe("AnthropicProvider", () => {
           },
         },
         {
-          // Non-text deltas (tool input streaming) are not previews.
+          // A tool-input fragment with no `tool_use` block start to attach to.
           type: "stream_event",
           parent_tool_use_id: null,
           event: {
@@ -1691,6 +1691,144 @@ describe("AnthropicProvider", () => {
           options: expect.objectContaining({ includePartialMessages: true }),
         }),
       );
+    });
+
+    it("streams thinking, text, and tool input with block ids that match the completed blocks", async () => {
+      // Frame order recorded from SDK 0.3.281: block start, deltas, the
+      // completed block as its own assistant message, then block stop.
+      const frame = (event: Record<string, unknown>) => ({
+        type: "stream_event",
+        parent_tool_use_id: null,
+        user_message_uuid: SENT,
+        event,
+      });
+      mockQuery([
+        frame({ type: "message_start", message: { id: "msg_A" } }),
+        frame({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }),
+        frame({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "Check the" },
+        }),
+        frame({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: " kernel." },
+        }),
+        frame({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "signature_delta", signature: "sig" },
+        }),
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          message: { id: "msg_A", content: [{ type: "thinking", thinking: "Check the kernel." }] },
+        },
+        frame({ type: "content_block_stop", index: 0 }),
+        frame({ type: "content_block_start", index: 1, content_block: { type: "text" } }),
+        frame({
+          type: "content_block_delta",
+          index: 1,
+          delta: { type: "text_delta", text: "Running it." },
+        }),
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          message: { id: "msg_A", content: [{ type: "text", text: "Running it." }] },
+        },
+        frame({ type: "content_block_stop", index: 1 }),
+        frame({
+          type: "content_block_start",
+          index: 2,
+          content_block: { type: "tool_use", id: "toolu_1", name: "Bash", input: {} },
+        }),
+        frame({
+          type: "content_block_delta",
+          index: 2,
+          delta: { type: "input_json_delta", partial_json: '{"command":' },
+        }),
+        frame({
+          type: "content_block_delta",
+          index: 2,
+          delta: { type: "input_json_delta", partial_json: '"uname -s"}' },
+        }),
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          message: {
+            id: "msg_A",
+            content: [
+              { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "uname -s" } },
+            ],
+          },
+        },
+        frame({ type: "content_block_stop", index: 2 }),
+        // Next API call: thinking hidden by the provider streams empty deltas.
+        frame({ type: "message_start", message: { id: "msg_B" } }),
+        frame({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }),
+        frame({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "" },
+        }),
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          message: { id: "msg_B", content: [{ type: "thinking", thinking: "" }] },
+        },
+        frame({ type: "content_block_start", index: 1, content_block: { type: "text" } }),
+        frame({
+          type: "content_block_delta",
+          index: 1,
+          delta: { type: "text_delta", text: "Linux." },
+        }),
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          message: { id: "msg_B", content: [{ type: "text", text: "Linux." }] },
+        },
+        {
+          type: "result",
+          subtype: "success",
+          result: "Linux.",
+          num_turns: 2,
+          stop_reason: "end_turn",
+          total_cost_usd: 0,
+          duration_ms: 1,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "which kernel?", inputId: SENT });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type !== "input_status")).toEqual([
+        { type: "thinking_delta", blockId: "msg_A:0", content: "Check the" },
+        { type: "thinking_delta", blockId: "msg_A:0", content: " kernel." },
+        { type: "thinking", content: "Check the kernel.", blockId: "msg_A:0" },
+        { type: "text_delta", content: "Running it.", blockId: "msg_A:1" },
+        // The tool input's first fragment confirms the held text was narration.
+        { type: "text", content: "Running it.", turnPhase: "commentary", blockId: "msg_A:1" },
+        {
+          type: "tool_input_delta",
+          toolUseId: "toolu_1",
+          tool: "Bash",
+          content: '{"command":',
+        },
+        { type: "tool_input_delta", toolUseId: "toolu_1", tool: "Bash", content: '"uname -s"}' },
+        {
+          type: "tool_use",
+          id: "toolu_1",
+          tool: "Bash",
+          input: { command: "uname -s" },
+        },
+        // No delta and no thinking block for hidden reasoning.
+        { type: "text_delta", content: "Linux.", blockId: "msg_B:1" },
+        { type: "text", content: "Linux.", turnPhase: "final", blockId: "msg_B:1" },
+        { type: "result", content: "Linux." },
+      ]);
     });
 
     it("emits tool_result messages for builtin SDK tools like WebSearch", async () => {

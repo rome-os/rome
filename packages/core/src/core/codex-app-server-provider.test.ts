@@ -1355,8 +1355,13 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     expect(msgs.filter((m) => m.type === "text")).toEqual([
-      { type: "text", content: "Let me check the weather.", turnPhase: "commentary" },
-      { type: "text", content: "It's sunny.", turnPhase: "final" },
+      {
+        type: "text",
+        content: "Let me check the weather.",
+        turnPhase: "commentary",
+        blockId: "m1",
+      },
+      { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "m2" },
     ]);
     const result = msgs.find((m) => m.type === "result");
     expect(result).toMatchObject({ type: "result", content: "It's sunny." });
@@ -1425,6 +1430,100 @@ describe("CodexAppServerProvider", () => {
     // The adapter still offers this turn as a checkpoint; AgentSession is
     // what declines to persist it for an interrupted turn.
     expect(session.lastCompletedTurnCheckpoint).toBe("turn-1");
+    await session.close();
+  });
+
+  it("streams reasoning, answer text, and command output with the item ids as block ids", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const at = { threadId: "thr-1", turnId: "turn-1" };
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: "Plan",
+          summaryIndex: 0,
+        });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: " it.",
+          summaryIndex: 0,
+        });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: "Run.",
+          summaryIndex: 1,
+        });
+        // A delta for another turn is not this turn's.
+        n("item/reasoning/summaryTextDelta", {
+          threadId: "thr-1",
+          turnId: "turn-0",
+          itemId: "rs_0",
+          delta: "stale",
+          summaryIndex: 0,
+        });
+        n("item/completed", {
+          ...at,
+          item: { type: "reasoning", id: "rs_1", summary: ["Plan it.", "Run."], content: [] },
+          completedAtMs: 0,
+        });
+        const command = { type: "commandExecution", id: "cmd_1", command: "seq 1 2", cwd: "/w" };
+        n("item/started", { ...at, item: { ...command, status: "inProgress" }, startedAtMs: 0 });
+        n("item/commandExecution/outputDelta", { ...at, itemId: "cmd_1", delta: "1\n" });
+        n("item/commandExecution/outputDelta", { ...at, itemId: "cmd_1", delta: "2\n" });
+        n("item/completed", {
+          ...at,
+          item: { ...command, status: "completed", exitCode: 0, aggregatedOutput: "1\n2\n" },
+          completedAtMs: 0,
+        });
+        n("item/agentMessage/delta", { ...at, itemId: "msg_1", delta: "Done" });
+        n("item/completed", {
+          ...at,
+          item: { type: "agentMessage", id: "msg_1", text: "Done", phase: "final_answer" },
+          completedAtMs: 0,
+        });
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go" });
+    const msgs = await collected;
+
+    expect(
+      msgs
+        .filter((m) =>
+          ["thinking_delta", "thinking", "tool_output_delta", "text_delta", "text"].includes(
+            m.type,
+          ),
+        )
+        .map((m) => {
+          const { startedAt: _s, endedAt: _e, ...rest } = m as Record<string, unknown>;
+          return rest;
+        }),
+    ).toEqual([
+      { type: "thinking_delta", blockId: "rs_1", content: "Plan" },
+      { type: "thinking_delta", blockId: "rs_1", content: " it." },
+      // A new summary part starts on its own line, as in the completed block.
+      { type: "thinking_delta", blockId: "rs_1", content: "\nRun." },
+      { type: "thinking", content: "Plan it.\nRun.", blockId: "rs_1" },
+      { type: "tool_output_delta", toolUseId: "cmd_1", content: "1\n" },
+      { type: "tool_output_delta", toolUseId: "cmd_1", content: "2\n" },
+      { type: "text_delta", content: "Done", blockId: "msg_1" },
+      { type: "text", content: "Done", turnPhase: "final", blockId: "msg_1" },
+    ]);
+    // The command's tool_use and tool_result keep the ids the output deltas use.
+    expect(msgs.find((m) => m.type === "tool_use")).toMatchObject({ id: "cmd_1", tool: "Bash" });
+    expect(msgs.find((m) => m.type === "tool_result")).toMatchObject({ toolUseId: "cmd_1" });
     await session.close();
   });
 
@@ -2182,7 +2281,7 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     const text = msgs.find((m) => m.type === "text");
-    expect(text).toEqual({ type: "text", content: "plain answer" });
+    expect(text).toEqual({ type: "text", content: "plain answer", blockId: "m1" });
     expect(msgs.find((m) => m.type === "result")).toMatchObject({ content: "plain answer" });
     await session.close();
   });

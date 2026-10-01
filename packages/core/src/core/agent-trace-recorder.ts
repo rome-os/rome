@@ -13,6 +13,7 @@ import type { ThreadContext } from "./types.js";
 import { toTraceBlock, type TraceableAgentMessage } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { isTransientDelta } from "./agent-message.js";
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -93,7 +94,7 @@ export class AgentTraceRecorder {
     startSeq = this.seq,
   ): Promise<void> {
     const blocks = messages.flatMap((msg) =>
-      msg.type === "text_delta" || msg.type === "input_status"
+      isTransientDelta(msg) || msg.type === "input_status"
         ? []
         : [toTraceBlock(msg as TraceableAgentMessage & { agent?: string })],
     );

@@ -653,7 +653,26 @@ export class AnthropicProvider implements ModelProvider {
       // stream in real time; only the completed-block event is deferred by one
       // step (a block isn't truly "done" until the next one starts anyway).
       let pendingText: string | null = null;
+      let pendingTextBlockId: string | undefined;
       let partialText = "";
+      let partialTextBlockId: string | undefined;
+      // Block identity is `<API message id>:<content block index>`. The stream
+      // reports the index on each `content_block_*` event; the SDK then sends
+      // each completed block as its own assistant message, in index order, so
+      // counting blocks per message id yields the same index.
+      let streamMessageId: string | undefined;
+      const streamToolBlocks = new Map<number, { id: string; name: string }>();
+      const assistantBlockCounts = new Map<string, number>();
+      const blockIdOf = (messageId: string | undefined, index: number): string | undefined =>
+        messageId ? `${messageId}:${index}` : undefined;
+      const textBlock = (
+        content: string,
+        turnPhase: "commentary" | "final",
+        blockId: string | undefined,
+      ): AgentMessage =>
+        blockId
+          ? { type: "text", content, turnPhase, blockId }
+          : { type: "text", content, turnPhase };
       try {
         for await (const message of q) {
           const replayedId = replayedSendId(message);
@@ -697,40 +716,90 @@ export class AnthropicProvider implements ModelProvider {
             // own subagents run in their own provider sessions.
             if (message.parent_tool_use_id === null) {
               const evt = message.event;
-              if (evt.type === "content_block_delta" && evt.delta.type === "text_delta") {
-                if (params.outputSchema) continue;
-                if (partialText === "" && pendingText !== null) {
-                  yield { type: "text", content: pendingText, turnPhase: "commentary" };
-                  pendingText = null;
+              if (evt.type === "message_start") {
+                streamMessageId = evt.message.id;
+                streamToolBlocks.clear();
+              } else if (
+                evt.type === "content_block_start" &&
+                evt.content_block.type === "tool_use"
+              ) {
+                streamToolBlocks.set(evt.index, {
+                  id: evt.content_block.id,
+                  name: normalizeToolName(evt.content_block.name),
+                });
+              } else if (evt.type === "content_block_delta") {
+                const blockId = blockIdOf(streamMessageId, evt.index);
+                if (evt.delta.type === "text_delta") {
+                  if (params.outputSchema) continue;
+                  if (partialText === "" && pendingText !== null) {
+                    yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                    pendingText = null;
+                  }
+                  partialText += evt.delta.text;
+                  partialTextBlockId = blockId;
+                  yield blockId
+                    ? { type: "text_delta", content: evt.delta.text, blockId }
+                    : { type: "text_delta", content: evt.delta.text };
+                } else if (evt.delta.type === "thinking_delta" && evt.delta.thinking && blockId) {
+                  // A following block confirms the held text was narration.
+                  if (pendingText !== null) {
+                    yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                    pendingText = null;
+                  }
+                  yield { type: "thinking_delta", blockId, content: evt.delta.thinking };
+                } else if (evt.delta.type === "input_json_delta" && evt.delta.partial_json) {
+                  const toolBlock = streamToolBlocks.get(evt.index);
+                  if (toolBlock) {
+                    if (pendingText !== null) {
+                      yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                      pendingText = null;
+                    }
+                    yield {
+                      type: "tool_input_delta",
+                      toolUseId: toolBlock.id,
+                      tool: toolBlock.name,
+                      content: evt.delta.partial_json,
+                    };
+                  }
                 }
-                partialText += evt.delta.text;
-                yield { type: "text_delta", content: evt.delta.text };
               }
             }
           } else if (isAssistantMessage(message)) {
             if (message.parent_tool_use_id === null) {
               activeTurnLastAssistantMessageId = message.uuid;
             }
+            const apiMessageId = (message.message as { id?: unknown }).id;
+            const assistantMessageId = typeof apiMessageId === "string" ? apiMessageId : undefined;
             for (const block of message.message.content) {
+              let blockId: string | undefined;
+              if (assistantMessageId) {
+                const index = assistantBlockCounts.get(assistantMessageId) ?? 0;
+                assistantBlockCounts.set(assistantMessageId, index + 1);
+                blockId = blockIdOf(assistantMessageId, index);
+              }
               if (isTextBlock(block) && block.text) {
                 if (params.outputSchema) continue;
                 partialText = "";
+                partialTextBlockId = undefined;
                 // A new text block: the previously held one is now confirmed
                 // mid-turn narration. Hold this one until something follows it.
                 if (pendingText !== null) {
-                  yield { type: "text", content: pendingText, turnPhase: "commentary" };
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
                 }
                 pendingText = block.text;
+                pendingTextBlockId = blockId;
               } else if (isThinkingBlock(block) && block.thinking) {
                 if (pendingText !== null) {
-                  yield { type: "text", content: pendingText, turnPhase: "commentary" };
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
                   pendingText = null;
                 }
-                yield { type: "thinking", content: block.thinking };
+                yield blockId
+                  ? { type: "thinking", content: block.thinking, blockId }
+                  : { type: "thinking", content: block.thinking };
               } else if (isToolUseBlock(block)) {
                 // A tool call follows the held text → that text was narration.
                 if (pendingText !== null) {
-                  yield { type: "text", content: pendingText, turnPhase: "commentary" };
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
                   pendingText = null;
                 }
                 const normalizedToolName = normalizeToolName(block.name);
@@ -765,6 +834,8 @@ export class AnthropicProvider implements ModelProvider {
               yield toolResult;
             }
           } else if (isResultMessage(message)) {
+            // Block ids are unique within a turn; start the next turn's count fresh.
+            assistantBlockCounts.clear();
             const echoed = echoedSendIds(message).filter((id) => romeSendIds.has(id));
             const ownerAtResult = sdkTurnOwner;
             sdkTurnOwner = undefined;
@@ -798,7 +869,7 @@ export class AnthropicProvider implements ModelProvider {
               }
               // The turn is ending: any text still held was the closing answer.
               if (!params.outputSchema && pendingText !== null) {
-                yield { type: "text", content: pendingText, turnPhase: "final" };
+                yield textBlock(pendingText, "final", pendingTextBlockId);
                 pendingText = null;
               }
             }
@@ -903,14 +974,10 @@ export class AnthropicProvider implements ModelProvider {
         if (abortController.signal.aborted && running) {
           await queryProcess.abort();
           if (!params.outputSchema && pendingText !== null) {
-            yield {
-              type: "text",
-              content: pendingText,
-              turnPhase: partialText ? "commentary" : "final",
-            };
+            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
           }
           if (!params.outputSchema && partialText)
-            yield { type: "text", content: partialText, turnPhase: "final" };
+            yield textBlock(partialText, "final", partialTextBlockId);
           running = false;
           yield params.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
@@ -924,14 +991,10 @@ export class AnthropicProvider implements ModelProvider {
         // purpose: a `yield` in `finally` re-suspends the generator when the
         // consumer abandons iteration via `.return()`, swallowing the close.
         if (!params.outputSchema && pendingText !== null) {
-          yield {
-            type: "text",
-            content: pendingText,
-            turnPhase: partialText ? "commentary" : "final",
-          };
+          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
         }
         if (!params.outputSchema && partialText)
-          yield { type: "text", content: partialText, turnPhase: "final" };
+          yield textBlock(partialText, "final", partialTextBlockId);
         if (abortController.signal.aborted && err instanceof AbortError) {
           await queryProcess.abort();
           if (running) {

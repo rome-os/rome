@@ -5,6 +5,7 @@ import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
 import { isValidAppId } from "../apps/packaging/app-id.js";
+import type { TransientDeltaType } from "../core/agent-message.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The
  *  daemon always injects `connectionRegistry`; a missing one is a wiring bug,
@@ -154,7 +155,10 @@ function timestampToIso(value: Date | number): string {
  * never persisted, so callers must filter deltas out before reaching here —
  * the compiler enforces it instead of a runtime throw.
  */
-export type TraceableAgentMessage = Exclude<AgentMessage, { type: "text_delta" | "input_status" }>;
+export type TraceableAgentMessage = Exclude<
+  AgentMessage,
+  { type: TransientDeltaType | "input_status" }
+>;
 
 export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): TraceBlockDto {
   switch (msg.type) {

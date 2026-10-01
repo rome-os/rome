@@ -79,6 +79,7 @@ import {
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import { isTransientDelta } from "../../core/agent-message.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -2738,6 +2739,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             write("input_status", message);
             return;
           }
+          if (isTransientDelta(message) && message.type !== "text_delta") return;
           if (message.type === "text_delta") {
             assistantText += message.content;
             write("assistant_text", {
@@ -3279,6 +3281,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
+              // Previews other than text have no webchat consumer yet.
+              if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Live preview of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
               // late subscriber gets one event with the latest block's
@@ -3776,7 +3780,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       // Backend turns have no live bubble; drop transient text previews.
-      if (msg.type === "text_delta" || msg.type === "input_status") return;
+      if (isTransientDelta(msg) || msg.type === "input_status") return;
       stream.traceBlocks.push(msg);
       emitTraceBlock(stream, msg);
       if (msg.type === "result") replyText = msg.content;
