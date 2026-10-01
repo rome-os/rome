@@ -1,0 +1,43 @@
+# Compose project for a host that boots without a Rome Cloud deployment
+# bundle: dev VMs and self-hosted boxes. 30-rome.sh writes it only when
+# /opt/rome has no compose file yet, so a tenant's bundle is never replaced.
+#
+# Rome listens on every interface so the VM's port forward reaches it. Nothing
+# here restricts inbound traffic; an internet-facing host needs a firewall or
+# the Rome Cloud bundle.
+name: rome
+services:
+  rome:
+    image: ${ROME_DOCKER_IMAGE}
+    ports:
+      - "8080:8080"
+    volumes:
+      - app:/app
+      - rome-memory:/app/memory
+      - rome-home:/home/rome
+      - user-home:/home/user
+      - ssh-keys:/etc/ssh/ssh_host_keys
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - WEB_HOST=0.0.0.0
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    # Chromium-based clients fault at startup on Docker's 64 MB default.
+    shm_size: 1gb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9368/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+volumes:
+  app:
+  rome-memory:
+  rome-home:
+  user-home:
+  ssh-keys:

@@ -1,0 +1,13 @@
+[Unit]
+Description=Rome host helper
+After=network.target
+# The socket directory lives on /run. It must exist before Docker restores the
+# container that mounts it.
+Before=docker.service
+
+[Service]
+ExecStart=/usr/local/bin/rome-hostd --config /etc/rome-host/config.json
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
