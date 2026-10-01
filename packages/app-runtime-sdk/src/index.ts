@@ -898,7 +898,7 @@ export interface TurnResultEvent {
   accounting?: AgentAccounting;
 }
 
-/** Terminal event: the turn failed. `turn_end` still follows. */
+/** Machine-readable classification of a failed turn, carried as `TurnErrorEvent.code`. */
 export type AgentErrorCode =
   | "usage_limit"
   | "auth_revoked"
@@ -917,6 +917,7 @@ export type AgentErrorReason =
   | "model_access_denied"
   | "no_available_provider";
 
+/** Terminal event: the turn failed. `turn_end` still follows. */
 export interface TurnErrorEvent {
   type: "error";
   error: string;

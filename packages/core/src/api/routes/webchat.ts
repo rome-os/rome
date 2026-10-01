@@ -3283,7 +3283,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              // Previews other than text have no webchat consumer yet.
+              // Deltas other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -3300,8 +3300,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 );
                 continue;
               }
-              // Block boundary: a complete `text` block closes the in-flight
-              // preview. If the deltas didn't cover the block (non-streaming
+              // Block boundary: a complete `text` block ends its in-flight
+              // deltas. If the deltas didn't cover the block (non-streaming
               // provider, or a dropped frame), emit a corrective event with the
               // full text — this is what gives block-level previews on
               // providers that never stream deltas. The next text block gets a
@@ -3363,6 +3363,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   type: "text" as const,
                   content: stream.assistantText,
                   turnPhase: "final" as const,
+                  ...(blockId ? { blockId } : {}),
                 };
                 lastCompletedText = {
                   blockIx,
