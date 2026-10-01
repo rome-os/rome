@@ -397,6 +397,7 @@ COPY sshd_config /etc/ssh/sshd_config
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV PANTHEON_BASE_ORIGIN=https://romeos.cc
 ENV INTERNAL_API_WEB_ROOT=/app/packages/web/dist
 ENV ROME_VERSION=${ROME_VERSION}
 ENV ROME_BUILD_SHA=${ROME_BUILD_SHA}

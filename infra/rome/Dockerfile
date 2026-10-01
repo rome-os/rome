@@ -123,6 +123,8 @@ RUN mkdir -p /workspace /rome-home \
 
 WORKDIR /workspace
 
+ENV PANTHEON_BASE_ORIGIN=https://romeos.cc
+
 # The source workspace is volume-populated at runtime. Keep a stable PATH entry
 # whose target appears as soon as the sync sidecar seeds /workspace.
 RUN ln -sf /workspace/packages/discord-cli/bin/discord.js /usr/local/bin/discord
