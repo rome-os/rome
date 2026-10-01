@@ -52,8 +52,8 @@ export class WechatApp {
     if (!pid) {
       // The connection's setup owns the client until its key capture ends, and
       // the capture brings up WeChat's desktop and its own client. Until that
-      // client runs, the page waits rather than connecting to a desktop that may
-      // not be up, and it must not start a client of its own.
+      // client runs, the app reports starting: the page must not start a client
+      // of its own, and it reconnects its desktop view once the client runs.
       if (this.runtime.captureInProgress) return { state: "starting" };
       return { state: "stopped", ...error };
     }
