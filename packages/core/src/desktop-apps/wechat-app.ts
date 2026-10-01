@@ -48,12 +48,13 @@ export class WechatApp {
     if (this.runtime.installInFlight) return { state: "installing" };
     const error = this.error ? { error: this.error } : {};
     if (!(await this.runtime.installed())) return { state: "absent", ...error };
-    // The connection's key capture is relaunching the client under a debugger,
-    // and the guardian signs in on this desktop while it does.
+    // The connection's setup owns the client until its key capture ends, and the
+    // guardian signs in on this desktop while it does.
     if (this.runtime.captureInProgress) return { state: "running" };
     const pid = await this.runtime.pid();
     if (!pid) return { state: "stopped", ...error };
-    // A failure is about an attempt that has since been overtaken.
+    // This read clears the stored failure: a running client has overtaken the
+    // attempt it described, whoever started it.
     this.error = undefined;
     // A client on the shared desktop, such as one started before WeChat had its
     // own, stays there until it next exits; WeChat's own desktop is empty.
@@ -88,8 +89,8 @@ export class WechatApp {
     kind: "installing" | "starting",
     work: () => Promise<void>,
   ): Promise<WechatAppStatus> {
-    // The connection's setup installs without starting, because its next step
-    // relaunches the client under a debugger. While it owns an install, the app
+    // The connection's setup installs without starting, because it owns the
+    // client until its key capture ends. While it owns an install, the app
     // starts nothing; the page shows the result once the install is done.
     if (!this.job && this.runtime.installInFlight) return this.status();
     if (!this.job) {

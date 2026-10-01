@@ -278,42 +278,48 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
   };
 
   return async (interact, ctx) => {
-    const ready = await ctx.step("ensure-runtime", async (signal) => {
-      const initial = await runtime.status();
-      if (initial.state === "ready" && initial.running) return initial;
-      if (initial.keysReady) {
-        interact.show({
-          title: "Resuming WeChat",
-          body: [
-            "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
-          ],
-          links: [{ label: "Open Rome's desktop", url: initial.desktopPath }],
-          progress: true,
-        });
-        await runtime.start(signal);
-        return waitFor(signal, (status) => status.running && status.state === "ready");
-      }
-      if (!initial.installed) {
-        interact.show(installingView());
-        await runtime.install(signal);
-      }
-      await runtime.installReader(signal);
-      // The client is deliberately not started here — recovery launches it under
-      // gdb to own it from birth and catch the first login. Only the session it
-      // draws into and the capture driver are readied.
-      await runtime.prepareSession();
-      await deps.stageDriver();
-      return null;
-    });
+    // The capture lease, once the setup takes the capture path. Released when
+    // the setup ends, whether it confers, fails or is cancelled.
+    const lease: { release?: () => void } = {};
+    const confer = async () => {
+      const ready = await ctx.step("ensure-runtime", async (signal) => {
+        const initial = await runtime.status();
+        if (initial.state === "ready" && initial.running) return initial;
+        if (initial.keysReady) {
+          interact.show({
+            title: "Resuming WeChat",
+            body: [
+              "Open the desktop and confirm the sign-in on your phone if WeChat asks. Your saved message keys are ready.",
+            ],
+            links: [{ label: "Open Rome's desktop", url: initial.desktopPath }],
+            progress: true,
+          });
+          await runtime.start(signal);
+          return waitFor(signal, (status) => status.running && status.state === "ready");
+        }
+        // From here the setup owns the client until its key capture ends: the
+        // capture kills any client and relaunches it under a debugger, so nothing,
+        // such as an open /desktop/wechat, may launch an ordinary one meanwhile.
+        lease.release ??= runtime.holdCapture();
+        if (!initial.installed) {
+          interact.show(installingView());
+          await runtime.install(signal);
+        }
+        await runtime.installReader(signal);
+        // The client is deliberately not started here — recovery launches it under
+        // gdb to own it from birth and catch the first login. Only the session it
+        // draws into and the capture driver are readied.
+        await runtime.prepareSession();
+        await deps.stageDriver();
+        return null;
+      });
 
-    let status = ready;
-    if (!status) {
-      status = await ctx.step("capture-login", async (signal) => {
-        // The capture kills the client and relaunches it under a debugger. The
-        // lease keeps the WeChat app and the health check from launching an
-        // ordinary client in between.
-        const release = runtime.holdCapture();
-        try {
+      let status = ready;
+      if (!status) {
+        status = await ctx.step("capture-login", async (signal) => {
+          // Held already when ensure-runtime took the capture path; taken here
+          // when this step runs on its own.
+          lease.release ??= runtime.holdCapture();
           // Recovery launches the client, so the login window appears once this
           // begins. While recovery waits for the guardian to sign in, poll that
           // window and stream it into the view as the scannable QR, so the
@@ -365,24 +371,27 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             await qrLoop.catch(() => {});
             throw error;
           }
-        } finally {
-          release();
-        }
-      });
-    }
+        });
+      }
 
-    const profile = wechatUserProfileFromStatus(status, new Date()) ?? undefined;
-    return {
-      credential: containerCredential(status.wxid),
-      ...(profile ? { profile } : {}),
-      summary: {
-        title: "WeChat connected",
-        body: [
-          `${status.wxid ?? "Your WeChat account"} is signed in on your instance. Rome can now read your chats and message history.`,
-          "This connection is read-only — Rome never sends WeChat messages.",
-        ],
-      },
+      const profile = wechatUserProfileFromStatus(status, new Date()) ?? undefined;
+      return {
+        credential: containerCredential(status.wxid),
+        ...(profile ? { profile } : {}),
+        summary: {
+          title: "WeChat connected",
+          body: [
+            `${status.wxid ?? "Your WeChat account"} is signed in on your instance. Rome can now read your chats and message history.`,
+            "This connection is read-only — Rome never sends WeChat messages.",
+          ],
+        },
+      };
     };
+    try {
+      return await confer();
+    } finally {
+      lease.release?.();
+    }
   };
 }
 

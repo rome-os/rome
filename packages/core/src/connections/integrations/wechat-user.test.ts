@@ -111,7 +111,7 @@ function setupWith(
 }
 
 describe("makeWechatUserSetup", () => {
-  it("holds off ordinary launches for the whole key capture", async () => {
+  it("holds off ordinary launches from the install through the key capture", async () => {
     const runtime = fakeRuntime({
       statuses: [
         { state: "absent", installed: false, running: false, loggedIn: false, keysReady: false },
@@ -126,6 +126,10 @@ describe("makeWechatUserSetup", () => {
       ],
     });
     const held = runtime as unknown as { captures: number };
+    let heldDuringReaderInstall = 0;
+    runtime.installReader = rs.fn(async () => {
+      heldDuringReaderInstall = held.captures;
+    });
     let heldDuringRecovery = 0;
     const { fn } = setupWith(
       runtime,
@@ -139,6 +143,9 @@ describe("makeWechatUserSetup", () => {
     await session.started();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
+    // The page could otherwise start an ordinary client in the minutes between
+    // the install and the capture, which the capture would then kill.
+    expect(heldDuringReaderInstall).toBe(1);
     expect(heldDuringRecovery).toBe(1);
     expect(held.captures).toBe(0);
   });

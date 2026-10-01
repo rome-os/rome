@@ -346,8 +346,8 @@ export class WechatUserRuntime {
   }
 
   /**
-   * Hold off every ordinary launch while the connection's key capture replaces
-   * the client with one under a debugger. `start()` launches nothing until the
+   * Hold off every ordinary launch while the connection's setup prepares and
+   * runs its key capture, which replaces the client with one under a debugger. `start()` launches nothing until the
    * returned release runs. The capture kills the client on purpose, so nothing,
    * such as the guardian opening /desktop/wechat, may bring an ordinary one back
    * while it runs.
