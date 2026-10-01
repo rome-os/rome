@@ -42,7 +42,8 @@ export type WechatAppRuntime = Pick<
  *
  * - Rome starts an installed client when it boots, and after the client crashes.
  * - A client the guardian quits, which exits 0, stays stopped until the next
- *   Install, Start or Rome restart.
+ *   Install, Start or Rome restart. So does a client the app did not launch,
+ *   which records no exit status, and one whose start failed.
  * - After `CRASH_LIMIT` restarts within `CRASH_WINDOW_MS`, the app stops
  *   restarting and reports why, so a client that cannot run does not loop.
  *
@@ -76,12 +77,13 @@ export class WechatApp {
     if (this.runtime.captureInProgress) return { state: "running" };
     const pid = await this.runtime.pid();
     if (!pid) {
-      // Stopped: the app gave up, the last start failed, or the guardian quit
-      // the client since Rome booted. Otherwise a check is about to start it.
-      if (this.gaveUp || this.error || (this.booted && (await this.runtime.lastExit()) === 0)) {
-        return { state: "stopped", ...error };
+      // Starting: Rome has not booted the client yet, or it crashed and a check
+      // restarts it. Otherwise Rome will not start it: it gave up, the last
+      // start failed, or the client exited without a crash.
+      if (!this.gaveUp && !this.error && (!this.booted || (await this.crashed()))) {
+        return { state: "starting" };
       }
-      return { state: "starting" };
+      return { state: "stopped", ...error };
     }
     // A failure is about an attempt that has since been overtaken.
     this.error = undefined;
@@ -145,8 +147,9 @@ export class WechatApp {
       if (this.job || this.runtime.installInFlight || this.runtime.captureInProgress) return;
       if (!(await this.runtime.installed())) return;
       if (await this.runtime.pid()) return;
-      if (this.gaveUp) return;
-      if (!boot && (await this.runtime.lastExit()) === 0) return;
+      // A failed start stays stopped, like a quit, until the guardian acts.
+      if (this.gaveUp || this.error) return;
+      if (!boot && !(await this.crashed())) return;
       if (!boot) {
         const since = this.now() - CRASH_WINDOW_MS;
         this.restarts = this.restarts.filter((at) => at > since);
@@ -167,6 +170,16 @@ export class WechatApp {
     } finally {
       this.booted = true;
     }
+  }
+
+  /**
+   * Whether the last client the app launched crashed: it recorded a non-zero
+   * exit status. A quit records 0. A client launched another way, such as the
+   * connection's key capture, records nothing, and the app leaves it alone.
+   */
+  private async crashed(): Promise<boolean> {
+    const exit = await this.runtime.lastExit();
+    return exit !== null && exit !== 0;
   }
 
   private resetRestarts(): void {

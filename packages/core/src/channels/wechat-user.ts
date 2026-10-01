@@ -359,14 +359,19 @@ export class WechatUserRuntime {
    * the client with one under a debugger. `start()` launches nothing until the
    * returned release runs. The capture kills the client on purpose, so nothing
    * may bring an ordinary one back while it runs.
+   *
+   * Release also forgets the last exit status. The capture's kill recorded a
+   * crash for the client it replaced, and its own client records nothing, so
+   * that status does not describe the client running after it.
    */
-  holdCapture(): () => void {
+  holdCapture(): () => Promise<void> {
     this.captures += 1;
     let released = false;
-    return () => {
+    return async () => {
       if (released) return;
       released = true;
       this.captures -= 1;
+      await rm(this.exitFile, { force: true });
     };
   }
 
@@ -843,6 +848,8 @@ export class WechatUserRuntime {
     const display = await this.ensureDesktop(signal);
     await this.ensureClientLink();
     await this.prepareSession();
+    // A capture can take the lease during the steps above; it owns the launch.
+    if (this.captureInProgress) return;
 
     const started = await this.run(
       "sh",

@@ -47,6 +47,11 @@ function fakeRuntime(options: FakeOptions = {}) {
   return {
     runtime,
     gates,
+    /** The client exits and nothing records it, as with the capture's own client. */
+    vanish() {
+      pid = null;
+      runtime.lastExit.mockImplementation(async () => null);
+    },
     /** The client exits with `code`, as the launch wrapper records it. */
     exit(code: number) {
       pid = null;
@@ -247,6 +252,31 @@ describe("WechatApp keeps the client running", () => {
     // Start clears the limit.
     await app.start();
     expect(runtime.start).toHaveBeenCalledTimes(4);
+  });
+
+  it("leaves alone a client it did not launch when that client exits", async () => {
+    // The connection's key capture launches its own client, which records no
+    // exit status, so the app cannot tell its quit from a crash.
+    const { runtime, app, vanish } = await bootedWithRunningClient();
+
+    vanish();
+    await app.tick();
+
+    expect(runtime.start).not.toHaveBeenCalled();
+    expect(await app.status()).toEqual({ state: "stopped" });
+  });
+
+  it("does not retry a failed start on its own, so stopped means Rome will not start it", async () => {
+    const { runtime, app, exit, gates } = await bootedWithRunningClient();
+
+    exit(139);
+    await app.tick();
+    gates[0]!.fail(new Error("Could not start WeChat's desktop: port 5901 is busy"));
+    await app.settled();
+    await app.tick();
+
+    expect(runtime.start).toHaveBeenCalledTimes(1);
+    expect((await app.status()).state).toBe("stopped");
   });
 
   it("restarts nothing while the connection's key capture holds the client", async () => {

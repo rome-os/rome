@@ -48,7 +48,7 @@ A client that was already running on the shared desktop stays there until it nex
 - **Not installed:** the page offers **Install WeChat**. It downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
 - **Rome boots:** Rome starts an installed client that is not running.
 - **The client crashes:** Rome checks every 15 s and starts it again, so it is back within about 30 s. After 3 restarts in 5 minutes, Rome stops and the page shows where the client's log is.
-- **The guardian quits it:** a client that exits with status 0 stays stopped until **Start WeChat**, **Install WeChat** or a Rome restart. The client is launched through a wrapper that writes its exit status to `client.exit`, which is how Rome tells a quit from a crash.
+- **The guardian quits it:** a client that exits with status 0 stays stopped until **Start WeChat**, **Install WeChat** or a Rome restart. The client is launched through a wrapper that writes its exit status to `client.exit`, which is how Rome tells a quit from a crash. A client the app did not launch, such as the one Connect's key capture runs, records no status, so the app leaves it stopped when it exits. So does a client whose start failed; the page shows why.
 
 The page keeps the desktop on view while the client starts or restarts, with a small "Starting WeChat" banner, so the login window shows the moment it appears. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it.
 

@@ -240,6 +240,53 @@ describe("WechatUserRuntime.start", () => {
     await rs.waitFor(async () => expect(await runtime.lastExit()).toBe(code));
   });
 
+  it("launches nothing when a key capture takes the lease while a start is under way", async () => {
+    const h = await tempHome();
+    let reachedSession = false;
+    let openSession: () => void = () => {};
+    const sessionOpen = new Promise<void>((resolve) => {
+      openSession = resolve;
+    });
+    const scripted = scriptedRun({});
+    const run: RunCommand = async (file, args, options) => {
+      // prepareSession() is one of the slow steps before the launch.
+      if (args.includes("wechat-session")) {
+        reachedSession = true;
+        await sessionOpen;
+      }
+      return scripted.run(file, args, options);
+    };
+    const runtime = new WechatUserRuntime({
+      home: h,
+      runtimeDir: join(h, "run"),
+      canonicalPrefix: join(h, "opt-wechat"),
+      run,
+    });
+    await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
+
+    const starting = runtime.start();
+    await rs.waitFor(() => expect(reachedSession).toBe(true));
+    const release = runtime.holdCapture();
+    openSession();
+    await starting;
+
+    expect(scripted.calls.some((call) => call.includes(CLIENT_LAUNCH))).toBe(false);
+    await release();
+  });
+
+  it("forgets the last exit status when a key capture ends", async () => {
+    // The capture kills the wrapped client, which records a crash, and then
+    // runs its own client that nothing records. The record no longer describes
+    // the running client.
+    const runtime = new WechatUserRuntime({ home: await tempHome() });
+    const release = runtime.holdCapture();
+    await writeFile(await ensureFile(runtime.exitFile), "143");
+
+    await release();
+
+    expect(await runtime.lastExit()).toBeNull();
+  });
+
   it("reports no exit status when none was recorded", async () => {
     expect(await new WechatUserRuntime({ home: await tempHome() }).lastExit()).toBeNull();
   });
