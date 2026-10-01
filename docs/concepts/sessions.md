@@ -41,7 +41,7 @@ A session remembers the concrete model that produced its history — the **sessi
 
 A turn is one request to an agent plus the agent work that follows until the agent answers or stops. The request comes from a user, from a system continuation such as a deferred task, an approval resumption, a timer, or a backend action, or from a provider-started wake. Each turn has a turn id, and usage reporting counts and aggregates turns.
 
-*Deprecated alias:* **Agent run** — surfaces that still say "agent run" or "run" for this unit mean a turn.
+*Deprecated alias:* **Agent run** — surfaces that still say "agent run" for this unit mean a turn. On session and usage surfaces, a bare "run" also means a turn.
 
 **Contracts:**
 
@@ -79,7 +79,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 **Not to be confused with:**
 
 - **[Message](messaging.md#message)** — a message is a conversation entry that a person or an agent sends. An event is an item of one turn's stream.
-- **[Block](#block)** — every block reaches consumers as a block event, but results, errors, plan updates, and subagent reports are events that are not blocks.
+- **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which reach them as subagent start and result events. Results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
 - **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
 - **Segment** — a display group of a turn's trace events. It groups events and is not one itself.
@@ -90,7 +90,7 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 **Contracts:**
 
-- A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id.
+- A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. For a subagent call, the subagent start and result events that stand in for those two blocks carry the same tool-use id.
 - A consumer places a text or thinking block by its order in the turn's stream.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
