@@ -1,0 +1,141 @@
+# Prototype trace, 2026-10-01, devbox (NixOS 25.11, x86_64), Codex 0.156.1 via Rome's AppServerClient.
+# Gateway = local stub running amantru/rome-cloud#108 validateRequest @4aa7c23; Azure upstream and ledger stubbed.
+# ChatGPT login on the devbox is stale (401 on workspace routing discovery), so own-login turns fail.
+# Rome logger JSON lines and Codex reconnect retries omitted.
+   0.00s gateway.listening {"baseUrl":"http://127.0.0.1:33039/v1"}
+   0.39s codex.initialized {"userAgent":"rome/0.156.1 (NixOS 25.11.0; x86_64) dumb (rome; 0)","envKeys":["HOME","PATH","SHELL","TMPDIR","LANG","TERM"]}
+   1.26s codex.accountReadFailed {"error":"workspace routing discovery unauthorized (401)"}
+
+=== S1 credits thread with Rome's current config (Codex defaults for web search)
+   1.57s codex.threadStarted {"label":"credits-default-config","thread":"cdfa6e","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+   1.57s turn.start {"label":"credits-default-config","thread":"cdfa6e","text":"Reply with exactly: BRAVO"}
+   2.10s gateway.request {"n":1,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+   2.10s gateway.reply {"n":1,"status":200,"output":"BRAVO"}
+   2.11s codex.agentMessage {"thread":"cdfa6e","text":"BRAVO"}
+   2.11s codex.turnCompleted {"thread":"cdfa6e","status":"completed","error":null}
+   2.11s turn.end {"label":"credits-default-config","thread":"cdfa6e","status":"completed"}
+
+=== S2 concurrent: ChatGPT thread A and credits thread B in one app-server
+   2.31s codex.threadStarted {"label":"A own-login","thread":"a88e2b","modelProvider":"openai","model":"gpt-5.6-terra"}
+   2.54s codex.threadStarted {"label":"B credits","thread":"5d86e8","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+   2.54s turn.start {"label":"A own-login","thread":"a88e2b","text":"Reply with exactly: ALPHA"}
+   2.54s turn.start {"label":"B credits","thread":"5d86e8","text":"Reply with exactly: BRAVO"}
+   3.22s gateway.request {"n":2,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+   3.22s gateway.reply {"n":2,"status":200,"output":"BRAVO"}
+   3.22s codex.agentMessage {"thread":"5d86e8","text":"BRAVO"}
+   3.23s codex.turnCompleted {"thread":"5d86e8","status":"completed","error":null}
+   3.23s turn.end {"label":"B credits","thread":"5d86e8","status":"completed"}
+  19.26s codex.error {"thread":"a88e2b","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  19.27s codex.turnCompleted {"thread":"a88e2b","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  19.27s turn.end {"label":"A own-login","thread":"a88e2b","status":"failed"}
+  19.27s check.S2 {"gatewayRequestsDuringS2":1,"aMessages":[],"bMessages":["BRAVO"]}
+
+=== S3 move credits thread B to the ChatGPT login
+  19.50s codex.threadResumed {"label":"B -> own-login (config only)","thread":"5d86e8","requestedModelProvider":"(config only: none)","modelProvider":"openai"}
+  19.68s codex.threadResumed {"label":"B -> own-login (explicit modelProvider)","thread":"5d86e8","requestedModelProvider":"openai","modelProvider":"openai"}
+  19.68s turn.start {"label":"B on own-login","thread":"5d86e8","text":"Reply with exactly: CHARLIE"}
+  36.27s codex.error {"thread":"5d86e8","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  36.28s codex.turnCompleted {"thread":"5d86e8","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  36.28s turn.end {"label":"B on own-login","thread":"5d86e8","status":"failed"}
+  36.28s check.S3 {"gatewayRequestsDuringS3":0,"bMessages":["BRAVO"]}
+
+=== S4 move ChatGPT thread A to Rome credits
+  36.28s codex.threadResumed {"label":"A -> credits (config only)","thread":"a88e2b","requestedModelProvider":"(config only: rome_credits)","modelProvider":"openai"}
+  36.29s codex.threadResumed {"label":"A -> credits (explicit modelProvider)","thread":"a88e2b","requestedModelProvider":"rome_credits","modelProvider":"openai"}
+  36.29s turn.start {"label":"A on credits","thread":"a88e2b","text":"Reply with exactly: DELTA"}
+  44.43s codex.error {"thread":"a88e2b","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  44.43s codex.turnCompleted {"thread":"a88e2b","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  44.43s turn.end {"label":"A on credits","thread":"a88e2b","status":"failed"}
+  44.44s check.S4.history {"turns":[{"status":"failed","items":["userMessage"]},{"status":"failed","items":["userMessage"]}]}
+
+=== S4b move credits thread B back to Rome credits after its own-login turn
+  44.44s codex.threadResumed {"label":"B -> credits","thread":"5d86e8","requestedModelProvider":"rome_credits","modelProvider":"openai"}
+  44.44s turn.start {"label":"B back on credits","thread":"5d86e8","text":"Reply with exactly: GOLF"}
+  53.11s codex.error {"thread":"5d86e8","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  53.11s codex.turnCompleted {"thread":"5d86e8","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  53.11s turn.end {"label":"B back on credits","thread":"5d86e8","status":"failed"}
+
+=== S5 credits refused (402) before the first model step
+  53.38s codex.threadStarted {"label":"C credits","thread":"a98545","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+  53.38s turn.start {"label":"C refused","thread":"a98545","text":"Reply with exactly: ECHO"}
+  53.94s gateway.request {"n":3,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+  53.94s gateway.reply {"n":3,"status":402,"code":"insufficient_credits"}
+  53.94s codex.error {"thread":"a98545","willRetry":false,"error":{"message":"unexpected status 402 Payment Required: There are not enough available credits to reserve this request., url: http://127.0.0.1:33039/v1/responses","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  53.94s codex.turnCompleted {"thread":"a98545","status":"failed","error":{"message":"unexpected status 402 Payment Required: There are not enough available credits to reserve this request., url: http://127.0.0.1:33039/v1/responses","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  53.94s turn.end {"label":"C refused","thread":"a98545","status":"failed"}
+
+=== S6 credits run out mid-turn: tool call, then 402 on the next model step
+  54.13s codex.threadStarted {"label":"D credits","thread":"fac350","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+  54.13s turn.start {"label":"D mid-turn","thread":"fac350","text":"Call rome_echo with text 'step one', then summarize."}
+  54.71s gateway.request {"n":4,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+  54.71s gateway.reply {"n":4,"status":200,"output":"function_call rome_echo"}
+  54.71s codex.dynamicToolCall {"params":{"threadId":"01a0f61d-6280-7190-9407-40e67efac350","turnId":"01a0f61d-62d4-7513-aee7-ffe8e82c686a","callId":"call_4","namespace":null,"tool":"rome_echo","arguments":{"text":"step one"}}}
+  54.71s codex.item {"thread":"fac350","type":"dynamicToolCall","status":"completed"}
+  54.88s gateway.request {"n":5,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6,"function_call":1,"function_call_output":1},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+  54.88s gateway.reply {"n":5,"status":402,"code":"insufficient_credits"}
+  54.88s codex.error {"thread":"fac350","willRetry":false,"error":{"message":"unexpected status 402 Payment Required: There are not enough available credits to reserve this request., url: http://127.0.0.1:33039/v1/responses","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  54.88s codex.turnCompleted {"thread":"fac350","status":"failed","error":{"message":"unexpected status 402 Payment Required: There are not enough available credits to reserve this request., url: http://127.0.0.1:33039/v1/responses","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  54.88s turn.end {"label":"D mid-turn","thread":"fac350","status":"failed"}
+  54.88s check.S6.history {"turns":[{"status":"failed","items":["userMessage"]}]}
+
+=== S7 gateway concurrency limit (429 with retry-after: 60)
+  55.07s codex.threadStarted {"label":"E credits","thread":"b4a792","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+  55.07s turn.start {"label":"E 429","thread":"b4a792","text":"Reply with exactly: FOXTROT"}
+  55.70s gateway.request {"n":6,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+  55.70s gateway.reply {"n":6,"status":429,"code":"concurrency_limit"}
+  55.70s codex.error {"thread":"b4a792","willRetry":false,"error":{"message":"exceeded retry limit, last status: 429 Too Many Requests","codexErrorInfo":{"responseTooManyFailedAttempts":{"httpStatusCode":429}},"additionalDetails":null,"misalignment":null}}
+  55.71s codex.turnCompleted {"thread":"b4a792","status":"failed","error":{"message":"exceeded retry limit, last status: 429 Too Many Requests","codexErrorInfo":{"responseTooManyFailedAttempts":{"httpStatusCode":429}},"additionalDetails":null,"misalignment":null}}
+  55.71s turn.end {"label":"E 429","thread":"b4a792","status":"failed"}
+  55.71s check.S7.history {"turns":[{"status":"failed","items":["userMessage"]}]}
+
+=== S8 restart app-server with the credits provider defined process-wide
+  56.09s codex.initialized {"userAgent":"rome/0.156.1 (NixOS 25.11.0; x86_64) dumb (rome; 0)","envKeys":["HOME","PATH","SHELL","TMPDIR","LANG","TERM","ROME_CREDITS_TOKEN"]}
+  56.68s codex.threadStarted {"label":"P credits (process-wide provider)","thread":"154d71","modelProvider":"rome_credits","model":"gpt-5.6-terra"}
+  56.68s turn.start {"label":"P on credits","thread":"154d71","text":"Reply with exactly: HOTEL"}
+  57.29s gateway.request {"n":7,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":6},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+  57.29s gateway.reply {"n":7,"status":200,"output":"HOTEL"}
+  57.29s codex.agentMessage {"thread":"154d71","text":"HOTEL"}
+  57.30s codex.turnCompleted {"thread":"154d71","status":"completed","error":null}
+  57.30s turn.end {"label":"P on credits","thread":"154d71","status":"completed"}
+  57.46s codex.threadResumed {"label":"P -> own-login","thread":"154d71","requestedModelProvider":"openai","modelProvider":"openai"}
+  57.46s turn.start {"label":"P on own-login","thread":"154d71","text":"Reply with exactly: INDIA"}
+  73.21s codex.error {"thread":"154d71","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  73.21s codex.turnCompleted {"thread":"154d71","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  73.21s turn.end {"label":"P on own-login","thread":"154d71","status":"failed"}
+  73.21s check.S8.ownLogin {"gatewayRequests":0}
+  73.22s codex.threadResumed {"label":"P -> credits","thread":"154d71","requestedModelProvider":"rome_credits","modelProvider":"openai"}
+  73.22s turn.start {"label":"P back on credits","thread":"154d71","text":"Reply with exactly: JULIET"}
+  81.60s codex.error {"thread":"154d71","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  81.61s codex.turnCompleted {"thread":"154d71","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  81.61s turn.end {"label":"P back on credits","thread":"154d71","status":"failed"}
+  81.61s check.S8.P.history {"turns":[{"status":"failed","items":["userMessage"]},{"status":"failed","items":["userMessage"]},{"status":"completed","items":["userMessage","agentMessage"]}]}
+  81.83s codex.threadStarted {"label":"Q own-login","thread":"c2ada2","modelProvider":"openai","model":"gpt-5.6-terra"}
+  81.83s turn.start {"label":"Q on own-login","thread":"c2ada2","text":"Reply with exactly: KILO"}
+  98.56s codex.error {"thread":"c2ada2","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  98.57s codex.turnCompleted {"thread":"c2ada2","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+  98.57s turn.end {"label":"Q on own-login","thread":"c2ada2","status":"failed"}
+  98.58s codex.threadResumed {"label":"Q -> credits","thread":"c2ada2","requestedModelProvider":"rome_credits","modelProvider":"openai"}
+  98.58s turn.start {"label":"Q on credits","thread":"c2ada2","text":"Reply with exactly: LIMA"}
+ 106.94s codex.error {"thread":"c2ada2","willRetry":false,"error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+ 106.94s codex.turnCompleted {"thread":"c2ada2","status":"failed","error":{"message":"workspace routing discovery unauthorized (401)","codexErrorInfo":"other","additionalDetails":null,"misalignment":null}}
+ 106.94s turn.end {"label":"Q on credits","thread":"c2ada2","status":"failed"}
+
+=== S9 a second app-server whose default provider is Rome credits resumes P and Q
+ 107.32s codex.initialized {"userAgent":"rome/0.156.1 (NixOS 25.11.0; x86_64) dumb (rome; 0)","envKeys":["HOME","PATH","SHELL","TMPDIR","LANG","TERM","ROME_CREDITS_TOKEN"]}
+ 107.68s codex.threadResumed {"label":"P -> credits process","thread":"154d71","requestedModelProvider":"(config only: none)","modelProvider":"rome_credits"}
+ 107.68s turn.start {"label":"P in credits process","thread":"154d71","text":"Reply with exactly: MIKE"}
+ 108.19s gateway.request {"n":8,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":10},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+ 108.19s gateway.reply {"n":8,"status":200,"output":"MIKE"}
+ 108.19s codex.agentMessage {"thread":"154d71","text":"MIKE"}
+ 108.19s codex.turnCompleted {"thread":"154d71","status":"completed","error":null}
+ 108.19s turn.end {"label":"P in credits process","thread":"154d71","status":"completed"}
+ 108.25s codex.threadResumed {"label":"Q -> credits process","thread":"c2ada2","requestedModelProvider":"(config only: none)","modelProvider":"rome_credits"}
+ 108.25s turn.start {"label":"Q in credits process","thread":"c2ada2","text":"Reply with exactly: NOVEMBER"}
+ 108.61s gateway.request {"n":9,"method":"POST","path":"/v1/responses","authorization":"Bearer <instance token>","chatgptAccountHeader":false,"contentEncoding":null,"model":"gpt-5.6-terra","stream":true,"store":false,"include":["reasoning.encrypted_content"],"previous_response_id":null,"service_tier":null,"max_output_tokens":null,"tools":null,"input":{"types":{"additional_tools":1,"message":9},"encryptedReasoning":0,"additionalTools":[{"keys":["type","id","role","tools"],"tools":["namespace:functions[custom:exec,function:wait,function:request_user_input]","namespace:collaboration[function:followup_task,function:interrupt_agent,function:list_agents,function:send_message,function:spawn_agent,function:wait_agent]"]}]},"admission":"accepted by #108 validateRequest"}
+ 108.61s gateway.reply {"n":9,"status":200,"output":"NOVEMBER"}
+ 108.61s codex.agentMessage {"thread":"c2ada2","text":"NOVEMBER"}
+ 108.61s codex.turnCompleted {"thread":"c2ada2","status":"completed","error":null}
+ 108.61s turn.end {"label":"Q in credits process","thread":"c2ada2","status":"completed"}
+ 108.61s check.S9.Q.history {"turns":[{"status":"completed","items":["userMessage","agentMessage"]},{"status":"failed","items":["userMessage"]},{"status":"failed","items":["userMessage"]}]}
+ 108.61s done {"gatewayRequests":9}
+ 
