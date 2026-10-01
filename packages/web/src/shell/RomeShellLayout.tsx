@@ -143,7 +143,7 @@ export function RomeShellLayout() {
   }, [hideSidebar, navigate, toggleCollapsed]);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
       <UpgradeCountdownBanner />
       <div className="relative flex flex-1">
         {sidebarOpen && !hideSidebar ? (

@@ -10,7 +10,9 @@ export default function FreePage() {
     // the sidebar but keeps the layout, so this is nested either way.
     <div
       className={`flex min-h-0 flex-col overflow-hidden ${
-        hideSidebar ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh"
+        hideSidebar
+          ? "h-[var(--rome-viewport-height)] pt-safe"
+          : "h-[var(--rome-mobile-content-height)] md:h-dvh"
       }`}
     >
       <FreeGrid />
