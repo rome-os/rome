@@ -1,4 +1,5 @@
 import { Navigate } from "react-router-dom";
+import { useDesktop } from "@/hooks/use-desktop";
 import SettingsTabPage from "./SettingsTabPage";
 
 /**
@@ -6,7 +7,5 @@ import SettingsTabPage from "./SettingsTabPage";
  * phone it is the list of sections, and each section opens as its own screen.
  */
 export default function SettingsPage() {
-  const phone =
-    typeof window.matchMedia === "function" && window.matchMedia("(width < 48rem)").matches;
-  return phone ? <SettingsTabPage /> : <Navigate to="/settings/appearance" replace />;
+  return useDesktop() ? <Navigate to="/settings/appearance" replace /> : <SettingsTabPage />;
 }

@@ -903,7 +903,7 @@ export default function ActivityPage() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-            className="h-11 min-w-0 flex-1 rounded-10 border border-border-strong bg-surface px-3 text-foreground"
+            className="h-11 min-w-0 flex-1 rounded-10 border border-border-strong bg-surface px-3 text-foreground outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             {FILTER_VALUES.map((value) => (
               <option key={value} value={value}>
