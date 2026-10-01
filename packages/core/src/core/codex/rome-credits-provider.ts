@@ -31,7 +31,9 @@ function tomlString(value: string): string {
  * has a Rome Cloud origin.
  *
  * Codex keeps `*TOKEN*` variables in agent shell commands by default, so the
- * instance credential is excluded explicitly: only the provider may read it.
+ * instance credential is excluded from the shell env explicitly. This is not
+ * a security boundary: a full-access agent command runs as the same user and
+ * can still read the app-server's environ, as it can read Rome's settings DB.
  */
 export function codexAppServerConfigArgs(romeCloudOrigin: string | null): string[] {
   const args = [
