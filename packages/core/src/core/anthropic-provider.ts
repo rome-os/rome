@@ -53,6 +53,7 @@ import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { SdkTurnRouter } from "./sdk-turn-router.js";
+import { BackgroundTaskTracker } from "./background-tasks.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -508,6 +509,8 @@ export class AnthropicProvider implements ModelProvider {
     const { sessionId } = params;
     // Decides which Rome turn, if any, gets each message of the SDK stream.
     const router = new SdkTurnRouter();
+    // The session's background tasks, followed between turns as well.
+    const backgroundTasks = new BackgroundTaskTracker();
     // A cancelled first turn can leave a user-only transcript that is not
     // resumable. Its id is still reserved by the CLI, so don't reuse it.
     const sdkSessionId =
@@ -597,6 +600,7 @@ export class AnthropicProvider implements ModelProvider {
       let partialText = "";
       try {
         for await (const message of q) {
+          backgroundTasks.observe(message);
           const route = router.onMessage(message, running || closed);
           if (route.dropped) {
             log.warn("dropping SDK reply to a send no Rome turn is waiting for", {
@@ -885,6 +889,7 @@ export class AnthropicProvider implements ModelProvider {
         throw err;
       } finally {
         closed = true;
+        backgroundTasks.reset();
       }
     })();
 
@@ -1005,6 +1010,9 @@ export class AnthropicProvider implements ModelProvider {
       },
       releaseInput(inputId: string): void {
         router.releaseInput(inputId);
+      },
+      onBackgroundTasks(listener) {
+        return backgroundTasks.subscribe(listener);
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });

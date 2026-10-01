@@ -249,6 +249,31 @@ export interface ModelSessionFork {
   open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
 
+/** A background task a provider session is running (a backgrounded shell or subagent). */
+export interface ModelBackgroundTask {
+  readonly id: string;
+  /** The provider's task type, e.g. Claude's `local_bash` or `local_agent`. */
+  readonly type: string;
+  readonly description: string;
+  /** When this session first saw the task running. */
+  readonly seenAt: number;
+}
+
+/** How a task ended, as the provider reported it. */
+export interface ModelBackgroundTaskEnd {
+  readonly id: string;
+  readonly status: "completed" | "failed" | "stopped";
+  /** `worker_restart`: the provider process restarted and found the task orphaned. */
+  readonly reason?: "worker_restart";
+  readonly summary: string;
+}
+
+export interface ModelBackgroundTaskListener {
+  /** The full set of running tasks, after every change. Replaces the previous set. */
+  onChange?(tasks: readonly ModelBackgroundTask[]): void;
+  onEnd?(end: ModelBackgroundTaskEnd): void;
+}
+
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
@@ -292,6 +317,16 @@ export interface ModelSession {
    * a result) stops waiting for one.
    */
   releaseInput?(inputId: string): void;
+
+  /**
+   * Follow the session's background tasks, including between turns. Returns
+   * an unsubscribe function. Providers without background tasks omit it. The
+   * set empties when the session closes, since its tasks end with it.
+   * A new listener first hears the current set, when it is not empty, then
+   * every change. Changes arrive as `events` is read: while its reader waits,
+   * task events wait in the stream behind the message it is on.
+   */
+  onBackgroundTasks?(listener: ModelBackgroundTaskListener): () => void;
 
   /**
    * Close the session. The events iterable terminates. Idempotent. After

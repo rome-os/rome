@@ -44,6 +44,7 @@ rs.mock("../paths.js", () => ({
 import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
+  ModelBackgroundTaskListener,
   ModelProvider,
   ModelSession,
   ModelSessionForkParams,
@@ -602,6 +603,36 @@ describe("AgentRunner", () => {
         error: "Fork checkpoint belongs to a different provider thread",
       });
       expect(onFork).not.toHaveBeenCalled();
+    });
+
+    it("follows the model session's background tasks between turns", async () => {
+      const provider = new MockModelProvider([[{ type: "result", content: "Started" }]]);
+      let listener: ModelBackgroundTaskListener | undefined;
+      const baseOpen = provider.openSession.bind(provider);
+      provider.openSession = async (params: ModelSessionParams) => ({
+        ...(await baseOpen(params)),
+        onBackgroundTasks: (next: ModelBackgroundTaskListener) => {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        },
+      });
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const key = { agentName: "test-main", channelThreadKey: "webchat:background-tasks" };
+      try {
+        await collectMessages(new AgentRunner(manager).run({ ...key, prompt: "Start a task" }));
+        const session = manager.peek(key);
+        expect(session?.backgroundTasks).toEqual([]);
+        const task = { id: "b1", type: "local_bash", description: "sleep 900", seenAt: 1 };
+        listener?.onChange?.([task]);
+        expect(session?.backgroundTasks).toEqual([task]);
+      } finally {
+        await manager.shutdown();
+      }
     });
 
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
