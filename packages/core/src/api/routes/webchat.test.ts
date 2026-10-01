@@ -2025,6 +2025,33 @@ describe("Webchat API", () => {
       ]);
     });
 
+    it("gives the answer the final block's id when a text block completes after it", async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "b-0" };
+            yield { type: "text", content: "(Source: forecast.)", blockId: "b-1" };
+            yield { type: "result", content: "It's sunny." };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [
+            {
+              type: "text",
+              content: "It's sunny.",
+              turnPhase: "final",
+              blockId: "b-0",
+              blockIx: 0,
+            },
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+
     it("keeps the block id of a text block cut off by the end of its turn", async () => {
       const { sendMessageRun } = await runScriptedStream(
         () =>

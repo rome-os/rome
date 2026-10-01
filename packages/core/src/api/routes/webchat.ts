@@ -3278,6 +3278,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
               | undefined;
             let finalTextBlockIx: number | undefined;
+            let finalTextBlockId: string | undefined;
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
@@ -3351,7 +3352,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   content: msg.content,
                   turnPhase: msg.turnPhase,
                 };
-                if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
+                if (msg.turnPhase === "final") {
+                  finalTextBlockIx = blockIx;
+                  finalTextBlockId = msg.blockId;
+                }
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
                 inFlightTextBlockId = undefined;
@@ -3373,6 +3377,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 };
                 inFlightTextBlockId = undefined;
                 finalTextBlockIx = blockIx;
+                finalTextBlockId = blockId;
                 stream.traceEvents.push(partial);
                 emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
@@ -3599,11 +3604,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   : undefined;
               const resultBlockIx =
                 finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
-              // The completed block the answer reuses, when there is one.
+              // The id of the block whose index the answer takes, when it has one.
               const resultBlockId =
-                lastCompletedText && resultBlockIx === lastCompletedText.blockIx
-                  ? lastCompletedText.blockId
-                  : undefined;
+                finalTextBlockIx !== undefined
+                  ? finalTextBlockId
+                  : lastCompletedText && resultBlockIx === lastCompletedText.blockIx
+                    ? lastCompletedText.blockId
+                    : undefined;
               await deps.actionEngine.run(
                 "send_message",
                 {
