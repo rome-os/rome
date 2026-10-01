@@ -14,9 +14,9 @@ type Env = NodeJS.ProcessEnv;
 
 /**
  * Legacy `WECHAT_USER_DISPLAY`, which overrides the `wechat` desktop's display:
- * the one rule the table and startup validation share. Null while WeChat is
- * disabled or the variable is unset. Like the entrypoint, a value that is not
- * `:<number>`, or that names the shared display, is an error.
+ * the one rule the table and boot validation share, and the only place the
+ * rule lives. Null while WeChat is disabled or the variable is unset. A value
+ * that is not `:<number>`, or that names the shared display, is an error.
  */
 export function wechatUserDisplay(env: Env = process.env): string | null {
   const display = env.WECHAT_USER_DISPLAY;

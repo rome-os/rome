@@ -441,7 +441,7 @@ describe("WechatUserRuntime display", () => {
     expect(runtime.display).toBe(":100");
   });
 
-  it("gives the script the log directory the entrypoint's run uses", async () => {
+  it("gives the script an operator's ROME_DESKTOP_LOG_DIR", async () => {
     wechatEnabled();
     rs.stubEnv("ROME_DESKTOP_LOG_DIR", "/var/log/rome");
     const { run, calls } = scriptedRun({ pgrep: () => ({ code: 1, stdout: "", stderr: "" }) });

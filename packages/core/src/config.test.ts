@@ -92,7 +92,7 @@ describe("loadConfig()", () => {
     rs.stubEnv("ROME_WECHAT_VNC_PORT", "abc");
     expect(() => loadConfig()).not.toThrow();
   });
-  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled, like the entrypoint", () => {
+  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled", () => {
     rs.stubEnv("WECHAT_USER_ENABLED", "false");
     rs.stubEnv("WECHAT_USER_DISPLAY", "not-a-display");
     expect(() => loadConfig()).not.toThrow();

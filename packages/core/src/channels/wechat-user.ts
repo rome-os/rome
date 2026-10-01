@@ -79,8 +79,10 @@ const INSTALL_TIMEOUT_MS = 20 * 60_000;
 /** How long the start script waits for another run of the same desktop. */
 const DESKTOP_LOCK_WAIT_S = 20;
 /** The start script's worst case: the lock wait, then up to 30 s for each of
- *  its two ports and 5 s for Openbox. The timeout leaves a margin past that, so
- *  a busy lock fails with the script's own message, not a kill. */
+ *  its two ports (wait_for_tcp_port) and 5 s for Openbox, in
+ *  scripts/docker/rome-start-desktop.sh. Change those waits there and here
+ *  together. The timeout leaves a margin past that, so a busy lock fails with
+ *  the script's own message, not a kill. */
 const DESKTOP_START_TIMEOUT_MS = (DESKTOP_LOCK_WAIT_S + 30 + 30 + 5 + 15) * 1000;
 
 function sharedDisplay(): string {
