@@ -1,0 +1,175 @@
+# Single-process prototype trace, 2026-10-01, devbox (NixOS 25.11, x86_64), Codex 0.156.1 via Rome's AppServerClient.
+# Throwaway HOME (mkdtemp), Codex API-key login with a fake key; built-in openai provider pointed at the stub's /own path,
+# rome_credits at /credits running #108 validateRequest @4aa7c23. Rome logger JSON lines and Codex websocket reconnect lines omitted.
+# C4a and C6a are expected to FAIL: they reproduce the two traps the design avoids.
+   0.01s setup {"home":"<mkdtemp>","origin":"http://127.0.0.1:43317"}
+   0.01s config {"thread_unload_delay_secs":"default (60)"}
+   0.17s process.started {"label":"process 1 (default unload delay)","userAgent":"rome/0.156.1 (NixOS 25.11.0; x86_64) dumb (rome; 0)"}
+   0.17s codex.login {"result":{"type":"apiKey"}}
+
+=== C1 start a conversation on credits in the shared process
+   0.18s thread.started {"label":"X","thread":"aaabdd","requested":"rome_credits","modelProvider":"rome_credits"}
+   0.18s turn.start {"label":"X","thread":"aaabdd","text":"Reply: one"}
+   0.20s codex.status {"thread":"aaabdd","status":{"type":"active","activeFlags":[]}}
+   0.23s stub.request {"payer":"credits","n":1,"authorization":"Bearer <instance token>","inputMessages":6,"admission":"accepted by #108"}
+   0.23s stub.reply {"payer":"credits","n":1,"status":200,"text":"CREDITS-OK"}
+   0.24s codex.agentMessage {"thread":"aaabdd","text":"CREDITS-OK"}
+   0.24s codex.status {"thread":"aaabdd","status":{"type":"idle"}}
+   0.24s turn.end {"label":"X","thread":"aaabdd","status":"completed","paidBy":"credits"}
+   0.24s CHECK.pass {"check":"C1 credits on start","detail":"thread/start modelProvider=rome_credits"}
+
+=== C2 an own-login and a credits conversation run at the same time
+   0.27s thread.started {"label":"Y","thread":"af441f","requested":null,"modelProvider":"openai"}
+   0.27s turn.start {"label":"X","thread":"aaabdd","text":"Reply: two"}
+   0.27s turn.start {"label":"Y","thread":"af441f","text":"Reply: two"}
+   0.27s codex.status {"thread":"af441f","status":{"type":"active","activeFlags":[]}}
+   0.28s codex.status {"thread":"aaabdd","status":{"type":"active","activeFlags":[]}}
+   0.31s stub.request {"payer":"credits","n":2,"authorization":"Bearer <instance token>","inputMessages":8,"admission":"accepted by #108"}
+   0.31s stub.reply {"payer":"credits","n":2,"status":200,"text":"CREDITS-OK"}
+   0.31s codex.agentMessage {"thread":"aaabdd","text":"CREDITS-OK"}
+   0.32s codex.status {"thread":"aaabdd","status":{"type":"idle"}}
+   0.32s turn.end {"label":"X","thread":"aaabdd","status":"completed","paidBy":"credits"}
+   6.53s stub.request {"payer":"own","n":1,"authorization":"Bearer <own API key>","inputMessages":6}
+   6.53s stub.reply {"payer":"own","n":1,"status":200,"text":"OWN-OK"}
+   6.54s codex.agentMessage {"thread":"af441f","text":"OWN-OK"}
+   6.54s codex.status {"thread":"af441f","status":{"type":"idle"}}
+   6.54s turn.end {"label":"Y","thread":"af441f","status":"completed","paidBy":"own"}
+   6.54s CHECK.pass {"check":"C2 concurrent payers","detail":"X=credits Y=own"}
+
+=== C3 credits -> own login after the guardian connects ChatGPT (spec D10)
+   6.54s thread.unsubscribed {"thread":"aaabdd","result":{"status":"unsubscribed"}}
+   6.54s codex.status {"thread":"aaabdd","status":{"type":"notLoaded"}}
+   6.57s codex.status {"thread":"aaabdd","status":{"type":"idle"}}
+   6.57s thread.resumed {"label":"X -> own","thread":"aaabdd","requested":"openai","modelProvider":"openai"}
+   6.57s turn.start {"label":"X","thread":"aaabdd","text":"Reply: three"}
+   6.58s codex.status {"thread":"aaabdd","status":{"type":"active","activeFlags":[]}}
+  13.10s stub.request {"payer":"own","n":2,"authorization":"Bearer <own API key>","inputMessages":10}
+  13.10s stub.reply {"payer":"own","n":2,"status":200,"text":"OWN-OK"}
+  13.10s codex.agentMessage {"thread":"aaabdd","text":"OWN-OK"}
+  13.10s codex.status {"thread":"aaabdd","status":{"type":"idle"}}
+  13.10s turn.end {"label":"X","thread":"aaabdd","status":"completed","paidBy":"own"}
+  13.10s CHECK.pass {"check":"C3 switch credits -> own on an idle thread","detail":"resumed=openai paid=own"}
+
+=== C4 own login hits its limit mid-conversation, then credits pick up (spec D3)
+  13.10s turn.start {"label":"Y","thread":"af441f","text":"Reply: four"}
+  13.11s codex.status {"thread":"af441f","status":{"type":"active","activeFlags":[]}}
+  13.13s stub.request {"payer":"own","n":3,"authorization":"Bearer <own API key>","inputMessages":8}
+  13.13s stub.reply {"payer":"own","n":3,"status":429}
+  13.13s codex.status {"thread":"af441f","status":{"type":"systemError"}}
+  13.13s codex.error {"thread":"af441f","willRetry":false,"message":"Quota exceeded. Check your plan and billing details."}
+  13.13s turn.end {"label":"Y","thread":"af441f","status":"failed","paidBy":"own"}
+  13.13s thread.unsubscribed {"thread":"af441f","result":{"status":"unsubscribed"}}
+  13.13s thread.resumed {"label":"Y -> credits right after the failure","thread":"af441f","requested":"rome_credits","modelProvider":"openai"}
+  13.13s CHECK.FAIL {"check":"C4a immediate switch after a failed turn","detail":"failed turn paid=own; resumed=openai (Codex keeps a loaded thread in SystemError and ignores resume overrides)"}
+  13.13s thread.unsubscribed {"thread":"af441f","result":{"status":"unsubscribed"}}
+  73.14s codex.status {"thread":"af441f","status":{"type":"notLoaded"}}
+  73.14s codex.closed {"thread":"af441f"}
+  78.20s codex.status {"thread":"af441f","status":{"type":"idle"}}
+  78.20s thread.resumed {"label":"Y -> credits after the unload delay","thread":"af441f","requested":"rome_credits","modelProvider":"rome_credits"}
+  78.20s turn.start {"label":"Y","thread":"af441f","text":"Reply: four again"}
+  78.22s codex.status {"thread":"af441f","status":{"type":"active","activeFlags":[]}}
+  78.28s stub.request {"payer":"credits","n":3,"authorization":"Bearer <instance token>","inputMessages":9,"admission":"accepted by #108"}
+  78.28s stub.reply {"payer":"credits","n":3,"status":200,"text":"CREDITS-OK"}
+  78.28s codex.agentMessage {"thread":"af441f","text":"CREDITS-OK"}
+  78.28s codex.status {"thread":"af441f","status":{"type":"idle"}}
+  78.28s turn.end {"label":"Y","thread":"af441f","status":"completed","paidBy":"credits"}
+  78.28s CHECK.pass {"check":"C4b switch after the thread unloads","detail":"waited ~65s, paid=credits"}
+
+=== C5 a credits conversation before a Rome restart
+  78.31s thread.started {"label":"Z","thread":"89d289","requested":"rome_credits","modelProvider":"rome_credits"}
+  78.31s turn.start {"label":"Z","thread":"89d289","text":"Reply: five"}
+  78.32s codex.status {"thread":"89d289","status":{"type":"active","activeFlags":[]}}
+  78.39s stub.request {"payer":"credits","n":4,"authorization":"Bearer <instance token>","inputMessages":6,"admission":"accepted by #108"}
+  78.39s stub.reply {"payer":"credits","n":4,"status":200,"text":"CREDITS-OK"}
+  78.39s codex.agentMessage {"thread":"89d289","text":"CREDITS-OK"}
+  78.40s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  78.40s turn.end {"label":"Z","thread":"89d289","status":"completed","paidBy":"credits"}
+
+=== C6 after restart: Rome's current resume (no modelProvider) vs explicit modelProvider
+  78.40s config {"thread_unload_delay_secs":0}
+  78.56s process.started {"label":"process 2 (thread_unload_delay_secs = 0)","userAgent":"rome/0.156.1 (NixOS 25.11.0; x86_64) dumb (rome; 0)"}
+  78.60s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  78.61s thread.resumed {"label":"Z as Rome resumes today","thread":"89d289","requested":null,"modelProvider":"openai"}
+  78.61s CHECK.FAIL {"check":"C6a restart without explicit provider","detail":"resumed=openai"}
+  78.61s thread.unsubscribed {"thread":"89d289","result":{"status":"unsubscribed"}}
+  78.61s thread.resumeRetry {"label":"Z with explicit provider","thread":"89d289","attempt":1}
+  78.61s codex.status {"thread":"89d289","status":{"type":"notLoaded"}}
+  78.61s codex.closed {"thread":"89d289"}
+  78.75s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  78.75s thread.resumed {"label":"Z with explicit provider","thread":"89d289","requested":"rome_credits","modelProvider":"rome_credits"}
+  78.76s turn.start {"label":"Z","thread":"89d289","text":"Reply: six"}
+  78.77s codex.status {"thread":"89d289","status":{"type":"active","activeFlags":[]}}
+  78.83s stub.request {"payer":"credits","n":5,"authorization":"Bearer <instance token>","inputMessages":8,"admission":"accepted by #108"}
+  78.83s stub.reply {"payer":"credits","n":5,"status":200,"text":"CREDITS-OK"}
+  78.84s codex.agentMessage {"thread":"89d289","text":"CREDITS-OK"}
+  78.84s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  78.84s turn.end {"label":"Z","thread":"89d289","status":"completed","paidBy":"credits"}
+  78.84s CHECK.pass {"check":"C6b restart with explicit provider","detail":"resumed=rome_credits paid=credits"}
+
+=== C7 with thread_unload_delay_secs = 0: switch right after an own-login failure
+  78.87s thread.started {"label":"W","thread":"706358","requested":null,"modelProvider":"openai"}
+  78.87s turn.start {"label":"W","thread":"706358","text":"Reply: seven"}
+  78.88s codex.status {"thread":"706358","status":{"type":"active","activeFlags":[]}}
+  85.57s stub.request {"payer":"own","n":4,"authorization":"Bearer <own API key>","inputMessages":6}
+  85.57s stub.reply {"payer":"own","n":4,"status":429}
+  85.57s codex.status {"thread":"706358","status":{"type":"systemError"}}
+  85.57s codex.error {"thread":"706358","willRetry":false,"message":"Quota exceeded. Check your plan and billing details."}
+  85.57s turn.end {"label":"W","thread":"706358","status":"failed","paidBy":"own"}
+  85.57s thread.unsubscribed {"thread":"706358","result":{"status":"unsubscribed"}}
+  85.57s thread.resumeRetry {"label":"W -> credits attempt 1","thread":"706358","attempt":1}
+  85.57s codex.status {"thread":"706358","status":{"type":"notLoaded"}}
+  85.57s codex.closed {"thread":"706358"}
+  85.72s codex.status {"thread":"706358","status":{"type":"idle"}}
+  85.72s thread.resumed {"label":"W -> credits attempt 1","thread":"706358","requested":"rome_credits","modelProvider":"rome_credits"}
+  85.72s turn.start {"label":"W","thread":"706358","text":"Reply: seven again"}
+  85.73s codex.status {"thread":"706358","status":{"type":"active","activeFlags":[]}}
+  85.79s stub.request {"payer":"credits","n":6,"authorization":"Bearer <instance token>","inputMessages":7,"admission":"accepted by #108"}
+  85.79s stub.reply {"payer":"credits","n":6,"status":200,"text":"CREDITS-OK"}
+  85.79s codex.agentMessage {"thread":"706358","text":"CREDITS-OK"}
+  85.79s codex.status {"thread":"706358","status":{"type":"idle"}}
+  85.79s turn.end {"label":"W","thread":"706358","status":"completed","paidBy":"credits"}
+  85.79s CHECK.pass {"check":"C7 immediate switch with zero unload delay","detail":"resumed=rome_credits paid=credits"}
+
+=== C8 credits -> own -> credits on one conversation keeps its history
+  85.79s thread.unsubscribed {"thread":"89d289","result":{"status":"unsubscribed"}}
+  85.80s thread.resumeRetry {"label":"Z -> own","thread":"89d289","attempt":1}
+  85.80s codex.status {"thread":"89d289","status":{"type":"notLoaded"}}
+  85.80s codex.closed {"thread":"89d289"}
+  85.94s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  85.94s thread.resumed {"label":"Z -> own","thread":"89d289","requested":"openai","modelProvider":"openai"}
+  85.94s turn.start {"label":"Z","thread":"89d289","text":"Reply: eight"}
+  85.94s codex.status {"thread":"89d289","status":{"type":"active","activeFlags":[]}}
+  92.01s stub.request {"payer":"own","n":5,"authorization":"Bearer <own API key>","inputMessages":10}
+  92.01s stub.reply {"payer":"own","n":5,"status":200,"text":"OWN-OK"}
+  92.01s codex.agentMessage {"thread":"89d289","text":"OWN-OK"}
+  92.01s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  92.01s turn.end {"label":"Z","thread":"89d289","status":"completed","paidBy":"own"}
+  92.01s thread.unsubscribed {"thread":"89d289","result":{"status":"unsubscribed"}}
+  92.02s thread.resumeRetry {"label":"Z -> credits","thread":"89d289","attempt":1}
+  92.02s codex.status {"thread":"89d289","status":{"type":"notLoaded"}}
+  92.02s codex.closed {"thread":"89d289"}
+  92.14s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  92.14s thread.resumed {"label":"Z -> credits","thread":"89d289","requested":"rome_credits","modelProvider":"rome_credits"}
+  92.14s turn.start {"label":"Z","thread":"89d289","text":"Reply: eight again"}
+  92.14s codex.status {"thread":"89d289","status":{"type":"active","activeFlags":[]}}
+  92.19s stub.request {"payer":"credits","n":7,"authorization":"Bearer <instance token>","inputMessages":12,"admission":"accepted by #108"}
+  92.19s stub.reply {"payer":"credits","n":7,"status":200,"text":"CREDITS-OK"}
+  92.19s codex.agentMessage {"thread":"89d289","text":"CREDITS-OK"}
+  92.20s codex.status {"thread":"89d289","status":{"type":"idle"}}
+  92.20s turn.end {"label":"Z","thread":"89d289","status":"completed","paidBy":"credits"}
+  92.20s CHECK.pass {"check":"C8 round trip","detail":"own=own back=credits"}
+  93.27s CHECK.pass {"check":"token never written to disk","detail":"no file under the Codex home contains the instance token"}
+
+=== summary
+PASS  C1 credits on start  (thread/start modelProvider=rome_credits)
+PASS  C2 concurrent payers  (X=credits Y=own)
+PASS  C3 switch credits -> own on an idle thread  (resumed=openai paid=own)
+FAIL  C4a immediate switch after a failed turn  (failed turn paid=own; resumed=openai (Codex keeps a loaded thread in SystemError and ignores resume overrides))
+PASS  C4b switch after the thread unloads  (waited ~65s, paid=credits)
+FAIL  C6a restart without explicit provider  (resumed=openai)
+PASS  C6b restart with explicit provider  (resumed=rome_credits paid=credits)
+PASS  C7 immediate switch with zero unload delay  (resumed=rome_credits paid=credits)
+PASS  C8 round trip  (own=own back=credits)
+PASS  token never written to disk  (no file under the Codex home contains the instance token)
+  93.33s done {"ownRequests":5,"creditsRequests":7}
+0
