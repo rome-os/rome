@@ -825,11 +825,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         offFloorReconcileTimersRef.current.set(id, timer);
       };
       const check = async (delayMs: number) => {
+        const nextDelayMs = Math.min(
+          Math.max(RECONNECT_BASE_DELAY_MS, delayMs * 2),
+          RECONNECT_MAX_DELAY_MS,
+        );
         const stillPending = () =>
           isChatMountedRef.current && pendingMessageReconciliationsRef.current.get(id) === turnId;
         if (!stillPending()) return;
         if (floorSessionIdRef.current === id) {
-          schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+          schedule(nextDelayMs);
           return;
         }
         const controller = new AbortController();
@@ -841,7 +845,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           offFloorReconcileControllersRef.current.delete(id);
         if (!stillPending()) return;
         if (floorSessionIdRef.current === id) {
-          schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+          schedule(nextDelayMs);
           return;
         }
         // Reconcile this turn as soon as it disappears, even if another turn
@@ -856,7 +860,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           });
           if (!stillPending()) return;
           if (floorSessionIdRef.current === id) {
-            schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+            schedule(nextDelayMs);
             return;
           }
           if (loaded) {
@@ -875,7 +879,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             return;
           }
         }
-        schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
+        schedule(nextDelayMs);
       };
       const wake = () => schedule(0);
       offFloorReconcileWakeRef.current.set(id, wake);
@@ -1241,8 +1245,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
+      const activeTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+      const activeReader = activeTurnId
+        ? turnStreamControllersRef.current.get(activeTurnId)
+        : undefined;
       if (
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
+        (activeReader && !activeReader.signal.aborted) ||
         (streamingSessionsRef.current.has(reattachSessionId) &&
           !recoveringSessionIdsRef.current.has(reattachSessionId))
       ) {
@@ -1388,10 +1397,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
 
-        noteRecoveryConnected();
         streamOpened = true;
         streamOpenedAt = Date.now();
         finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId, () => {
+          if (
+            !cancelled &&
+            streamingSessionsRef.current.get(reattachSessionId)?.turnId === attachedTurnId
+          ) {
+            noteRecoveryConnected();
+          }
           setStreamError(null);
           setRecoveryNotice((current) =>
             current?.sessionId === reattachSessionId ? null : current,
@@ -1945,7 +1959,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     setRecoveryNotice(null);
     setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
     setStreamReconnectRevision((revision) => revision + 1);
-    void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+    const acceptedSendRevision = acceptedSendRevisionsRef.current.get(sessionId) ?? 0;
+    void loadMessages(sessionId, {
+      force: true,
+      dropLocalOptimistic: true,
+      bounded: true,
+      shouldApply: () =>
+        isChatMountedRef.current &&
+        floorSessionIdRef.current === sessionId &&
+        suppressedTurnIdsRef.current.get(sessionId) === turnId &&
+        (acceptedSendRevisionsRef.current.get(sessionId) ?? 0) === acceptedSendRevision,
+    });
   }, [
     recoveryNotice,
     streamingSessionsRef,
