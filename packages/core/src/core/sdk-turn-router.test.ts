@@ -127,7 +127,23 @@ describe("SdkTurnRouter", () => {
     expect(r.trackedSendCount).toBe(0);
   });
 
-  it("drops, and reports, a reply to a steer replayed before the result but answered after", () => {
+  it("answers a steer replayed in a Rome turn within that turn, as the SDK documents", () => {
+    const r = new SdkTurnRouter();
+    r.openTurn("A");
+    r.steer("S");
+    r.onMessage(frame("A"), true);
+    expect(r.onMessage(replay("S"), true)).toEqual({ ...deliver, consumed: "S" });
+    // Frames after the fold carry no echo; the result lists every send the turn took.
+    expect(r.onMessage(frame(), true)).toEqual(deliver);
+    expect(r.onResult(result({ echo: ["A", "S"] }))).toEqual({ owner: "rome", carried: [] });
+    expect(r.trackedSendCount).toBe(0);
+  });
+
+  // Outside the SDK contract: a result lists every send its turn took off the
+  // queue (a replay), and SDK 0.3.281 always did so in probes. If a steer's
+  // reply still came after a result that left it out, no Rome turn is open or
+  // coming for it, so the reply is dropped with a warning rather than held.
+  it("drops, with a warning, a steer's reply that comes after a result leaving it out", () => {
     const r = new SdkTurnRouter();
     r.openTurn("A");
     r.steer("S");
