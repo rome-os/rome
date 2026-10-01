@@ -49,6 +49,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 
 - **[Hook](apps.md#hooks)** — a hook is app-owned code declared in a manifest. A routine is guardian- or agent-authored data managed at runtime.
 - **Event-bus event** — an event is a thing that happens. A routine is a standing binding that may use one as its trigger.
+- **[Event](sessions.md#event)** — one item of a turn's stream. The deprecated alias "events" above means routines, never turn events.
 
 ## Database
 

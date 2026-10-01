@@ -39,7 +39,7 @@ A session remembers the concrete model that produced its history — the **sessi
 
 ## Turn
 
-A turn is one user request, or one provider-started wake, plus the agent work that follows until the agent answers or stops. Each turn has a turn id, and usage reporting counts and aggregates turns.
+A turn is one request to an agent plus the agent work that follows until the agent answers or stops. The request comes from a user, from a system continuation such as a deferred task, an approval resumption, a timer, or a backend action, or from a provider-started wake. Each turn has a turn id, and usage reporting counts and aggregates turns.
 
 *Deprecated alias:* **Agent run** — surfaces that still say "agent run" or "run" for this unit mean a turn.
 
@@ -81,6 +81,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 - **[Message](messaging.md#message)** — a message is a conversation entry that a person or an agent sends. An event is an item of one turn's stream.
 - **[Block](#block)** — every block reaches consumers as a block event, but results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
+- **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
 - **Segment** — a display group of a turn's trace events. It groups events and is not one itself.
 
 ## Block
@@ -89,9 +90,8 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 **Contracts:**
 
-- A block has one identity, unique within its turn. A text or thinking block is identified by its block id. A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. No block carries two unrelated ids.
-- A block's [deltas](#delta) carry the same identity as the completed block, so a consumer matches them without relying on event order.
-- When a provider gives a text or thinking block no identity, the block has none. Rome never borrows another block's identity for it.
+- A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id.
+- A text or thinking block carries no id. A consumer places it by its order in the turn's stream.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
 **Not to be confused with:**
@@ -102,19 +102,19 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 ## Delta
 
-A delta is an increment of a [block](#block) that is still being produced: a few tokens of text or thinking, part of a tool's input, or the latest output of a running command.
+A delta is an increment of a [block](#block) that is still being produced. Rome publishes deltas for text blocks: each delta is a few tokens of the text.
 
 **Contracts:**
 
 - A delta is transient. The durable trace, persistence, and accounting never keep it.
-- A delta carries the identity of the block it belongs to.
-- The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it, and a consumer that shows deltas discards the ones left without a block when the turn ends.
+- A delta carries no id. It belongs to the next text block in the turn's stream, which a consumer matches by order.
+- The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it.
 
 **Not to be confused with:**
 
 - **Chunk** — a whole partial response object that some provider APIs stream. A delta belongs to a single block.
 - **Preview** — what a surface shows while a block is in progress. The delta is the data a preview is built from.
-- **Fragment** — any partial piece of something. A delta is the specific increment Rome publishes with its block's identity.
+- **Fragment** — any partial piece of something. A delta is the specific increment of one block that Rome publishes in a turn's stream.
 
 ## Conversational inputs
 
