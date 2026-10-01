@@ -418,21 +418,118 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
-    it("reports a frameless result that names nothing as a turn of its own", async () => {
+    it("settles the messages still waiting with a frameless error that names none", async () => {
+      let controller!: AbortController;
+      queryMock.mockImplementation(({ prompt, options }) => {
+        controller = options.abortController;
+        return {
+          async *[Symbol.asyncIterator]() {
+            const inputs = prompt[Symbol.asyncIterator]();
+            await inputs.next();
+            // A zeroed result: no frames, no echo; the SDK answers nothing after it.
+            yield {
+              type: "result",
+              subtype: "error_during_execution",
+              num_turns: 0,
+              total_cost_usd: 0,
+              duration_ms: 1,
+              errors: ["worker crashed"],
+            };
+            if (!controller.signal.aborted) {
+              await new Promise<void>((resolve) =>
+                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
+          },
+          close: rs.fn(),
+        };
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Hello", inputId: a });
+      const events = session.events[Symbol.asyncIterator]();
+      const seen: string[] = [];
+      for (;;) {
+        const next = await events.next();
+        const line = next.done ? undefined : view(next.value);
+        if (line) seen.push(line);
+        if (next.done || next.value.type === "model_turn_end") break;
+      }
+      expect(seen).toEqual(["start []", "error worker crashed", "answers +[A]", "end [A]"]);
+      // Nothing is left running, and a later interrupt makes up no second reply.
+      await expect(
+        session.fork({ sessionId: "fork-after", mode: "thread" }),
+      ).resolves.toBeDefined();
+      const rest = (async () => {
+        const lines: string[] = [];
+        for (;;) {
+          const next = await events.next();
+          if (next.done) return lines;
+          const line = view(next.value);
+          if (line) lines.push(line);
+        }
+      })();
+      await session.interrupt("user-stop");
+      expect(await rest).toEqual([]);
+      await session.close();
+    });
+
+    it("leaves waiting messages alone after a frameless error from a background task", async () => {
       scripted(async function* (sent) {
-        await sent();
+        const prompt = await sent();
         yield {
           type: "result",
           subtype: "error_during_execution",
           num_turns: 0,
           total_cost_usd: 0,
           duration_ms: 1,
-          errors: ["worker crashed"],
+          errors: ["notification failed"],
+          origin: { kind: "task-notification" },
         };
+        yield { ...prompt, isReplay: true };
+        yield say("Hi", prompt.uuid);
+        yield result("Hi", [prompt.uuid], "human");
       });
       const session = await new AnthropicProvider().openSession(buildParams());
       await session.sendUserInput({ text: "Hello", inputId: a });
-      expect(await read(session, 1)).toEqual(["start []", "error worker crashed", "end []"]);
+      expect(await read(session, 2)).toEqual([
+        "start []",
+        "error notification failed",
+        "end []",
+        "start []",
+        "consumed A",
+        "answers +[A]",
+        "text Hi",
+        "result Hi",
+        "end [A]",
+      ]);
+      await session.close();
+    });
+
+    it("gives an interrupted fork or title send its terminal, though Rome minted its id", async () => {
+      let controller!: AbortController;
+      const sends: { uuid: string }[] = [];
+      queryMock.mockImplementation(({ prompt, options }) => {
+        controller = options.abortController;
+        return {
+          async *[Symbol.asyncIterator]() {
+            sends.push((await prompt[Symbol.asyncIterator]().next()).value);
+            if (!controller.signal.aborted) {
+              await new Promise<void>((resolve) =>
+                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
+            throw new AbortError("Cancelled");
+          },
+          close: rs.fn(),
+        };
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Name this conversation" });
+      const reading = read(session);
+      await new Promise((resolve) => setImmediate(resolve));
+      await session.interrupt("user-stop");
+      const minted = sends[0]!.uuid;
+      expect(await reading).toEqual([`start [${minted}]`, "result ", `end [${minted}]`]);
       await session.close();
     });
 
@@ -503,9 +600,11 @@ describe("AnthropicProvider", () => {
             yield notification;
             yield say("Checking the task.");
             started();
-            await new Promise<void>((resolve) =>
-              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-            );
+            if (!controller.signal.aborted) {
+              await new Promise<void>((resolve) =>
+                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
             throw new AbortError("Cancelled");
           },
           close: rs.fn(),
@@ -564,9 +663,11 @@ describe("AnthropicProvider", () => {
             yield { ...first, isReplay: true };
             yield say("Done.", first.uuid);
             await inputs.next(); // the follow-up, never picked up
-            await new Promise<void>((resolve) =>
-              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-            );
+            if (!controller.signal.aborted) {
+              await new Promise<void>((resolve) =>
+                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
             // A real result arrives after the abort; then the stream ends.
             yield result("Done.", [first.uuid], "human");
             resultSeen();
@@ -601,9 +702,11 @@ describe("AnthropicProvider", () => {
         controller = options.abortController;
         return {
           async *[Symbol.asyncIterator]() {
-            await new Promise<void>((resolve) =>
-              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-            );
+            if (!controller.signal.aborted) {
+              await new Promise<void>((resolve) =>
+                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+              );
+            }
             throw new AbortError("Cancelled");
           },
           close: rs.fn(),

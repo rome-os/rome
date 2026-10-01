@@ -580,6 +580,15 @@ export class AnthropicProvider implements ModelProvider {
     // The SDK is working: a turn is open, or a sent message is still queued.
     // A turn the SDK starts by itself counts as much as one Rome asked for.
     const running = () => projection.isOpen || unreadSends.size > 0;
+    // Messages the SDK never picked up that Rome answers itself, in send
+    // order. Minted ids (forks, titles) are included: those callers also need
+    // a terminal, and their turn events never reach a client.
+    const settleUnread = (): string[] => {
+      const unread = [...unreadSends];
+      unreadSends.clear();
+      for (const id of unread) mintedIds.delete(id);
+      return unread;
+    };
 
     // The SDK's own session id, captured from the first assistant message once a
     // transcript with real content exists. Exposed via `session.providerThreadId`
@@ -630,8 +639,7 @@ export class AnthropicProvider implements ModelProvider {
           yield closing;
           yield* projection.close();
         }
-        const unread = [...unreadSends].filter((id) => !mintedIds.has(id));
-        unreadSends.clear();
+        const unread = settleUnread();
         if (unread.length === 0) return answered;
         log.warn("ending messages the Claude SDK never picked up", { inputIds: unread });
         yield* projection.openForTerminal(unread);
@@ -911,8 +919,29 @@ export class AnthropicProvider implements ModelProvider {
             yield terminal;
             // A result names the sends its turn took, whether or not their
             // replay arrived.
-            for (const id of echoedSendIds(message)) unreadSends.delete(id);
-            yield* projection.end(message);
+            const echoed = echoedSendIds(message);
+            for (const id of echoed) unreadSends.delete(id);
+            // A zeroed or delivery-failure result names nothing, and the SDK
+            // answers nothing after it (documented on the result's
+            // user_message_uuid). It is the last word for every message still
+            // waiting: settle them with it, with a warning, so none is left
+            // running or gets a reply made up later. A frameless result from a
+            // background task (origin task-notification, e.g. #510's empty
+            // resume result) is not one: a message may still be queued behind it.
+            const settles =
+              echoed.length === 0 &&
+              projection.isFrameless &&
+              message.subtype !== "success" &&
+              message.origin?.kind !== "task-notification"
+                ? settleUnread()
+                : [];
+            if (settles.length > 0) {
+              log.warn("a Claude SDK result that names no message settles the ones still waiting", {
+                subtype: message.subtype,
+                inputIds: settles,
+              });
+            }
+            yield* projection.end(message, settles);
           }
         }
         if (abortController.signal.aborted && running()) {

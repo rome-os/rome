@@ -37,11 +37,16 @@ function isReplay(message: SDKMessage): boolean {
 }
 
 export class SdkTurnProjection {
-  private current: { turnId: string; answers: Set<string> } | undefined;
+  private current: { turnId: string; answers: Set<string>; frameless: boolean } | undefined;
 
   /** An SDK turn is open: started, and its result not yet seen. */
   get isOpen(): boolean {
     return this.current !== undefined;
+  }
+
+  /** The open turn began with its result: no replay or model frame came first. */
+  get isFrameless(): boolean {
+    return this.current?.frameless === true;
   }
 
   /** Turn events to emit before handling `message`. */
@@ -50,17 +55,25 @@ export class SdkTurnProjection {
     const echoed = modelFrame ? echoedSendIds(message as Parameters<typeof echoedSendIds>[0]) : [];
     if (!this.current) {
       if (!modelFrame && !isReplay(message) && message.type !== "result") return [];
-      this.current = { turnId: randomUUID(), answers: new Set(echoed) };
+      this.current = {
+        turnId: randomUUID(),
+        answers: new Set(echoed),
+        frameless: message.type === "result",
+      };
       return [{ type: "model_turn_start", turnId: this.current.turnId, answers: echoed }];
     }
     return this.add(echoed);
   }
 
-  /** Turn events to emit after handling a result: anything it newly names, then the end. */
-  end(result: SDKResultMessage): ModelTurnEvent[] {
+  /**
+   * Turn events to emit after handling a result: anything it newly names, then
+   * the end. `settles` adds inputs the result answers without echoing them
+   * (see AnthropicProvider: a result after which the SDK answers nothing).
+   */
+  end(result: SDKResultMessage, settles: string[] = []): ModelTurnEvent[] {
     const current = this.current;
     if (!current) return [];
-    const events = this.add(echoedSendIds(result));
+    const events = this.add([...echoedSendIds(result), ...settles]);
     events.push({ type: "model_turn_end", turnId: current.turnId, answers: [...current.answers] });
     this.current = undefined;
     return events;
@@ -74,7 +87,7 @@ export class SdkTurnProjection {
    */
   openForTerminal(inputs: string[]): ModelTurnEvent[] {
     if (this.current || inputs.length === 0) return [];
-    this.current = { turnId: randomUUID(), answers: new Set(inputs) };
+    this.current = { turnId: randomUUID(), answers: new Set(inputs), frameless: false };
     return [{ type: "model_turn_start", turnId: this.current.turnId, answers: [...inputs] }];
   }
 
