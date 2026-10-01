@@ -89,7 +89,19 @@ function summarizeInput(input: unknown): Record<string, unknown> {
     types[type] = (types[type] ?? 0) + 1;
     if (isRecord(item) && item.type === "reasoning" && typeof item.encrypted_content === "string") encryptedReasoning++;
   }
-  return { types, encryptedReasoning };
+  // Codex 0.156 carries tool definitions in an `additional_tools` input item,
+  // not in `tools`, so #108's hosted-tool check never sees them.
+  const additionalTools = input
+    .filter((item) => isRecord(item) && item.type === "additional_tools")
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      const tools = Array.isArray(record.tools) ? record.tools : [];
+      return {
+        keys: Object.keys(record),
+        tools: tools.map((tool) => (isRecord(tool) ? `${String(tool.type)}:${String(tool.name ?? "")}` : "?")),
+      };
+    });
+  return { types, encryptedReasoning, additionalTools };
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
