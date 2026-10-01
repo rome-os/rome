@@ -71,8 +71,8 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 
 **Contracts:**
 
-- A turn's stream opens with its start event and closes with its end event. The terminal result or error comes before the end event.
-- Each agent emits at most one terminal event per turn.
+- A turn's stream opens with its start event and closes with its end event.
+- A turn's stream carries at most one terminal event, the result or error, and it comes before the end event. A turn the user stops can end with no terminal event, and its end event reports the turn as interrupted.
 - The durable trace keeps every event of a turn except delta events and input-status events.
 - Delta events never open, close, or reorder a turn.
 
@@ -91,7 +91,7 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 **Contracts:**
 
 - A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id.
-- A text or thinking block carries no id. A consumer places it by its order in the turn's stream.
+- A consumer places a text or thinking block by its order in the turn's stream.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
 **Not to be confused with:**
@@ -107,7 +107,7 @@ A delta is an increment of a [block](#block) that is still being produced. Rome 
 **Contracts:**
 
 - A delta is transient. The durable trace, persistence, and accounting never keep it.
-- A delta carries no id. It belongs to the next text block in the turn's stream, which a consumer matches by order.
+- A consumer matches a delta to its block by order: a delta belongs to the next text block in the turn's stream.
 - The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it.
 
 **Not to be confused with:**
