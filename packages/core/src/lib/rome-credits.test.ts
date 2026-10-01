@@ -92,4 +92,13 @@ describe("fetchRomeCredits", () => {
       RomeCreditsUnavailableError,
     );
   });
+
+  it.each([403, 503])("releases the unread body of a %i answer", async (status) => {
+    enroll();
+    const cancel = rs.fn();
+    const body = new ReadableStream({ cancel });
+    const fetchImpl = rs.fn(async () => new Response(body, { status }));
+    await fetchRomeCredits(fetchImpl as unknown as typeof fetch).catch(() => {});
+    expect(cancel).toHaveBeenCalled();
+  });
 });

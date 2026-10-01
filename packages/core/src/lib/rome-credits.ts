@@ -44,9 +44,11 @@ export async function fetchRomeCredits(
       `Rome credits request failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
-  // 401 unknown and 403 revoked instance credentials: not signed in.
-  if (response.status === 401 || response.status === 403) return null;
   if (!response.ok) {
+    // Release the pooled connection; an unread body holds it until GC.
+    await response.body?.cancel().catch(() => {});
+    // 401 unknown and 403 revoked instance credentials: not signed in.
+    if (response.status === 401 || response.status === 403) return null;
     throw new RomeCreditsUnavailableError(`Rome credits request failed with ${response.status}`);
   }
 
