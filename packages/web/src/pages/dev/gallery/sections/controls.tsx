@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { ArrowRight, Check, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUpFromLine,
+  Check,
+  Plus,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { Toggle } from "@rome-os/ui/toggle";
 import { Calendar } from "@rome-os/ui/calendar";
 import { Button } from "@/components/ui/button";
@@ -213,6 +224,17 @@ export function ControlsSection() {
             ))}
           </Row>
         </Specimen>
+
+        <Specimen
+          label="IconButton — a packed toolbar"
+          note="Icon actions `gap-1` apart, as a panel's toolbar packs them. On a phone each is a 44px box, so the cluster widens and a tap on one never lands on its neighbour."
+        >
+          <div className="flex items-center gap-1">
+            <IconButton size="sm" label="Download" icon={<ArrowDownToLine />} />
+            <IconButton size="sm" label="Upload" icon={<ArrowUpFromLine />} />
+            <IconButton size="sm" label="Reset" icon={<RotateCcw />} />
+          </div>
+        </Specimen>
       </Component>
 
       <Component id="button-group" name="ButtonGroup" source="ui/button-group.tsx">
@@ -234,6 +256,25 @@ export function ControlsSection() {
                 <ArrowRight data-icon="inline-end" />
               </Button>
             </ButtonGroup>
+          </Row>
+        </Specimen>
+
+        <Specimen
+          label="ButtonGroup — vertical, and short labels"
+          note="Buttons stacked edge to edge, and labels shorter than the floor is wide. On a phone each is a 44px box, so a tap on one never lands on another."
+        >
+          <Row className="items-start">
+            <ButtonGroup orientation="vertical">
+              <Button variant="outline">Above</Button>
+              <Button variant="outline">Middle</Button>
+              <Button variant="outline">Below</Button>
+            </ButtonGroup>
+            <Button variant="outline" size="xs">
+              +3
+            </Button>
+            <Button variant="outline" size="sm">
+              +3
+            </Button>
           </Row>
         </Specimen>
       </Component>

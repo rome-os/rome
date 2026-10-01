@@ -98,7 +98,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                   title={app.displayName}
                   className={cn(
                     LINK_CLASS,
-                    "pr-8 [@media(hover:none)]:pr-16",
+                    "pr-8 [@media(hover:none)]:pr-16 max-md:pr-16",
                     active ? ACTIVE_CLASS : IDLE_CLASS,
                   )}
                 >
@@ -110,7 +110,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                 <span
                   role="img"
                   aria-label={t("sidebar.notOpened")}
-                  className="pointer-events-none absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-info transition-opacity group-hover/recent:opacity-0 group-focus-within/recent:opacity-0 [@media(hover:none)]:right-12"
+                  className="pointer-events-none absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-info transition-opacity group-hover/recent:opacity-0 group-focus-within/recent:opacity-0 [@media(hover:none)]:right-12 max-md:right-12"
                 />
               ) : null}
               <button
@@ -118,7 +118,7 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
                 onClick={() => onPin(app.id)}
                 aria-label={tApps("installed.pin")}
                 title={tApps("installed.pin")}
-                className="touch-show absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-4 text-subtle-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 group-hover/recent:opacity-100"
+                className="touch-show absolute right-1 top-1/2 flex size-6 -translate-y-1/2 max-md:size-11 max-md:opacity-100 items-center justify-center rounded-4 text-subtle-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 group-hover/recent:opacity-100"
               >
                 <Pin className="size-3.5" aria-hidden />
               </button>
