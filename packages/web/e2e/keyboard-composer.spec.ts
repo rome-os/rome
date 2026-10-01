@@ -113,9 +113,22 @@ function installIosVisualViewport(page: Page) {
   });
 }
 
-async function expectIosKeyboardRoundTrip(page: Page, keyboardTop: number) {
+async function expectIosKeyboardRoundTrip(
+  page: Page,
+  keyboardTop: number,
+  { homeIndicatorInset = 0 } = {},
+) {
   await openChat(page);
+  // env(safe-area-inset-bottom) is zero in desktop Chromium. The stylesheet
+  // reads it through this property so a spec can stand in a real iPhone's.
+  await page.locator("html").evaluate((element, inset) => {
+    (element as HTMLElement).style.setProperty("--rome-safe-area-inset-bottom", `${inset}px`);
+  }, homeIndicatorInset);
   const before = await measure(page);
+  // With the keyboard closed, the composer clears the home indicator.
+  expect(page.viewportSize()!.height - before.composerBottom).toBeGreaterThanOrEqual(
+    homeIndicatorInset + 16,
+  );
 
   await page.evaluate((top) => {
     (window as unknown as { setKeyboardTop: (top: number) => void }).setKeyboardTop(top);
@@ -139,6 +152,15 @@ test("iOS Safari: a visual viewport shrunk by the keyboard keeps the composer an
 }) => {
   await installIosVisualViewport(page);
   await expectIosKeyboardRoundTrip(page, KEYBOARD_TOP);
+});
+
+test("iOS Safari on a Face ID iPhone: the home indicator's inset gives way to the keyboard", async ({
+  page,
+}) => {
+  // The keyboard covers the home indicator, so its 34px inset would otherwise
+  // sit as an empty band between the composer and the keyboard.
+  await installIosVisualViewport(page);
+  await expectIosKeyboardRoundTrip(page, KEYBOARD_TOP, { homeIndicatorInset: 34 });
 });
 
 test.describe("on a landscape phone, past the md breakpoint", () => {

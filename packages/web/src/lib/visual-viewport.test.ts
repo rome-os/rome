@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  KEYBOARD_HEIGHT_VAR,
+  keyboardHeight,
   overscrollCorrection,
   trackVisualViewport,
   usableViewportHeight,
@@ -13,6 +15,21 @@ describe("usableViewportHeight", () => {
 
   it("falls back to the stylesheet while the page is pinch-zoomed", () => {
     expect(usableViewportHeight({ height: 300, pageTop: 0, scale: 2 })).toBeNull();
+  });
+});
+
+describe("keyboardHeight", () => {
+  it("is the part of the layout viewport below the visual viewport", () => {
+    // iOS: the layout viewport keeps the full 844px under a 332px keyboard.
+    expect(keyboardHeight({ height: 512, pageTop: 0, scale: 1 }, 844)).toBe(332);
+  });
+
+  it("is zero when the layout viewport shrank with the keyboard, as on Android", () => {
+    expect(keyboardHeight({ height: 512, pageTop: 0, scale: 1 }, 512)).toBe(0);
+  });
+
+  it("is zero while the page is pinch-zoomed", () => {
+    expect(keyboardHeight({ height: 422, pageTop: 0, scale: 2 }, 844)).toBe(0);
   });
 });
 
@@ -59,6 +76,7 @@ describe("trackVisualViewport", () => {
           },
         },
       },
+      innerHeight: 844,
       scrollTo: (_x: number, y: number) => scrolls.push(y),
     } as unknown as Window;
     return {
@@ -83,6 +101,7 @@ describe("trackVisualViewport", () => {
     page.setDocumentHeight(512);
     page.listeners.get("resize")?.();
     expect(page.properties.get(VIEWPORT_HEIGHT_VAR)).toBe("512px");
+    expect(page.properties.get(KEYBOARD_HEIGHT_VAR)).toBe("332px");
     expect(page.scrolls).toEqual([0]);
 
     page.viewport.height = 844;
@@ -90,6 +109,7 @@ describe("trackVisualViewport", () => {
     page.setDocumentHeight(844);
     page.listeners.get("resize")?.();
     expect(page.properties.get(VIEWPORT_HEIGHT_VAR)).toBe("844px");
+    expect(page.properties.get(KEYBOARD_HEIGHT_VAR)).toBe("0px");
     expect(page.scrolls).toEqual([0]);
   });
 

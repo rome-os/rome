@@ -375,7 +375,15 @@
        example inside the Expo WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
-    --rome-safe-area-bottom: env(safe-area-inset-bottom);
+    --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
+    /* An open keyboard covers the home indicator, but iOS keeps reporting its
+       inset. lib/visual-viewport.ts publishes the covered height inline on
+       <html>, and only the inset still showing above it pads the page. */
+    --rome-keyboard-height: 0px;
+    --rome-safe-area-bottom: max(
+      0px,
+      var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
+    );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
     /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
        overrides this inline on <html>; the fallback serves browsers without
