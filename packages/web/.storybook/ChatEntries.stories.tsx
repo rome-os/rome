@@ -1,23 +1,23 @@
 import type { Meta, StoryObj } from "storybook-react-rsbuild";
 import { expect, fn, userEvent } from "storybook/test";
-import { ChatBlockPreview, CHAT_BLOCK_SPECIMENS } from "../src/pages/dev/ChatBlocksPage";
+import { ChatEntryPreview, CHAT_ENTRY_SPECIMENS } from "../src/pages/dev/ChatEntriesPage";
 
 const meta = {
-  title: "Dev/Chat blocks",
-  component: ChatBlockPreview,
+  title: "Dev/Chat entries",
+  component: ChatEntryPreview,
   parameters: { layout: "padded" },
   args: {
-    sessionId: "storybook-chat-blocks",
+    sessionId: "storybook-chat-entries",
     onSubmitAppComponent: () => undefined,
     onDismissAppComponent: () => undefined,
   },
-} satisfies Meta<typeof ChatBlockPreview>;
+} satisfies Meta<typeof ChatEntryPreview>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 function specimen(id: string) {
-  const found = CHAT_BLOCK_SPECIMENS.find((item) => item.id === id);
+  const found = CHAT_ENTRY_SPECIMENS.find((item) => item.id === id);
   if (!found) throw new Error(`Missing chat block specimen: ${id}`);
   return found;
 }
@@ -75,7 +75,7 @@ export const WrappedSubmission: Story = {
     await expect(option).toHaveAttribute("aria-pressed", "true");
     await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
     await expect(args.onSubmitAppComponent).toHaveBeenCalledWith(
-      "storybook-chat-blocks",
+      "storybook-chat-entries",
       "dev-ask-cjk",
       { answers: [{ questionId: "i18n", value: answer }] },
       answer,

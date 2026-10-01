@@ -1,28 +1,28 @@
-import type { ApprovalCardStatus, StreamBlock } from "@/lib/chat-types";
+import type { ApprovalCardStatus, ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
 import { ApprovalCard } from "../approval/ApprovalCard";
-import { AgentCallBlock } from "./AgentCallBlock";
+import { AgentCallView } from "./AgentCallView";
 import { AiToolsCard } from "./AiToolsCard";
-import { AppComponentBlock } from "./AppComponentBlock";
-import { ErrorRunBlock } from "./ErrorBlock";
+import { AppComponentView } from "./AppComponentView";
+import { ErrorRunView } from "./ErrorEventView";
 import { HandoffCard } from "./HandoffCard";
 import { QuestionCard } from "./QuestionCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
-import { SubagentStepBlock } from "./SubagentStepBlock";
+import { SubagentCallView } from "./SubagentCallView";
 import { TextBlock } from "./TextBlock";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ToolResultBlock } from "./ToolResultBlock";
-import { ToolStepBlock, type ToolStepStatus } from "./ToolStepBlock";
+import { ToolCallView, type ToolCallStatus } from "./ToolCallView";
 import { ToolUseBlock } from "./ToolUseBlock";
-import { TurnRecapBlock } from "./TurnRecapBlock";
-import { UsageSummaryBlock } from "./UsageSummaryBlock";
+import { TurnRecapView } from "./TurnRecapView";
+import { UsageSummaryView } from "./UsageSummaryView";
 
-export interface RenderBlockOptions {
+export interface RenderEntryOptions {
   onApprovalResolved?: () => void;
   compact?: boolean;
   toolUseInput?: unknown;
-  /** Trace drawer is currently live-streaming (forwarded to ToolStepBlock). */
+  /** Trace drawer is currently live-streaming (forwarded to ToolCallView). */
   live?: boolean;
   /** Session that owns the message these blocks belong to — namespaces resolved
    * interaction state and routes submissions to the right session in the merged
@@ -44,10 +44,10 @@ export interface RenderBlockOptions {
   onDismissAppComponent?: (sessionId: string, toolUseId: string) => void | Promise<void>;
 }
 
-export function renderSingleBlock(
-  block: StreamBlock,
+export function renderSingleEntry(
+  block: ChatEntry,
   key: string | number,
-  options: RenderBlockOptions = {},
+  options: RenderEntryOptions = {},
 ) {
   const {
     onApprovalResolved,
@@ -73,7 +73,7 @@ export function renderSingleBlock(
   switch (block.type) {
     case "session_init":
       return (
-        <AgentCallBlock
+        <AgentCallView
           key={key}
           agent={block.agent}
           sessionId={block.sessionId}
@@ -93,7 +93,7 @@ export function renderSingleBlock(
     case "subagent_start":
       if (!block.agentName || !block.sessionId || !block.turnId) return null;
       return (
-        <SubagentStepBlock
+        <SubagentCallView
           key={key}
           agentName={block.agentName}
           input={block.input}
@@ -106,7 +106,7 @@ export function renderSingleBlock(
     case "subagent_result":
       if (!block.agentName || !block.sessionId || !block.turnId || !block.status) return null;
       return (
-        <SubagentStepBlock
+        <SubagentCallView
           key={key}
           agentName={block.agentName}
           sessionId={block.sessionId}
@@ -144,7 +144,7 @@ export function renderSingleBlock(
     }
     case "turn_recap":
       return (
-        <TurnRecapBlock
+        <TurnRecapView
           key={key}
           content={block.content ?? ""}
           audioUrl={block.audioUrl}
@@ -190,7 +190,7 @@ export function renderSingleBlock(
         );
       }
       return (
-        <AppComponentBlock
+        <AppComponentView
           key={`app-component-${block.toolUseId}`}
           toolUseId={block.toolUseId}
           appId={block.appId}
@@ -247,12 +247,10 @@ export function renderSingleBlock(
         />
       );
     case "result":
-      return block.accounting ? (
-        <UsageSummaryBlock key={key} accounting={block.accounting} />
-      ) : null;
+      return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":
       return (
-        <ErrorRunBlock
+        <ErrorRunView
           key={key}
           error={typeof block.error === "string" ? block.error : (block.error?.message ?? "")}
           accounting={block.accounting}
@@ -270,13 +268,13 @@ export function renderSingleBlock(
 // that store MessagePart[] (text + approval_card) directly, and for the trace
 // drawer's run blocks. Pairs ordinary tool and first-class subagent lifecycle
 // blocks into one expandable row per invocation.
-export function renderFlatBlocks(blocks: StreamBlock[], options: RenderBlockOptions = {}) {
+export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptions = {}) {
   const { live = false } = options;
   // Index results by provider tool-use ID (or ordinary tool name as a legacy
   // fallback) so each paired step renders once.
-  const resultsByUseId = new Map<string, StreamBlock>();
-  const resultsByTool = new Map<string, StreamBlock[]>();
-  const subagentResultsByUseId = new Map<string, StreamBlock>();
+  const resultsByUseId = new Map<string, ChatEntry>();
+  const resultsByTool = new Map<string, ChatEntry[]>();
+  const subagentResultsByUseId = new Map<string, ChatEntry>();
   for (const block of blocks) {
     if (block.type === "subagent_result") {
       if (block.toolUseId) subagentResultsByUseId.set(block.toolUseId, block);
@@ -290,7 +288,7 @@ export function renderFlatBlocks(blocks: StreamBlock[], options: RenderBlockOpti
     }
   }
 
-  const consumedResults = new Set<StreamBlock>();
+  const consumedResults = new Set<ChatEntry>();
   const nodes: React.ReactNode[] = [];
 
   for (let i = 0; i < blocks.length; i += 1) {
@@ -300,13 +298,13 @@ export function renderFlatBlocks(blocks: StreamBlock[], options: RenderBlockOpti
       const paired = pickResult(block, resultsByUseId, resultsByTool, consumedResults);
       if (paired) consumedResults.add(paired);
       nodes.push(
-        <ToolStepBlock
+        <ToolCallView
           key={i}
           tool={block.tool}
           input={block.input}
           output={paired?.type === "tool_result" ? paired.output : undefined}
-          status={toolStepStatus(paired)}
-          durationMs={stepDurationMs(block, paired)}
+          status={toolCallStatus(paired)}
+          durationMs={toolCallDurationMs(block, paired)}
           hasResult={paired !== null}
           live={live}
         />,
@@ -323,7 +321,7 @@ export function renderFlatBlocks(blocks: StreamBlock[], options: RenderBlockOpti
           ? (paired.status as "completed" | "failed" | "cancelled")
           : "running";
       nodes.push(
-        <SubagentStepBlock
+        <SubagentCallView
           key={i}
           agentName={block.agentName}
           input={block.input}
@@ -348,22 +346,22 @@ export function renderFlatBlocks(blocks: StreamBlock[], options: RenderBlockOpti
       if (consumedResults.has(block)) continue;
       // Orphan result (no matching start in this run): fall back to the
       // original standalone renderer so the data isn't lost.
-      nodes.push(renderSingleBlock(block, i, options));
+      nodes.push(renderSingleEntry(block, i, options));
       continue;
     }
 
-    nodes.push(renderSingleBlock(block, i, options));
+    nodes.push(renderSingleEntry(block, i, options));
   }
 
   return nodes;
 }
 
 function pickResult(
-  use: StreamBlock,
-  resultsByUseId: Map<string, StreamBlock>,
-  resultsByTool: Map<string, StreamBlock[]>,
-  consumedResults: Set<StreamBlock>,
-): StreamBlock | null {
+  use: ChatEntry,
+  resultsByUseId: Map<string, ChatEntry>,
+  resultsByTool: Map<string, ChatEntry[]>,
+  consumedResults: Set<ChatEntry>,
+): ChatEntry | null {
   if (use.type !== "tool_use") return null;
   if (use.id) {
     const byId = resultsByUseId.get(use.id);
@@ -383,7 +381,7 @@ function pickResult(
   return null;
 }
 
-function toolStepStatus(result: StreamBlock | null): ToolStepStatus {
+function toolCallStatus(result: ChatEntry | null): ToolCallStatus {
   if (!result || result.type !== "tool_result") return "running";
   if (result.isError !== undefined) return result.isError ? "error" : "ok";
   return isLegacyErrorOutput(result.output) ? "error" : "ok";
@@ -426,7 +424,7 @@ function hasErrorPayload(value: unknown): boolean {
   return true;
 }
 
-function stepDurationMs(use: StreamBlock, result: StreamBlock | null): number | undefined {
+function toolCallDurationMs(use: ChatEntry, result: ChatEntry | null): number | undefined {
   if (use.type !== "tool_use") return undefined;
   if (!result || result.type !== "tool_result") return undefined;
   const start = parseTimestamp(use.startedAt);
@@ -436,10 +434,7 @@ function stepDurationMs(use: StreamBlock, result: StreamBlock | null): number | 
   return delta >= 0 ? delta : undefined;
 }
 
-function subagentStepDurationMs(
-  start: StreamBlock,
-  result: StreamBlock | null,
-): number | undefined {
+function subagentStepDurationMs(start: ChatEntry, result: ChatEntry | null): number | undefined {
   if (start.type !== "subagent_start") return undefined;
   if (!result || result.type !== "subagent_result") return undefined;
   const startedAt = parseTimestamp(start.startedAt);

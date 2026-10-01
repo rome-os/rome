@@ -375,7 +375,7 @@ interface CodexFailureClassification {
 }
 
 /** Terminal `error` block for a classified codex failure. */
-function codexErrorBlock(
+function codexErrorEvent(
   error: string,
   classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
 ): ErrorMessage {
@@ -835,7 +835,7 @@ export class CodexAppServerProvider implements ModelProvider {
           } else {
             if (classification.pending) void classification.pending;
             // Out-of-turn error: no turn to attach to, emit directly.
-            sink.push(codexErrorBlock(message, classification));
+            sink.push(codexErrorEvent(message, classification));
           }
           return;
         }
@@ -1006,7 +1006,7 @@ export class CodexAppServerProvider implements ModelProvider {
         if (!closed && !runtime.isClosed()) {
           if (turn.errorMessage) {
             runtime.sink.push(
-              codexErrorBlock(turn.errorMessage, {
+              codexErrorEvent(turn.errorMessage, {
                 code: turn.errorCode,
                 httpStatus: turn.errorHttpStatus,
               }),
@@ -1062,7 +1062,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(codexErrorBlock(message, classification));
+          runtime.sink.push(codexErrorEvent(message, classification));
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();

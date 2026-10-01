@@ -182,7 +182,7 @@ export function RomeAppHost({
         mountedModule = module;
         await module.mount(mountRoot, currentBootstrap);
         // Both page surfaces (embedded + full) mount through here; the inline
-        // chat surface has its own mount path in AppComponentBlock. Together
+        // chat surface has its own mount path in AppComponentView. Together
         // the two call sites are the complete record of app
         // opens — including surfaces that never change the URL.
         trackAppOpen(appId, currentBootstrap.shell.mode);

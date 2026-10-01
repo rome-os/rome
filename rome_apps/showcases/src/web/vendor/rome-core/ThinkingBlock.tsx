@@ -1,5 +1,5 @@
 // VENDORED VERBATIM from rome-internal:
-//   packages/web/src/components/chat/blocks/ThinkingBlock.tsx
+//   packages/web/src/components/chat/entries/ThinkingBlock.tsx
 // Only the import lines are adapted (see ../VENDOR.md "seams"):
 //   - "react-i18next"            -> ../shims/i18n
 //   - "@radix-ui/react-icons"    -> ../shims/icons

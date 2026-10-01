@@ -1,13 +1,13 @@
 import { TurnSummaryGroup, type TurnRecapSummary } from "@/components/chat/TurnSummaryGroup";
 
-export type TurnRecapBlockProps = TurnRecapSummary;
+export type TurnRecapViewProps = TurnRecapSummary;
 
-export function TurnRecapBlock({
+export function TurnRecapView({
   content,
   audioUrl,
   audioMimeType,
   audioDurationMs,
-}: TurnRecapBlockProps) {
+}: TurnRecapViewProps) {
   return (
     <TurnSummaryGroup recap={{ content, audioUrl, audioMimeType, audioDurationMs }} live={false} />
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { describeToolSummary, toolStepDotClass } from "./ToolStepBlock";
+import { describeToolSummary, toolCallDotClass } from "./ToolCallView";
 
 const t = (key: string) => key;
 
@@ -51,16 +51,16 @@ describe("describeToolSummary", () => {
   });
 });
 
-describe("toolStepDotClass", () => {
+describe("toolCallDotClass", () => {
   it("uses the current yellow running dot when a pending tool call is not live", () => {
-    expect(toolStepDotClass("running", false)).toBe("bg-warning");
+    expect(toolCallDotClass("running", false)).toBe("bg-warning");
   });
 
   it("uses a blinking blue dot when a pending tool call is live", () => {
-    expect(toolStepDotClass("running", true)).toBe("animate-pulse bg-info");
+    expect(toolCallDotClass("running", true)).toBe("animate-pulse bg-info");
   });
 
   it("does not change completed statuses for live traces", () => {
-    expect(toolStepDotClass("ok", true)).toBe("bg-success");
+    expect(toolCallDotClass("ok", true)).toBe("bg-success");
   });
 });

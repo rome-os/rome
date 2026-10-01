@@ -1,4 +1,4 @@
-import type { AppRefDto, SubagentStartBlock, ToolUseBlock } from "@rome/api-types/trace-segments";
+import type { AppRefDto, SubagentStartEvent, ToolUseBlock } from "@rome/api-types/trace-segments";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -69,7 +69,7 @@ export function createRegistryAppResolver(deps: RegistryAppResolverDeps): AppRes
   };
 
   return {
-    resolveTool(block: ToolUseBlock | SubagentStartBlock): AppRefDto {
+    resolveTool(block: ToolUseBlock | SubagentStartEvent): AppRefDto {
       const tool = block.type === "subagent_start" ? block.agentName : block.tool;
 
       if (isExecuteShim(tool)) {

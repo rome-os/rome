@@ -1,7 +1,7 @@
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { prettyAgentName } from "@/lib/agent-name";
-import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: many flat per-session message lists → one renderable view.
 // This is the single place the multi-session handoff tree is merged. No React,
@@ -73,7 +73,7 @@ function indexHandoffs(
   const msgs = messagesBySession.get(sessionId) ?? [];
   const openByToolUseId = new Map<string, HandoffNode>();
   for (const msg of msgs) {
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (msg.role === "user") {
         if (b.type === "interaction_result" && b.toolUseId) {
           const node = openByToolUseId.get(b.toolUseId);
@@ -153,7 +153,7 @@ function buildDisplayMessages(
       if (seedText && userMessageText(msg.content).trim() === seedText.trim()) continue;
     }
     out.push(msg);
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (b.type === "handoff" && b.childSessionId) pendingChildren.push(b.childSessionId);
     }
   }
@@ -180,7 +180,7 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 // guardian is.
 const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
 
-function isAutoDismissedCard(b: StreamBlock): boolean {
+function isAutoDismissedCard(b: ChatEntry): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render?.builtin === true &&
@@ -201,7 +201,7 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   const openCards = new Map<string, Set<string>>();
   for (const msg of messages) {
     let userTextReply = false;
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (
         msg.role === "assistant" &&
         (b.type === "pending_interaction" || b.type === "handoff") &&

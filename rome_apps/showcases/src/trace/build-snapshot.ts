@@ -5,9 +5,9 @@ import type {
   AppResolver,
   ToolResultBlock,
   ToolUseBlock,
-  ErrorBlock,
-  ResultBlock,
-  TraceBlockDto,
+  ErrorEvent,
+  ResultEvent,
+  TraceEventDto,
   TraceRunSegment,
   TraceSegment,
   TraceSnapshot,
@@ -20,14 +20,14 @@ interface RunState {
   app: AppRefDto;
   ordinal: number;
   count: number;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   pairedAny: boolean;
   durationDirty: boolean;
   durationMs: number;
   useIndexById: Map<string, number>;
 }
 
-function isTerminalBlock(block: TraceBlockDto): block is ResultBlock | ErrorBlock {
+function isTerminalEvent(block: TraceEventDto): block is ResultEvent | ErrorEvent {
   return block.type === "result" || block.type === "error";
 }
 
@@ -64,7 +64,7 @@ function defaultAgentDisplayName(agentId: string): string {
 
 export interface BuildTraceSnapshotArgs {
   idPrefix: string;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   resolver?: AppResolver;
   agentDisplayName?: AgentDisplayNameResolver;
 }
@@ -85,7 +85,7 @@ export function buildTraceSnapshot(args: BuildTraceSnapshotArgs): TraceSnapshot 
   let totalDurationMs: number | undefined;
   let stoppedByUser = false;
   let terminalError: string | undefined;
-  let lastTerminal: (TraceBlockDto & { type: "result" | "error" }) | undefined;
+  let lastTerminal: (TraceEventDto & { type: "result" | "error" }) | undefined;
 
   const allocId = () => `${args.idPrefix}-${nextSegmentNum++}`;
   const observeApp = (app: AppRefDto) => {
@@ -108,10 +108,10 @@ export function buildTraceSnapshot(args: BuildTraceSnapshotArgs): TraceSnapshot 
       if (otherIdx > useIdx) state.useIndexById.set(otherId, otherIdx + 1);
     }
     const use = state.blocks[useIdx];
-    const stepDuration = use.type === "tool_use" ? pairedDurationMs(use, result) : null;
+    const toolCallDuration = use.type === "tool_use" ? pairedDurationMs(use, result) : null;
     state.pairedAny = true;
-    if (stepDuration === null) state.durationDirty = true;
-    else state.durationMs += stepDuration;
+    if (toolCallDuration === null) state.durationDirty = true;
+    else state.durationMs += toolCallDuration;
   };
   const fallbackPairIntoActive = (result: ToolResultBlock, agent: string): boolean => {
     if (!activeRunSegId) return false;
@@ -186,7 +186,7 @@ export function buildTraceSnapshot(args: BuildTraceSnapshotArgs): TraceSnapshot 
 
     if (block.type !== "tool_use") {
       activeRunSegId = null;
-      if (isTerminalBlock(block)) {
+      if (isTerminalEvent(block)) {
         lastTerminal = block;
       }
       segments.push({

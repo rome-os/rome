@@ -11,15 +11,14 @@ import {
 import { createLogger } from "../../logger.js";
 import { logInboundChannelMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
-import { toWebchatSessionResponse, type TraceableAgentMessage } from "../helpers.js";
+import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
 import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
 import {
-  agentMessageToBlock,
   buildTraceSnapshot,
   createSegmentBuilder,
   type AppResolver,
   type SegmentBuilder,
-  type TraceBlockDto,
+  type TraceEventDto,
 } from "../trace-segments.js";
 import type {
   TraceAccounting,
@@ -608,10 +607,10 @@ interface ActiveWebchatStream {
   // rather than every historical frame. Map preserves insertion order, so
   // the replay matches the order the segments were first opened.
   events: Map<string, WebchatSseEvent>;
-  traceBlocks: (TraceableAgentMessage & { agent?: string })[];
+  traceEvents: (TraceableEvent & { agent?: string })[];
   traceRecorder: AgentTraceRecorder;
   /**
-   * Accumulated preview of the in-flight assistant text block, plus the index
+   * Accumulated deltas of the in-flight assistant text block, plus the index
    * of that block within the turn. The server states stream facts only:
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
@@ -620,7 +619,7 @@ interface ActiveWebchatStream {
    */
   assistantText: string;
   assistantBlockIx: number;
-  persistedTraceBlockCount: number;
+  persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
   subscribers: Map<string, StreamSubscriber>;
@@ -788,10 +787,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     agentLoader: deps.agentLoader,
   });
 
-  const parseStoredTraceBlocks = (content: string): TraceBlockDto[] => {
+  const parseStoredTraceEvents = (content: string): TraceEventDto[] => {
     try {
       const parsed = JSON.parse(content);
-      return Array.isArray(parsed) ? (parsed as TraceBlockDto[]) : [];
+      return Array.isArray(parsed) ? (parsed as TraceEventDto[]) : [];
     } catch {
       // Legacy non-JSON content; render as text so the drawer degrades gracefully.
       return [{ type: "text", content, agent: "main" }];
@@ -868,7 +867,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     return [...byModel.values()];
   };
-  const terminalAccounting = (blocks: TraceBlockDto[]): TraceAccounting | null => {
+  const terminalAccounting = (blocks: TraceEventDto[]): TraceAccounting | null => {
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
       if ((block.type === "result" || block.type === "error") && block.accounting) {
@@ -885,7 +884,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     usageByModel: TraceModelUsage[];
   };
   const collectDescendantUsage = async (
-    blocks: TraceBlockDto[],
+    blocks: TraceEventDto[],
     visited: Set<string>,
   ): Promise<DescendantUsage> => {
     const refs = blocks.filter((block) => block.type === "subagent_start");
@@ -912,9 +911,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             usageByModel: [],
           };
         }
-        const childBlocks = parseStoredTraceBlocks(row.content);
-        const accounting = terminalAccounting(childBlocks);
-        const nested = await collectDescendantUsage(childBlocks, visited);
+        const childEvents = parseStoredTraceEvents(row.content);
+        const accounting = terminalAccounting(childEvents);
+        const nested = await collectDescendantUsage(childEvents, visited);
         return {
           usage: accounting ? addTokenUsage(accounting.usage, nested.usage) : nested.usage,
           costUsd: (accounting?.costUsd ?? 0) + nested.costUsd,
@@ -945,7 +944,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     );
   };
-  const includeSubagentUsage = async (blocks: TraceBlockDto[]): Promise<TraceBlockDto[]> => {
+  const includeSubagentUsage = async (blocks: TraceEventDto[]): Promise<TraceEventDto[]> => {
     let terminalIndex = -1;
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
@@ -983,7 +982,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     content: string,
     options: { includeSubagentUsage?: boolean } = {},
   ): Promise<TraceSnapshot> => {
-    let blocks = parseStoredTraceBlocks(content);
+    let blocks = parseStoredTraceEvents(content);
     if (options.includeSubagentUsage) blocks = await includeSubagentUsage(blocks);
     return buildTraceSnapshot({
       idPrefix,
@@ -1083,10 +1082,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (row.role === "trace") {
           const content = contentById.get(row.id);
           if (content) {
-            let blocks: TraceBlockDto[] = [];
+            let blocks: TraceEventDto[] = [];
             try {
               const parsed = JSON.parse(content);
-              if (Array.isArray(parsed)) blocks = parsed as TraceBlockDto[];
+              if (Array.isArray(parsed)) blocks = parsed as TraceEventDto[];
             } catch {
               blocks = [];
             }
@@ -1225,9 +1224,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
-        ? parseStoredTraceBlocks(traceRow.content)
+        ? parseStoredTraceEvents(traceRow.content)
             .filter(
-              (block): block is Extract<TraceBlockDto, { type: "turn_end" }> =>
+              (block): block is Extract<TraceEventDto, { type: "turn_end" }> =>
                 block.type === "turn_end" && block.turnId === input.turnId,
             )
             .at(-1)?.status
@@ -1598,22 +1597,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const persist = async () => {
-      while (stream.persistedTraceBlockCount < stream.traceBlocks.length) {
+      while (stream.persistedTraceEventCount < stream.traceEvents.length) {
         // Append-only: serialize and write only the tail that arrived since
         // the last successful persist. A full-array rewrite is O(N²) over a
         // turn and blocks the event loop for tens of milliseconds per event
         // once traces reach megabytes — long enough to stall every
         // concurrent HTTP request in this process.
-        const startSeq = stream.persistedTraceBlockCount;
-        const persistedCount = stream.traceBlocks.length;
+        const startSeq = stream.persistedTraceEventCount;
+        const persistedCount = stream.traceEvents.length;
         try {
-          // Transactional: on failure nothing lands, persistedTraceBlockCount
+          // Transactional: on failure nothing lands, persistedTraceEventCount
           // stays put, and the next call retries the same tail.
           await stream.traceRecorder.recordBatch(
-            stream.traceBlocks.slice(startSeq, persistedCount),
+            stream.traceEvents.slice(startSeq, persistedCount),
             startSeq,
           );
-          stream.persistedTraceBlockCount = persistedCount;
+          stream.persistedTraceEventCount = persistedCount;
         } catch (err) {
           log.error("failed to persist webchat trace", {
             sessionId: stream.sessionId,
@@ -1664,11 +1663,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // Push an AgentMessage through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
-  const emitTraceBlock = (
+  const emitTraceEvent = (
     stream: ActiveWebchatStream,
-    msg: TraceableAgentMessage & { agent?: string },
+    msg: TraceableEvent & { agent?: string },
   ): void => {
-    const block = agentMessageToBlock(msg);
+    const block = toTraceEvent(msg);
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);
@@ -1688,7 +1687,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Incrementally persist so trace blocks survive a mid-turn crash (e.g.
     // CDP connection closed, long-running tool errors). persistTrace is
     // idempotent + serialized via tracePersistPromise and writes only the
-    // new tail since persistedTraceBlockCount, so frequent calls are safe.
+    // new tail since persistedTraceEventCount, so frequent calls are safe.
     // Fire-and-forget — the runOnStream tail still calls safePersistTrace
     // as the final flush.
     void persistTrace(stream).catch((err) => {
@@ -1736,7 +1735,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       startedAt: new Date().toISOString(),
       finished: false,
       events: new Map(),
-      traceBlocks: [],
+      traceEvents: [],
       traceRecorder: new AgentTraceRecorder({
         webchatRepo: deps.webchatRepo,
         agentName,
@@ -1746,7 +1745,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }),
       assistantText: "",
       assistantBlockIx: 0,
-      persistedTraceBlockCount: 0,
+      persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
       subscribers: new Map(),
@@ -2439,7 +2438,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json({ trace: snapshot });
   });
 
-  // Raw trace dump: returns the original TraceBlockDto[] for a (session, turn)
+  // Raw trace dump: returns the original TraceEventDto[] for a (session, turn)
   // as a downloadable JSON file. Always the pre-segmentation blocks so the
   // dump can be replayed/inspected verbatim. Falls back to the in-memory
   // active stream when the row hasn't been persisted yet (very early in a turn).
@@ -2455,7 +2454,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     } else {
       const stream = streamsByTurnId.get(turnId);
       if (stream && stream.sessionId === sessionId) {
-        const blocks = stream.traceBlocks.map((m) => agentMessageToBlock(m));
+        const blocks = stream.traceEvents.map((m) => toTraceEvent(m));
         content = JSON.stringify(blocks);
       }
     }
@@ -2755,7 +2754,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
           if (message.type === "error") terminalError = message;
           if (message.type === "turn_end" && message.status === "interrupted") interrupted = true;
-          const block = agentMessageToBlock(message);
+          const block = toTraceEvent(message);
           const changed = builder.push(block);
           for (const segment of changed) write("segment_upsert", segment);
           if (
@@ -3202,7 +3201,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // stream remains replayable for 30 seconds after completion and the
         // persisted trace renders on reload even if navigation finishes later.
         void runOnStream(stream, "webchat model resolution", async () => {
-          const failedTurn: Array<TraceableAgentMessage & { agent?: string }> = [
+          const failedTurn: Array<TraceableEvent & { agent?: string }> = [
             {
               type: "turn_start",
               turnId,
@@ -3220,8 +3219,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             },
           ];
           for (const message of failedTurn) {
-            stream.traceBlocks.push(message);
-            emitTraceBlock(stream, message);
+            stream.traceEvents.push(message);
+            emitTraceEvent(stream, message);
           }
           return { success: false, ...modelError };
         });
@@ -3283,7 +3282,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               if (msg.type === "input_status") continue;
               // Previews other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
-              // Live preview of the in-flight text block. Transient — never a
+              // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
               // late subscriber gets one event with the latest block's
               // accumulated text.
@@ -3359,13 +3358,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 };
                 lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
                 finalTextBlockIx = blockIx;
-                stream.traceBlocks.push(partial);
-                emitTraceBlock(stream, partial);
+                stream.traceEvents.push(partial);
+                emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
               }
-              stream.traceBlocks.push(msg);
-              emitTraceBlock(stream, msg);
+              stream.traceEvents.push(msg);
+              emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
                 const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
                 if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
@@ -3779,10 +3778,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           };
         }
       }
-      // Backend turns have no live bubble; drop transient text previews.
+      // Backend turns have no live bubble; drop delta events.
       if (isTransientDelta(msg) || msg.type === "input_status") return;
-      stream.traceBlocks.push(msg);
-      emitTraceBlock(stream, msg);
+      stream.traceEvents.push(msg);
+      emitTraceEvent(stream, msg);
       if (msg.type === "result") replyText = msg.content;
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);

@@ -58,7 +58,7 @@ function UsageStat({ label, value, hint }: { label: string; value: number; hint?
   );
 }
 
-export function UsageSummaryBlock({ accounting }: { accounting: TraceAccounting }) {
+export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }) {
   const { t } = useTranslation("chat");
   const options = useContext(TraceUsageOptionsContext);
   const context = accounting.context;

@@ -1,4 +1,4 @@
-import type { StreamBlock } from "@/lib/chat-types";
+import type { ChatEntry } from "@/lib/chat-types";
 import { appBuildingChat } from "./app-building-chat";
 
 export interface DemoChat {
@@ -7,9 +7,9 @@ export interface DemoChat {
   project: string;
   turns: {
     at: string;
-    prompt: string | StreamBlock[];
+    prompt: string | ChatEntry[];
     reply: string;
-    blocks?: StreamBlock[];
+    blocks?: ChatEntry[];
   }[];
 }
 

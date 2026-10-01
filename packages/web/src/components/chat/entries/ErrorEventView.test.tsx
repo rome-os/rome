@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "@rstest/core";
 import i18n from "@/i18n";
-import { ErrorBlock } from "./ErrorBlock";
+import { ErrorEventView } from "./ErrorEventView";
 
 beforeAll(async () => {
   await i18n.changeLanguage("zh-CN");
@@ -17,11 +17,11 @@ afterAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-describe("ErrorBlock", () => {
+describe("ErrorEventView", () => {
   it("guides a logged-out Codex user to AI Tools", () => {
     render(
       <MemoryRouter>
-        <ErrorBlock
+        <ErrorEventView
           error="Selected model provider is unavailable: Codex"
           code="model_provider_unavailable"
           provider="openai"
@@ -40,7 +40,7 @@ describe("ErrorBlock", () => {
   it("guides a user with revoked Claude auth to reconnect in AI Tools", () => {
     render(
       <MemoryRouter>
-        <ErrorBlock
+        <ErrorEventView
           error="OAuth token revoked · Please run /login"
           code="auth_revoked"
           provider="anthropic"
@@ -58,7 +58,7 @@ describe("ErrorBlock", () => {
   it("guides a user to switch accounts or wait when every connected provider is exhausted", () => {
     render(
       <MemoryRouter>
-        <ErrorBlock
+        <ErrorEventView
           error="All connected model providers have reached their usage limits"
           code="no_model_provider_available"
           reason="quota_exhausted"
@@ -76,7 +76,7 @@ describe("ErrorBlock", () => {
   it("keeps unknown errors as plain text", () => {
     render(
       <MemoryRouter>
-        <ErrorBlock error="Something else failed" />
+        <ErrorEventView error="Something else failed" />
       </MemoryRouter>,
     );
 

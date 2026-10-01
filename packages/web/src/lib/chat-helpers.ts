@@ -1,5 +1,5 @@
 import { escapeMarkdownText } from "./markdown-text";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { ApprovalRecord, PendingUpload, ReasoningEffort } from "./chat-types";
 
 export interface AppInstalledEvent {
@@ -35,10 +35,10 @@ function parseInstallSuccess(output: unknown): { appId?: string } | null {
   return null;
 }
 
-export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] {
+export function detectAppInstalls(blocks: TraceEventDto[]): AppInstalledEvent[] {
   const results: AppInstalledEvent[] = [];
 
-  const resultMap = new Map<string, TraceBlockDto>();
+  const resultMap = new Map<string, TraceEventDto>();
   // tool_use id → appId from the input ("create" carries one), or null when it
   // can only come from the result ("install" takes NO appId by contract — the
   // daemon derives it from the source and returns it in the result).
@@ -101,7 +101,7 @@ export function detectAppInstalls(blocks: TraceBlockDto[]): AppInstalledEvent[] 
 /** Whether a Bash tool result succeeded. A result without `isError` (recorded
  *  before the flag existed, or from a producer that cannot tell) falls back
  *  to the shell's exit code. */
-function bashSucceeded(result: Extract<TraceBlockDto, { type: "tool_result" }>): boolean {
+function bashSucceeded(result: Extract<TraceEventDto, { type: "tool_result" }>): boolean {
   if (result.isError !== undefined) return !result.isError;
   const out = result.output as Record<string, unknown> | null;
   return (out?.exit_code ?? out?.exitCode) === 0;

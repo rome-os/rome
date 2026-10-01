@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { TraceAccounting } from "@rome/api-types/trace-segments";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { UsageSummaryBlock } from "./UsageSummaryBlock";
+import { UsageSummaryView } from "./UsageSummaryView";
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -28,7 +28,7 @@ beforeAll(() => {
 
 afterEach(() => cleanup());
 
-describe("UsageSummaryBlock", () => {
+describe("UsageSummaryView", () => {
   it("shows cross-model usage as a compact text breakdown", async () => {
     const user = userEvent.setup();
     const accounting: TraceAccounting = {
@@ -73,7 +73,7 @@ describe("UsageSummaryBlock", () => {
 
     render(
       <TooltipProvider>
-        <UsageSummaryBlock accounting={accounting} />
+        <UsageSummaryView accounting={accounting} />
       </TooltipProvider>,
     );
 
@@ -111,7 +111,7 @@ describe("UsageSummaryBlock", () => {
 
     render(
       <TooltipProvider>
-        <UsageSummaryBlock accounting={accounting} />
+        <UsageSummaryView accounting={accounting} />
       </TooltipProvider>,
     );
 

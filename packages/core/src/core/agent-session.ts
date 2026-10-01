@@ -87,7 +87,7 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
-import { isTerminalBlock, isTransientDelta } from "./agent-message.js";
+import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -100,7 +100,7 @@ import {
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
 } from "../apps/packaging/output-schema-validator.js";
-import { translateTurnSpans, type CapturedBlock } from "./turn-span-translator.js";
+import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,
   classifyAgentTurnStatus,
@@ -1728,7 +1728,7 @@ interface TurnSink {
    * the sink itself drops (e.g. subagent tool_results) so per-tool spans
    * are reconstructed for subagent dispatch from the parent's view.
    */
-  blocks: CapturedBlock[];
+  blocks: CapturedEvent[];
   /** Captured at turn start; used as the floor for tool startedAt values. */
   modelTurnStartMs: number;
   /**
@@ -2125,7 +2125,7 @@ class AgentSessionImpl implements AgentSession {
         }
         if (msg.type === "result" || msg.type === "error") await this.inputs.seal(sink.turnId);
         // Time-to-first-token: the first *text* event of the turn (a text_delta
-        // preview or a completed text block) marks when the model started
+        // or a completed text block) marks when the model started
         // producing visible output. Gate strictly to text — thinking/tool_use
         // can precede any token (Codex emits tool_use before agentMessageDelta),
         // and counting those would make tool-first turns look artificially fast.
@@ -2146,7 +2146,7 @@ class AgentSessionImpl implements AgentSession {
           });
           this.currentModelSpan?.setAttribute("ttft_ms", ttftMs);
         }
-        // Deltas are transient previews of an in-flight block; the complete
+        // Deltas are transient increments of an in-flight block; the complete
         // block still follows. Fast-path them straight to the sink: no
         // span-translator capture, no per-delta DB touch, no metrics.
         if (isTransientDelta(msg)) {
@@ -2222,7 +2222,7 @@ class AgentSessionImpl implements AgentSession {
 
         this.publishOutbound(sink, outbound);
 
-        if (isTerminalBlock(outbound)) {
+        if (isTerminalEvent(outbound)) {
           // The branch action becomes available when turn_end is published.
           // Persist the provider-native anchor first so an immediate click can
           // never fall back to (or race with) a later provider-thread head.
@@ -2863,7 +2863,7 @@ class AgentSessionImpl implements AgentSession {
             for await (const msg of providerEvents) {
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
-              if (projected.some(isTerminalBlock)) break;
+              if (projected.some(isTerminalEvent)) break;
             }
           } catch (err) {
             outbound.push({
@@ -2890,7 +2890,7 @@ class AgentSessionImpl implements AgentSession {
           // Relayed subagent blocks carry the child's agent tag; everything
           // else is this agent's own output.
           yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
-          if (isTerminalBlock(out)) {
+          if (isTerminalEvent(out)) {
             status = isInterruptedAccounting(out.accounting)
               ? "interrupted"
               : out.type === "error"
@@ -3220,7 +3220,7 @@ class AgentSessionImpl implements AgentSession {
       // (including the per-turn session_init below) may become visible while
       // the summary still shows turn N's terminal state.
       this.ensureTurnStart(sink);
-      // Per-turn session_init: trace/UI headers (AgentCallBlock, showcases'
+      // Per-turn session_init: trace/UI headers (AgentCallView, showcases'
       // userPrompt derivation) still key off it. Step 2 of the stream-shape
       // cleanup demotes it to once-per-session — turn_start above is already
       // the authoritative turn boundary.

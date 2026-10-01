@@ -1,12 +1,12 @@
 /**
- * Gallery of the transcript blocks, at `/dev/chat-blocks`.
+ * Gallery of the transcript entries, at `/dev/chat-entries`.
  *
  * A block renders only once an agent reaches a particular state — a parked
  * turn, a pending approval, a handoff — and `/chat` opens on an empty composer,
  * so no product route shows one on load. This page is where the family becomes
  * reachable to a reader and to the layout-invariant sweep.
  *
- * A specimen goes through `renderSingleBlock` rather than mounting its
+ * A specimen goes through `renderSingleEntry` rather than mounting its
  * component, so it exercises the dispatch guards too: a block shape that stops
  * reaching its component fails here rather than rendering a component nothing
  * produces.
@@ -16,20 +16,20 @@
  * animates, or reads the clock needs a frozen fixture before it belongs here.
  */
 
-import type { StreamBlock } from "@/lib/chat-types";
+import type { ChatEntry } from "@/lib/chat-types";
 import { interactionResultKey } from "@/components/chat/chat-view";
-import { renderSingleBlock, type RenderBlockOptions } from "@/components/chat/blocks/render";
+import { renderSingleEntry, type RenderEntryOptions } from "@/components/chat/entries/render";
 
 /** Specimens are inert data; submissions have nowhere to go on this page. */
 const noop = () => {};
 
-const SESSION_ID = "dev-chat-blocks";
+const SESSION_ID = "dev-chat-entries";
 
 /**
  * A pending `ask_question` card. `appId` is the "core" sentinel and `builtin`
  * is what routes it to rome-web's own QuestionCard instead of an app bundle.
  */
-const askQuestion = (toolUseId: string, questions: unknown[]): StreamBlock => ({
+const askQuestion = (toolUseId: string, questions: unknown[]): ChatEntry => ({
   type: "pending_interaction",
   toolUseId,
   appId: "core",
@@ -41,12 +41,12 @@ interface Specimen {
   title: string;
   /** What this specimen is for — the state or layout branch it pins. */
   note: string;
-  block: StreamBlock;
+  block: ChatEntry;
   /** Prior submitted output, for a specimen of the resolved (locked) card. */
   result?: Record<string, unknown>;
 }
 
-export const CHAT_BLOCK_SPECIMENS: Specimen[] = [
+export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
   {
     id: "question-card-compact",
     title: "QuestionCard — compact options",
@@ -168,19 +168,19 @@ export const CHAT_BLOCK_SPECIMENS: Specimen[] = [
   },
 ];
 
-export default function ChatBlocksGalleryPage() {
+export default function ChatEntriesGalleryPage() {
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="mx-auto max-w-5xl space-y-10">
         <div>
           <h1 className="font-serif text-display text-foreground">Transcript blocks</h1>
           <p className="mt-1 max-w-2xl text-ui text-muted-foreground">
-            Every component <code className="font-mono">renderSingleBlock</code> dispatches to,
-            rendered from a literal <code className="font-mono">StreamBlock</code>. Specimens must
+            Every component <code className="font-mono">renderSingleEntry</code> dispatches to,
+            rendered from a literal <code className="font-mono">ChatEntry</code>. Specimens must
             render identically on every load — this page is in the layout-invariant sweep.
           </p>
         </div>
-        {CHAT_BLOCK_SPECIMENS.map((specimen) => (
+        {CHAT_ENTRY_SPECIMENS.map((specimen) => (
           <SpecimenFrame key={specimen.id} specimen={specimen} />
         ))}
       </div>
@@ -194,31 +194,31 @@ export default function ChatBlocksGalleryPage() {
  * one row only if the column is wide enough to hold them, and that shared row is
  * what the geometry assertions measure.
  */
-type SubmitAppComponent = NonNullable<RenderBlockOptions["onSubmitAppComponent"]>;
-type DismissAppComponent = NonNullable<RenderBlockOptions["onDismissAppComponent"]>;
+type SubmitAppComponent = NonNullable<RenderEntryOptions["onSubmitAppComponent"]>;
+type DismissAppComponent = NonNullable<RenderEntryOptions["onDismissAppComponent"]>;
 
-export interface ChatBlockPreviewProps {
-  block: StreamBlock;
+export interface ChatEntryPreviewProps {
+  block: ChatEntry;
   result?: Record<string, unknown>;
   sessionId: string;
   onSubmitAppComponent: SubmitAppComponent;
   onDismissAppComponent: DismissAppComponent;
 }
 
-/** Renders a StreamBlock through the transcript's production dispatcher. */
-export function ChatBlockPreview({
+/** Renders a ChatEntry through the transcript's production dispatcher. */
+export function ChatEntryPreview({
   block,
   result,
   sessionId,
   onSubmitAppComponent,
   onDismissAppComponent,
-}: ChatBlockPreviewProps) {
+}: ChatEntryPreviewProps) {
   const results =
     result && block.toolUseId
       ? new Map([[interactionResultKey(sessionId, block.toolUseId), result]])
       : undefined;
 
-  return renderSingleBlock(block, block.toolUseId ?? "chat-block-preview", {
+  return renderSingleEntry(block, block.toolUseId ?? "chat-block-preview", {
     sessionId,
     interactionResults: results,
     onSubmitAppComponent,
@@ -234,7 +234,7 @@ function SpecimenFrame({ specimen }: { specimen: Specimen }) {
         <p className="max-w-2xl text-ui text-muted-foreground">{specimen.note}</p>
       </div>
       <div className="w-full max-w-2xl">
-        <ChatBlockPreview
+        <ChatEntryPreview
           block={specimen.block}
           result={specimen.result}
           sessionId={SESSION_ID}

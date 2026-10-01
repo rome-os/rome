@@ -8,7 +8,7 @@ import { CollapsibleTraceRow } from "@/components/agent-trace/CollapsibleTraceRo
 const SYSTEM_PROMPT_COLLAPSED_MAX_HEIGHT = 168;
 const SYSTEM_PROMPT_FADE_MASK = "linear-gradient(to bottom, black 70%, transparent 100%)";
 
-export function AgentCallBlock({
+export function AgentCallView({
   agent,
   sessionId,
   romeSession,

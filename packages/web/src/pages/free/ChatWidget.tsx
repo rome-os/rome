@@ -3,11 +3,11 @@ import { ChatComponent, type SessionMessage } from "@/components/chat/ChatCompon
 import { detectAppInstalls } from "@/lib/chat-helpers";
 import { extractFilePathsFromText, isProjectPath } from "@/lib/extract-file-paths";
 import type { AgentMention } from "@/lib/chat-types";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import { useWorkspaceEventBus } from "./workspace-event-bus";
 import { useWorkspaceStore } from "./workspace-store";
 
-function extractProjectPathsFromBlocks(blocks: TraceBlockDto[]): string[] {
+function extractProjectPathsFromBlocks(blocks: TraceEventDto[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 

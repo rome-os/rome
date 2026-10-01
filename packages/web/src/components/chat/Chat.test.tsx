@@ -103,9 +103,9 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   ),
 }));
 
-rs.mock("@/components/chat/blocks", () => ({
-  renderFlatBlocks: () => null,
-  renderSingleBlock: () => null,
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
 }));
 
 rs.mock("@/lib/chat-api", () => {

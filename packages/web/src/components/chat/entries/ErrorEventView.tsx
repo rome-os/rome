@@ -6,9 +6,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ChatErrorCode, ChatErrorProvider, ChatErrorReason } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
-import { UsageSummaryBlock } from "./UsageSummaryBlock";
+import { UsageSummaryView } from "./UsageSummaryView";
 
-export interface ErrorBlockProps {
+export interface ErrorEventViewProps {
   error: string;
   code?: ChatErrorCode;
   provider?: ChatErrorProvider;
@@ -23,14 +23,14 @@ function providerName(provider?: ChatErrorProvider): string {
   return "AI tool";
 }
 
-export function ErrorBlock({
+export function ErrorEventView({
   error,
   code,
   provider,
   reason,
   presentation = "block",
   className,
-}: ErrorBlockProps) {
+}: ErrorEventViewProps) {
   const { t } = useTranslation("chat");
   const isModelResolutionError =
     code === "model_provider_unavailable" ||
@@ -143,7 +143,7 @@ export function ErrorBlock({
   );
 }
 
-export function ErrorRunBlock({
+export function ErrorRunView({
   error,
   accounting,
   code,
@@ -159,13 +159,13 @@ export function ErrorRunBlock({
   const { t } = useTranslation("chat");
   return (
     <div>
-      <ErrorBlock
+      <ErrorEventView
         error={error ?? t("blocks.agentRunFailed")}
         code={code}
         provider={provider}
         reason={reason}
       />
-      {accounting ? <UsageSummaryBlock accounting={accounting} /> : null}
+      {accounting ? <UsageSummaryView accounting={accounting} /> : null}
     </div>
   );
 }

@@ -20,19 +20,19 @@ import type { RunOutcome, SessionsSort } from "@rome/api-types/sessions";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
 
-const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
-const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
-const terminalBlockType = sql<string>`json_extract(${terminalTraceBlocks.content}, '$.type')`;
+const terminalTraceEvents = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
+const turnEndTraceEvents = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
+const terminalBlockType = sql<string>`json_extract(${terminalTraceEvents.content}, '$.type')`;
 const terminalBlockCondition = sql`${terminalBlockType} IN ('result', 'error')`;
 const modelProvider = sql<
   string | null
->`nullif(trim(json_extract(${terminalTraceBlocks.content}, '$.accounting.provider')), '')`;
+>`nullif(trim(json_extract(${terminalTraceEvents.content}, '$.accounting.provider')), '')`;
 const modelName = sql<
   string | null
->`nullif(trim(json_extract(${terminalTraceBlocks.content}, '$.accounting.model')), '')`;
-const turnEndBlockType = sql<string>`json_extract(${turnEndTraceBlocks.content}, '$.type')`;
+>`nullif(trim(json_extract(${terminalTraceEvents.content}, '$.accounting.model')), '')`;
+const turnEndBlockType = sql<string>`json_extract(${turnEndTraceEvents.content}, '$.type')`;
 const turnEndBlockCondition = sql`${turnEndBlockType} = 'turn_end'`;
-const runStatus = sql<string | null>`json_extract(${turnEndTraceBlocks.content}, '$.status')`;
+const runStatus = sql<string | null>`json_extract(${turnEndTraceEvents.content}, '$.status')`;
 const normalizedAgentName = sql<string>`coalesce(${romeSessions.agentName}, 'main')`;
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -266,12 +266,12 @@ export class SessionQueryRepository {
       })
       .from(romeAgentMessages)
       .leftJoin(
-        terminalTraceBlocks,
-        and(eq(terminalTraceBlocks.messageId, romeAgentMessages.id), terminalBlockCondition),
+        terminalTraceEvents,
+        and(eq(terminalTraceEvents.messageId, romeAgentMessages.id), terminalBlockCondition),
       )
       .leftJoin(
-        turnEndTraceBlocks,
-        and(eq(turnEndTraceBlocks.messageId, romeAgentMessages.id), turnEndBlockCondition),
+        turnEndTraceEvents,
+        and(eq(turnEndTraceEvents.messageId, romeAgentMessages.id), turnEndBlockCondition),
       )
       .where(and(...runPredicates(scope)))
       .groupBy(romeAgentMessages.sessionId)
@@ -399,12 +399,12 @@ export class SessionQueryRepository {
       .from(romeAgentMessages)
       .innerJoin(romeSessions, eq(romeSessions.id, romeAgentMessages.sessionId))
       .leftJoin(
-        terminalTraceBlocks,
-        and(eq(terminalTraceBlocks.messageId, romeAgentMessages.id), terminalBlockCondition),
+        terminalTraceEvents,
+        and(eq(terminalTraceEvents.messageId, romeAgentMessages.id), terminalBlockCondition),
       )
       .leftJoin(
-        turnEndTraceBlocks,
-        and(eq(turnEndTraceBlocks.messageId, romeAgentMessages.id), turnEndBlockCondition),
+        turnEndTraceEvents,
+        and(eq(turnEndTraceEvents.messageId, romeAgentMessages.id), turnEndBlockCondition),
       )
       .where(and(...runPredicates(scope), ...sessionPredicates(scope)))
       .groupBy(

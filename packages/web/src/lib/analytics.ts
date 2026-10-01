@@ -103,7 +103,7 @@ export function trackEvent(name: string, params?: Record<string, unknown>): void
 export type AppOpenSurface = "embedded" | "full" | "inline";
 
 // Called from BOTH mount paths — RomeAppHost (embedded + full pages) and
-// AppComponentBlock (inline chat components bypass RomeAppHost), so every app
+// AppComponentView (inline chat components bypass RomeAppHost), so every app
 // open is one event regardless of surface. Custom names are rome_-prefixed to
 // avoid GA/Firebase auto-collected semantics.
 export function trackAppOpen(appId: string, surface: AppOpenSurface): void {

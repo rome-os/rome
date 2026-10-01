@@ -60,7 +60,7 @@ import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useSseEvents } from "@/hooks/use-sse-events";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
   MessageList,
   type BlockActions,
@@ -81,7 +81,7 @@ import type {
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
-  StreamBlock,
+  ChatEntry,
 } from "@/lib/chat-types";
 import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
@@ -531,7 +531,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const runningTurnId = floorSessionStream?.turnId ?? null;
   const isActiveSessionStreaming = !!floorSessionStream;
   // Typewriter-paced reveal of the latest assistant text block — the SSE
-  // stream updates in provider-sized chunks; this smooths them into typing.
+  // stream updates in provider-sized deltas; this smooths them into typing.
   // Keyed by turn + block: a new block retypes from zero (delayed fold — it
   // replaces the previous block the moment its first delta arrives).
   const liveAssistantText = useSmoothText(
@@ -1857,13 +1857,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           onClose={closeTraceDrawer}
           hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block as ChatEntry, key, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks as ChatEntry[], {
               onApprovalResolved: refreshActiveSession,
               compact: true,
               live,

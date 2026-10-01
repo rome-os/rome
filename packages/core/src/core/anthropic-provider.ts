@@ -589,7 +589,7 @@ export class AnthropicProvider implements ModelProvider {
         mcpServers,
         debug: true,
         // Surface raw API stream events so the events loop below can yield
-        // `text_delta` previews while a text block is still being generated.
+        // `text_delta` events while a text block is still being generated.
         includePartialMessages: true,
         extraArgs: { "replay-user-messages": null },
         permissionMode: "bypassPermissions",
@@ -649,7 +649,7 @@ export class AnthropicProvider implements ModelProvider {
       // moment any further turn activity (more text, a thinking block, or a tool
       // call) arrives, the held block is confirmed mid-turn → tag it `commentary`.
       // Whatever text is still held when the terminal `result`/`error` lands is
-      // the closing answer → tag it `final`. Live `text_delta` previews still
+      // the closing answer → tag it `final`. Live `text_delta` events still
       // stream in real time; only the completed-block event is deferred by one
       // step (a block isn't truly "done" until the next one starts anyway).
       let pendingText: string | null = null;
@@ -709,8 +709,8 @@ export class AnthropicProvider implements ModelProvider {
             isUserMessage(message);
           if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
           if (isPartialAssistantMessage(message)) {
-            // Incremental preview of an in-flight text block. The complete
-            // `text` block still arrives on the assistant message, so this is
+            // Deltas of in-flight blocks. Each complete block still arrives
+            // on its own assistant message, so this is
             // purely additive for consumers that render live output. Skip
             // SDK-internal subagent streams (parent_tool_use_id set) — Rome's
             // own subagents run in their own provider sessions.

@@ -17,7 +17,7 @@ import {
   SHOWCASE_BUNDLE_VERSION,
   isShowcaseBundle,
 } from "../trace/portable.js";
-import type { ReplyBlock, ReplyInteractionBlock, TraceBlockDto } from "../trace/types.js";
+import type { ReplyBlock, ReplyInteractionBlock, TraceEventDto } from "../trace/types.js";
 
 interface SourceSessionRow {
   id: string;
@@ -72,10 +72,10 @@ function toDate(value: number | string | Date): Date {
   return Number.isFinite(parsed.getTime()) ? parsed : new Date();
 }
 
-function parseTraceBlocks(content: string): TraceBlockDto[] {
+function parseTraceEvents(content: string): TraceEventDto[] {
   try {
     const parsed = JSON.parse(content) as unknown;
-    return Array.isArray(parsed) ? (parsed as TraceBlockDto[]) : [];
+    return Array.isArray(parsed) ? (parsed as TraceEventDto[]) : [];
   } catch {
     return [{ type: "text", content, agent: "main" }];
   }
@@ -144,7 +144,7 @@ function truncate(text: string, max: number): string {
 // The guardian's prompt for a one-turn trace. Prefer the clean `turn_start`
 // prompt; fall back to the `session_init` prompt with its injected
 // `<thread_context>` envelope stripped.
-function traceBlocksUserPrompt(blocks: TraceBlockDto[]): string | undefined {
+function traceEventsUserPrompt(blocks: TraceEventDto[]): string | undefined {
   const find = (type: string): string | undefined => {
     for (const raw of blocks as Array<{ type?: string; userPrompt?: unknown }>) {
       if (raw?.type === type && typeof raw.userPrompt === "string" && raw.userPrompt.trim()) {
@@ -162,8 +162,8 @@ function traceBlocksUserPrompt(blocks: TraceBlockDto[]): string | undefined {
 // Wrap a bare trace-blocks array (the shape /chat's "Download raw trace JSON"
 // button produces for one turn) into a single-trace bundle, so a downloaded
 // chat trace imports directly.
-function bundleFromTraceBlocks(blocks: TraceBlockDto[]): ShowcaseBundle {
-  const prompt = traceBlocksUserPrompt(blocks);
+function bundleFromTraceEvents(blocks: TraceEventDto[]): ShowcaseBundle {
+  const prompt = traceEventsUserPrompt(blocks);
   const title = prompt ? truncate(prompt, 80) : "Imported trace";
   const now = new Date().toISOString();
   return {
@@ -199,7 +199,7 @@ function coerceImportBundle(value: unknown): ShowcaseBundle | null {
   // A non-empty bare trace-blocks array; an empty array carries no turn, so
   // reject it rather than importing a blank trace.
   if (Array.isArray(value) && value.length > 0)
-    return bundleFromTraceBlocks(value as TraceBlockDto[]);
+    return bundleFromTraceEvents(value as TraceEventDto[]);
   return null;
 }
 
@@ -465,8 +465,8 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
   private assistantTextBlocksByTurn(
     sessionId: string,
     agent: string,
-  ): Map<string, TraceBlockDto[]> {
-    const map = new Map<string, TraceBlockDto[]>();
+  ): Map<string, TraceEventDto[]> {
+    const map = new Map<string, TraceEventDto[]>();
     const rows = this.ctx.db.connection.all(sql`
       SELECT wm.turn_id AS turn_id, wm.content AS content
       FROM rome_agent_messages wm
@@ -485,7 +485,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       if (!Array.isArray(parsed)) continue;
       const texts = (parsed as Array<{ type?: unknown; content?: unknown }>)
         .filter((b) => b?.type === "text" && typeof b.content === "string" && b.content.trim())
-        .map((b) => ({ type: "text", content: b.content as string, agent }) as TraceBlockDto);
+        .map((b) => ({ type: "text", content: b.content as string, agent }) as TraceEventDto);
       if (texts.length === 0) continue;
       map.set(row.turn_id, [...(map.get(row.turn_id) ?? []), ...texts]);
     }
@@ -636,10 +636,10 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       // Prefer the reassembled append-only blocks; fall back to the row's
       // inline content for legacy traces stored before rome_agent_trace_blocks.
       const traceContent = traceContentByMessage.get(row.message_id) ?? row.content;
-      const traceBlocks = parseTraceBlocks(traceContent);
-      const traceHasText = traceBlocks.some((b) => b.type === "text");
+      const traceEvents = parseTraceEvents(traceContent);
+      const traceHasText = traceEvents.some((b) => b.type === "text");
       const finalText = (!traceHasText && row.turn_id && assistantByTurn.get(row.turn_id)) || [];
-      const blocks = [...traceBlocks, ...finalText];
+      const blocks = [...traceEvents, ...finalText];
       const snapshot = buildTraceSnapshot({
         idPrefix: `trace-${index}`,
         blocks,

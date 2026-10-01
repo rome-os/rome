@@ -1720,7 +1720,7 @@ export class WebChatRepository {
    *
    * The stub insert (first batch only), block inserts, and accounting bump
    * commit in one transaction: a failed append leaves no partial state, so
-   * the caller's `persistedTraceBlockCount` cursor stays truthful and a
+   * the caller's `persistedTraceEventCount` cursor stays truthful and a
    * retry re-appends the same `startSeq` without double-counting. A replay
    * that *would* double-write trips the (message_id, seq) primary key and
    * fails loudly instead.
@@ -1731,7 +1731,7 @@ export class WebChatRepository {
     turnId: string | null;
     /** 0-based index of the first block in `blocks` within the whole trace. */
     startSeq: number;
-    /** Pre-shaped trace blocks (already passed through toTraceBlock). */
+    /** Pre-shaped trace blocks (already passed through toTraceEvent). */
     blocks: unknown[];
     trigger?: RomeAgentTraceTriggerMetadata;
     transcriptMessages?: RomeAgentTranscriptMessageInput[];

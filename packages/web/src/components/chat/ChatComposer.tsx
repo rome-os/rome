@@ -41,7 +41,7 @@ import type {
   ReasoningEffort,
   ChatErrorNotice,
 } from "@/lib/chat-types";
-import { ErrorBlock } from "./blocks/ErrorBlock";
+import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
 import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
@@ -962,7 +962,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </ButtonGroup>
       )}
       {streamError && (
-        <ErrorBlock
+        <ErrorEventView
           presentation="status"
           className="mb-2"
           error={typeof streamError === "string" ? streamError : streamError.message}

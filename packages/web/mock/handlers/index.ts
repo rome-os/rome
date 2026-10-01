@@ -7,7 +7,7 @@ import type {
 } from "@rome/api-types/conversation-settings";
 import type {
   AppRefDto,
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
@@ -26,7 +26,7 @@ import type {
   ChatSession,
   ProjectCatalog,
   ProjectOption,
-  StreamBlock,
+  ChatEntry,
   TurnInfo,
 } from "@/lib/chat-types";
 import type {
@@ -70,7 +70,7 @@ const identity: DashboardIdentity = {
   avatarUrl: null,
 };
 
-const text = (content: string, turnPhase?: "commentary" | "final"): StreamBlock =>
+const text = (content: string, turnPhase?: "commentary" | "final"): ChatEntry =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -106,9 +106,9 @@ const millisBetween = (from?: string, to?: string): number | undefined => {
  * else stands alone as a `block` segment. `ordinal` is the drawer's render
  * order and runs across both kinds.
  */
-function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
+function traceSegmentsOf(blocks: TraceEventDto[]): TraceSegment[] {
   const segments: TraceSegment[] = [];
-  let run: TraceBlockDto[] = [];
+  let run: TraceEventDto[] = [];
   const flushRun = () => {
     if (run.length === 0) return;
     const steps = run.filter((b) => b.type === "tool_use" || b.type === "subagent_start");
@@ -118,7 +118,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
     const durations = steps.map((start) => {
       const id = start.type === "tool_use" ? start.id : start.toolUseId;
       const end = run.find(
-        (block): block is Extract<TraceBlockDto, { type: "tool_result" | "subagent_result" }> =>
+        (block): block is Extract<TraceEventDto, { type: "tool_result" | "subagent_result" }> =>
           (block.type === "tool_result" || block.type === "subagent_result") &&
           block.toolUseId === id,
       );
@@ -164,7 +164,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
 
 /** Read-time aggregation over the turn's blocks — never stored beside them, so
  *  deriving it here is what keeps the trigger's counts honest. */
-function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
+function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
   // Both invocation-start kinds count. A delegated turn is a step and observes
   // an app exactly as a tool call does, so counting only `tool_use` would leave
   // a turn showing a subagent chip while its trigger claimed nothing ran.
@@ -211,15 +211,15 @@ function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
  * the grouped layout (and its trace subtitle slot) reachable in mock mode.
  *
  * `reply` carries only what the real API persists as MessagePart[] — text,
- * cards, recaps. Anything a run produced goes in `traceBlocks`.
+ * cards, recaps. Anything a run produced goes in `traceEvents`.
  */
 const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | StreamBlock[],
-  reply: StreamBlock[],
-  traceBlocks?: TraceBlockDto[],
+  prompt: string | ChatEntry[],
+  reply: ChatEntry[],
+  traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
   const at = (offsetMs: number) => new Date(Date.parse(startedAt) + offsetMs).toISOString();
@@ -233,10 +233,10 @@ const turn = (
       createdAt: startedAt,
     },
   ];
-  if (traceBlocks?.length) {
+  if (traceEvents?.length) {
     const traceId = `${turnId}-trace`;
-    const summary = traceSummaryOf(traceBlocks);
-    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceBlocks), summary };
+    const summary = traceSummaryOf(traceEvents);
+    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceEvents), summary };
     rows.push({
       id: traceId,
       sessionId,
@@ -262,7 +262,7 @@ const turn = (
 
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
-// StreamBlocks exactly as the real API stores it, so what renders here goes
+// ChatEntries exactly as the real API stores it, so what renders here goes
 // through the production parse path rather than a mock-only shortcut.
 //
 // ChatSearchDialog ranks title/project matches itself and *appends* sessions
@@ -698,7 +698,7 @@ const chatSessions: ChatSession[] = [
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as StreamBlock[])
+  (JSON.parse(message.content) as ChatEntry[])
     .filter((b) => b.type === "text" && typeof b.content === "string")
     .map((b) => b.content)
     .join(" ");

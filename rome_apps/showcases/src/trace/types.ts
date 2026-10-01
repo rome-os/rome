@@ -4,11 +4,11 @@ export interface AppRefDto {
   iconUrl: string;
 }
 
-interface TraceBlockBase {
+interface TraceEventBase {
   agent?: string;
 }
 
-export interface SessionInitBlock extends TraceBlockBase {
+export interface SessionInitEvent extends TraceEventBase {
   type: "session_init";
   sessionId: string;
   systemPrompt?: string;
@@ -16,31 +16,31 @@ export interface SessionInitBlock extends TraceBlockBase {
   projectPath?: string;
 }
 
-export interface TurnStartBlock extends TraceBlockBase {
+export interface TurnStartEvent extends TraceEventBase {
   type: "turn_start";
   turnId: string;
   sessionId: string;
   userPrompt: string;
 }
 
-export interface TurnEndBlock extends TraceBlockBase {
+export interface TurnEndEvent extends TraceEventBase {
   type: "turn_end";
   turnId: string;
   status: "completed" | "interrupted" | "error";
   durationMs: number;
 }
 
-export interface TextBlock extends TraceBlockBase {
+export interface TextBlock extends TraceEventBase {
   type: "text";
   content: string;
 }
 
-export interface ThinkingBlock extends TraceBlockBase {
+export interface ThinkingBlock extends TraceEventBase {
   type: "thinking";
   content: string;
 }
 
-export interface ToolUseBlock extends TraceBlockBase {
+export interface ToolUseBlock extends TraceEventBase {
   type: "tool_use";
   tool: string;
   input: unknown;
@@ -48,7 +48,7 @@ export interface ToolUseBlock extends TraceBlockBase {
   startedAt?: string;
 }
 
-export interface ToolResultBlock extends TraceBlockBase {
+export interface ToolResultBlock extends TraceEventBase {
   type: "tool_result";
   tool: string;
   output: unknown;
@@ -84,35 +84,35 @@ export interface TraceAccounting {
   rawUsage?: Record<string, unknown>;
 }
 
-export interface ResultBlock extends TraceBlockBase {
+export interface ResultEvent extends TraceEventBase {
   type: "result";
   content: string;
   structuredOutput?: unknown;
   accounting?: TraceAccounting;
 }
 
-export interface ErrorBlock extends TraceBlockBase {
+export interface ErrorEvent extends TraceEventBase {
   type: "error";
   error: string;
   accounting?: TraceAccounting;
 }
 
-export interface StructuredOutputBlock extends TraceBlockBase {
+export interface StructuredOutputEvent extends TraceEventBase {
   type: "structured_output";
   payload: unknown;
 }
 
-export type TraceBlockDto =
-  | SessionInitBlock
-  | TurnStartBlock
-  | TurnEndBlock
+export type TraceEventDto =
+  | SessionInitEvent
+  | TurnStartEvent
+  | TurnEndEvent
   | TextBlock
   | ThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
-  | ResultBlock
-  | ErrorBlock
-  | StructuredOutputBlock;
+  | ResultEvent
+  | ErrorEvent
+  | StructuredOutputEvent;
 
 // Conversation-flow blocks captured from the agent's *assistant* message (not
 // the trace steps): the reply text plus any interaction card it surfaced. The
@@ -143,21 +143,21 @@ export interface TraceRunSegment {
   agentDisplayName: string;
   app: AppRefDto;
   count: number;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   durationMs?: number;
   ordinal: number;
 }
 
-export interface TraceBlockSegment {
+export interface TraceEventSegment {
   kind: "block";
   id: string;
   agent: string;
   agentDisplayName: string;
-  block: TraceBlockDto;
+  block: TraceEventDto;
   ordinal: number;
 }
 
-export type TraceSegment = TraceRunSegment | TraceBlockSegment;
+export type TraceSegment = TraceRunSegment | TraceEventSegment;
 
 export interface TraceSummary {
   distinctApps: AppRefDto[];

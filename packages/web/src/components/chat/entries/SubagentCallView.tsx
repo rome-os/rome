@@ -5,21 +5,21 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   describeToolSummary,
   formatStepDuration,
-  toolStepDotClass,
-  type ToolStepStatus,
-} from "./ToolStepBlock";
+  toolCallDotClass,
+  type ToolCallStatus,
+} from "./ToolCallView";
 import { TraceJsonView } from "./TraceJsonView";
 
 type SubagentStatus = "running" | "completed" | "failed" | "cancelled";
 
-function stepStatus(status: SubagentStatus): ToolStepStatus {
+function stepStatus(status: SubagentStatus): ToolCallStatus {
   if (status === "completed") return "ok";
   if (status === "failed") return "error";
   if (status === "cancelled") return "pending";
   return "running";
 }
 
-export function SubagentStepBlock({
+export function SubagentCallView({
   agentName,
   input,
   sessionId,
@@ -70,7 +70,7 @@ export function SubagentStepBlock({
         />
         <span
           aria-hidden="true"
-          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolStepDotClass(stepStatus(status), live)}`}
+          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(stepStatus(status), live)}`}
         />
         <span
           className="flex-none font-mono text-aux text-foreground"

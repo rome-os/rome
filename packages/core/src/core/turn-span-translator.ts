@@ -24,14 +24,14 @@ import { trace, type Attributes, type Context, type Span } from "@opentelemetry/
 import type { AgentMessage } from "../types.js";
 import { getTracer } from "../telemetry.js";
 
-export interface CapturedBlock {
+export interface CapturedEvent {
   block: AgentMessage;
   /** Wall-clock ms when AgentSession yielded this block from modelSession.events. */
   tsMs: number;
 }
 
 export interface TranslateTurnSpansArgs {
-  blocks: CapturedBlock[];
+  blocks: CapturedEvent[];
   /** The active `model.turn` span — tool spans + events parent under this. */
   modelSpan: Span;
   /** OTel context carrying the turn's agent span; used to scope child spans. */

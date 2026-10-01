@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "@rstest/core";
 import i18n from "@/i18n";
-import { AgentCallBlock } from "./AgentCallBlock";
+import { AgentCallView } from "./AgentCallView";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -21,11 +21,11 @@ afterAll(async () => {
   await i18n.changeLanguage("en");
 });
 
-describe("AgentCallBlock", () => {
+describe("AgentCallView", () => {
   it("renders a navigable Rome session reference when the live session starts", () => {
     render(
       <MemoryRouter>
-        <AgentCallBlock
+        <AgentCallView
           agent="reviewer"
           sessionId="runtime-session"
           romeSession={{ _romeSessionId: "action:execution-1:reviewer", _type: "action" }}
@@ -43,7 +43,7 @@ describe("AgentCallBlock", () => {
   it("links a webchat Rome session to the chat route", () => {
     render(
       <MemoryRouter>
-        <AgentCallBlock
+        <AgentCallView
           agent="reviewer"
           sessionId="runtime-session"
           romeSession={{ _romeSessionId: "chat-session-1", _type: "webchat" }}
@@ -61,7 +61,7 @@ describe("AgentCallBlock", () => {
   it("keeps legacy session blocks without a Rome reference link", () => {
     render(
       <MemoryRouter>
-        <AgentCallBlock agent="reviewer" sessionId="runtime-session" />
+        <AgentCallView agent="reviewer" sessionId="runtime-session" />
       </MemoryRouter>,
     );
 

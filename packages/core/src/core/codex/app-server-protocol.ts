@@ -105,7 +105,7 @@ export interface AgentMessageDeltaNotification {
   itemId: string;
   delta: string;
 }
-/** `item/reasoning/summaryTextDelta`: a fragment of a reasoning summary part. */
+/** `item/reasoning/summaryTextDelta`: a delta of a reasoning summary part. */
 export interface ReasoningSummaryTextDeltaNotification {
   threadId: string;
   turnId: string;
@@ -113,7 +113,7 @@ export interface ReasoningSummaryTextDeltaNotification {
   delta: string;
   summaryIndex: number;
 }
-/** `item/reasoning/textDelta`: a fragment of raw reasoning content. */
+/** `item/reasoning/textDelta`: a delta of raw reasoning content. */
 export interface ReasoningTextDeltaNotification {
   threadId: string;
   turnId: string;

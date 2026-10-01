@@ -6,21 +6,21 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import { formatTracePrimitive, normalizeTracePayload } from "@/lib/trace-format";
 import { TraceJsonView } from "./TraceJsonView";
 
-export type ToolStepStatus = "ok" | "running" | "pending" | "error";
+export type ToolCallStatus = "ok" | "running" | "pending" | "error";
 
-const DOT_CLASS: Record<ToolStepStatus, string> = {
+const DOT_CLASS: Record<ToolCallStatus, string> = {
   ok: "bg-success",
   running: "bg-warning",
   pending: "bg-border-strong",
   error: "bg-destructive",
 };
 
-export function toolStepDotClass(status: ToolStepStatus, live = false): string {
+export function toolCallDotClass(status: ToolCallStatus, live = false): string {
   if (status === "running" && live) return "animate-pulse bg-info";
   return DOT_CLASS[status];
 }
 
-export function ToolStepBlock({
+export function ToolCallView({
   tool,
   input,
   output,
@@ -32,7 +32,7 @@ export function ToolStepBlock({
   tool?: string;
   input: unknown;
   output: unknown;
-  status: ToolStepStatus;
+  status: ToolCallStatus;
   durationMs?: number;
   hasResult: boolean;
   live?: boolean;
@@ -64,7 +64,7 @@ export function ToolStepBlock({
         />
         <span
           aria-hidden="true"
-          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolStepDotClass(status, live)}`}
+          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(status, live)}`}
         />
         <span
           className="flex-none font-mono text-aux text-foreground"
@@ -94,7 +94,7 @@ export function ToolStepBlock({
       </button>
       {open && (
         <div className="pt-1 pr-3 pb-3 pl-9">
-          <ToolStepDetails tool={toolLabel} input={input} output={output} hasResult={hasResult} />
+          <ToolCallDetails tool={toolLabel} input={input} output={output} hasResult={hasResult} />
           {resultUnknown && (
             <p className="mt-2 text-aux text-muted-foreground">{t("blocks.resultUnknownHint")}</p>
           )}
@@ -104,7 +104,7 @@ export function ToolStepBlock({
   );
 }
 
-function ToolStepDetails({
+function ToolCallDetails({
   tool,
   input,
   output,

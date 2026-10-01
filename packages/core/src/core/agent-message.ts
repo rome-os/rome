@@ -1,13 +1,13 @@
 /** Per-turn terminals — result or error — produced by an agent. Works
  *  generically over `AgentMessage`, `StreamAgentMessage`, and
- *  `TraceBlockDto`, all of which discriminate on `type`. */
-export function isTerminalBlock<T extends { type: string }>(
+ *  `TraceEventDto`, all of which discriminate on `type`. */
+export function isTerminalEvent<T extends { type: string }>(
   m: T,
 ): m is T & { type: "result" | "error" } {
   return m.type === "result" || m.type === "error";
 }
 
-/** Transient preview types. Each is followed by the complete block it
+/** Delta event types. Each is followed by the complete block it
  *  previews, so traces, persistence, and accounting skip them. */
 const TRANSIENT_DELTA_TYPE_LIST = [
   "text_delta",
@@ -20,7 +20,7 @@ export type TransientDeltaType = (typeof TRANSIENT_DELTA_TYPE_LIST)[number];
 
 const TRANSIENT_DELTA_TYPES: ReadonlySet<string> = new Set(TRANSIENT_DELTA_TYPE_LIST);
 
-/** Whether `m` is a transient preview that a complete block still follows. */
+/** Whether `m` is a delta event, which a complete block normally follows. */
 export function isTransientDelta<T extends { type: string }>(
   m: T,
 ): m is T & { type: TransientDeltaType } {

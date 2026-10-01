@@ -13,7 +13,7 @@ for (const width of [375, 1440]) {
         "resolved-question",
       ]) {
         await page.goto(
-          `/iframe.html?id=dev-chat-blocks--${story}&viewMode=story&globals=locale:${locale}`,
+          `/iframe.html?id=dev-chat-entries--${story}&viewMode=story&globals=locale:${locale}`,
         );
         const fieldset = page.locator("fieldset");
         await expect(fieldset).toBeVisible();

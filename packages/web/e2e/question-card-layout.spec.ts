@@ -3,7 +3,7 @@ import { expectQuestionCardContained } from "./question-card-layout";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
-  await page.goto("/dev/chat-blocks");
+  await page.goto("/dev/chat-entries");
   await expect(page.locator("#question-card-cjk fieldset")).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
 });

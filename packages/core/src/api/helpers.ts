@@ -1,4 +1,4 @@
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentMessage } from "../types.js";
 import type { ActionResult } from "../actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
@@ -150,17 +150,13 @@ function timestampToIso(value: Date | number): string {
 }
 
 /**
- * AgentMessage variants that have a trace-block representation. `text_delta`
- * is excluded at the type level: it is a transient streaming preview that is
- * never persisted, so callers must filter deltas out before reaching here —
+ * Events that have a trace representation. Delta events and `input_status`
+ * are excluded at the type level: a delta is transient and never persisted, so callers must filter deltas out before reaching here —
  * the compiler enforces it instead of a runtime throw.
  */
-export type TraceableAgentMessage = Exclude<
-  AgentMessage,
-  { type: TransientDeltaType | "input_status" }
->;
+export type TraceableEvent = Exclude<AgentMessage, { type: TransientDeltaType | "input_status" }>;
 
-export function toTraceBlock(msg: TraceableAgentMessage & { agent?: string }): TraceBlockDto {
+export function toTraceEvent(msg: TraceableEvent & { agent?: string }): TraceEventDto {
   switch (msg.type) {
     case "session_init":
       return {

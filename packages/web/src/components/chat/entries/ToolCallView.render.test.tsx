@@ -2,14 +2,14 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import "@/i18n";
-import { ToolStepBlock } from "./ToolStepBlock";
+import { ToolCallView } from "./ToolCallView";
 
 afterEach(cleanup);
 
-describe("ToolStepBlock incomplete results", () => {
+describe("ToolCallView incomplete results", () => {
   it("keeps the input and labels a finished call without a result as unknown", () => {
     render(
-      <ToolStepBlock
+      <ToolCallView
         tool="Edit"
         input={{ path: "changed.ts" }}
         output={undefined}
@@ -28,7 +28,7 @@ describe("ToolStepBlock incomplete results", () => {
     { live: false, hasResult: true },
   ])("does not label live or completed calls as unknown: %j", ({ live, hasResult }) => {
     render(
-      <ToolStepBlock
+      <ToolCallView
         tool="Edit"
         input={{ path: "changed.ts" }}
         output="File changed"

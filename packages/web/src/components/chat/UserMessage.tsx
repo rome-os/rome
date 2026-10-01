@@ -3,7 +3,7 @@ import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,7 @@ export const UserMessage = memo(
   function UserMessage({ msg }: { msg: ChatMessage }) {
     const { t } = useTranslation("chat");
     const text = useMemo(() => {
-      let blocks: StreamBlock[];
+      let blocks: ChatEntry[];
       try {
         const parsed = JSON.parse(msg.content);
         blocks = Array.isArray(parsed) ? parsed : [{ type: "text", content: msg.content }];

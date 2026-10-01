@@ -10,7 +10,7 @@ import type {
 } from "../db/repositories/webchat.js";
 import type { AgentMessage, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
-import { toTraceBlock, type TraceableAgentMessage } from "../api/helpers.js";
+import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
@@ -96,7 +96,7 @@ export class AgentTraceRecorder {
     const blocks = messages.flatMap((msg) =>
       isTransientDelta(msg) || msg.type === "input_status"
         ? []
-        : [toTraceBlock(msg as TraceableAgentMessage & { agent?: string })],
+        : [toTraceEvent(msg as TraceableEvent & { agent?: string })],
     );
     if (blocks.length === 0) return;
     await this.ensureSession();

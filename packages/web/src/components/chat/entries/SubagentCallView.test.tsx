@@ -3,16 +3,16 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { SubagentStepBlock } from "./SubagentStepBlock";
+import { SubagentCallView } from "./SubagentCallView";
 
 afterEach(cleanup);
 
-describe("SubagentStepBlock", () => {
+describe("SubagentCallView", () => {
   it("renders one dedicated Child execution row and links to its session", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
-        <SubagentStepBlock
+        <SubagentCallView
           agentName="planning"
           input={{ prompt: "Inspect the repository" }}
           sessionId="child-session"

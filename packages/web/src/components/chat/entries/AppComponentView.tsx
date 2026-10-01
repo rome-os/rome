@@ -43,7 +43,7 @@ interface RomeAppComponentModule {
   unmountComponent?(container: HTMLElement): void | Promise<void>;
 }
 
-export interface AppComponentBlockProps {
+export interface AppComponentViewProps {
   toolUseId: string;
   appId: string;
   componentId: string;
@@ -60,7 +60,7 @@ export interface AppComponentBlockProps {
  * bundle's `mountComponent` with a host bridge. The component lives entirely in
  * the app — core only transported the `app_component` part that named it.
  */
-export function AppComponentBlock({
+export function AppComponentView({
   toolUseId,
   appId,
   componentId,
@@ -68,7 +68,7 @@ export function AppComponentBlock({
   result,
   onSubmit,
   onDismiss,
-}: AppComponentBlockProps) {
+}: AppComponentViewProps) {
   const { resolved: theme, theme: themeName } = useTheme();
   const rootRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
