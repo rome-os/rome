@@ -366,7 +366,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             throw error;
           }
         } finally {
-          await release();
+          release();
         }
       });
     }

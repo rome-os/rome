@@ -137,15 +137,6 @@ export const runCommand: RunCommand = (file, args, opts = {}) =>
     );
   });
 
-/**
- * Launch the client in its own session and, when it exits, write its exit status
- * to the file in `$3`: 0 when the guardian quit it, anything else when it
- * crashed or was killed. Arguments: `$1` the client prefix, `$2` its log, `$3`
- * the exit file, which goes first so a stale status never describes this run.
- */
-export const CLIENT_LAUNCH =
-  'cd "$1" && rm -f "$3" && setsid sh -c \'"$1/wechat" >"$2" 2>&1 </dev/null; echo $? >"$3"\' wechat-client "$1" "$2" "$3" >/dev/null 2>&1 </dev/null &';
-
 /** `promise`, or `signal`'s reason as soon as it aborts. The work goes on. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason);
@@ -357,47 +348,23 @@ export class WechatUserRuntime {
   /**
    * Hold off every ordinary launch while the connection's key capture replaces
    * the client with one under a debugger. `start()` launches nothing until the
-   * returned release runs. The capture kills the client on purpose, so nothing
-   * may bring an ordinary one back while it runs.
-   *
-   * Release also forgets the last exit status. The capture's kill recorded a
-   * crash for the client it replaced, and its own client records nothing, so
-   * that status does not describe the client running after it.
+   * returned release runs. The capture kills the client on purpose, so nothing,
+   * such as the guardian opening /desktop/wechat, may bring an ordinary one back
+   * while it runs.
    */
-  holdCapture(): () => Promise<void> {
+  holdCapture(): () => void {
     this.captures += 1;
     let released = false;
-    return async () => {
+    return () => {
       if (released) return;
       released = true;
       this.captures -= 1;
-      await rm(this.exitFile, { force: true });
     };
   }
 
   /** Whether a key capture holds the client. */
   get captureInProgress(): boolean {
     return this.captures > 0;
-  }
-
-  /** The client's own output, the first place to look when it exits. */
-  get clientLog(): string {
-    return join(this.prefix, "client.log");
-  }
-
-  /** Where the last client this runtime launched wrote its exit status. */
-  get exitFile(): string {
-    return join(this.prefix, "client.exit");
-  }
-
-  /**
-   * The exit status of the last client launched through `start()`, or null when
-   * none has exited since its launch, or none was launched that way.
-   */
-  async lastExit(): Promise<number | null> {
-    const text = await readFile(this.exitFile, "utf8").catch(() => null);
-    const code = text === null ? Number.NaN : Number(text.trim());
-    return Number.isInteger(code) ? code : null;
   }
 
   /** Whether an install is running for any caller. */
@@ -853,7 +820,13 @@ export class WechatUserRuntime {
 
     const started = await this.run(
       "sh",
-      ["-c", CLIENT_LAUNCH, "wechat-start", this.canonicalPrefix, this.clientLog, this.exitFile],
+      [
+        "-c",
+        `cd "$1" && setsid "$1/wechat" >"$2" 2>&1 </dev/null &`,
+        "wechat-start",
+        this.canonicalPrefix,
+        join(this.prefix, "client.log"),
+      ],
       { env: this.clientEnv(display), ...(signal ? { signal } : {}) },
     );
     if (started.code !== 0) {

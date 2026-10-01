@@ -9,14 +9,12 @@
 //   3. The reader parses the helper's JSON and classifies a signed-out account
 //      (exit 3) as terminal, everything else as transient.
 
-import { execFileSync } from "node:child_process";
 import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  CLIENT_LAUNCH,
   loginWindowId,
   WechatUserReader,
   WechatUserRuntime,
@@ -190,7 +188,9 @@ describe("WechatUserRuntime.start", () => {
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
     await Promise.all([runtime.start(), runtime.start()]);
     expect(await readlink(runtime.canonicalPrefix)).toBe(runtime.clientDir);
-    expect(calls.filter((call) => call.includes(CLIENT_LAUNCH))).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.some((arg) => arg.includes('setsid "$1/wechat"'))),
+    ).toHaveLength(1);
     expect(calls).toContainEqual(["pgrep", "-x", "wechat"]);
     expect(calls.some((call) => ["curl", "dpkg-deb", "pkill"].includes(call[0]!))).toBe(false);
   });
@@ -208,36 +208,17 @@ describe("WechatUserRuntime.start", () => {
 
     const release = runtime.holdCapture();
     await runtime.start();
-    expect(calls.some((call) => call.includes(CLIENT_LAUNCH))).toBe(false);
+    expect(calls.some((call) => call.some((arg) => arg.includes('setsid "$1/wechat"')))).toBe(
+      false,
+    );
 
     release();
     release();
     expect(runtime.captureInProgress).toBe(false);
     await runtime.start();
-    expect(calls.filter((call) => call.includes(CLIENT_LAUNCH))).toHaveLength(1);
-  });
-
-  it.each([
-    ["a quit", 0],
-    ["a crash", 3],
-  ])("records the client's exit status after %s", async (_name, code) => {
-    const h = await tempHome();
-    const prefix = join(h, "opt-wechat");
-    await mkdir(prefix, { recursive: true });
-    await writeFile(join(prefix, "wechat"), `#!/bin/sh\nexit ${code}\n`, { mode: 0o755 });
-    const runtime = new WechatUserRuntime({ home: h });
-    await writeFile(await ensureFile(runtime.exitFile), "stale");
-
-    execFileSync("sh", [
-      "-c",
-      CLIENT_LAUNCH,
-      "wechat-start",
-      prefix,
-      runtime.clientLog,
-      runtime.exitFile,
-    ]);
-
-    await rs.waitFor(async () => expect(await runtime.lastExit()).toBe(code));
+    expect(
+      calls.filter((call) => call.some((arg) => arg.includes('setsid "$1/wechat"'))),
+    ).toHaveLength(1);
   });
 
   it("launches nothing when a key capture takes the lease while a start is under way", async () => {
@@ -270,25 +251,10 @@ describe("WechatUserRuntime.start", () => {
     openSession();
     await starting;
 
-    expect(scripted.calls.some((call) => call.includes(CLIENT_LAUNCH))).toBe(false);
-    await release();
-  });
-
-  it("forgets the last exit status when a key capture ends", async () => {
-    // The capture kills the wrapped client, which records a crash, and then
-    // runs its own client that nothing records. The record no longer describes
-    // the running client.
-    const runtime = new WechatUserRuntime({ home: await tempHome() });
-    const release = runtime.holdCapture();
-    await writeFile(await ensureFile(runtime.exitFile), "143");
-
-    await release();
-
-    expect(await runtime.lastExit()).toBeNull();
-  });
-
-  it("reports no exit status when none was recorded", async () => {
-    expect(await new WechatUserRuntime({ home: await tempHome() }).lastExit()).toBeNull();
+    expect(
+      scripted.calls.some((call) => call.some((arg) => arg.includes('setsid "$1/wechat"'))),
+    ).toBe(false);
+    release();
   });
 
   it("leaves an existing desktop process alone", async () => {

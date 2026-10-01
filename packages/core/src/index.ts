@@ -1226,8 +1226,6 @@ async function main() {
   // version is committed after "Rome started" below.
   const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
   computerUse.start();
-  // An installed WeChat client runs whenever Rome does.
-  wechatApp?.watch();
 
   // Wire the process-global feature-flag backend (Statsig) when a server secret
   // is configured, then apply any FEATURE_GATE_* env overrides on top, then
@@ -1561,7 +1559,6 @@ async function main() {
 
     stopInstanceHeartbeat();
     await computerUse.stop();
-    await wechatApp?.unwatch();
     shutdownLog.info("instance identity heartbeat stopped");
 
     capabilityDiscovery.stop();

@@ -64,12 +64,26 @@ describe("WechatDesktopPage", () => {
     expect(screen.queryByTitle("Rome desktop “wechat”")).toBeNull();
   });
 
-  it("offers to start a client the guardian closed", async () => {
+  it("starts an installed client that is not running when the page opens", async () => {
     state = { state: "stopped" };
     renderPage();
-    await userEvent.click(await screen.findByRole("button", { name: "Start WeChat" }));
-    expect(posts).toEqual(["/api/wechat/app/start"]);
     expect(await screen.findByRole("status", { name: "Starting WeChat" })).toBeTruthy();
+    expect(posts).toEqual(["/api/wechat/app/start"]);
+    expect(screen.getByTitle("Rome desktop “wechat”")).toBeTruthy();
+  });
+
+  it("leaves a failed start for the guardian to retry", async () => {
+    state = { state: "stopped", error: "Could not start WeChat's desktop: port 5901 is busy" };
+    renderPage();
+    expect(
+      await screen.findByText(
+        "WeChat did not start: Could not start WeChat's desktop: port 5901 is busy",
+      ),
+    ).toBeTruthy();
+    expect(posts).toEqual([]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(posts).toEqual(["/api/wechat/app/start"]);
   });
 
   it("keeps the same desktop mounted while the client restarts", async () => {

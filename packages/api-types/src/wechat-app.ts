@@ -5,9 +5,8 @@ import { z } from "zod";
  *   unavailable — WeChat is not enabled on this instance
  *   absent      — the client is not downloaded yet
  *   installing  — downloading and unpacking it, then opening it
- *   stopped     — not running, and Rome will not start it: the guardian quit it,
- *                 its last start failed, or it kept crashing
- *   starting    — not running yet, and Rome is starting it
+ *   stopped     — installed, but not running; opening the page starts it
+ *   starting    — opening it on its desktop
  *   running     — running, or being relaunched by the connection's key capture,
  *                 so its desktop has something to show
  */

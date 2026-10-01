@@ -210,7 +210,7 @@
     },
     "stopped": {
       "title": "微信未运行",
-      "description": "微信在这个实例上已关闭。在这里启动它或 Rome 重启之前，它会保持关闭。",
+      "description": "微信客户端已安装在这个实例上。",
       "action": "启动微信",
       "failed": "微信没有启动：{{error}}"
     },

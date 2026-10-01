@@ -1,6 +1,7 @@
 import { wechatAppStatusSchema, type WechatAppStatus } from "@rome/api-types/wechat-app";
 import { Spinner } from "@rome-os/ui/spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,9 @@ function pollInterval(status: WechatAppStatus | undefined): number {
   return status?.state === "installing" || status?.state === "starting" ? 2_000 : 30_000;
 }
 
-/** `/desktop/wechat`: WeChat's own desktop once the client runs, and until then
- *  what is missing and the button that fixes it. */
+/** `/desktop/wechat`: WeChat's own desktop. Opening the page starts an installed
+ *  client that is not running; until it runs, the page says what is missing and
+ *  offers the button that fixes it. */
 export default function WechatDesktopPage() {
   const { t } = useTranslation("common");
   const queryClient = useQueryClient();
@@ -51,6 +53,15 @@ export default function WechatDesktopPage() {
   });
 
   const data = status.data;
+  // Opening the page starts an installed client that is not running, once per
+  // visit. A start that failed waits for the guardian, so it cannot loop.
+  const opened = useRef(false);
+  const stopped = data?.state === "stopped" && !data.error;
+  useEffect(() => {
+    if (!stopped || opened.current) return;
+    opened.current = true;
+    action.mutate("start");
+  }, [stopped, action.mutate]);
   // Starting and running share one tree, so the desktop stays mounted while
   // Rome restarts the client, and the login window shows the moment it appears.
   if ((data?.state === "running" && !data.sharedDesktop) || data?.state === "starting") {

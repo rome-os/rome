@@ -210,7 +210,7 @@
     },
     "stopped": {
       "title": "WeChat is not running",
-      "description": "WeChat was closed on this instance. It stays closed until it is started here or Rome restarts.",
+      "description": "The WeChat client is installed on this instance.",
       "action": "Start WeChat",
       "failed": "WeChat did not start: {{error}}"
     },
