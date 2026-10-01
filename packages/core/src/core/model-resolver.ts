@@ -148,7 +148,7 @@ function matchesModelAlias(model: string, baseModel: string): boolean {
 }
 
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
-  if (tier === "large") return state.solAccess ? "gpt-6-sol" : "gpt-5.6-terra";
+  if (tier === "large") return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
   if (tier === "small") return state.lunaAccess ? "gpt-6-luna" : "gpt-5.6-terra";
   return "gpt-5.6-terra";
 }
@@ -203,6 +203,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     if (providerId !== "openai") return;
     const denied =
       (model === "gpt-6-astra" && !codex.solAccess) ||
+      (matchesModelAlias(model, "gpt-6.1-sol") && !codex.solAccess) ||
       (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
       (matchesModelAlias(model, "gpt-6-luna") && !codex.lunaAccess) ||
       (model === "gpt-5.6-sol" && !codex.solAccess) ||

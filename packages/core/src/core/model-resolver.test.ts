@@ -29,7 +29,7 @@ describe("ModelResolver", () => {
   it("maps Codex tiers through Sol, Terra, and Luna", async () => {
     await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
     await expect(resolver().getModelProvider({ tier: "medium" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
@@ -88,7 +88,7 @@ describe("ModelResolver", () => {
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
 
     settings.enableFable = true;
@@ -117,7 +117,7 @@ describe("ModelResolver", () => {
       ).getModelProvider({ tier: "large" }),
     ).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
   });
 
@@ -135,7 +135,7 @@ describe("ModelResolver", () => {
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
     await expect(
       r.getModelProvider({ tier: "large", providerId: "anthropic" }),
@@ -179,6 +179,38 @@ describe("ModelResolver", () => {
       provider: "openai",
       reason: "not_logged_in",
     });
+  });
+
+  it("resolves GPT-6.1 Sol selections and exact aliases with Sol access", async () => {
+    await expect(
+      resolver().getModelProvider({ tier: "large", providerId: "openai" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+    await expect(
+      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+    await expect(
+      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-sol" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-sol" });
+
+    const unavailable = resolver({
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+    });
+    await expect(
+      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
+    ).rejects.toMatchObject({ code: "model_unavailable", reason: "model_access_denied" });
+
+    for (const model of ["gpt-6.1-sol", "gpt-6.1-sol:high", "gpt-6.1-sol-2026-10-01:high"]) {
+      await expect(
+        resolver().getModelProvider({ exact: { providerId: "openai", model } }),
+      ).resolves.toMatchObject({ modelProvider: codex, model });
+      await expect(
+        unavailable.getModelProvider({ exact: { providerId: "openai", model } }),
+      ).rejects.toMatchObject({
+        code: "model_unavailable",
+        provider: "openai",
+        reason: "model_access_denied",
+      });
+    }
   });
 
   it("keeps explicit Astra/Sol/Luna exact and never falls back", async () => {
