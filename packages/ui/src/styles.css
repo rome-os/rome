@@ -317,13 +317,14 @@
    hidden hit area; text rises to match, so a 44px control does not hold
    desktop-sized text. The roles keep their names and their 4px line grid:
 
-     ui       17/24     controls, rows, fields
-     section  17/24     600
-     title    28/36     700, a large page title
-     aux      15/20     metadata
-     badge    15/20     500
+     ui        17/24     controls, rows, fields
+     composer  17/24     the chat composer
+     section   17/24     600
+     title     28/36     700, a large page title
+     aux       15/20     metadata
+     badge     15/20     500
 
-   Display and composer keep their desktop values. Every row floor follows the
+   Display keeps its desktop value. Every row floor follows the
    control step, so `--row-h-*` rises to 52px with it.
 
    Unlayered and after the roles' `@theme`, so it outranks both the theme layer
@@ -334,6 +335,9 @@
   :host {
     --text-ui: var(--rome-font-size-17);
     --text-ui--line-height: var(--rome-line-height-141);
+
+    --text-composer: var(--rome-font-size-17);
+    --text-composer--line-height: var(--rome-line-height-141);
 
     --text-section: var(--rome-font-size-17);
     --text-section--line-height: var(--rome-line-height-141);
@@ -356,11 +360,19 @@
     --control-px-center-sm: 16px;
     --control-px-center-md: 18px;
   }
+}
 
-  /* A field reads at control size, and never under 16px, the size below which
-     mobile Safari zooms the page on focus. */
-  :where(input, textarea, select) {
-    font-size: max(var(--rome-font-size-16), var(--text-ui));
+/* A field that names no type role reads at control size on a phone, never
+   under 16px, the size below which mobile Safari zooms the page on focus. In
+   `base`, so a field that names a role keeps it: the kit's fields read
+   `text-ui` and the composer `text-composer`, both 17px there. `:is()` rather
+   than `:where()`, to match the specificity of the preflight's
+   `font: inherit` on the same elements, which this comes after. */
+@layer base {
+  @media (width < 48rem) {
+    :is(input, textarea, select) {
+      font-size: max(var(--rome-font-size-16), var(--text-ui));
+    }
   }
 }
 

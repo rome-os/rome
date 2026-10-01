@@ -109,7 +109,7 @@ function designFrontmatter(): Frontmatter {
  */
 function cssCustomProperties(): Map<string, string> {
   const sheet = read("packages/ui/src/styles.css");
-  const phone = sheet.indexOf("@media (width < 48rem)");
+  const phone = sheet.indexOf("@media (width < 48rem) {");
   let css = sheet;
   if (phone >= 0) {
     let depth = 0;
@@ -120,6 +120,9 @@ function cssCustomProperties(): Map<string, string> {
         break;
       }
     }
+    // The same contract as the kit's `splitPhoneBlock`: an unterminated block
+    // fails loudly rather than leaving the phone values in.
+    if (css === sheet) throw new Error("Unterminated phone block in styles.css");
   }
   const out = new Map<string, string>();
   for (const m of css.matchAll(/(--[a-z0-9-]+):\s*([^;}]+);/gi)) {

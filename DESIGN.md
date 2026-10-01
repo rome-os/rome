@@ -349,17 +349,18 @@ Every text run takes exactly one of seven roles. A role sets size, line height, 
 
 The font size scale has eleven steps (13, 14, 15, 16, 17, 18, 20, 22, 24, 28, 30px). The seven roles read 13, 14, 15, 16, 18, and 30. Steps 20, 22, and 24 back the Markdown heading tokens, not a dashboard role, and 17 and 28 back the phone ramp.
 
-On a phone (below 768px) four roles rise and keep their names, so a screen built from roles needs no phone variant of its own. Display, Body, and Composer keep their desktop values.
+On a phone (below 768px) every role but Display rises and keeps its name, so a screen built from roles needs no phone variant of its own.
 
 | Role | Desktop | Phone |
 | --- | --- | --- |
 | UI | 400, 14px/20px | 400, 17px/24px |
+| Body (`text-composer`) | 400, 16px/20px | 400, 17px/24px |
 | Section | 500, 15px/20px | 600, 17px/24px |
 | Title | 500, 18px/24px | 700, 28px/36px, a large page title |
 | Aux | 400, 13px/16px | 400, 15px/20px |
 | Badge | 500, 13px/16px | 500, 15px/20px |
 
-A field never reads under 16px on a phone, the size below which mobile Safari zooms the page on focus.
+On a phone, a field that names no role reads at 17px, never under 16px, the size below which mobile Safari zooms the page on focus. A field that names a role keeps it.
 
 ### Named Rules
 **The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-composer`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
@@ -374,7 +375,7 @@ The guardian shell is a sidebar plus a content column. On desktop (768px and up)
 
 Density is operational but not cramped. Cards carry 16px inner padding, tiles 12px, menu items 4px by 8px. Controls sit on three heights: 28px (`sm`), 32px (`md`, the default), and 44px (`lg`, square icon buttons only, for touch). Badges are 22px. Avatars are 24, 32, and 40px. When a control shares a row with loose text, the row takes the taller of the two, and the air around the text inside a control is never more than the text's own line box.
 
-On a phone (below 768px, where the sidebar becomes a slide-over) every control is painted at 44px. Both shared steps and the `xs` step rise to it, square icon buttons and calendar days are 44px squares, chips, tabs and page-nav entries are 44px tall, and the default switch is 48 by 28 with a hit area 44px tall. A control is a visible 44px box rather than a small box with a hidden hit area. A hidden hit area that reaches past its own box can land on a neighbour's box and take taps meant for it, and no stacking order can prevent that. The one exception stays inside its own composite: a segmented control's 36px segments reach over their own track's padding, which belongs to no other control. Row floors follow the control step to 52px.
+On a phone (below 768px, where the sidebar becomes a slide-over) every control is painted at 44px. Both shared steps and the `xs` step rise to it, square icon buttons and calendar days are 44px squares, chips, tabs and page-nav entries are 44px tall, and the switch is 48 by 28 at both sizes, with a hit area 44px tall. A control is a visible 44px box rather than a small box with a hidden hit area. A hidden hit area that reaches past its own box can land on a neighbour's box and take taps meant for it, and no stacking order can prevent that. The one exception stays inside its own composite: a segmented control's 36px segments reach over their own track's padding, which belongs to no other control. Row floors follow the control step to 52px.
 
 From 768px up, touch targets on compact surfaces reach 44 to 48px through padding or a pseudo-element hit area, not by enlarging the visible control. Hover-only disclosure is never the only path to an action.
 

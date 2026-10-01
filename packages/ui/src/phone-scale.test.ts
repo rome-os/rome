@@ -1,26 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
+import { PHONE_QUERY, splitPhoneBlock } from "./test/phone-block.js";
 
 const sheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
   "",
 );
 
-/** The body of the phone `@media` block, braces matched. */
-function phoneBlock(): string {
-  const start = sheet.indexOf("@media (width < 48rem)");
-  if (start < 0) throw new Error("No phone block");
-  const open = sheet.indexOf("{", start);
-  let depth = 0;
-  for (let index = open; index < sheet.length; index += 1) {
-    if (sheet[index] === "{") depth += 1;
-    if (sheet[index] === "}" && (depth -= 1) === 0) return sheet.slice(open + 1, index);
-  }
-  throw new Error("Unterminated phone block");
-}
-
-const block = phoneBlock();
+const block = splitPhoneBlock(sheet).phone;
 const tokens = new Map(
   [...block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [
     name,
@@ -65,6 +53,7 @@ describe("the phone scale", () => {
 
   it.each([
     ["ui", 17, 24],
+    ["composer", 17, 24],
     ["section", 17, 24],
     ["title", 28, 36],
     ["aux", 15, 20],
@@ -76,7 +65,7 @@ describe("the phone scale", () => {
   });
 
   it("keeps every phone line box on the 4px grid, above the 1.2 descender floor", () => {
-    for (const role of ["ui", "section", "title", "aux", "badge"]) {
+    for (const role of ["ui", "composer", "section", "title", "aux", "badge"]) {
       const size = step(`--text-${role}`);
       const ratio = step(`--text-${role}--line-height`);
       expect(Math.round(size * ratio * 1000) % 4000, role).toBe(0);
@@ -89,14 +78,23 @@ describe("the phone scale", () => {
     expect(tokens.get("--text-section--font-weight")).toBe("600");
   });
 
-  it("never sets a field under the size mobile Safari zooms on focus", () => {
-    expect(block).toMatch(
-      /:where\(input, textarea, select\)\s*\{\s*font-size: max\(var\(--rome-font-size-16\), var\(--text-ui\)\);/,
+  it("floors a field that names no role at 16px, in base so a role still wins", () => {
+    // Unlayered, the floor would beat every `text-*` utility on a field: the
+    // composer would lose its own line height, and an app could not size a
+    // field at all. In `base` it fills in only where no role is named.
+    const floor = sheet.indexOf(":is(input, textarea, select)");
+    const before = sheet.slice(0, floor);
+    expect(before.slice(before.lastIndexOf("@layer base"))).toMatch(
+      /^@layer base\s*\{\s*@media \(width < 48rem\)\s*\{\s*$/,
     );
+    expect(sheet.slice(floor)).toMatch(
+      /^:is\(input, textarea, select\)\s*\{\s*font-size: max\(var\(--rome-font-size-16\), var\(--text-ui\)\);/,
+    );
+    expect(block).not.toMatch(/:(?:is|where)\(input/);
   });
 
   it("is not inside a cascade layer, so it outranks the roles' theme layer", () => {
-    const before = sheet.slice(0, sheet.indexOf("@media (width < 48rem)"));
+    const before = sheet.slice(0, sheet.indexOf(PHONE_QUERY));
     const opened = (before.match(/@layer[^{;]*\{/g) ?? []).length;
     // Every layer block opened before the phone block has closed by then.
     let depth = 0;
