@@ -24,7 +24,8 @@ import type {
 //   coming. Any turn that opens ends the wait, since Rome's turns open in
 //   order and the adopting turn may sit behind another caller's. Without a
 //   queued steer no turn is coming, so the reply is dropped as the SDK's own
-//   instead of holding the stream.
+//   instead of holding the stream. A carried steer stops counting once Rome's
+//   turn for it ends, adopted or not.
 // - A send is forgotten once a result closes the SDK turn that answered it,
 //   that is, the result or a frame echoed it. A replay alone answers nothing:
 //   the SDK can replay a send in one turn and answer it in the next. A Rome
@@ -95,7 +96,10 @@ export class SdkTurnRouter {
   private owner: "rome" | "sdk" | undefined;
   /** The send that opened the current Rome turn. */
   private turnSendId: string | undefined;
-  private turnOpened: (() => void) | undefined;
+  /** Ends the current wait: true to deliver the held output, false to skip it. */
+  private turnOpened: ((deliver: boolean) => void) | undefined;
+  /** The Rome sends the held output claims. */
+  private waitingIds: string[] = [];
 
   /**
    * Rome opens a turn for `inputId`. Returns the uuid to send, or `adopted`
@@ -120,16 +124,34 @@ export class SdkTurnRouter {
     this.sends.add(inputId);
   }
 
-  /** Resolves when Rome opens a turn, or `releaseWait` runs. */
-  waitForTurn(): Promise<void> {
+  /**
+   * Resolves when Rome opens a turn, or `releaseWait` runs: true to deliver
+   * the held output. False when no turn will come for it (`releaseInput`):
+   * skip it.
+   */
+  waitForTurn(): Promise<boolean> {
     return new Promise((resolve) => {
       this.turnOpened = resolve;
     });
   }
 
-  /** Ends any wait; for interrupt and close. */
-  releaseWait(): void {
-    this.turnOpened?.();
+  /**
+   * Rome's turn for `inputId` ended. If it never adopted that carried steer
+   * (a turn middleware answered it, or it failed before sending), no turn
+   * will: stop holding output for it once nothing else is carried.
+   */
+  releaseInput(inputId: string): void {
+    if (!this.carried.delete(inputId) || this.carried.size > 0 || !this.turnOpened) return;
+    // The held output has no turn coming. Drop it as the SDK's own, so the
+    // rest of its SDK turn can't reach a Rome turn that opens later.
+    for (const id of this.waitingIds) this.forget(id);
+    if (this.owner === "rome") this.owner = "sdk";
+    this.releaseWait(false);
+  }
+
+  /** Ends any wait, delivering the held output; for interrupt and close. */
+  releaseWait(deliver = true): void {
+    this.turnOpened?.(deliver);
     this.turnOpened = undefined;
   }
 
@@ -151,6 +173,7 @@ export class SdkTurnRouter {
     if (claimed !== undefined && !turnOpen) {
       if (this.carried.size > 0) {
         waitForTurn = claimed;
+        this.waitingIds = romeReplay ? [replayed] : echoed;
       } else {
         // No Rome turn is open or coming: the reply has nowhere to go.
         for (const id of romeReplay ? [replayed] : echoed) this.forget(id);

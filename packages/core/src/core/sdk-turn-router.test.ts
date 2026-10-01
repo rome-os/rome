@@ -188,10 +188,49 @@ describe("SdkTurnRouter", () => {
     expect(r.trackedSendCount).toBe(0);
   });
 
-  it("ends a wait on releaseWait", async () => {
+  it("stops holding output once a carried steer's turn ends without adopting it", async () => {
+    const r = new SdkTurnRouter();
+    r.openTurn("A");
+    r.steer("S");
+    r.onMessage(frame("A"), true);
+    expect(r.onResult(result({ echo: ["A"] })).carried).toEqual(["S"]);
+    // S's reply arrives first and waits for the turn that will adopt S.
+    expect(r.onMessage(frame("S"), false)).toEqual({ ...deliver, waitForTurn: "S" });
+    const waited = r.waitForTurn();
+    // S's Rome turn ends without sending (a middleware answered it): no turn
+    // will adopt S, so the held reply is dropped as the SDK's own.
+    r.releaseInput("S");
+    expect(await waited).toBe(false);
+    // The rest of that SDK turn stays out of a Rome turn that opens meanwhile.
+    expect(r.openTurn("Y")).toEqual({ adopted: false, uuid: "Y" });
+    expect(r.onMessage(frame(), true)).toEqual(skip);
+    expect(r.onResult(result({ echo: ["S"] })).owner).toBe("sdk");
+    expect(r.onMessage(frame("Y"), true)).toEqual(deliver);
+    expect(r.onResult(result({ echo: ["Y"] })).owner).toBe("rome");
+    // Nothing is carried any more: a later stray reply is dropped, not held.
+    r.openTurn("B");
+    r.openTurn("C");
+    r.onMessage(frame("C"), true);
+    r.onResult(result({ echo: ["C"] }));
+    expect(r.onMessage(frame("B"), false)).toEqual({ ...skip, dropped: "B" });
+  });
+
+  it("ignores releaseInput for an input a turn already adopted or sent", () => {
+    const r = new SdkTurnRouter();
+    r.openTurn("A");
+    r.steer("S");
+    r.onMessage(frame("A"), true);
+    r.onResult(result({ echo: ["A"] }));
+    expect(r.openTurn("S")).toEqual({ adopted: true });
+    r.releaseInput("A");
+    r.releaseInput("S");
+    expect(r.onMessage(frame("S"), true)).toEqual(deliver);
+  });
+
+  it("ends a wait on releaseWait, delivering the held output", async () => {
     const r = new SdkTurnRouter();
     const waited = r.waitForTurn();
     r.releaseWait();
-    await waited;
+    expect(await waited).toBe(true);
   });
 });

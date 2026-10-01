@@ -606,8 +606,12 @@ export class AnthropicProvider implements ModelProvider {
           if (route.waitForTurn) {
             const inputId = route.waitForTurn;
             log.info("pausing SDK stream until Rome opens a turn for a queued send", { inputId });
-            await router.waitForTurn();
+            const deliver = await router.waitForTurn();
             log.info("resumed SDK stream", { inputId });
+            if (!deliver) {
+              log.warn("dropping SDK reply to a send no Rome turn is waiting for", { inputId });
+              continue;
+            }
           }
           // First assistant message means the SDK has written user+assistant
           // turns to the transcript: record the SDK's own session id so the
@@ -998,6 +1002,9 @@ export class AnthropicProvider implements ModelProvider {
             });
           },
         };
+      },
+      releaseInput(inputId: string): void {
+        router.releaseInput(inputId);
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });
