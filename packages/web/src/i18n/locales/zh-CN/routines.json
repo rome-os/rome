@@ -4,6 +4,10 @@
     "createButton": "创建例程"
   },
   "loading": "正在加载例程...",
+  "created": {
+    "badge": "已创建",
+    "confirmation": "已创建例程：{{name}}。"
+  },
   "stats": {
     "total": "总计",
     "active": "已启用",

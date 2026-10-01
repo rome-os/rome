@@ -1,8 +1,68 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { postSessionTurn } from "./chat-api";
+import { createRoutine, postSessionTurn } from "./chat-api";
 
 afterEach(() => {
   rs.unstubAllGlobals();
+});
+
+describe("createRoutine", () => {
+  it("exposes the persisted id and row from a complete successful response", async () => {
+    const routine = {
+      id: "r-1",
+      name: "Landlord emails",
+      enabled: true,
+      trigger: { type: "manual" },
+      actionName: "summon",
+      args: {},
+      createdAt: "2026-09-19T07:00:00.000Z",
+      lastFiredAt: null,
+      nextRunAt: null,
+    };
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockResolvedValue(
+        new Response(JSON.stringify(routine), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await createRoutine({
+      name: routine.name,
+      trigger: routine.trigger,
+      actionName: routine.actionName,
+      args: routine.args,
+      webchatContext: { sessionId: "chat-a", turnId: "turn-1", toolUseId: "draft-tool-1" },
+    });
+
+    expect(result).toEqual({ ok: true, status: 201, routineId: "r-1", routine });
+  });
+
+  it("does not expose an id from an incomplete successful response", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: "r-1" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await createRoutine({
+      name: "Landlord emails",
+      trigger: { type: "manual" },
+      actionName: "summon",
+      args: {},
+      webchatContext: { sessionId: "chat-a", turnId: "turn-1", toolUseId: "draft-tool-1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(201);
+    expect(result.routineId).toBeUndefined();
+    expect(result.routine).toBeUndefined();
+  });
 });
 
 describe("postSessionTurn", () => {

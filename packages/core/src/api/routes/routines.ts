@@ -5,8 +5,12 @@ import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
 import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
+import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
+import type { MessagePart } from "../../types.js";
 import type { Trigger } from "../../routines/types.js";
+
+const log = createLogger("api:routines");
 
 // The engine merges trigger payloads into action args under this key. Forbid
 // it in user-supplied args so we never silently overwrite caller data.
@@ -138,6 +142,12 @@ interface CreateRoutineBody {
   actionName?: string;
   args?: Record<string, unknown>;
   enabled?: boolean;
+  // Nullable: a client may send an explicit `null` to mean "no correlation".
+  webchatContext?: {
+    sessionId?: string;
+    turnId?: string;
+    toolUseId?: string;
+  } | null;
 }
 
 interface UpdateRoutineBody {
@@ -146,6 +156,50 @@ interface UpdateRoutineBody {
   trigger?: Trigger;
   actionName?: string;
   args?: Record<string, unknown>;
+}
+
+interface WebchatRoutineContext {
+  sessionId: string;
+  turnId: string;
+  toolUseId: string;
+}
+
+function parseWebchatRoutineContext(
+  value: CreateRoutineBody["webchatContext"],
+): WebchatRoutineContext | null {
+  // A body may legally carry `webchatContext: null`; treat it like an omitted
+  // context (no correlation) rather than dereferencing null into a 500.
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value.sessionId !== "string" ||
+    value.sessionId.trim() === "" ||
+    typeof value.turnId !== "string" ||
+    value.turnId.trim() === "" ||
+    typeof value.toolUseId !== "string" ||
+    value.toolUseId.trim() === ""
+  ) {
+    return null;
+  }
+  return {
+    sessionId: value.sessionId,
+    turnId: value.turnId,
+    toolUseId: value.toolUseId,
+  };
+}
+
+function messageHasRoutineDraft(content: string, toolUseId: string): boolean {
+  try {
+    const parts: unknown = JSON.parse(content);
+    return (
+      Array.isArray(parts) &&
+      parts.some(
+        (part) =>
+          isPlainObject(part) && part.type === "routine_draft_card" && part.toolUseId === toolUseId,
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Rebuilds the action-execution tree for a run from the flat `action_executions`
@@ -262,6 +316,33 @@ export function routinesRoutes(deps: ApiDeps): Hono {
 
   app.post("/routines", async (c) => {
     const body = await c.req.json<CreateRoutineBody>().catch(() => ({}) as CreateRoutineBody);
+    const webchatContext = parseWebchatRoutineContext(body.webchatContext);
+
+    // `!= null` so an explicit `webchatContext: null` (like an omitted one) is a
+    // routine with no chat correlation, not a validation error and never a 500.
+    if (body.webchatContext != null) {
+      if (!webchatContext) {
+        return c.json({ error: "webchatContext is invalid" }, 400);
+      }
+      const session = await deps.webchatRepo.getSession(webchatContext.sessionId);
+      if (!session || (session.type !== "webchat" && session.type !== "webchat_handoff")) {
+        return c.json({ error: "Webchat session not found" }, 404);
+      }
+      const turnMessages = (await deps.webchatRepo.getMessages(webchatContext.sessionId)).filter(
+        (message) => message.turnId === webchatContext.turnId,
+      );
+      const sourceExists = turnMessages.some((message) =>
+        messageHasRoutineDraft(message.content, webchatContext.toolUseId),
+      );
+      if (!sourceExists) {
+        return c.json({ error: "Routine draft not found in the originating chat turn" }, 400);
+      }
+      // Per-proposal idempotency is enforced atomically at the database level via
+      // the deterministic routines.key derived below — a raced or retried create
+      // for the same (session, turn, toolUseId) loses the UNIQUE-key insert and
+      // returns the winning routine instead of a duplicate. No read-then-write
+      // check here (it was a TOCTOU: two concurrent POSTs could both pass it).
+    }
 
     if (!body.trigger || !body.trigger.type) {
       return c.json({ error: "trigger is required" }, 400);
@@ -307,9 +388,18 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     }
 
     const now = new Date();
+    // A deterministic per-proposal key so concurrent or retried creates for the
+    // same (session, turn, toolUseId) collide on the routines.key UNIQUE
+    // constraint. This makes dedup atomic at the database level rather than a
+    // racy read-then-write. Non-webchat creates keep key null (SQLite treats
+    // multiple NULLs as distinct, so they never collide).
+    const idempotencyKey = webchatContext
+      ? `webchat:${webchatContext.sessionId}:${webchatContext.turnId}:${webchatContext.toolUseId}`
+      : null;
     const record = {
       id: uuid(),
       name: body.name ?? "",
+      key: idempotencyKey,
       enabled: body.enabled ?? true,
       trigger: body.trigger as unknown,
       actionName: resolvedActionName,
@@ -319,11 +409,54 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       nextRunAt: null,
     };
 
-    await deps.db.insert(routines).values(record);
+    try {
+      await deps.db.insert(routines).values(record);
+    } catch (err) {
+      // Lost the race on the proposal's UNIQUE key: another concurrent/retried
+      // request already created and activated this routine. Return that winning
+      // row instead of inserting/activating a duplicate.
+      if (idempotencyKey) {
+        const [winner] = await deps.db
+          .select()
+          .from(routines)
+          .where(eq(routines.key, idempotencyKey));
+        if (winner) return c.json(winner, 200);
+      }
+      throw err;
+    }
     const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
+    if (!inserted) {
+      return c.json({ error: "Created routine could not be loaded" }, 500);
+    }
 
-    if (inserted?.enabled) {
+    if (inserted.enabled) {
       await deps.routineEngine.activate(toRoutine(inserted));
+    }
+
+    if (webchatContext) {
+      const part: Extract<MessagePart, { type: "routine_created_card" }> = {
+        type: "routine_created_card",
+        sourceToolUseId: webchatContext.toolUseId,
+        routineId: inserted.id,
+        routineName: inserted.name,
+      };
+      // The routine is already created and activated. A failure to append the
+      // transcript record must not 500 the request (which would prompt a client
+      // retry and duplicate the routine) — log and continue, matching the other
+      // addBackendMessage call sites (persistSuspensionCard / commentary path).
+      try {
+        await deps.webchatRepo.addBackendMessage(webchatContext.sessionId, webchatContext.turnId, [
+          part,
+        ]);
+      } catch (err) {
+        log.warn("failed to persist routine_created card", {
+          sessionId: webchatContext.sessionId,
+          turnId: webchatContext.turnId,
+          toolUseId: webchatContext.toolUseId,
+          routineId: inserted.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     return c.json(inserted, 201);
