@@ -189,6 +189,16 @@ describe("Markdown fenced-block chrome", () => {
     expect(declarations).toContain("min-height: var(--control-min-h, 0px);");
   });
 
+  it("gives a diagram room to pan between its buttons on a phone", () => {
+    // Streamdown's canvas floor is 112px. The phone's 44px action and zoom
+    // rows cover half of that, so the phone raises the floor.
+    const phone = media("width < 48rem");
+    const canvas = [...phone.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) =>
+      selector.trim().startsWith('[data-streamdown="mermaid"] > :first-child'),
+    );
+    expect(canvas?.[2]).toContain("min-height: 12rem;");
+  });
+
   it("leaves a fullscreen diagram's zoom stack alone", () => {
     // Streamdown portals a fullscreen diagram to document.body, outside the
     // prose root. There the zoom stack is the whole interface, so every rule

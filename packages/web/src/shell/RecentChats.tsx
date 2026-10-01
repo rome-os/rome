@@ -541,14 +541,17 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
         ) : (
           <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
+        {/* On a phone there is no hover to reveal the row's actions, so the
+            "…" always shows, as a 44px box, and the unread dot moves to its
+            left. The dot passes taps through to the row. */}
         <span
-          className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
+          className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center max-md:mr-0 max-md:size-11 ${
             isEditing ? "hidden" : ""
           }`}
         >
           {unread ? (
             <span
-              className="h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0"
+              className="pointer-events-none h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0 max-md:absolute max-md:-left-2 max-md:opacity-100"
               role="img"
               aria-label={t("recentChats.unread")}
             />
@@ -562,7 +565,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 type="button"
                 aria-label={t("recentChats.chatActions")}
                 title={t("recentChats.chatActions")}
-                className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-100"
               >
                 <Ellipsis className="h-3 w-3" aria-hidden />
               </button>
@@ -683,20 +686,20 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               }
               aria-label={t("recentChats.newChatInProject")}
               title={t("recentChats.newChatInProject")}
-              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:opacity-100 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
             </button>
           ) : null}
           {projectPath ? (
-            <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
+            <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center max-md:mr-0 max-md:size-11">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     aria-label={t("recentChats.projectActions")}
                     title={t("recentChats.projectActions")}
-                    className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+                    className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100 max-md:opacity-100"
                   >
                     <Ellipsis className="h-3 w-3" aria-hidden />
                   </button>

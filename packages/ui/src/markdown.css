@@ -599,6 +599,29 @@
   flex-direction: var(--markdown-zoom-direction, column);
 }
 
+/* On phones, the 44px controls float over opposite edges of the canvas.
+   Streamdown's usual 112px floor would leave too little room to pan. */
+@media (width < 48rem) {
+  [data-streamdown="mermaid"] :has(> button[title="Zoom in"]) {
+    flex-direction: row;
+  }
+
+  [data-streamdown="mermaid"] > :first-child {
+    min-height: 12rem;
+  }
+
+  .rome-markdown
+    :is(
+      [data-streamdown="code-block-header"],
+      [data-streamdown="mermaid-block"] > :first-child,
+      [data-streamdown="code-block"] > :has(> [data-streamdown="code-block-actions"]),
+      [data-streamdown="mermaid-block"] > :has(> [data-streamdown="mermaid-block-actions"])
+    ) {
+    height: auto;
+    min-height: var(--rome-space-8);
+  }
+}
+
 .rome-markdown
   :is(
     [data-streamdown="code-block-header"],

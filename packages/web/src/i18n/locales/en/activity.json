@@ -33,6 +33,7 @@
       "pending_approval": "Awaiting",
       "cancelled": "Cancelled"
     },
+    "filterLabel": "Show",
     "pagination": {
       "previous": "‹ Previous",
       "next": "Next ›",

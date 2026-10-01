@@ -46,6 +46,8 @@ import {
   Sun,
   WalletCards,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   FormRow,
@@ -370,15 +372,57 @@ export default function SettingsPage() {
   // it hid the nav during the wait so no other tab was reachable.
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
+  // On a phone Settings is a list of sections, and each section is its own
+  // screen with a way back, instead of a sideways strip of tabs. Bare
+  // /settings shows the list there and Appearance from 768px up. All of it is
+  // breakpoint classes, so the desktop page renders as before.
+  const onSection = Boolean(params.tab);
+
   return (
     <Page>
+      {onSection ? (
+        <Link
+          to="/settings"
+          className="flex min-h-11 items-center gap-1 self-start text-ui text-primary md:hidden"
+        >
+          <ChevronLeft className="size-5" aria-hidden />
+          {t("page.title")}
+        </Link>
+      ) : null}
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
+          <PageTitle>
+            {onSection ? (
+              <>
+                <span className="md:hidden">{t(`tabs.${activeTab}` as const)}</span>
+                <span className="max-md:hidden">{t("page.title")}</span>
+              </>
+            ) : (
+              t("page.title")
+            )}
+          </PageTitle>
         </PageHeading>
       </PageHeader>
 
-      <PageNav aria-label={t("page.title")}>
+      {onSection ? null : (
+        <nav aria-label={t("page.title")} className="md:hidden">
+          <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+            {VISIBLE_TABS.map((tab) => (
+              <li key={tab}>
+                <Link
+                  to={`/settings/${tabToSlug(tab)}`}
+                  className="flex min-h-12 items-center justify-between gap-3 px-4 text-ui text-foreground"
+                >
+                  {t(`tabs.${tab}` as const)}
+                  <ChevronRight className="size-5 text-subtle-foreground" aria-hidden />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+
+      <PageNav aria-label={t("page.title")} className="max-md:hidden">
         {VISIBLE_TABS.map((tab) => (
           <PageNavLink asChild key={tab} active={tab === activeTab}>
             <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
@@ -386,59 +430,61 @@ export default function SettingsPage() {
         ))}
       </PageNav>
 
-      {tabNeedsSettings && loading ? (
-        <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-      ) : tabNeedsSettings && loadError ? (
-        <Measure>
-          <Card>
-            <CardContent className="flex flex-col items-start gap-3">
-              <p className="text-ui text-destructive">{loadError}</p>
-              <Button type="button" size="sm" onClick={() => void loadAll()}>
-                <RefreshCw />
-                {t("page.retry")}
-              </Button>
-            </CardContent>
-          </Card>
-        </Measure>
-      ) : (
-        <>
-          {activeTab === "Appearance" && <AppearanceSection />}
-          {activeTab === "Connections" && (
-            <ConnectionsSection
-              connections={connections}
-              composio={composio}
-              loading={connectionsLoading}
-              error={connectionsError}
-              onRetry={loadConnections}
-              onRefresh={loadConnections}
-              onFlash={(message) => toast.error(message)}
-            />
-          )}
-          {activeTab === "Devices" && <DevicesSection />}
-          {activeTab === "Channels" && (
-            <div className="max-w-3xl">
-              <ChannelsSettingsPage />
-            </div>
-          )}
-          {activeTab === "Favors" && (
-            <Measure>
-              <FavorsSection />
-            </Measure>
-          )}
-          {activeTab === "AI Tools" && (
-            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
-          )}
-          {activeTab === "Advanced" && (
-            <AdvancedSection
-              settings={settings}
-              onSave={saveSettings}
-              saving={saving}
-              tailscale={tailscale}
-              onRefresh={loadAll}
-            />
-          )}
-        </>
-      )}
+      <div className={onSection ? "contents" : "contents max-md:hidden"}>
+        {tabNeedsSettings && loading ? (
+          <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+        ) : tabNeedsSettings && loadError ? (
+          <Measure>
+            <Card>
+              <CardContent className="flex flex-col items-start gap-3">
+                <p className="text-ui text-destructive">{loadError}</p>
+                <Button type="button" size="sm" onClick={() => void loadAll()}>
+                  <RefreshCw />
+                  {t("page.retry")}
+                </Button>
+              </CardContent>
+            </Card>
+          </Measure>
+        ) : (
+          <>
+            {activeTab === "Appearance" && <AppearanceSection />}
+            {activeTab === "Connections" && (
+              <ConnectionsSection
+                connections={connections}
+                composio={composio}
+                loading={connectionsLoading}
+                error={connectionsError}
+                onRetry={loadConnections}
+                onRefresh={loadConnections}
+                onFlash={(message) => toast.error(message)}
+              />
+            )}
+            {activeTab === "Devices" && <DevicesSection />}
+            {activeTab === "Channels" && (
+              <div className="max-w-3xl">
+                <ChannelsSettingsPage />
+              </div>
+            )}
+            {activeTab === "Favors" && (
+              <Measure>
+                <FavorsSection />
+              </Measure>
+            )}
+            {activeTab === "AI Tools" && (
+              <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+            )}
+            {activeTab === "Advanced" && (
+              <AdvancedSection
+                settings={settings}
+                onSave={saveSettings}
+                saving={saving}
+                tailscale={tailscale}
+                onRefresh={loadAll}
+              />
+            )}
+          </>
+        )}
+      </div>
     </Page>
   );
 }

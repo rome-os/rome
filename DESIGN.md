@@ -379,6 +379,8 @@ In the large platform scale, controls on the shared scale and menu options take 
 
 Selection controls keep their glyph geometry inside accessible labels or their composite hit areas. Hover-only disclosure is never the only path to an action.
 
+On a phone, pages whose rows would crowd reflow rather than scroll sideways. A card’s actions go under its text as one full-width row. Filter pills become one native picker. A routine’s name keeps the card’s width and its actions take a row of their own, with Run filling it. Settings is a list of sections, each opened as its own screen with a way back, instead of a sideways tab strip. A diagram’s canvas is at least 192px tall, so its pan area survives the 44px buttons floating over it.
+
 ## Elevation & Depth
 
 Rome is flat at rest. Two context canvases sit beneath three content depths: a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). Chat uses `chat-canvas`; compact app UI uses the brighter `app-canvas`; dashboard pages without a dedicated context use `background`. A canvas and card may share a fill, so the card's hairline border must still carry its boundary. In dark mode the distinct steps lighten as they rise, which is why depth names describe position rather than lightness.
