@@ -376,6 +376,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const pendingMessageReconciliationsRef = useRef<Map<string, string>>(new Map());
   const offFloorReconcileTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const offFloorReconcileControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const offFloorReconcileWakeRef = useRef<Map<string, () => void>>(new Map());
   const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
@@ -557,6 +558,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     const retryRecoveringFloor = () => {
       const sid = floorSessionIdRef.current;
+      // Browser timers may have been throttled while hidden. Wake dormant
+      // off-floor answer checks too, without duplicating an in-flight lookup.
+      for (const [id, wake] of offFloorReconcileWakeRef.current) {
+        if (id !== sid && offFloorReconcileTimersRef.current.has(id)) wake();
+      }
       if (!sid) return;
       const activeTurnId = streamingSessionsRef.current.get(sid)?.turnId;
       if (activeTurnId && !recoveringSessionIdsRef.current.has(sid)) {
@@ -653,6 +659,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       stopRetryConfirmedTurnIdsRef.current.clear();
       for (const timer of offFloorReconcileTimersRef.current.values()) clearTimeout(timer);
       offFloorReconcileTimersRef.current.clear();
+      offFloorReconcileWakeRef.current.clear();
       for (const controller of offFloorReconcileControllersRef.current.values()) controller.abort();
       offFloorReconcileControllersRef.current.clear();
       for (const controller of turnStreamControllersRef.current.values()) {
@@ -794,7 +801,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   );
   const queueOffFloorReconciliation = useCallback(
     (id: string, turnId: string) => {
-      if (pendingMessageReconciliationsRef.current.has(id)) return;
+      // A later off-floor turn can drop while an older turn's message reload
+      // is still in flight. Promote the marker so that older response cannot
+      // clear the only poller before the later answer is persisted.
+      if (pendingMessageReconciliationsRef.current.get(id) === turnId) return;
       pendingMessageReconciliationsRef.current.set(id, turnId);
       // An off-floor handoff child receives no message_insert subscription.
       // Check its turn until it ends, then fetch its durable answer; otherwise
@@ -817,6 +827,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const check = async (delayMs: number) => {
         const stillPending = () =>
           isChatMountedRef.current && pendingMessageReconciliationsRef.current.get(id) === turnId;
+        const observedSendRevision = acceptedSendRevisionsRef.current.get(id) ?? 0;
+        const sameSendRevision = () =>
+          (acceptedSendRevisionsRef.current.get(id) ?? 0) === observedSendRevision;
         if (!stillPending()) return;
         if (floorSessionIdRef.current === id) {
           schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
@@ -841,15 +854,22 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             force: true,
             dropLocalOptimistic: true,
             bounded: true,
-            shouldApply: () => stillPending() && floorSessionIdRef.current !== id,
+            shouldApply: () =>
+              stillPending() && floorSessionIdRef.current !== id && sameSendRevision(),
           });
           if (!stillPending()) return;
+          if (!sameSendRevision()) {
+            schedule(RECONNECT_BASE_DELAY_MS);
+            return;
+          }
           if (floorSessionIdRef.current === id) {
             schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
             return;
           }
           if (loaded) {
             pendingMessageReconciliationsRef.current.delete(id);
+            if (offFloorReconcileWakeRef.current.get(id) === wake)
+              offFloorReconcileWakeRef.current.delete(id);
             return;
           }
           if (loaded === null) {
@@ -857,11 +877,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             // sessions). The subsequent /messages 404 is authoritative: this
             // child is gone, so no answer can arrive through this poller.
             pendingMessageReconciliationsRef.current.delete(id);
+            if (offFloorReconcileWakeRef.current.get(id) === wake)
+              offFloorReconcileWakeRef.current.delete(id);
             return;
           }
         }
         schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
       };
+      const wake = () => schedule(0);
+      offFloorReconcileWakeRef.current.set(id, wake);
       schedule(RECONNECT_BASE_DELAY_MS);
     },
     [loadMessages],
@@ -1246,6 +1270,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           shouldApply: stillObserving,
           bounded: true,
         });
+        if (loaded === null) return null;
         if (!loaded && stillObserving()) noteRecoveryFailure();
         return loaded && stillObserving();
       };
@@ -1276,7 +1301,20 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             pendingMessageReconciliationsRef.current.has(reattachSessionId) ||
             Boolean(suppressedTurnId) ||
             (wasRecovering && recoveringSessionIdsRef.current.has(reattachSessionId));
-          if (needsReload && !(await reloadWhileObserving())) return;
+          if (needsReload) {
+            const reloaded = await reloadWhileObserving();
+            if (reloaded === null && stillObserving()) {
+              // /turns is session-agnostic, but /messages 404 confirms this
+              // floor child was deleted. Do not strand a phantom Stop state.
+              recoveringSessionIdsRef.current.delete(reattachSessionId);
+              if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
+              setRecoveryNotice((current) =>
+                current?.sessionId === reattachSessionId ? null : current,
+              );
+              return;
+            }
+            if (!reloaded) return;
+          }
           pendingMessageReconciliationsRef.current.delete(reattachSessionId);
           suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
