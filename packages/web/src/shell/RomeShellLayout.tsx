@@ -7,6 +7,7 @@ import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
 import { SlotOutlet } from "../components/slot";
+import { useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid, APP_NAV } from "./AppGrid";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
@@ -142,16 +143,45 @@ export function RomeShellLayout() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hideSidebar, navigate, toggleCollapsed]);
 
+  // On a phone a swipe right anywhere opens the sidebar and a swipe left closes
+  // it. The menu button in the mobile header stays as the visible way in.
+  const sidebarRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
+  const scrimRef = useRef<HTMLButtonElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  useSwipeSidebar({
+    disabled: hideSidebar,
+    open: sidebarOpen,
+    setOpen: setSidebarOpen,
+    sidebar: sidebarRef,
+    page: pageRef,
+    scrim: scrimRef,
+    frame: frameRef,
+  });
+
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <UpgradeCountdownBanner />
-      <div className="relative flex flex-1">
-        {sidebarOpen && !hideSidebar ? (
-          <MobileBackdrop label={t("nav.closeSidebar")} onDismiss={() => setSidebarOpen(false)} />
+      {/* On a phone the open sidebar pushes the page right rather than covering
+          it. The clip keeps that push from scrolling the document sideways, and
+          holds only while the page is pushed, so a page that overflows at rest
+          still shows it. */}
+      <div
+        ref={frameRef}
+        className={`relative flex flex-1 ${sidebarOpen && !hideSidebar ? "max-md:overflow-x-clip" : ""}`}
+      >
+        {!hideSidebar ? (
+          <MobileBackdrop
+            ref={scrimRef}
+            open={sidebarOpen}
+            label={t("nav.closeSidebar")}
+            onDismiss={() => setSidebarOpen(false)}
+          />
         ) : null}
         {!hideSidebar ? (
           <aside
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
+            ref={sidebarRef}
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
@@ -236,7 +266,10 @@ export function RomeShellLayout() {
             drawer can align to the chat column. The public share tree has no
             shell, so its drawer falls back to 0px. */}
         <main
-          className="flex min-w-0 flex-1 flex-col bg-background"
+          ref={pageRef}
+          className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
+            sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
+          }`}
           style={
             {
               "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
