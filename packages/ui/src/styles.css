@@ -806,7 +806,14 @@
 
 /* The hit area is positioned against the control, so the control needs a
    containing block. `relative` sits in `base` so an `absolute` or `sticky`
-   utility on the control still wins: those are containing blocks too. */
+   utility on the control still wins: those are containing blocks too.
+
+   On touch this makes every control carrying `touch-hit`, Button among them,
+   a positioned element, and so changes paint order there only. A positioned
+   control paints over non-positioned content and over earlier positioned
+   content without a `z-index`. A sticky or absolute header the control
+   scrolls under needs a `z-index` of its own, or the control paints over it
+   on a phone but not on a desktop. */
 @layer base {
   @media (hover: none) {
     .touch-hit {

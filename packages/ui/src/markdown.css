@@ -574,13 +574,23 @@
    row, which keeps it inside a short diagram's canvas. Fullscreen diagrams
    are portaled outside `.rome-markdown`, so none of this depends on it. */
 @media (hover: none) {
+  /* The row's own buttons only: each is a child of the row, or of the wrapper
+     around a button that opens a format menu. The menu's items sit a level
+     deeper, in its `absolute` panel, and keep their left-aligned layout. */
   :is(
       [data-streamdown="code-block-actions"],
       [data-streamdown="mermaid-block-actions"],
       [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
       [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
     )
-    button {
+    > button,
+  :is(
+      [data-streamdown="code-block-actions"],
+      [data-streamdown="mermaid-block-actions"],
+      [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
+    )
+    > div
+    > button {
     display: inline-flex;
     align-items: center;
     justify-content: center;

@@ -548,7 +548,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
         >
           {unread ? (
             <span
-              className="h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0 [@media(hover:none)]:absolute [@media(hover:none)]:-left-2"
+              className="pointer-events-none h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0 [@media(hover:none)]:absolute [@media(hover:none)]:-left-2"
               role="img"
               aria-label={t("recentChats.unread")}
             />

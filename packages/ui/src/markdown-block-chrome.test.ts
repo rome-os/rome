@@ -181,6 +181,13 @@ describe("Markdown fenced-block chrome", () => {
       expect(selector.replace(/\s+/g, " ")).toContain(hook);
     }
     expect(selector.trim().startsWith(".rome-markdown")).toBe(false);
+    // Only the row's own buttons: each a child of the row, or of the wrapper
+    // Streamdown puts around a button that opens a format menu. The menu's
+    // items sit one level deeper, inside its `absolute` panel, and keep
+    // their own left-aligned layout, so a bare descendant `button` is out.
+    expect(selector).not.toMatch(/\)\s+button/);
+    expect(selector).toMatch(/\)\s*>\s*button/);
+    expect(selector).toMatch(/\)\s*>\s*div\s*>\s*button/);
     expect(declarations).toContain("min-width: var(--rome-size-44, 2.75rem);");
     expect(declarations).toContain("min-height: var(--rome-size-44, 2.75rem);");
   });
