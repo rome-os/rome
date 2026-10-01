@@ -118,15 +118,6 @@ export class PullToRefreshController {
     this.#clearPull();
   }
 
-  /**
-   * Call when a load starts. The document that reported a partial pull may be
-   * gone and will never send its `end` or `cancel`, so the indicator retracts.
-   * An in-flight reload keeps its spinner.
-   */
-  loadStarted(): void {
-    if (!this.#cancelTimeout) this.#clearPull();
-  }
-
   loadEnded(): void {
     if (!this.#cancelTimeout) return;
     this.#cancelTimeout();
@@ -159,13 +150,20 @@ export class PullToRefreshController {
  * Page script for `injectedJavaScript`. It reads only `window`, so a test can
  * run it against a stand-in. It installs once per document.
  *
+ * On install it posts `cancel`. A document that went away mid-pull never sends
+ * its own `end` or `cancel`, so the next document retracts the indicator.
+ *
  * A pull starts only when one finger lands outside an editable field, no
- * Radix overlay is open (a modal holds the scroll lock, a popover, menu,
+ * editable textarea or contenteditable holds text that a reload would discard,
+ * no Radix overlay is open (a modal holds the scroll lock, a popover, menu,
  * select, or tooltip mounts a popper wrapper), and neither the document nor
- * any ancestor of the touched element is scrolled. It ends when the finger
- * lifts, and cancels when the finger moves up past the start, moves sideways
- * first, a second finger lands, or a page handler calls preventDefault on the
- * move.
+ * any ancestor of the touched element is scrolled.
+ *
+ * Before the pull starts, moving up or sideways abandons the touch. Once it
+ * starts, moving back above the start reports distance 0, so releasing there
+ * does not reload. A second finger, a page handler calling preventDefault on
+ * the move, or the touched pane scrolling cancels the pull. Lifting the finger
+ * ends it.
  */
 export const PULL_TO_REFRESH_SCRIPT = `(function () {
   var w = window;
@@ -188,6 +186,18 @@ export const PULL_TO_REFRESH_SCRIPT = `(function () {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable) {
         return true;
       }
+    }
+    return false;
+  }
+
+  function holdsUnsentText() {
+    var fields = doc.querySelectorAll(
+      "textarea:not([readonly]):not([disabled]), [contenteditable=''], [contenteditable='true']",
+    );
+    for (var i = 0; i < fields.length; i++) {
+      var field = fields[i];
+      var text = field.tagName === "TEXTAREA" ? field.value : field.textContent;
+      if (text && text.trim()) return true;
     }
     return false;
   }
@@ -217,7 +227,7 @@ export const PULL_TO_REFRESH_SCRIPT = `(function () {
     cancel();
     if (event.touches.length !== 1) return;
     var target = event.target;
-    if (editable(target) || !atTop(target)) return;
+    if (editable(target) || !atTop(target) || holdsUnsentText()) return;
     var selection = w.getSelection ? String(w.getSelection()) : "";
     if (selection) return;
     var touch = event.touches[0];
@@ -249,5 +259,6 @@ export const PULL_TO_REFRESH_SCRIPT = `(function () {
   }, { capture: true, passive: true });
 
   w.addEventListener("touchcancel", cancel, { capture: true, passive: true });
+  post({ phase: "cancel" });
 })();
 true;`;

@@ -36,7 +36,7 @@ The selected Rome's WebView follows platform navigation:
 
 - Android's back button steps back through the WebView history. With no earlier page, the press leaves the app.
 - On iOS, swiping from the left edge goes back and swiping from the right edge goes forward.
-- Pulling down from the top of the page reloads it. The gesture starts only when the touched pane and the page are both scrolled to the top, so pulling inside a scrolled chat transcript scrolls it instead. It does not start on text fields, while a dialog, sheet, popover, or menu is open, or inside an app's iframe.
+- Pulling down from the top of the page reloads it. The gesture starts only when the touched pane and the page are both scrolled to the top, so pulling inside a scrolled chat transcript scrolls it instead. It does not start on text fields, while a dialog, sheet, popover, or menu is open, or inside an app's iframe. It also does not start while a text box holds unsent text, such as a chat draft, because the reload would discard it.
 
 The dashboard turns off root overscroll, so a native refresh control cannot be pulled. An injected page script detects the pull and reports it to the app, which draws the indicator and reloads.
 

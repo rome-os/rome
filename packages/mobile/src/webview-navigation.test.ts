@@ -86,6 +86,7 @@ function page() {
   const posted: PullToRefreshEvent[] = [];
   let selection = "";
   let popperOpen = false;
+  const fields: { tagName: string; value: string; textContent: string }[] = [];
   const window = {
     document: {
       body: { hasAttribute: (name: string) => bodyAttributes.has(name) },
@@ -93,6 +94,7 @@ function page() {
       documentElement: root,
       querySelector: (selector: string) =>
         popperOpen && selector === "[data-radix-popper-content-wrapper]" ? {} : null,
+      querySelectorAll: () => fields,
     },
     scrollY: 0,
     getSelection: () => selection,
@@ -108,6 +110,7 @@ function page() {
     },
   };
   new Function("window", PULL_TO_REFRESH_SCRIPT)(window);
+  const installMessages = posted.splice(0);
 
   function dispatch(
     type: string,
@@ -125,6 +128,13 @@ function page() {
     root,
     body,
     posted,
+    installMessages,
+    addField: (tagName: string, text: string) =>
+      fields.push(
+        tagName === "TEXTAREA"
+          ? { tagName, value: text, textContent: "" }
+          : { tagName, value: "", textContent: text },
+      ),
     lockScroll: () => bodyAttributes.add("data-scroll-locked"),
     openPopper: () => {
       popperOpen = true;
@@ -154,6 +164,47 @@ describe("PULL_TO_REFRESH_SCRIPT", () => {
       { phase: "move", distance: 90 },
       { phase: "end", distance: 90 },
     ]);
+  });
+
+  it("posts cancel when it installs, so a pull the previous document left retracts", () => {
+    expect(page().installMessages).toEqual([{ phase: "cancel" }]);
+  });
+
+  it("reports distance 0 when the finger moves back above the start, so release does not reload", () => {
+    const p = page();
+    const target = element(p.body);
+    p.start(target, 100);
+    p.move(target, 140);
+    p.move(target, 90);
+    p.end(target);
+    expect(p.posted).toEqual([
+      { phase: "move", distance: 30 },
+      { phase: "move", distance: 0 },
+      { phase: "end", distance: 0 },
+    ]);
+  });
+
+  it("ignores a pull while a textarea or contenteditable holds unsent text", () => {
+    const textarea = page();
+    textarea.addField("TEXTAREA", "half-typed message");
+    const a = element(textarea.body);
+    textarea.start(a, 100);
+    textarea.move(a, 200);
+
+    const editor = page();
+    editor.addField("DIV", "draft");
+    const b = element(editor.body);
+    editor.start(b, 100);
+    editor.move(b, 200);
+
+    expect([...textarea.posted, ...editor.posted]).toEqual([]);
+
+    const blank = page();
+    blank.addField("TEXTAREA", "  \n");
+    const c = element(blank.body);
+    blank.start(c, 100);
+    blank.move(c, 140);
+    expect(blank.posted).toEqual([{ phase: "move", distance: 30 }]);
   });
 
   it("installs once per document", () => {
@@ -278,7 +329,6 @@ describe("PullToRefreshController", () => {
     pull.handle({ phase: "move", distance: 80 });
     pull.handle({ phase: "end", distance: 80 });
     pull.handle({ phase: "move", distance: 30 });
-    pull.loadStarted();
     pull.loadEnded();
     expect(calls).toEqual([
       "show 40",
@@ -302,14 +352,12 @@ describe("PullToRefreshController", () => {
     expect(calls).toEqual(["show 40", "settle 0", "show 20", "settle 0"]);
   });
 
-  it("retracts a partial pull when a load starts or the WebView remounts", () => {
+  it("retracts a partial pull when the WebView remounts", () => {
     const { pull, calls } = controller();
-    pull.handle({ phase: "move", distance: 50 });
-    pull.loadStarted();
     pull.handle({ phase: "move", distance: 30 });
     pull.reset();
-    pull.loadStarted();
-    expect(calls).toEqual(["show 50", "settle 0", "show 30", "settle 0"]);
+    pull.reset();
+    expect(calls).toEqual(["show 30", "settle 0"]);
   });
 
   it("unlocks the gesture when a reload never reports its end", () => {

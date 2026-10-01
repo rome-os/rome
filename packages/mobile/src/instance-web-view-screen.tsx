@@ -244,7 +244,6 @@ export function InstanceWebViewScreen({
           onNavigationStateChange={(state) => {
             canGoBackRef.current = state.canGoBack;
           }}
-          onLoadStart={() => pullController.loadStarted()}
           onLoadEnd={() => pullController.loadEnded()}
           allowsBackForwardNavigationGestures
           sharedCookiesEnabled
