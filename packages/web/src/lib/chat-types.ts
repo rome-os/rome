@@ -1,5 +1,5 @@
 import type {
-  ErrorEvent as TraceErrorEvent,
+  TraceErrorEvent,
   RomeSessionRefDto,
   TraceAccounting,
   TraceSummary,

@@ -151,8 +151,9 @@ function timestampToIso(value: Date | number): string {
 
 /**
  * Events that have a trace representation. Delta events and `input_status`
- * are excluded at the type level: a delta is transient and never persisted, so callers must filter deltas out before reaching here —
- * the compiler enforces it instead of a runtime throw.
+ * are excluded at the type level: a delta is transient and never persisted,
+ * so callers must filter deltas out before reaching here — the compiler
+ * enforces it instead of a runtime throw.
  */
 export type TraceableEvent = Exclude<AgentMessage, { type: TransientDeltaType | "input_status" }>;
 

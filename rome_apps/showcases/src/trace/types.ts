@@ -91,7 +91,7 @@ export interface ResultEvent extends TraceEventBase {
   accounting?: TraceAccounting;
 }
 
-export interface ErrorEvent extends TraceEventBase {
+export interface TraceErrorEvent extends TraceEventBase {
   type: "error";
   error: string;
   accounting?: TraceAccounting;
@@ -111,7 +111,7 @@ export type TraceEventDto =
   | ToolUseBlock
   | ToolResultBlock
   | ResultEvent
-  | ErrorEvent
+  | TraceErrorEvent
   | StructuredOutputEvent;
 
 // Conversation-flow blocks captured from the agent's *assistant* message (not

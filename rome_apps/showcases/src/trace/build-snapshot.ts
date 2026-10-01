@@ -5,7 +5,7 @@ import type {
   AppResolver,
   ToolResultBlock,
   ToolUseBlock,
-  ErrorEvent,
+  TraceErrorEvent,
   ResultEvent,
   TraceEventDto,
   TraceRunSegment,
@@ -27,7 +27,7 @@ interface RunState {
   useIndexById: Map<string, number>;
 }
 
-function isTerminalEvent(block: TraceEventDto): block is ResultEvent | ErrorEvent {
+function isTerminalEvent(block: TraceEventDto): block is ResultEvent | TraceErrorEvent {
   return block.type === "result" || block.type === "error";
 }
 

@@ -184,7 +184,7 @@ export interface ResultEvent extends TraceEventBase {
   accounting?: TraceAccounting;
 }
 
-export interface ErrorEvent extends TraceEventBase {
+export interface TraceErrorEvent extends TraceEventBase {
   type: "error";
   error: string;
   accounting?: TraceAccounting;
@@ -215,7 +215,7 @@ export type TraceEventDto =
   | SubagentStartEvent
   | SubagentResultEvent
   | ResultEvent
-  | ErrorEvent
+  | TraceErrorEvent
   | StructuredOutputEvent
   | PlanUpdateEvent;
 

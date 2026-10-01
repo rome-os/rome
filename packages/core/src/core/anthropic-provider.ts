@@ -710,8 +710,8 @@ export class AnthropicProvider implements ModelProvider {
           if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
           if (isPartialAssistantMessage(message)) {
             // Deltas of in-flight blocks. Each complete block still arrives
-            // on its own assistant message, so this is
-            // purely additive for consumers that render live output. Skip
+            // on its own assistant message, so this is purely additive for
+            // consumers that render live output. Skip
             // SDK-internal subagent streams (parent_tool_use_id set) — Rome's
             // own subagents run in their own provider sessions.
             if (message.parent_tool_use_id === null) {

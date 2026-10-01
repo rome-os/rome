@@ -12,7 +12,7 @@ import { TraceJsonView } from "./TraceJsonView";
 
 type SubagentStatus = "running" | "completed" | "failed" | "cancelled";
 
-function stepStatus(status: SubagentStatus): ToolCallStatus {
+function subagentCallStatus(status: SubagentStatus): ToolCallStatus {
   if (status === "completed") return "ok";
   if (status === "failed") return "error";
   if (status === "cancelled") return "pending";
@@ -70,7 +70,7 @@ export function SubagentCallView({
         />
         <span
           aria-hidden="true"
-          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(stepStatus(status), live)}`}
+          className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(subagentCallStatus(status), live)}`}
         />
         <span
           className="flex-none font-mono text-aux text-foreground"
