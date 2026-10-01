@@ -1,7 +1,7 @@
 import { type CDPSession, expect, type Page, test } from "@playwright/test";
 
 /**
- * On a phone a swipe right anywhere drags the sidebar out and pushes the page
+ * On a phone a swipe right on the page drags the sidebar out and pushes it
  * right; a swipe left or a tap on the dimmed page closes it. The gestures go
  * through the browser's own touch pipeline (CDP `Input.dispatchTouchEvent`),
  * so passive listeners, `preventDefault` and hit testing are the real ones.
@@ -96,39 +96,164 @@ test("a short, slow drag snaps back shut", async ({ page }) => {
   expect(await geometry(page)).toEqual(SHUT);
 });
 
+/**
+ * Put a probe at the top of the page, inside the shell, and return a point at
+ * its middle. With `shadow`, the probe is a host whose open shadow root holds
+ * the markup, the way an app mounts.
+ */
+async function probe(page: Page, html: string, { shadow = false } = {}) {
+  return page.evaluate(
+    ({ html, shadow }) => {
+      const main = document.querySelector("main")!;
+      const host = document.createElement("div");
+      host.id = "probe";
+      if (shadow) host.attachShadow({ mode: "open" }).innerHTML = html;
+      else host.innerHTML = html;
+      main.prepend(host);
+      window.scrollTo(0, 0);
+      const root = shadow ? host.shadowRoot! : host;
+      const scroller = root.querySelector<HTMLElement>("[data-scroll]");
+      if (scroller) scroller.scrollLeft = 60;
+      const box = host.getBoundingClientRect();
+      return [Math.round(box.left + 60), Math.round(box.top + box.height / 2)] as [number, number];
+    },
+    { html, shadow },
+  );
+}
+
+const SCROLLER =
+  '<div data-scroll style="overflow-x:auto;height:80px"><div style="width:1200px;height:80px"></div></div>';
+
 test("a sideways scroller keeps the swipe until it is back at its start", async ({ page }) => {
   const cdp = await open(page);
-  await page.evaluate(() => {
-    const scroller = document.createElement("div");
-    scroller.id = "probe-scroller";
-    scroller.style.cssText =
-      "position:fixed;left:0;right:0;top:300px;height:80px;overflow-x:auto;z-index:20";
-    scroller.innerHTML = '<div style="width:1200px;height:80px"></div>';
-    document.body.append(scroller);
-    scroller.scrollLeft = 60;
-  });
-  await swipe(cdp, [60, 340], 260);
+  const at = await probe(page, SCROLLER);
+  await swipe(cdp, at, at[0] + 200);
   await page.waitForTimeout(400);
   expect(await geometry(page)).toEqual(SHUT);
-  expect(await page.evaluate(() => document.getElementById("probe-scroller")!.scrollLeft)).toBe(0);
+  expect(
+    await page.evaluate(
+      () => document.querySelector<HTMLElement>("#probe [data-scroll]")!.scrollLeft,
+    ),
+  ).toBe(0);
 
-  await swipe(cdp, [60, 340], 300);
+  await swipe(cdp, at, at[0] + 240);
   await expect.poll(() => geometry(page)).toEqual(OPEN);
 });
 
-test("an area that handles its own touch (touch-action: none) keeps the swipe", async ({
+for (const [what, html] of [
+  [
+    "handles its own touch (touch-action: none)",
+    '<div style="height:120px;touch-action:none"></div>',
+  ],
+  [
+    "pans only up and down (touch-action: pan-y)",
+    '<div style="height:120px;touch-action:pan-y"></div>',
+  ],
+  ["is editable (contenteditable)", '<div contenteditable style="height:120px"></div>'],
+] as const) {
+  test(`an area that ${what} keeps the swipe`, async ({ page }) => {
+    const cdp = await open(page);
+    const at = await probe(page, html);
+    await swipe(cdp, at, at[0] + 240);
+    await page.waitForTimeout(400);
+    expect(await geometry(page)).toEqual(SHUT);
+  });
+}
+
+// An app mounts in an open shadow root, so a listener outside it sees the
+// host as the touch's target. What owns sideways movement inside still keeps
+// the swipe.
+for (const [what, html] of [
+  ["a sideways scroller", SCROLLER],
+  ["a touch-action: none canvas", '<div style="height:120px;touch-action:none"></div>'],
+  ["a text field", '<input style="display:block;box-sizing:border-box;width:100%;height:120px" />'],
+] as const) {
+  test(`inside an app's shadow root, ${what} keeps the swipe`, async ({ page }) => {
+    const cdp = await open(page);
+    const at = await probe(page, html, { shadow: true });
+    await swipe(cdp, at, at[0] + 240);
+    await page.waitForTimeout(400);
+    expect(await geometry(page)).toEqual(SHUT);
+  });
+}
+
+test("inside an app's shadow root, plain content still swipes", async ({ page }) => {
+  const cdp = await open(page);
+  const at = await probe(page, '<div style="height:120px"></div>', { shadow: true });
+  await swipe(cdp, at, at[0] + 240);
+  await expect.poll(() => geometry(page)).toEqual(OPEN);
+});
+
+test("a sheet over the page, portaled to the body or fixed in it, keeps the swipe", async ({
   page,
 }) => {
   const cdp = await open(page);
+  // A bottom sheet or dialog, portaled to the body the way Radix mounts one.
   await page.evaluate(() => {
-    const pan = document.createElement("div");
-    pan.style.cssText =
-      "position:fixed;left:0;right:0;top:300px;height:120px;touch-action:none;z-index:20";
-    document.body.append(pan);
+    const sheet = document.createElement("div");
+    sheet.setAttribute("role", "dialog");
+    sheet.style.cssText = "position:fixed;left:0;right:0;bottom:0;height:300px;z-index:60";
+    document.body.append(sheet);
   });
-  await swipe(cdp, [60, 360], 300);
+  await swipe(cdp, [60, 700], 300);
   await page.waitForTimeout(400);
   expect(await geometry(page)).toEqual(SHUT);
+
+  // A fixed overlay rendered inside the page, like the file browser's history.
+  await page.evaluate(() => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;left:0;right:0;top:200px;height:200px;z-index:30";
+    document.querySelector("main")!.append(overlay);
+  });
+  await swipe(cdp, [60, 300], 300);
+  await page.waitForTimeout(400);
+  expect(await geometry(page)).toEqual(SHUT);
+});
+
+test("a swipe back during the settle lands where the second swipe leaves it", async ({ page }) => {
+  const cdp = await open(page);
+  // The second swipe starts within the first one's 200ms settle.
+  await swipe(cdp, [100, 420], 330);
+  await swipe(cdp, [300, 420], 40);
+  await expect.poll(() => geometry(page)).toEqual(SHUT);
+  await page.waitForTimeout(400);
+  expect(await geometry(page)).toEqual(SHUT);
+  // And it hands the resting state back to the classes.
+  expect(
+    await page.evaluate(() =>
+      ["aside", "main"].map(
+        (selector) => document.querySelector<HTMLElement>(selector)!.style.translate,
+      ),
+    ),
+  ).toEqual(["", ""]);
+});
+
+test("the page stays clipped while it slides back after a tap closes the sidebar", async ({
+  page,
+}) => {
+  const cdp = await open(page);
+  await swipe(cdp, [100, 420], 330);
+  await expect.poll(() => geometry(page)).toEqual(OPEN);
+  // Sample the document's sideways overflow every frame through the close.
+  await page.evaluate(() => {
+    const w = window as unknown as { maxOverflow: number };
+    w.maxOverflow = 0;
+    const until = performance.now() + 600;
+    const sample = () => {
+      const overflow =
+        Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) -
+        window.innerWidth;
+      w.maxOverflow = Math.max(w.maxOverflow, overflow);
+      if (performance.now() < until) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.touchscreen.tap(360, 420);
+  await page.waitForTimeout(700);
+  expect(await geometry(page)).toEqual(SHUT);
+  expect(
+    await page.evaluate(() => (window as unknown as { maxOverflow: number }).maxOverflow),
+  ).toBe(0);
 });
 
 test.describe("from 768px up", () => {

@@ -7,7 +7,7 @@ import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
 import { SlotOutlet } from "../components/slot";
-import { useSwipeSidebar } from "./use-swipe-sidebar";
+import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid, APP_NAV } from "./AppGrid";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
@@ -158,17 +158,25 @@ export function RomeShellLayout() {
     scrim: scrimRef,
     frame: frameRef,
   });
+  // On a phone the open sidebar pushes the page right rather than covering
+  // it. The clip keeps that push from scrolling the document sideways. It
+  // holds while the page is pushed and until the page has slid back home, so
+  // a page that overflows at rest still shows it.
+  const pushed = sidebarOpen && !hideSidebar;
+  const [clipped, setClipped] = useState(pushed);
+  if (pushed && !clipped) setClipped(true);
+  useEffect(() => {
+    if (pushed || !clipped) return;
+    const timer = window.setTimeout(() => setClipped(false), SLIDE_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [pushed, clipped]);
 
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <UpgradeCountdownBanner />
-      {/* On a phone the open sidebar pushes the page right rather than covering
-          it. The clip keeps that push from scrolling the document sideways, and
-          holds only while the page is pushed, so a page that overflows at rest
-          still shows it. */}
       <div
         ref={frameRef}
-        className={`relative flex flex-1 ${sidebarOpen && !hideSidebar ? "max-md:overflow-x-clip" : ""}`}
+        className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}
       >
         {!hideSidebar ? (
           <MobileBackdrop
