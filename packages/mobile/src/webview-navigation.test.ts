@@ -85,11 +85,14 @@ function page() {
   const listeners = new Map<string, Listener[]>();
   const posted: PullToRefreshEvent[] = [];
   let selection = "";
+  let popperOpen = false;
   const window = {
     document: {
       body: { hasAttribute: (name: string) => bodyAttributes.has(name) },
       scrollingElement: root,
       documentElement: root,
+      querySelector: (selector: string) =>
+        popperOpen && selector === "[data-radix-popper-content-wrapper]" ? {} : null,
     },
     scrollY: 0,
     getSelection: () => selection,
@@ -123,6 +126,9 @@ function page() {
     body,
     posted,
     lockScroll: () => bodyAttributes.add("data-scroll-locked"),
+    openPopper: () => {
+      popperOpen = true;
+    },
     select: (text: string) => {
       selection = text;
     },
@@ -192,13 +198,21 @@ describe("PULL_TO_REFRESH_SCRIPT", () => {
     locked.start(target, 100);
     locked.move(target, 200);
 
+    const popover = page();
+    popover.openPopper();
+    const popoverContent = element(popover.body);
+    popover.start(popoverContent, 100);
+    popover.move(popoverContent, 200);
+
     const selected = page();
     selected.select("copied text");
     const text = element(selected.body);
     selected.start(text, 100);
     selected.move(text, 200);
 
-    expect([...editable.posted, ...locked.posted, ...selected.posted]).toEqual([]);
+    expect([...editable.posted, ...locked.posted, ...popover.posted, ...selected.posted]).toEqual(
+      [],
+    );
   });
 
   it("ignores upward and sideways swipes", () => {

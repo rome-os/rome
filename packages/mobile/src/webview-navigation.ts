@@ -160,10 +160,12 @@ export class PullToRefreshController {
  * run it against a stand-in. It installs once per document.
  *
  * A pull starts only when one finger lands outside an editable field, no
- * overlay holds the scroll lock, and neither the document nor any ancestor of
- * the touched element is scrolled. It ends when the finger lifts, and cancels
- * when the finger moves up past the start, moves sideways first, a second
- * finger lands, or a page handler calls preventDefault on the move.
+ * Radix overlay is open (a modal holds the scroll lock, a popover, menu,
+ * select, or tooltip mounts a popper wrapper), and neither the document nor
+ * any ancestor of the touched element is scrolled. It ends when the finger
+ * lifts, and cancels when the finger moves up past the start, moves sideways
+ * first, a second finger lands, or a page handler calls preventDefault on the
+ * move.
  */
 export const PULL_TO_REFRESH_SCRIPT = `(function () {
   var w = window;
@@ -192,6 +194,7 @@ export const PULL_TO_REFRESH_SCRIPT = `(function () {
 
   function atTop(node) {
     if (doc.body && doc.body.hasAttribute("data-scroll-locked")) return false;
+    if (doc.querySelector("[data-radix-popper-content-wrapper]")) return false;
     for (var el = node; el && el.nodeType === 1; el = el.parentElement) {
       if (el.scrollTop > 0) return false;
     }
