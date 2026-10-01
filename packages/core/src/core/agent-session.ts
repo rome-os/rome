@@ -167,6 +167,10 @@ const log = createLogger("agent-session");
  */
 export const DEFAULT_BACKGROUND_TASK_TTL_MS = 30 * 60 * 1000;
 
+function isWebchatThreadKey(channelThreadKey: string): boolean {
+  return channelThreadKey.startsWith("webchat:");
+}
+
 function conversationMessageText(content: string): string {
   try {
     const parts = JSON.parse(content) as unknown;
@@ -507,7 +511,7 @@ export function createAgentSessionManager(
           for (const session of [...sessions.values()]) {
             if (!session.isQuiescentForRotation || session.lastActiveAt >= now - idleTtlMs)
               continue;
-            const webchat = session.key.channelThreadKey.startsWith("webchat:");
+            const webchat = isWebchatThreadKey(session.key.channelThreadKey);
             const tasks = webchat ? session.backgroundTasks : [];
             if (tasks.length > 0) {
               // A webchat session's background tasks die with it: keep it
@@ -518,7 +522,8 @@ export function createAgentSessionManager(
                 taskIds: tasks.map((task) => task.id),
               });
             } else if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) {
-              // Its last task just ended: give the SDK the idle TTL to act on it.
+              // Its last task just ended: give the SDK time to act on it. The
+              // sweep runs every idle TTL, so this is 1 to 2 idle TTLs.
               continue;
             }
             void session.close("idle").catch(() => {
@@ -849,7 +854,7 @@ type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 function resolveSelectionFromChannelThreadKey(
   channelThreadKey: string,
 ): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
+  if (!isWebchatThreadKey(channelThreadKey)) return undefined;
   const marker = ":large-model:";
   const markerIndex = channelThreadKey.lastIndexOf(marker);
   if (markerIndex < 0) return undefined;
@@ -1027,8 +1032,7 @@ async function openSession(
   // to the main agent — so a suspended subagent call would hang forever. Where
   // this is false, an action that returns `renderComponent` falls back to relaying
   // its `promptText` as prose; see the executeAction shim below.
-  const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+  const supportsInteractiveSurface = isWebchatThreadKey(key.channelThreadKey) && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -2051,8 +2055,7 @@ class AgentSessionImpl implements AgentSession {
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
   private _backgroundTasks: readonly ModelBackgroundTask[] = [];
-  /** When the background task set last changed; 0 if it never has. */
-  backgroundTasksChangedAt = 0;
+  private _backgroundTasksChangedAt = 0;
   private unfollowBackgroundTasks: () => void = () => {};
   private replacingModelSession: ModelSession | null = null;
   private toolCount: number;
@@ -2198,6 +2201,11 @@ class AgentSessionImpl implements AgentSession {
     return this._backgroundTasks;
   }
 
+  /** When the background task set last changed; 0 if it never has. */
+  get backgroundTasksChangedAt(): number {
+    return this._backgroundTasksChangedAt;
+  }
+
   // A new model session is a new provider process: its task set starts empty.
   private followBackgroundTasks(session: ModelSession): void {
     this.unfollowBackgroundTasks();
@@ -2206,7 +2214,7 @@ class AgentSessionImpl implements AgentSession {
       session.onBackgroundTasks?.({
         onChange: (tasks) => {
           this._backgroundTasks = tasks;
-          this.backgroundTasksChangedAt = Date.now();
+          this._backgroundTasksChangedAt = Date.now();
           log.info("background tasks changed", {
             sessionId: this.sessionId,
             taskIds: tasks.map((task) => task.id),

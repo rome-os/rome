@@ -955,9 +955,10 @@ describe("AgentRunner", () => {
           tasks.onChange?.([task]);
           await rs.advanceTimersByTimeAsync(500);
           tasks.onChange?.([]);
-          await rs.advanceTimersByTimeAsync(50);
+          // Without the grace the t=600 sweep would close it.
+          await rs.advanceTimersByTimeAsync(150);
           expect(manager.peek(key)).toBeDefined();
-          await rs.advanceTimersByTimeAsync(200);
+          await rs.advanceTimersByTimeAsync(100);
           expect(manager.peek(key)).toBeUndefined();
         } finally {
           await manager.shutdown();
