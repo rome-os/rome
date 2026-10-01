@@ -38,7 +38,7 @@ import type {
   ConversationRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession } from "./agent-runner.js";
+import { createNullModelSession, isModelTurnEvent } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -2108,6 +2108,9 @@ class AgentSessionImpl implements AgentSession {
     try {
       enterSession(this.sessionId);
       for await (const msg of session.events) {
+        // Model turn boundaries are not consumed yet; AgentSession still opens
+        // its turns per send (dev/sdk-turns: PR 2 opens them from these).
+        if (isModelTurnEvent(msg)) continue;
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
@@ -2861,6 +2864,7 @@ class AgentSessionImpl implements AgentSession {
         void (async () => {
           try {
             for await (const msg of providerEvents) {
+              if (isModelTurnEvent(msg)) continue;
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
               if (projected.some(isTerminalEvent)) break;

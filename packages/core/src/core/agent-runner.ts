@@ -249,6 +249,58 @@ export interface ModelSessionFork {
   open(params: ModelSessionForkOpenParams): Promise<ModelSession>;
 }
 
+/**
+ * A provider's turn boundaries, reported alongside its AgentMessages. Internal
+ * to core: AgentSession reads them and never forwards them to clients.
+ *
+ * A model turn is the provider's own unit of work: what it does between
+ * picking up one or more inputs and producing a result. A turn the provider
+ * starts by itself (a finished background task) answers no input. The inputs a
+ * turn answers come from the provider itself (the Claude SDK's echo of each
+ * input's uuid), never from Rome's guesses.
+ *
+ * Every terminal (`result` or `error`) a provider yields falls inside a model
+ * turn, between its start and its end. When Rome ends the session (an
+ * interrupt, or a stream error the provider classifies), the provider closes
+ * the open turn with a terminal it makes up, naming only what the turn already
+ * named; inputs it never picked up get one made-up turn that names exactly
+ * them. An error result after which the provider answers nothing (Claude's
+ * zeroed or delivery-failure result, which echoes no input) also answers every
+ * input still waiting. No turn is ever made up that names nothing. If the
+ * stream itself ends or throws with a turn open (the provider process died),
+ * no end follows: the stream's end closes any open turn, and inputs still
+ * waiting got no reply.
+ */
+export type ModelTurnEvent =
+  | {
+      type: "model_turn_start";
+      turnId: string;
+      /** Input ids the turn answers so far. */
+      answers: string[];
+    }
+  | {
+      type: "model_turn_answers";
+      turnId: string;
+      /** Input ids the turn has newly been seen to answer. */
+      added: string[];
+    }
+  | {
+      type: "model_turn_end";
+      turnId: string;
+      /** Every input id the turn answered. */
+      answers: string[];
+    };
+
+export type ModelSessionEvent = AgentMessage | ModelTurnEvent;
+
+export function isModelTurnEvent(event: ModelSessionEvent): event is ModelTurnEvent {
+  return (
+    event.type === "model_turn_start" ||
+    event.type === "model_turn_answers" ||
+    event.type === "model_turn_end"
+  );
+}
+
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
@@ -261,8 +313,11 @@ export interface ModelSession {
   readonly appliedReasoningEffort?: string;
   /** A disposed provider execution must be reopened before another turn. */
   readonly isClosed?: boolean;
-  /** Single, lifetime stream of AgentMessages produced by the provider. */
-  readonly events: AsyncIterable<AgentMessage>;
+  /**
+   * Single, lifetime stream of the provider's AgentMessages, with each model
+   * turn's boundaries (`ModelTurnEvent`) in order around its messages.
+   */
+  readonly events: AsyncIterable<ModelSessionEvent>;
 
   /**
    * Provider-specific thread id, set after the first turn for providers that
