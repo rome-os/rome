@@ -322,9 +322,9 @@ export interface ModelSession {
    * Follow the session's background tasks, including between turns. Returns
    * an unsubscribe function. Providers without background tasks omit it. The
    * set empties when the session closes, since its tasks end with it.
-   * A listener hears only changes after it subscribes, so subscribe before
-   * reading `events`. Changes arrive as `events` is read: while its reader
-   * waits, task events wait in the stream behind the message it is on.
+   * A new listener first hears the current set, when it is not empty, then
+   * every change. Changes arrive as `events` is read: while its reader waits,
+   * task events wait in the stream behind the message it is on.
    */
   onBackgroundTasks?(listener: ModelBackgroundTaskListener): () => void;
 

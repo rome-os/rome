@@ -25,8 +25,11 @@ export class BackgroundTaskTracker {
     return this.tasks;
   }
 
+  /** A new listener first hears the current set, when it is not empty. */
   subscribe(listener: ModelBackgroundTaskListener): () => void {
     this.listeners.add(listener);
+    const tasks = this.tasks;
+    if (tasks.length > 0) this.notify(listener, (each) => each.onChange?.(tasks));
     return () => this.listeners.delete(listener);
   }
 
@@ -79,12 +82,17 @@ export class BackgroundTaskTracker {
   }
 
   private emit(call: (listener: ModelBackgroundTaskListener) => void): void {
-    for (const listener of this.listeners) {
-      try {
-        call(listener);
-      } catch (error) {
-        log.warn("background task listener failed", { error: String(error) });
-      }
+    for (const listener of this.listeners) this.notify(listener, call);
+  }
+
+  private notify(
+    listener: ModelBackgroundTaskListener,
+    call: (listener: ModelBackgroundTaskListener) => void,
+  ): void {
+    try {
+      call(listener);
+    } catch (error) {
+      log.warn("background task listener failed", { error: String(error) });
     }
   }
 }

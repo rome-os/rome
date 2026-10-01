@@ -111,6 +111,16 @@ describe("BackgroundTaskTracker", () => {
     expect(seen.ids()).toEqual([["a"]]);
   });
 
+  it("replays a non-empty current set to a new subscriber", () => {
+    const tracker = new BackgroundTaskTracker();
+    const early = follow(tracker);
+    tracker.observe(level({ id: "a" }));
+    const late = follow(tracker);
+    tracker.observe(level({ id: "a" }, { id: "b" }));
+    expect(early.ids()).toEqual([["a"], ["a", "b"]]);
+    expect(late.ids()).toEqual([["a"], ["a", "b"]]);
+  });
+
   it("stops notifying after unsubscribe", () => {
     const tracker = new BackgroundTaskTracker();
     const changes: unknown[] = [];
