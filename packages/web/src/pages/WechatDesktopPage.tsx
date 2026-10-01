@@ -59,7 +59,7 @@ export default function WechatDesktopPage() {
         <DesktopPage name="wechat" />
         {data.state === "starting" ? (
           <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
-            <div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-sm text-foreground shadow-sm">
+            <div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-ui text-foreground shadow-sm">
               <Spinner size="sm" label={t("wechatApp.starting.title")} />
               <span aria-hidden="true">{t("wechatApp.starting.title")}</span>
             </div>
