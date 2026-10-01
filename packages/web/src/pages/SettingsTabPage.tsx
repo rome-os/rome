@@ -238,7 +238,15 @@ export default function SettingsPage() {
   const redirectToInbox = isMovedToInbox(params.tab);
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
-  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
+  // On a phone Settings is a list of sections, and each section is its own
+  // screen with a way back, instead of a sideways strip of tabs. Bare
+  // /settings is that list; it renders here only on a phone, since from 768px
+  // up SettingsPage sends it to Appearance. So the list names no section and
+  // mounts none.
+  const onSection = Boolean(params.tab);
+  useDocumentTitle(
+    onSection ? [t(`tabs.${activeTab}` as const), t("page.title")] : [t("page.title")],
+  );
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -312,8 +320,9 @@ export default function SettingsPage() {
   }, [t]);
 
   useEffect(() => {
+    if (!onSection) return;
     loadAll();
-  }, [loadAll]);
+  }, [loadAll, onSection]);
 
   useEffect(() => {
     if (activeTab !== "Connections") return;
@@ -372,12 +381,6 @@ export default function SettingsPage() {
   // it hid the nav during the wait so no other tab was reachable.
   const tabNeedsSettings = SETTINGS_BACKED_TABS.has(activeTab);
 
-  // On a phone Settings is a list of sections, and each section is its own
-  // screen with a way back, instead of a sideways strip of tabs. Bare
-  // /settings shows the list there and Appearance from 768px up. All of it is
-  // breakpoint classes, so the desktop page renders as before.
-  const onSection = Boolean(params.tab);
-
   return (
     <Page>
       {onSection ? (
@@ -430,61 +433,59 @@ export default function SettingsPage() {
         ))}
       </PageNav>
 
-      <div className={onSection ? "contents" : "contents max-md:hidden"}>
-        {tabNeedsSettings && loading ? (
-          <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
-        ) : tabNeedsSettings && loadError ? (
-          <Measure>
-            <Card>
-              <CardContent className="flex flex-col items-start gap-3">
-                <p className="text-ui text-destructive">{loadError}</p>
-                <Button type="button" size="sm" onClick={() => void loadAll()}>
-                  <RefreshCw />
-                  {t("page.retry")}
-                </Button>
-              </CardContent>
-            </Card>
-          </Measure>
-        ) : (
-          <>
-            {activeTab === "Appearance" && <AppearanceSection />}
-            {activeTab === "Connections" && (
-              <ConnectionsSection
-                connections={connections}
-                composio={composio}
-                loading={connectionsLoading}
-                error={connectionsError}
-                onRetry={loadConnections}
-                onRefresh={loadConnections}
-                onFlash={(message) => toast.error(message)}
-              />
-            )}
-            {activeTab === "Devices" && <DevicesSection />}
-            {activeTab === "Channels" && (
-              <div className="max-w-3xl">
-                <ChannelsSettingsPage />
-              </div>
-            )}
-            {activeTab === "Favors" && (
-              <Measure>
-                <FavorsSection />
-              </Measure>
-            )}
-            {activeTab === "AI Tools" && (
-              <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
-            )}
-            {activeTab === "Advanced" && (
-              <AdvancedSection
-                settings={settings}
-                onSave={saveSettings}
-                saving={saving}
-                tailscale={tailscale}
-                onRefresh={loadAll}
-              />
-            )}
-          </>
-        )}
-      </div>
+      {!onSection ? null : tabNeedsSettings && loading ? (
+        <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
+      ) : tabNeedsSettings && loadError ? (
+        <Measure>
+          <Card>
+            <CardContent className="flex flex-col items-start gap-3">
+              <p className="text-ui text-destructive">{loadError}</p>
+              <Button type="button" size="sm" onClick={() => void loadAll()}>
+                <RefreshCw />
+                {t("page.retry")}
+              </Button>
+            </CardContent>
+          </Card>
+        </Measure>
+      ) : (
+        <>
+          {activeTab === "Appearance" && <AppearanceSection />}
+          {activeTab === "Connections" && (
+            <ConnectionsSection
+              connections={connections}
+              composio={composio}
+              loading={connectionsLoading}
+              error={connectionsError}
+              onRetry={loadConnections}
+              onRefresh={loadConnections}
+              onFlash={(message) => toast.error(message)}
+            />
+          )}
+          {activeTab === "Devices" && <DevicesSection />}
+          {activeTab === "Channels" && (
+            <div className="max-w-3xl">
+              <ChannelsSettingsPage />
+            </div>
+          )}
+          {activeTab === "Favors" && (
+            <Measure>
+              <FavorsSection />
+            </Measure>
+          )}
+          {activeTab === "AI Tools" && (
+            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+          )}
+          {activeTab === "Advanced" && (
+            <AdvancedSection
+              settings={settings}
+              onSave={saveSettings}
+              saving={saving}
+              tailscale={tailscale}
+              onRefresh={loadAll}
+            />
+          )}
+        </>
+      )}
     </Page>
   );
 }
