@@ -110,9 +110,7 @@ done
 # /home/user/* mount aliases such as /home/user/mount at runtime.
 chmod 2775 /home/user
 
-# Ensure Rome home contents survive named-volume reuse with the right owner.
-mkdir -p /home/rome/.rome
-safe_chown -R rome:rome /home/rome
+run_as_rome mkdir -p /home/rome/.rome
 chmod 750 /home/rome /home/rome/.rome
 
 # WeChat writes only into the runtime user's home and private session directory.
