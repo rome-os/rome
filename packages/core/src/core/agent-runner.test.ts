@@ -45,6 +45,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
   ModelProvider,
+  ModelSessionEvent,
   ModelSession,
   ModelSessionForkParams,
   ModelSessionForkOpenParams,
@@ -195,7 +196,7 @@ describe("AgentRunner", () => {
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
-    const drained: AgentMessage[] = [];
+    const drained: ModelSessionEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();

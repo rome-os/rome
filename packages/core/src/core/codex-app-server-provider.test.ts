@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { isModelTurnEvent } from "./agent-runner.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
 import type {
   ModelSession,
@@ -137,6 +138,7 @@ function usage(
 async function collectUntilTerminal(session: ModelSession): Promise<AgentMessage[]> {
   const out: AgentMessage[] = [];
   for await (const msg of session.events) {
+    if (isModelTurnEvent(msg)) continue;
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
@@ -195,6 +197,80 @@ describe("CodexAppServerProvider", () => {
       { type: "input_status", inputId: "b", state: "consumed" },
     ]);
     expect(await session.steerUserInput!({ text: "late", inputId: "c" })).toBe("deferred");
+    await session.close();
+  });
+
+  it("reports each native turn with the inputs it answers, a confirmed steer included", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "native-a" } });
+        return { turn: { id: "native-a" } };
+      }
+      if (method === "turn/steer") return { turnId: "native-a" };
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const event of session.events) {
+        if (event.type === "model_turn_start") seen.push(`start [${event.answers}]`);
+        else if (event.type === "model_turn_answers") seen.push(`answers +[${event.added}]`);
+        else if (event.type === "model_turn_end") {
+          seen.push(`end [${event.answers}]`);
+          return;
+        } else if (event.type === "result" || event.type === "error") seen.push(event.type);
+      }
+    })();
+    await session.sendUserInput({ text: "first", inputId: "a" });
+    const steering = session.steerUserInput!({ text: "second", inputId: "b" });
+    await rs.waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("turn/start", expect.anything()),
+    );
+    captured.onNotification?.("item/completed", {
+      threadId: "thr-1",
+      turnId: "native-a",
+      item: { type: "userMessage", id: "native-input-a", clientId: "a", content: [] },
+    });
+    expect(await steering).toBe("accepted");
+    captured.onNotification?.("item/completed", {
+      threadId: "thr-1",
+      turnId: "native-a",
+      item: { type: "userMessage", id: "native-b", clientId: "b", content: [] },
+    });
+    captured.onNotification?.("turn/completed", {
+      threadId: "thr-1",
+      turn: { id: "native-a", status: "completed" },
+    });
+    await reading;
+    expect(seen).toEqual(["start [a]", "answers +[b]", "result", "end [a,b]"]);
+    await session.close();
+  });
+
+  it("ends a native turn the app-server's exit fails", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-exit" } };
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-exit", turn: { id: "t-1" } });
+        captured.onExit?.(137);
+        return { turn: { id: "t-1" } };
+      }
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const event of session.events) {
+        if (event.type === "model_turn_start") seen.push(`start [${event.answers}]`);
+        else if (event.type === "model_turn_end") {
+          seen.push(`end [${event.answers}]`);
+          return;
+        } else if (event.type === "result" || event.type === "error") seen.push(event.type);
+      }
+    })();
+    await session.sendUserInput({ text: "first", inputId: "a" });
+    await reading;
+    expect(seen).toEqual(["start [a]", "error", "end [a]"]);
     await session.close();
   });
 
