@@ -121,6 +121,16 @@ import { evaluateProviderSessionReset } from "../conversation-settings/reset-pol
 
 const log = createLogger("agent-session");
 
+/**
+ * Default cap on keeping an idle webchat session alive for its background
+ * tasks. An open product question: how long should a task outlive the chat?
+ */
+export const DEFAULT_BACKGROUND_TASK_TTL_MS = 30 * 60 * 1000;
+
+function isWebchatThreadKey(channelThreadKey: string): boolean {
+  return channelThreadKey.startsWith("webchat:");
+}
+
 function conversationMessageText(content: string): string {
   try {
     const parts = JSON.parse(content) as unknown;
@@ -385,6 +395,12 @@ interface ManagerOptions {
   /** Idle TTL for kept-alive sessions (defaults to 30 minutes). */
   idleTtlMs?: number;
   /**
+   * How long an idle webchat session stays alive while it runs background
+   * tasks, counted from its last activity (defaults to 30 minutes). Closing
+   * the session ends its tasks.
+   */
+  backgroundTaskTtlMs?: number;
+  /**
    * True for managers that hand out subagent sessions (created via
    * `AgentSessionImpl.childManager`). Subagent runs block the parent turn and
    * only the main agent receives the next user turn, so subagents must not
@@ -417,6 +433,7 @@ export function createAgentSessionManager(
   const lifecycleMutex = new KeyedMutex();
   const keepAlive = options.keepAliveAcrossTurns === true;
   const idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
+  const backgroundTaskTtlMs = options.backgroundTaskTtlMs ?? DEFAULT_BACKGROUND_TASK_TTL_MS;
   const isSubagent = options.isSubagent === true;
 
   const keyOf = (k: AgentSessionKey) => `${k.agentName}::${k.channelThreadKey}`;
@@ -430,13 +447,28 @@ export function createAgentSessionManager(
     sweeperTimer =
       setInterval(
         () => {
-          const cutoff = Date.now() - idleTtlMs;
+          const now = Date.now();
           for (const session of [...sessions.values()]) {
-            if (session.isQuiescentForRotation && session.lastActiveAt < cutoff) {
-              void session.close("idle").catch(() => {
-                // best-effort sweeper
+            if (!session.isQuiescentForRotation || session.lastActiveAt >= now - idleTtlMs)
+              continue;
+            const webchat = isWebchatThreadKey(session.key.channelThreadKey);
+            const tasks = webchat ? session.backgroundTasks : [];
+            if (tasks.length > 0) {
+              // A webchat session's background tasks die with it: keep it
+              // until they finish, or until the cap since its last activity.
+              if (session.lastActiveAt >= now - backgroundTaskTtlMs) continue;
+              log.warn("closing idle webchat session with background tasks still running", {
+                sessionId: session.sessionId,
+                taskIds: tasks.map((task) => task.id),
               });
+            } else if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) {
+              // Its last task just ended: give the SDK time to act on it. That
+              // is one idle TTL plus up to one sweep interval.
+              continue;
             }
+            void session.close("idle").catch(() => {
+              // best-effort sweeper
+            });
           }
         },
         Math.min(60_000, idleTtlMs),
@@ -762,7 +794,7 @@ type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 function resolveSelectionFromChannelThreadKey(
   channelThreadKey: string,
 ): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
+  if (!isWebchatThreadKey(channelThreadKey)) return undefined;
   const marker = ":large-model:";
   const markerIndex = channelThreadKey.lastIndexOf(marker);
   if (markerIndex < 0) return undefined;
@@ -940,8 +972,7 @@ async function openSession(
   // to the main agent — so a suspended subagent call would hang forever. Where
   // this is false, an action that returns `renderComponent` falls back to relaying
   // its `promptText` as prose; see the executeAction shim below.
-  const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+  const supportsInteractiveSurface = isWebchatThreadKey(key.channelThreadKey) && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -1947,6 +1978,7 @@ class AgentSessionImpl implements AgentSession {
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
   private _backgroundTasks: readonly ModelBackgroundTask[] = [];
+  private _backgroundTasksChangedAt = 0;
   private unfollowBackgroundTasks: () => void = () => {};
   private replacingModelSession: ModelSession | null = null;
   private toolCount: number;
@@ -2070,6 +2102,11 @@ class AgentSessionImpl implements AgentSession {
     return this._backgroundTasks;
   }
 
+  /** When the background task set last changed; 0 if it never has. */
+  get backgroundTasksChangedAt(): number {
+    return this._backgroundTasksChangedAt;
+  }
+
   // A new model session is a new provider process: its task set starts empty.
   private followBackgroundTasks(session: ModelSession): void {
     this.unfollowBackgroundTasks();
@@ -2078,6 +2115,7 @@ class AgentSessionImpl implements AgentSession {
       session.onBackgroundTasks?.({
         onChange: (tasks) => {
           this._backgroundTasks = tasks;
+          this._backgroundTasksChangedAt = Date.now();
           log.info("background tasks changed", {
             sessionId: this.sessionId,
             taskIds: tasks.map((task) => task.id),
