@@ -968,9 +968,9 @@ describe("main-owned action subprocess", () => {
     w2Engine = new ActionEngine(
       w2Registry,
       undefined,
-      rome.repos.actionExecutions,
-      rome.repos.approvals,
-      rome.repos.executionJournal,
+      rome.repos.actionExecutionsRepo,
+      rome.repos.approvalsRepo,
+      rome.repos.executionJournalRepo,
       {
         processRole: "worker",
         actionSubprocessRunner: new DelegatedActionClient(w2),
@@ -982,16 +982,16 @@ describe("main-owned action subprocess", () => {
         rome.actionEngine.run("action_a", {}, { executionId: "root-persist" }),
       ).resolves.toEqual({ status: "ok", data: "c-result" });
 
-      const [a] = await rome.repos.actionExecutions.findByAction("action_a");
-      const [b] = await rome.repos.actionExecutions.findByAction("action_b");
-      const [c] = await rome.repos.actionExecutions.findByAction("action_c");
+      const [a] = await rome.repos.actionExecutionsRepo.findByAction("action_a");
+      const [b] = await rome.repos.actionExecutionsRepo.findByAction("action_b");
+      const [c] = await rome.repos.actionExecutionsRepo.findByAction("action_c");
       expect(a).toMatchObject({ id: "root-persist", rootExecutionId: "root-persist" });
       expect(b).toMatchObject({ rootExecutionId: "root-persist", parentId: "root-persist" });
       expect(c).toMatchObject({
         rootExecutionId: "root-persist",
         parentId: b.id,
       });
-      const journal = await rome.repos.executionJournal.loadJournal("root-persist");
+      const journal = await rome.repos.executionJournalRepo.loadJournal("root-persist");
       expect(journal).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ actionName: "action_b", status: "completed" }),
@@ -1023,10 +1023,10 @@ describe("main-owned action subprocess", () => {
         rome.actionEngine.run("action_a", {}, { executionId: "root-cancel-persist" }),
       ).rejects.toMatchObject({ name: "ActionCancelledError", message: "cancel B" });
 
-      const journal = await rome.repos.executionJournal.loadJournal("root-cancel-persist");
+      const journal = await rome.repos.executionJournalRepo.loadJournal("root-cancel-persist");
       expect(journal).toEqual([]);
-      const [a] = await rome.repos.actionExecutions.findByAction("action_a");
-      const [b] = await rome.repos.actionExecutions.findByAction("action_b");
+      const [a] = await rome.repos.actionExecutionsRepo.findByAction("action_a");
+      const [b] = await rome.repos.actionExecutionsRepo.findByAction("action_b");
       expect(a.status).toBe("cancelled");
       expect(b.status).toBe("cancelled");
     } finally {

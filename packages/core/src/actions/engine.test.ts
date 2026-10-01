@@ -50,9 +50,9 @@ describe("ActionEngine", () => {
 
   /** The persisted journal of the most recent root run of `rootActionName`. */
   async function journalOf(rootActionName: string): Promise<JournalEntry[]> {
-    const [row] = await rome.repos.actionExecutions.findByAction(rootActionName);
+    const [row] = await rome.repos.actionExecutionsRepo.findByAction(rootActionName);
     expect(row, `no execution row for ${rootActionName}`).toBeDefined();
-    return rome.repos.executionJournal.loadJournal(row.rootExecutionId);
+    return rome.repos.executionJournalRepo.loadJournal(row.rootExecutionId);
   }
 
   describe("resolveActionWorkerEntryPath", () => {
@@ -616,7 +616,7 @@ describe("ActionEngine", () => {
 
       await rome.actionEngine.run("logged", { key: "val" });
 
-      const rows = await rome.repos.actionExecutions.findByAction("logged");
+      const rows = await rome.repos.actionExecutionsRepo.findByAction("logged");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         actionName: "logged",
@@ -644,7 +644,7 @@ describe("ActionEngine", () => {
 
       await rome.actionEngine.run("slow", {});
 
-      const [row] = await rome.repos.actionExecutions.findByAction("slow");
+      const [row] = await rome.repos.actionExecutionsRepo.findByAction("slow");
       expect(row.startedAt).toEqual(new Date("2026-01-15T10:00:00Z"));
       expect(row.finishedAt).toEqual(new Date("2026-01-15T10:00:02Z"));
       expect(row.durationMs).toBe(2000);
@@ -672,8 +672,8 @@ describe("ActionEngine", () => {
 
       await runWithSessionActor(actor, () => rome.actionEngine.run("audited-root", {}));
 
-      const [root] = await rome.repos.actionExecutions.findByAction("audited-root");
-      const [child] = await rome.repos.actionExecutions.findByAction("audited-child");
+      const [root] = await rome.repos.actionExecutionsRepo.findByAction("audited-root");
+      const [child] = await rome.repos.actionExecutionsRepo.findByAction("audited-child");
       expect(root.actor).toEqual(actor);
       expect(child.actor).toEqual(actor);
     });
@@ -687,7 +687,7 @@ describe("ActionEngine", () => {
         rome.actionEngine.run("explicit-actor", {}, { actor: explicit }),
       );
 
-      const [row] = await rome.repos.actionExecutions.findByAction("explicit-actor");
+      const [row] = await rome.repos.actionExecutionsRepo.findByAction("explicit-actor");
       expect(row.actor).toEqual(explicit);
     });
 
@@ -696,7 +696,7 @@ describe("ActionEngine", () => {
 
       await rome.actionEngine.run("no-actor", {}, { initiator: "agent:main" });
 
-      const [row] = await rome.repos.actionExecutions.findByAction("no-actor");
+      const [row] = await rome.repos.actionExecutionsRepo.findByAction("no-actor");
       expect(row.actor).toBeNull();
     });
 
@@ -733,13 +733,13 @@ describe("ActionEngine", () => {
       if (first.status !== "pending_approval") {
         throw new Error(`expected pending_approval, got ${first.status}`);
       }
-      const [pendingRow] = await rome.repos.actionExecutions.findByAction("guarded-root");
+      const [pendingRow] = await rome.repos.actionExecutionsRepo.findByAction("guarded-root");
       expect(pendingRow.status).toBe("pending_approval");
       expect(pendingRow.actor).toEqual(visitor);
 
       // Replay exactly as ApprovalHandler does — same journal, same execution
       // id — but inside the approver's session scope.
-      const approval = await rome.repos.approvals.findById(first.approval.approvalId);
+      const approval = await rome.repos.approvalsRepo.findById(first.approval.approvalId);
       const payload = approval!.payload as {
         rootActionName: string;
         rootArgs: Record<string, unknown>;
@@ -757,10 +757,10 @@ describe("ActionEngine", () => {
 
       // The reused root row and the freshly executed child both carry the
       // approver, so the tree attributes the run to one accountable session.
-      const root = await rome.repos.actionExecutions.findById(payload.rootExecutionId);
+      const root = await rome.repos.actionExecutionsRepo.findById(payload.rootExecutionId);
       expect(root!.status).toBe("success");
       expect(root!.actor).toEqual(guardian);
-      const [child] = await rome.repos.actionExecutions.findByAction("approved-child");
+      const [child] = await rome.repos.actionExecutionsRepo.findByAction("approved-child");
       expect(child.actor).toEqual(guardian);
     });
 
@@ -794,7 +794,7 @@ describe("ActionEngine", () => {
       // Approval granted outside any HTTP/WS scope (e.g. a channel flow): the
       // requester stays on the reused root row rather than being wiped to
       // null, and is inherited by children executed during the replay.
-      const approval = await rome.repos.approvals.findById(first.approval.approvalId);
+      const approval = await rome.repos.approvalsRepo.findById(first.approval.approvalId);
       const payload = approval!.payload as {
         rootActionName: string;
         rootArgs: Record<string, unknown>;
@@ -808,10 +808,10 @@ describe("ActionEngine", () => {
       });
       if (replayed.status !== "ok") throw new Error(`expected ok, got ${replayed.status}`);
 
-      const root = await rome.repos.actionExecutions.findById(payload.rootExecutionId);
+      const root = await rome.repos.actionExecutionsRepo.findById(payload.rootExecutionId);
       expect(root!.status).toBe("success");
       expect(root!.actor).toEqual(visitor);
-      const [child] = await rome.repos.actionExecutions.findByAction("solo-child");
+      const [child] = await rome.repos.actionExecutionsRepo.findByAction("solo-child");
       expect(child.actor).toEqual(visitor);
     });
 
@@ -828,7 +828,7 @@ describe("ActionEngine", () => {
 
       await expect(rome.actionEngine.run("fail", {})).rejects.toThrow("boom");
 
-      const rows = await rome.repos.actionExecutions.findByAction("fail");
+      const rows = await rome.repos.actionExecutionsRepo.findByAction("fail");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         actionName: "fail",
@@ -923,7 +923,7 @@ describe("ActionEngine", () => {
         actionName: "child",
       });
       // The root execution row stays parked: pending_approval, not finished.
-      const rows = await rome.repos.actionExecutions.findByAction("root");
+      const rows = await rome.repos.actionExecutionsRepo.findByAction("root");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ status: "pending_approval", error: null });
       expect(rows[0].finishedAt).toBeNull();
@@ -940,7 +940,7 @@ describe("ActionEngine", () => {
         "executeInSubprocess",
       ).mockImplementation(async (...args: unknown[]) => {
         const invocation = args[0] as { rootExecutionId: string };
-        await rome.repos.actionExecutions.create({
+        await rome.repos.actionExecutionsRepo.create({
           id: "descendant-1",
           rootExecutionId: invocation.rootExecutionId,
           actionName: "descendant",
@@ -951,12 +951,12 @@ describe("ActionEngine", () => {
 
       await expect(rome.actionEngine.run("root", { x: 1 })).rejects.toThrow("worker crashed");
 
-      const [rootRow] = await rome.repos.actionExecutions.findByAction("root");
+      const [rootRow] = await rome.repos.actionExecutionsRepo.findByAction("root");
       expect(rootRow).toMatchObject({ status: "error", error: "worker crashed" });
       expect(rootRow.finishedAt).not.toBeNull();
       expect(rootRow.durationMs).toEqual(expect.any(Number));
 
-      const descendant = await rome.repos.actionExecutions.findById("descendant-1");
+      const descendant = await rome.repos.actionExecutionsRepo.findById("descendant-1");
       expect(descendant).toMatchObject({ status: "error", error: "worker crashed" });
     });
 
@@ -984,7 +984,7 @@ describe("ActionEngine", () => {
       }
       expect(result.approval.actionName).toBe("risky");
 
-      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      const row = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
       expect(row).toMatchObject({ type: "action_execution", status: "pending" });
       expect(row!.payload).toMatchObject({ actionName: "risky", args: { target: "prod" } });
     });
@@ -1022,7 +1022,7 @@ describe("ActionEngine", () => {
       if (result.status !== "pending_approval") {
         throw new Error(`expected pending_approval, got ${result.status}`);
       }
-      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      const row = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
       expect(row!.payload).toMatchObject({
         channelContext: context.channelContext,
         sharedContext: context.sharedContext,
@@ -1171,7 +1171,7 @@ describe("ActionEngine", () => {
       if (result.status !== "pending_approval") {
         throw new Error(`expected pending_approval, got ${result.status}`);
       }
-      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      const row = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
       expect(row!.status).toBe("pending");
     });
   });
@@ -1263,7 +1263,7 @@ describe("ActionEngine", () => {
       }
       expect(result.approval.actionName).toBe("needs_approval");
 
-      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      const row = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
       expect(row).toMatchObject({ type: "action_execution", status: "pending" });
     });
 
@@ -1320,7 +1320,7 @@ describe("ActionEngine", () => {
       if (result.status !== "pending_approval") {
         throw new Error(`expected pending_approval, got ${result.status}`);
       }
-      const row = await rome.repos.approvals.findById(result.approval.approvalId);
+      const row = await rome.repos.approvalsRepo.findById(result.approval.approvalId);
       const payload = row!.payload as Record<string, unknown>;
       expect(payload).toMatchObject({
         actionName: "needs_approval",
@@ -1614,7 +1614,7 @@ describe("ActionEngine", () => {
         },
       ];
       // The journal a prior record-mode run would have left behind.
-      await rome.repos.executionJournal.saveJournal(rootExecutionId, replayJournal);
+      await rome.repos.executionJournalRepo.saveJournal(rootExecutionId, replayJournal);
 
       await rome.actionEngine.run(
         "parent",
@@ -1625,7 +1625,7 @@ describe("ActionEngine", () => {
         },
       );
 
-      const journal = await rome.repos.executionJournal.loadJournal(rootExecutionId);
+      const journal = await rome.repos.executionJournalRepo.loadJournal(rootExecutionId);
       expect(journal[0]).toMatchObject({
         sequence: 0,
         actionName: "child",
@@ -1728,7 +1728,7 @@ describe("ActionEngine", () => {
         },
       );
 
-      const journal = await rome.repos.executionJournal.loadJournal(rootExecutionId);
+      const journal = await rome.repos.executionJournalRepo.loadJournal(rootExecutionId);
       const diverged = journal.find((e) => e.status === "diverged");
       expect(diverged).toBeDefined();
       expect(diverged!.expectedActionName).toBe("child_y");
@@ -1773,7 +1773,7 @@ describe("ActionEngine", () => {
         },
       );
 
-      const journal = await rome.repos.executionJournal.loadJournal(rootExecutionId);
+      const journal = await rome.repos.executionJournalRepo.loadJournal(rootExecutionId);
       const diverged = journal.find((e) => e.status === "diverged");
       expect(diverged).toBeDefined();
       expect(diverged!.expectedArgsHash).toBe(hashArgs({ a: 1 }));
@@ -1937,7 +1937,7 @@ describe("ActionEngine", () => {
       );
       expect(result).toEqual({ status: "ok", data: "X" });
 
-      const journal = await rome.repos.executionJournal.loadJournal(rootExecutionId);
+      const journal = await rome.repos.executionJournalRepo.loadJournal(rootExecutionId);
       const diverged = journal.find((e) => e.status === "diverged");
       expect(diverged).toBeDefined();
       expect(diverged!.expectedActionName).toBe("EOF");
@@ -2014,7 +2014,7 @@ describe("ActionEngine", () => {
 
       expect(capturedRootId).toBe("original-exec-id");
       // The replayed run is recorded under the original execution id.
-      const row = await rome.repos.actionExecutions.findById("original-exec-id");
+      const row = await rome.repos.actionExecutionsRepo.findById("original-exec-id");
       expect(row).toMatchObject({ actionName: "parent", status: "success" });
     });
 

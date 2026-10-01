@@ -40,7 +40,7 @@ describe("ApprovalHandler", () => {
     agentName = "main",
     channelThreadKey = `approval:${id}`,
   ) {
-    await rome.repos.sessions.create({
+    await rome.repos.sessionsRepo.create({
       id,
       agentName,
       channelThreadKey,
@@ -85,7 +85,7 @@ describe("ApprovalHandler", () => {
       expect(childA.calls).toEqual([{ id: 1 }]);
       expect(childB.calls).toEqual([]);
 
-      const resolved = await rome.repos.approvals.resolvePending(
+      const resolved = await rome.repos.approvalsRepo.resolvePending(
         approvalId,
         "approve",
         "test-guardian",
@@ -99,7 +99,7 @@ describe("ApprovalHandler", () => {
       expect(childA.calls).toEqual([]);
       expect(childB.calls).toEqual([{ id: 2 }]);
 
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("succeeded");
       expect(row!.executedAt).not.toBeNull();
     });
@@ -136,11 +136,11 @@ describe("ApprovalHandler", () => {
         throw new Error(`expected pending_approval, got ${recorded.status}`);
       }
       const approvalId = recorded.approval.approvalId;
-      const payload = (await rome.repos.approvals.findById(approvalId))!.payload as Record<
+      const payload = (await rome.repos.approvalsRepo.findById(approvalId))!.payload as Record<
         string,
         unknown
       >;
-      await rome.repos.approvals.resolvePending(approvalId, "approve", "test-guardian");
+      await rome.repos.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
 
       await rome.approvalHandler.onApproved(approvalId);
 
@@ -162,7 +162,7 @@ describe("ApprovalHandler", () => {
 
       await expect(rome.approvalHandler.onApproved(approvalId)).resolves.toBeUndefined();
 
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toContain("ghost_root");
       expect(row!.executedAt).toBeNull();
@@ -182,7 +182,7 @@ describe("ApprovalHandler", () => {
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(sendMessage.calls).toEqual([{ to: "user-1", text: "hello" }]);
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("succeeded");
       expect(row!.executedAt).not.toBeNull();
     });
@@ -229,7 +229,7 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain("insufficient permissions");
 
       // An action that ran and reported failure still counts as executed.
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("succeeded");
     });
 
@@ -284,7 +284,7 @@ describe("ApprovalHandler", () => {
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(rome.model.calls).toHaveLength(0);
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("succeeded");
     });
 
@@ -295,12 +295,12 @@ describe("ApprovalHandler", () => {
         args: {},
       });
       // Another worker claimed it (queued -> running).
-      expect(await rome.repos.approvals.claimExecution(approvalId)).toBe(true);
+      expect(await rome.repos.approvalsRepo.claimExecution(approvalId)).toBe(true);
 
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(sendMessage.calls).toEqual([]);
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("running");
       expect(row!.executedAt).toBeNull();
     });
@@ -314,7 +314,7 @@ describe("ApprovalHandler", () => {
 
       await expect(rome.approvalHandler.onApproved(approvalId)).resolves.toBeUndefined();
 
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toContain("unregistered_action");
       expect(row!.executedAt).toBeNull();
@@ -337,7 +337,7 @@ describe("ApprovalHandler", () => {
 
       await rome.approvalHandler.onApproved(approvalId);
 
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toBe("approval has no payload");
     });
@@ -348,7 +348,7 @@ describe("ApprovalHandler", () => {
 
       await rome.approvalHandler.onApproved(approvalId);
 
-      const row = await rome.repos.approvals.findById(approvalId);
+      const row = await rome.repos.approvalsRepo.findById(approvalId);
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toBe("approval payload missing required field: actionName");
     });
@@ -378,7 +378,7 @@ describe("ApprovalHandler", () => {
 
     it("preserves the journal for the audit trail", async () => {
       await setup();
-      await rome.repos.executionJournal.saveJournal("exec-42", [
+      await rome.repos.executionJournalRepo.saveJournal("exec-42", [
         {
           sequence: 0,
           actionName: "child",
@@ -396,7 +396,7 @@ describe("ApprovalHandler", () => {
 
       await rome.approvalHandler.onRejected(approvalId);
 
-      const journal = await rome.repos.executionJournal.loadJournal("exec-42");
+      const journal = await rome.repos.executionJournalRepo.loadJournal("exec-42");
       expect(journal).toHaveLength(1);
     });
 
@@ -477,7 +477,7 @@ describe("ApprovalHandler", () => {
       ]);
 
       for (const id of Object.values(ids)) {
-        const row = await rome.repos.approvals.findById(id);
+        const row = await rome.repos.approvalsRepo.findById(id);
         expect(row!.executionState).toBe("succeeded");
       }
     });
@@ -519,9 +519,9 @@ describe("ApprovalHandler", () => {
 
       expect(order).toEqual(["first_action", "third_action"]);
 
-      expect((await rome.repos.approvals.findById(ids.A))!.executionState).toBe("succeeded");
-      expect((await rome.repos.approvals.findById(ids.C))!.executionState).toBe("succeeded");
-      const failed = await rome.repos.approvals.findById(ids.B);
+      expect((await rome.repos.approvalsRepo.findById(ids.A))!.executionState).toBe("succeeded");
+      expect((await rome.repos.approvalsRepo.findById(ids.C))!.executionState).toBe("succeeded");
+      const failed = await rome.repos.approvalsRepo.findById(ids.B);
       expect(failed!.executionState).toBe("failed");
       expect(failed!.executionError).toContain("missing_action");
     });

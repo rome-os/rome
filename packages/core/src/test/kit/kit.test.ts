@@ -41,7 +41,9 @@ describe("testkit", () => {
       // The REAL SessionManager persisted the session row.
       const init = messages.find((m) => m.type === "session_init");
       expect(init).toBeDefined();
-      const session = await rome.repos.sessions.findById((init as { sessionId: string }).sessionId);
+      const session = await rome.repos.sessionsRepo.findById(
+        (init as { sessionId: string }).sessionId,
+      );
       expect(session).not.toBeNull();
       expect(session!.agentName).toBe("main");
       expect(session!.channelThreadKey).toBe("telegram:thread-7");
@@ -66,7 +68,7 @@ describe("testkit", () => {
       expect(sendMessage.calls).toEqual([{ to: "user-1", body: "hi" }]);
 
       // The real engine recorded the execution in the DB.
-      const executions = await rome.repos.actionExecutions.findByAction("send_message");
+      const executions = await rome.repos.actionExecutionsRepo.findByAction("send_message");
       expect(executions).toHaveLength(1);
 
       // The model stream carried the real tool_use/tool_result pair.

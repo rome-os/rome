@@ -37,8 +37,8 @@ describe("callAction", () => {
     expect(childResult).toEqual({ status: "ok", data: "result" });
 
     // The child execution is recorded under the parent's execution tree.
-    const [parentRow] = await rome.repos.actionExecutions.findByAction("parent");
-    const [childRow] = await rome.repos.actionExecutions.findByAction("send_message");
+    const [parentRow] = await rome.repos.actionExecutionsRepo.findByAction("parent");
+    const [childRow] = await rome.repos.actionExecutionsRepo.findByAction("send_message");
     expect(childRow.rootExecutionId).toBe(parentRow.id);
     expect(childRow.parentId).toBe(parentRow.id);
   });
