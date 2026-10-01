@@ -5,10 +5,13 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <!-- maximum-scale=1 + user-scalable=no locks zoom so mobile browsers stop
          auto-zooming when a sub-16px input gains focus (and disables pinch-zoom
-         on this guardian-only app). -->
+         on this guardian-only app). interactive-widget=resizes-content makes
+         Chrome on Android shrink the page above the keyboard rather than slide
+         the keyboard over it; iOS ignores it, and lib/visual-viewport.ts covers
+         iOS. e2e/keyboard-composer.spec.ts pins all three keys. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <!-- Add-to-Home-Screen / installable PWA. iOS ignores the SVG favicon and
          the manifest for the Home Screen icon — it uses apple-touch-icon.png —

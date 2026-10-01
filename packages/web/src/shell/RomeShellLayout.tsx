@@ -143,7 +143,7 @@ export function RomeShellLayout() {
   }, [hideSidebar, navigate, toggleCollapsed]);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
       <UpgradeCountdownBanner />
       <div className="relative flex flex-1">
         {sidebarOpen && !hideSidebar ? (
@@ -151,7 +151,7 @@ export function RomeShellLayout() {
         ) : null}
         {!hideSidebar ? (
           <aside
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
