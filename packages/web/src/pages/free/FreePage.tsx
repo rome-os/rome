@@ -12,7 +12,7 @@ export default function FreePage() {
       className={`flex min-h-0 flex-col overflow-hidden ${
         hideSidebar
           ? "h-[var(--rome-viewport-height)] pt-safe"
-          : "h-[var(--rome-mobile-content-height)] md:h-dvh"
+          : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]"
       }`}
     >
       <FreeGrid />
