@@ -71,6 +71,7 @@ export function useStickToBottom({
   const [isAtBottom, setIsAtBottom] = useState(initialStuck);
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null);
   const explicitScrollRef = useRef<HTMLElement | null>(null);
+  const [explicitScrollEl, setExplicitScrollEl] = useState<HTMLElement | null>(null);
   // Stickiness intent, read inside the ResizeObserver without re-subscribing.
   const stuckRef = useRef(initialStuck);
   // Set by real user gestures; lets the scroll handler tell a deliberate
@@ -80,6 +81,7 @@ export function useStickToBottom({
 
   const scrollRef = useCallback((node: HTMLElement | null) => {
     explicitScrollRef.current = node;
+    setExplicitScrollEl(node);
   }, []);
   const contentRef = useCallback((node: HTMLElement | null) => setContentEl(node), []);
 
@@ -175,14 +177,19 @@ export function useStickToBottom({
   // bottom through streaming, late-loading media, and composer growth. The RO
   // also fires once on observe, which pins the initial layout. It runs after
   // layout and before paint, so there is no visible lag.
+  //
+  // A named scroller is observed too: when it shrinks, as it does when an
+  // on-screen keyboard opens under a chat, its scrollTop stays put and the
+  // newest content drops below its visible bottom without any scroll event.
   useEffect(() => {
-    if (!contentEl) return;
+    if (!contentEl && !explicitScrollEl) return;
     const observer = new ResizeObserver(() => {
       if (stuckRef.current) jumpToBottom("auto");
     });
-    observer.observe(contentEl);
+    if (contentEl) observer.observe(contentEl);
+    if (explicitScrollEl) observer.observe(explicitScrollEl);
     return () => observer.disconnect();
-  }, [contentEl, jumpToBottom]);
+  }, [contentEl, explicitScrollEl, jumpToBottom]);
 
   return { scrollRef, contentRef, isAtBottom, scrollToBottom };
 }

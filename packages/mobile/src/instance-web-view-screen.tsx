@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   AppState,
   Easing,
+  Keyboard,
   Linking,
+  Platform,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { WebView, type WebViewProps } from "react-native-webview";
+import { keyboardOverlap } from "./keyboard-inset";
 import { LauncherMessage } from "./launcher-screens";
 import { EMBER } from "./mobile-theme";
 import { sessionCoordinator } from "./mobile-runtime";
@@ -52,6 +55,31 @@ function RefreshingBanner() {
   );
 }
 
+// The dp of `shell` the Android keyboard covers, so the WebView can end at the
+// keyboard's top edge (keyboard-inset.ts). Always zero on iOS, where WKWebView
+// reports the keyboard to the page through its visual viewport and the
+// dashboard lays itself out above it.
+function useAndroidKeyboardInset(shell: RefObject<View | null>): number {
+  const [inset, setInset] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      const keyboardTop = event.endCoordinates.screenY;
+      shell.current?.measureInWindow((_x, y, _width, height) => {
+        setInset(keyboardOverlap({ y, height }, keyboardTop));
+      });
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => setInset(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [shell]);
+
+  return inset;
+}
+
 export function InstanceWebViewScreen({
   instance,
   session,
@@ -59,6 +87,8 @@ export function InstanceWebViewScreen({
   onFailure,
 }: InstanceWebViewScreenProps) {
   const webViewRef = useRef<WebView>(null);
+  const shellRef = useRef<View>(null);
+  const keyboardInset = useAndroidKeyboardInset(shellRef);
   const [webViewKey, setWebViewKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -126,7 +156,7 @@ export function InstanceWebViewScreen({
   );
 
   return (
-    <View style={styles.shell}>
+    <View ref={shellRef} style={[styles.shell, { paddingBottom: keyboardInset }]}>
       <View style={styles.webViewContainer}>
         <WebView
           key={webViewKey}
@@ -159,6 +189,9 @@ export function InstanceWebViewScreen({
           contentInsetAdjustmentBehavior="never"
           bounces={false}
           overScrollMode="never"
+          // The dashboard's viewport tag already forbids zoom. Android WebView
+          // also has zoom gestures of its own, on by default in this library.
+          setBuiltInZoomControls={false}
           style={styles.webView}
           renderError={() => (
             <LauncherMessage
