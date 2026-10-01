@@ -42,6 +42,7 @@ import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
+  ModelBackgroundTask,
   ModelSession,
   ModelSessionForkOpenParams,
   ModelSessionParams,
@@ -320,6 +321,8 @@ export interface AgentSession {
   readonly romeSessionId?: string;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
+  /** Background tasks the model session runs now, between turns as well. */
+  readonly backgroundTasks?: readonly ModelBackgroundTask[];
   /**
    * Synchronously allocate a turn and return its handle. The caller can read
    * `turnId` immediately and start consuming `events` (which yields once the
@@ -1943,6 +1946,8 @@ class AgentSessionImpl implements AgentSession {
   private openModelSession: ImplArgs["openModelSession"];
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
+  private _backgroundTasks: readonly ModelBackgroundTask[] = [];
+  private unfollowBackgroundTasks: () => void = () => {};
   private replacingModelSession: ModelSession | null = null;
   private toolCount: number;
   private subagentToolNames: Set<string>;
@@ -2056,7 +2061,29 @@ class AgentSessionImpl implements AgentSession {
 
   startModelSessionEvents(): void {
     const session = this.modelSession;
+    this.followBackgroundTasks(session);
     this.modelEventsLoop = this.runEventsLoop(session);
+  }
+
+  /** Background tasks the model session is running now, between turns as well. */
+  get backgroundTasks(): readonly ModelBackgroundTask[] {
+    return this._backgroundTasks;
+  }
+
+  // A new model session is a new provider process: its task set starts empty.
+  private followBackgroundTasks(session: ModelSession): void {
+    this.unfollowBackgroundTasks();
+    this._backgroundTasks = [];
+    this.unfollowBackgroundTasks =
+      session.onBackgroundTasks?.({
+        onChange: (tasks) => {
+          this._backgroundTasks = tasks;
+          log.info("background tasks changed", {
+            sessionId: this.sessionId,
+            taskIds: tasks.map((task) => task.id),
+          });
+        },
+      }) ?? (() => {});
   }
 
   private async ensureModelSessionForTurn(): Promise<void> {
