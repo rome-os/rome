@@ -73,7 +73,8 @@ describe("WeChat app API", () => {
   it("refuses cross-site writes", async () => {
     const wechat = stubApp();
     const app = build(wechat);
-    for (const headers of [{ "sec-fetch-site": "cross-site" }, {}]) {
+    const origins: Record<string, string>[] = [{ "sec-fetch-site": "cross-site" }, {}];
+    for (const headers of origins) {
       const response = await app.request("https://rome.example.com/wechat/app/install", {
         method: "POST",
         headers,
