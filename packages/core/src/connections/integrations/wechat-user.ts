@@ -309,55 +309,64 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
     let status = ready;
     if (!status) {
       status = await ctx.step("capture-login", async (signal) => {
-        // Recovery launches the client, so the login window appears once this
-        // begins. While recovery waits for the guardian to sign in, poll that
-        // window and stream it into the view as the scannable QR, so the
-        // guardian scans inside Rome rather than opening the desktop. The
-        // passphrase comes back the moment that first login derives the key.
-        // A cached account store makes the client show a sign-in button, which
-        // needs the desktop, so that case skips the QR stream.
-        const remembered = (await runtime.status()).loggedIn;
-        // Recovery replaces any running client, so it starts on WeChat's own
-        // desktop. Recovery, the QR capture and the links all use the display
-        // this returns, never a legacy client's that a status() reports.
-        const display = await runtime.ensureDesktop(signal);
-        const desktopPath = runtime.desktopPathFor(display);
-        interact.show(remembered ? rememberedView(desktopPath) : scanView(desktopPath));
-        const recovery = deps.recoverPassphrase(signal, display);
-        const qr = { stop: remembered };
-        const qrLoop = (async () => {
-          let last: string | undefined;
-          while (!qr.stop && !signal.aborted) {
-            const shot = await runtime.captureLoginQr(display).catch(() => null);
-            if (shot && shot !== last) {
-              last = shot;
-              interact.show(scanView(desktopPath, shot));
-            }
-            await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
-          }
-        })();
+        // The capture kills the client and relaunches it under a debugger. The
+        // lease keeps the WeChat app and the health check from launching an
+        // ordinary client in between.
+        const release = runtime.holdCapture();
         try {
-          const passphrase = await recovery;
-          qr.stop = true;
-          await qrLoop;
-          interact.show(keysView(remembered, desktopPath));
-          await waitFor(signal, (s) => s.loggedIn);
-          // Derive and verify the per-database keys from the captured passphrase.
-          const deadline = Date.now() + loginTimeoutMs;
-          for (;;) {
-            try {
-              await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
-              break;
-            } catch (error) {
-              if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline) throw error;
-              await abortableDelay(pollIntervalMs, signal);
+          // Recovery launches the client, so the login window appears once this
+          // begins. While recovery waits for the guardian to sign in, poll that
+          // window and stream it into the view as the scannable QR, so the
+          // guardian scans inside Rome rather than opening the desktop. The
+          // passphrase comes back the moment that first login derives the key.
+          // A cached account store makes the client show a sign-in button, which
+          // needs the desktop, so that case skips the QR stream.
+          const remembered = (await runtime.status()).loggedIn;
+          // Recovery replaces any running client, so it starts on WeChat's own
+          // desktop. Recovery, the QR capture and the links all use the display
+          // this returns, never a legacy client's that a status() reports.
+          const display = await runtime.ensureDesktop(signal);
+          const desktopPath = runtime.desktopPathFor(display);
+          interact.show(remembered ? rememberedView(desktopPath) : scanView(desktopPath));
+          const recovery = deps.recoverPassphrase(signal, display);
+          const qr = { stop: remembered };
+          const qrLoop = (async () => {
+            let last: string | undefined;
+            while (!qr.stop && !signal.aborted) {
+              const shot = await runtime.captureLoginQr(display).catch(() => null);
+              if (shot && shot !== last) {
+                last = shot;
+                interact.show(scanView(desktopPath, shot));
+              }
+              await abortableDelay(qrPollIntervalMs, signal).catch(() => {});
             }
+          })();
+          try {
+            const passphrase = await recovery;
+            qr.stop = true;
+            await qrLoop;
+            interact.show(keysView(remembered, desktopPath));
+            await waitFor(signal, (s) => s.loggedIn);
+            // Derive and verify the per-database keys from the captured passphrase.
+            const deadline = Date.now() + loginTimeoutMs;
+            for (;;) {
+              try {
+                await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
+                break;
+              } catch (error) {
+                if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline)
+                  throw error;
+                await abortableDelay(pollIntervalMs, signal);
+              }
+            }
+            return waitFor(signal, (s) => s.running && s.state === "ready");
+          } catch (error) {
+            qr.stop = true;
+            await qrLoop.catch(() => {});
+            throw error;
           }
-          return waitFor(signal, (s) => s.running && s.state === "ready");
-        } catch (error) {
-          qr.stop = true;
-          await qrLoop.catch(() => {});
-          throw error;
+        } finally {
+          release();
         }
       });
     }

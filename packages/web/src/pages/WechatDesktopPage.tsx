@@ -51,7 +51,23 @@ export default function WechatDesktopPage() {
   });
 
   const data = status.data;
-  if (data?.state === "running" && !data.sharedDesktop) return <DesktopPage name="wechat" />;
+  // Starting and running share one tree, so the desktop stays mounted while
+  // Rome restarts the client, and the login window shows the moment it appears.
+  if ((data?.state === "running" && !data.sharedDesktop) || data?.state === "starting") {
+    return (
+      <div className="relative">
+        <DesktopPage name="wechat" />
+        {data.state === "starting" ? (
+          <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center">
+            <div className="flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-sm text-foreground shadow-sm">
+              <Spinner size="sm" label={t("wechatApp.starting.title")} />
+              <span aria-hidden="true">{t("wechatApp.starting.title")}</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   const panel = (children: React.ReactNode) => (
     <div className="flex h-[var(--rome-mobile-content-height)] items-center justify-center md:h-dvh">
@@ -98,14 +114,14 @@ export default function WechatDesktopPage() {
     );
   }
 
-  if (data.state === "installing" || data.state === "starting") {
+  if (data.state === "installing") {
     return panel(
       <>
         <EmptyStateIcon>
-          <Spinner label={t(`wechatApp.${data.state}.title`)} />
+          <Spinner label={t("wechatApp.installing.title")} />
         </EmptyStateIcon>
-        <EmptyStateTitle>{t(`wechatApp.${data.state}.title`)}</EmptyStateTitle>
-        <EmptyStateDescription>{t(`wechatApp.${data.state}.description`)}</EmptyStateDescription>
+        <EmptyStateTitle>{t("wechatApp.installing.title")}</EmptyStateTitle>
+        <EmptyStateDescription>{t("wechatApp.installing.description")}</EmptyStateDescription>
       </>,
     );
   }

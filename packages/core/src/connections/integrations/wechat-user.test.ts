@@ -64,6 +64,13 @@ function fakeRuntime(opts: {
     ensureAccessibility: rs.fn(async () => {}),
     repairDesktop: rs.fn(async () => {}),
     captureLoginQr: rs.fn(async () => opts.qr ?? null),
+    captures: 0,
+    holdCapture: rs.fn(function (this: { captures: number }) {
+      this.captures += 1;
+      return () => {
+        this.captures -= 1;
+      };
+    }),
     start: rs.fn(async () => {}),
     stop: rs.fn(async () => {}),
     status: rs.fn(
@@ -104,6 +111,38 @@ function setupWith(
 }
 
 describe("makeWechatUserSetup", () => {
+  it("holds off ordinary launches for the whole key capture", async () => {
+    const runtime = fakeRuntime({
+      statuses: [
+        { state: "absent", installed: false, running: false, loggedIn: false, keysReady: false },
+        {
+          state: "awaiting-keys",
+          installed: true,
+          running: true,
+          loggedIn: true,
+          keysReady: false,
+        },
+        READY,
+      ],
+    });
+    const held = runtime as unknown as { captures: number };
+    let heldDuringRecovery = 0;
+    const { fn } = setupWith(
+      runtime,
+      rs.fn(async (_signal: AbortSignal) => {
+        heldDuringRecovery = held.captures;
+        return "a".repeat(64);
+      }),
+    );
+    const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
+
+    await session.started();
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+
+    expect(heldDuringRecovery).toBe(1);
+    expect(held.captures).toBe(0);
+  });
+
   it("confers with no guardian interaction when the account is already ready", async () => {
     const { fn } = setupWith(fakeRuntime({ statuses: [READY] }));
     const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});

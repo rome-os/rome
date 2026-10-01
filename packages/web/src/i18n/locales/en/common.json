@@ -210,13 +210,12 @@
     },
     "stopped": {
       "title": "WeChat is not running",
-      "description": "The WeChat client is installed on this instance.",
+      "description": "WeChat was closed on this instance. It stays closed until it is started here or Rome restarts.",
       "action": "Start WeChat",
       "failed": "WeChat did not start: {{error}}"
     },
     "starting": {
-      "title": "Starting WeChat",
-      "description": "Rome is opening the WeChat client on its own desktop."
+      "title": "Starting WeChat"
     },
     "sharedDesktop": {
       "title": "WeChat is running on the shared desktop",

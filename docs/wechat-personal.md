@@ -43,13 +43,16 @@ A client that was already running on the shared desktop stays there until it nex
 
 ### The WeChat app
 
-`/desktop/wechat` works without a connection. Until the client runs, the page says what is missing and offers the button that fixes it:
+`/desktop/wechat` works without a connection. Once the client is installed, Rome keeps it running ([`wechat-app.ts`](../packages/core/src/desktop-apps/wechat-app.ts)):
 
-- **Not installed:** "Install WeChat" downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
-- **Installed but stopped:** "Start WeChat" opens it.
-- **Failed:** the page shows why the last install or start failed, with "Try again".
+- **Not installed:** the page offers **Install WeChat**. It downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
+- **Rome boots:** Rome starts an installed client that is not running.
+- **The client crashes:** Rome checks every 15 s and starts it again, so it is back within about 30 s. After 3 restarts in 5 minutes, Rome stops and the page shows where the client's log is.
+- **The guardian quits it:** a client that exits with status 0 stays stopped until **Start WeChat**, **Install WeChat** or a Rome restart. The client is launched through a wrapper that writes its exit status to `client.exit`, which is how Rome tells a quit from a crash.
 
-Once the client runs, the page shows its desktop. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it ([`wechat-app.ts`](../packages/core/src/desktop-apps/wechat-app.ts)). A client opened this way is signed in on the desktop, not through **Connect**, so Rome has not captured its store key. Reading history still needs **Connect** below, which restarts the client under the debugger and asks for one more confirmation on the phone.
+The page keeps the desktop on view while the client starts or restarts, with a small "Starting WeChat" banner, so the login window shows the moment it appears. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it.
+
+Connect's key capture kills the client and relaunches it under the debugger. While it runs it holds a lease on the runtime, and nothing else launches an ordinary client: not the app, and not the connection's health check. A client signed in from the app has not had its store key captured, so reading history still needs **Connect**, which can ask for one more confirmation on the phone.
 
 ## Connect
 

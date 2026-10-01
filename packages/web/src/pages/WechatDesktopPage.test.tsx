@@ -64,12 +64,35 @@ describe("WechatDesktopPage", () => {
     expect(screen.queryByTitle("Rome desktop “wechat”")).toBeNull();
   });
 
-  it("offers to start an installed client that is not running", async () => {
+  it("offers to start a client the guardian closed", async () => {
     state = { state: "stopped" };
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "Start WeChat" }));
     expect(posts).toEqual(["/api/wechat/app/start"]);
-    expect(await screen.findByText("Starting WeChat")).toBeTruthy();
+    expect(await screen.findByRole("status", { name: "Starting WeChat" })).toBeTruthy();
+  });
+
+  it("keeps the same desktop mounted while the client restarts", async () => {
+    state = { state: "running" };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <WechatDesktopPage />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const iframe = await screen.findByTitle("Rome desktop “wechat”");
+
+    queryClient.setQueryData(["wechat-app"], { state: "starting" });
+    expect(await screen.findByRole("status", { name: "Starting WeChat" })).toBeTruthy();
+    expect(screen.getByTitle("Rome desktop “wechat”")).toBe(iframe);
+
+    queryClient.setQueryData(["wechat-app"], { state: "running" });
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Starting WeChat" })).toBeNull(),
+    );
+    expect(screen.getByTitle("Rome desktop “wechat”")).toBe(iframe);
   });
 
   it("shows why the last install failed, with a retry", async () => {

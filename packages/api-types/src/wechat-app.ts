@@ -5,9 +5,11 @@ import { z } from "zod";
  *   unavailable — WeChat is not enabled on this instance
  *   absent      — the client is not downloaded yet
  *   installing  — downloading and unpacking it, then opening it
- *   stopped     — downloaded, but not running
- *   starting    — opening it on its desktop
- *   running     — running, so its desktop has something to show
+ *   stopped     — not running, and Rome will not start it: the guardian quit it,
+ *                 its last start failed, or it kept crashing
+ *   starting    — not running yet, and Rome is starting it
+ *   running     — running, or being relaunched by the connection's key capture,
+ *                 so its desktop has something to show
  */
 export const wechatAppStateSchema = z.enum([
   "unavailable",
