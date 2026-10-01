@@ -164,11 +164,43 @@ describe("Markdown fenced-block chrome", () => {
     expect(hoverCapable).not.toContain("display: none");
   });
 
+  it("paints every fence button at the 44px floor on a phone", () => {
+    // Streamdown sizes these for a pointer, 24px and 32px. Below 768px, where
+    // the kit paints every control at 44px, each button takes that floor as its
+    // own box. It is not scoped to `.rome-markdown`, so a fullscreen diagram's
+    // zoom stack, which is portaled out of it, gets the floor too.
+    const touch = media("width < 48rem");
+    const buttons = [...touch.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) =>
+      selector.includes("button"),
+    );
+
+    expect(buttons).toBeDefined();
+    const [, selector, declarations] = buttons!;
+    for (const hook of [CODE_ACTIONS, DIAGRAM_ACTIONS, ZOOM_STACK, TABLE_ACTIONS]) {
+      expect(selector.replace(/\s+/g, " ")).toContain(hook);
+    }
+    expect(selector.trim().startsWith(".rome-markdown")).toBe(false);
+    // Only the row's own buttons: each a child of the row, or of the wrapper
+    // Streamdown puts around a button that opens a format menu. The menu's
+    // items sit one level deeper, inside its `absolute` panel, and keep
+    // their own left-aligned layout, so a bare descendant `button` is out.
+    expect(selector).not.toMatch(/\)\s+button/);
+    expect(selector).toMatch(/\)\s*>\s*button/);
+    expect(selector).toMatch(/\)\s*>\s*div\s*>\s*button/);
+    expect(declarations).toContain("min-width: var(--rome-size-44, 2.75rem);");
+    expect(declarations).toContain("min-height: var(--rome-size-44, 2.75rem);");
+  });
+
   it("leaves a fullscreen diagram's zoom stack alone", () => {
     // Streamdown portals a fullscreen diagram to document.body, outside the
     // prose root. There the zoom stack is the whole interface, so every rule
-    // that hides it stays scoped to Markdown rendered in place.
-    const hiding = rules().filter(({ selector }) => selector.includes(ZOOM_STACK));
+    // that hides it stays scoped to Markdown rendered in place. A rule that
+    // only sizes it, as the phone floor above does, may reach it there too.
+    const hiding = rules().filter(
+      ({ selector, declarations }) =>
+        selector.includes(ZOOM_STACK) &&
+        /opacity: 0|display: none|visibility: hidden/.test(declarations),
+    );
 
     expect(hiding.length).toBeGreaterThan(0);
     for (const { selector } of hiding) expect(selector.startsWith(".rome-markdown")).toBe(true);

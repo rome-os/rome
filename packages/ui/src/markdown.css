@@ -565,6 +565,57 @@
   }
 }
 
+/* Phone. Streamdown sizes its fence buttons for a pointer: 24px for copy,
+   download and fullscreen, 32px for the zoom stack. Below 768px, where the kit
+   paints every control at 44px, each button takes that floor as its own box. The band grows to hold the taller row, the pill drops the
+   padding the taller buttons no longer need, and the zoom stack turns into a
+   row, which keeps it inside a short diagram's canvas. Fullscreen diagrams
+   are portaled outside `.rome-markdown`, so none of this depends on it. */
+@media (width < 48rem) {
+  /* The row's own buttons only: each is a child of the row, or of the wrapper
+     around a button that opens a format menu. The menu's items sit a level
+     deeper, in its `absolute` panel, and keep their left-aligned layout. */
+  :is(
+      [data-streamdown="code-block-actions"],
+      [data-streamdown="mermaid-block-actions"],
+      [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
+      [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
+    )
+    > button,
+  :is(
+      [data-streamdown="code-block-actions"],
+      [data-streamdown="mermaid-block-actions"],
+      [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
+    )
+    > div
+    > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--rome-size-44, 2.75rem);
+    min-height: var(--rome-size-44, 2.75rem);
+  }
+
+  :is([data-streamdown="code-block-actions"], [data-streamdown="mermaid-block-actions"]) {
+    padding-block: 0;
+  }
+
+  [data-streamdown="mermaid"] :has(> button[title="Zoom in"]) {
+    flex-direction: row;
+  }
+
+  .rome-markdown
+    :is(
+      [data-streamdown="code-block-header"],
+      [data-streamdown="mermaid-block"] > :first-child,
+      [data-streamdown="code-block"] > :has(> [data-streamdown="code-block-actions"]),
+      [data-streamdown="mermaid-block"] > :has(> [data-streamdown="mermaid-block-actions"])
+    ) {
+    height: auto;
+    min-height: var(--rome-space-8);
+  }
+}
+
 /* Mermaid SVGs are wrapped in a shrink-to-fit pan/zoom layer. Streamdown portals
    fullscreen diagrams to document.body, so these rules cannot depend on the
    .rome-markdown ancestor. */

@@ -62,13 +62,16 @@ const buttonVariants = cva(
       // toolbars, with no field counterpart to line up with — so it pads from a
       // spacing step, neither group carrying a step that low.
       size: {
-        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+        // `xs` and `icon-xs` are literal steps rather than `--control-h-*`
+        // ones, so the phone scale cannot reach them: below 768px they take
+        // the 44px floor themselves.
+        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 max-md:h-11 max-md:px-4 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-[var(--control-h-sm)] gap-[var(--control-gap)] rounded-[var(--control-r-sm)] px-[var(--control-px-center-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         md: SIZE_MD,
         /** @deprecated Spelling of `md` that predates the shared vocabulary. */
         default: SIZE_MD,
         "icon-xs":
-          "size-6 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+          "size-6 max-md:size-11 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
           "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-md": SIZE_ICON_MD,

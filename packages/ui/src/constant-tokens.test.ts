@@ -2,10 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
 
-const stylesheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
-);
+import { splitPhoneBlock } from "./test/phone-block.js";
+
+/** The sheet without its comments and without the phone block, which
+ * re-declares some of these tokens below 768px and is pinned in
+ * `phone-scale.test.ts`. This file checks the values every other width reads. */
+const stylesheet = splitPhoneBlock(
+  readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
+).rest;
 
 function readRootHostDeclarations(): Map<string, string> {
   const declarations = new Map<string, string>();

@@ -66,7 +66,7 @@ The role exists for these: any two at the same size, dropped into one row, are t
 - A step reaches a member's public API when a call site needs it, not to complete a set. A name no caller can use is a promise the role has to keep for nothing. `[mech]`
 - A member centers its own content on the cross axis, so a row of same-size members needs `items-center` on the row and no per-member nudging. `[mech]`
 - An adornment inside the control — a leading icon in a field, a trailing chevron — consumes the horizontal padding, never the height. `[mech]`
-- A member whose smallest step falls under 44px names `.touch-target` as its pairing for touch-reachable surfaces. `[mech]`
+- Below 768px every member is painted at 44px: `sm` and `md` through the phone scale in `styles.css`, and steps the scale does not reach, such as `xs`, through a `max-md:` floor of their own. It is a visible box rather than a hidden hit area, so no member's target lands on a neighbour's box. From 768px up, a member whose smallest step falls under 44px names `.touch-target` as its pairing for touch-reachable surfaces. `[mech]`
 
 ### Block members
 

@@ -173,7 +173,8 @@ export function PageNavLink({
         data-slot="page-nav-link"
         aria-current={active ? "page" : undefined}
         className={cn(
-          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors",
+          // Below 768px an entry is 44px tall, the touch floor.
+          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors max-md:min-h-11",
           // A 2px border on a zero-content pseudo-element, not a sized box, so
           // it authors no off-scale edge length.
           "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",
