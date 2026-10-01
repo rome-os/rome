@@ -102,9 +102,25 @@ function designFrontmatter(): Frontmatter {
   return parseFrontmatterBlock(match[1]) as unknown as Frontmatter;
 }
 
-/** `--name: value;` declarations from `styles.css`, last one wins. */
+/**
+ * `--name: value;` declarations from `styles.css`, last one wins, without the
+ * phone block: the frontmatter records the values every width from 768px up
+ * reads, and the phone ramp is a table in the prose.
+ */
 function cssCustomProperties(): Map<string, string> {
-  const css = read("packages/ui/src/styles.css");
+  const sheet = read("packages/ui/src/styles.css");
+  const phone = sheet.indexOf("@media (width < 48rem)");
+  let css = sheet;
+  if (phone >= 0) {
+    let depth = 0;
+    for (let index = sheet.indexOf("{", phone); index < sheet.length; index += 1) {
+      if (sheet[index] === "{") depth += 1;
+      if (sheet[index] === "}" && (depth -= 1) === 0) {
+        css = sheet.slice(0, phone) + sheet.slice(index + 1);
+        break;
+      }
+    }
+  }
   const out = new Map<string, string>();
   for (const m of css.matchAll(/(--[a-z0-9-]+):\s*([^;}]+);/gi)) {
     out.set(m[1], m[2].replace(/\s+/g, " ").trim());

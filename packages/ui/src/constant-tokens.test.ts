@@ -2,9 +2,22 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
 
-const stylesheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
+/** The sheet without its comments and without the phone block, which
+ * re-declares some of these tokens below 768px and is pinned in
+ * `phone-scale.test.ts`. This file checks the values every other width reads. */
+function withoutPhoneBlock(css: string): string {
+  const start = css.indexOf("@media (width < 48rem)");
+  if (start < 0) return css;
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    if (css[index] === "}" && (depth -= 1) === 0) return css.slice(0, start) + css.slice(index + 1);
+  }
+  throw new Error("Unterminated phone block");
+}
+
+const stylesheet = withoutPhoneBlock(
+  readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
 );
 
 function readRootHostDeclarations(): Map<string, string> {

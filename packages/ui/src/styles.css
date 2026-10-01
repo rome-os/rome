@@ -212,10 +212,12 @@
   --rome-font-size-14: 0.875rem;
   --rome-font-size-15: 0.9375rem;
   --rome-font-size-16: 1rem;
+  --rome-font-size-17: 1.0625rem;
   --rome-font-size-18: 1.125rem;
   --rome-font-size-20: 1.25rem;
   --rome-font-size-22: 1.375rem;
   --rome-font-size-24: 1.5rem;
+  --rome-font-size-28: 1.75rem;
   --rome-font-size-30: 1.875rem;
 
   /* Every step composes its size step to a line box on the 4px spacing grid, so
@@ -233,8 +235,10 @@
   --rome-line-height-123: calc(1 / 0.8125);
   --rome-line-height-125: 1.25;
   --rome-line-height-127: calc(1.75 / 1.375);
+  --rome-line-height-129: calc(2.25 / 1.75);
   --rome-line-height-133: calc(4 / 3);
   --rome-line-height-140: calc(1.75 / 1.25);
+  --rome-line-height-141: calc(1.5 / 1.0625);
   --rome-line-height-143: calc(1.25 / 0.875);
   --rome-line-height-150: 1.5;
 }
@@ -304,6 +308,60 @@
   --text-aux--line-height: var(--rome-line-height-123);
   --text-aux--letter-spacing: 0;
   --text-aux--font-weight: 400;
+}
+
+/* ─────────────────────────────── PHONE ─────────────────────────────────────
+   Below 768px (Tailwind's `md`, where the dashboard's sidebar becomes a
+   slide-over) the kit moves size and type together. Every control the scale
+   sizes is painted at 44px, the touch floor, rather than reaching it through a
+   hidden hit area; text rises to match, so a 44px control does not hold
+   desktop-sized text. The roles keep their names and their 4px line grid:
+
+     ui       17/24     controls, rows, fields
+     section  17/24     600
+     title    28/36     700, a large page title
+     aux      15/20     metadata
+     badge    15/20     500
+
+   Display and composer keep their desktop values. Every row floor follows the
+   control step, so `--row-h-*` rises to 52px with it.
+
+   Unlayered and after the roles' `@theme`, so it outranks both the theme layer
+   and the constant block above. `:host` carries it into app shadow roots,
+   which on a phone are phone-sized too. */
+@media (width < 48rem) {
+  :root,
+  :host {
+    --text-ui: var(--rome-font-size-17);
+    --text-ui--line-height: var(--rome-line-height-141);
+
+    --text-section: var(--rome-font-size-17);
+    --text-section--line-height: var(--rome-line-height-141);
+    --text-section--font-weight: 600;
+
+    --text-title: var(--rome-font-size-28);
+    --text-title--line-height: var(--rome-line-height-129);
+    --text-title--font-weight: 700;
+
+    --text-aux: var(--rome-font-size-15);
+    --text-aux--line-height: var(--rome-line-height-133);
+
+    --text-badge: var(--rome-font-size-15);
+    --text-badge--line-height: var(--rome-line-height-133);
+
+    --control-h-sm: var(--rome-size-44);
+    --control-h-md: var(--rome-size-44);
+    --control-px-start-sm: 14px;
+    --control-px-start-md: 16px;
+    --control-px-center-sm: 16px;
+    --control-px-center-md: 18px;
+  }
+
+  /* A field reads at control size, and never under 16px, the size below which
+     mobile Safari zooms the page on focus. */
+  :where(input, textarea, select) {
+    font-size: max(var(--rome-font-size-16), var(--text-ui));
+  }
 }
 
 /* ─────────────────────────── MARKDOWN TOKENS ──────────────────────────────

@@ -188,7 +188,10 @@ export function RomeShellLayout() {
                 data-app-titlebar="header"
                 className="flex shrink-0 items-center justify-between px-5 pb-4 pt-5"
               >
-                <Link to="/" className="text-title text-foreground">
+                <Link
+                  to="/"
+                  className="text-title text-foreground max-md:flex max-md:min-h-11 max-md:items-center"
+                >
                   {t("appName")}
                 </Link>
                 <div className="flex items-center gap-1">
@@ -262,7 +265,7 @@ export function RomeShellLayout() {
                 name="mobileHeader"
                 className="flex min-w-0 flex-1 items-center gap-2"
                 fallback={
-                  <Link to="/" className="flex items-center gap-2">
+                  <Link to="/" className="flex items-center gap-2 max-md:min-h-11">
                     <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
                     <span className="text-ui text-foreground">{t("appName")}</span>
                   </Link>

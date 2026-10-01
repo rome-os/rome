@@ -4,6 +4,7 @@ import { Check, ChevronRight, Copy, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger, PopoverArrow } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -336,7 +337,7 @@ export function PairingConfirmationDialog({
 
 export interface PairingRequestsSectionProps {
   state: "loading" | "error" | "empty" | "ready";
-  activityLink: ReactElement<{ children?: ReactNode }>;
+  activityLink: ReactElement<{ children?: ReactNode; className?: string }>;
   onRetry: () => void;
   children?: ReactNode;
 }
@@ -394,7 +395,20 @@ export function PairingRequestsSection({
         children
       )}
       {state !== "empty" && (
-        <div className="text-ui">{cloneElement(activityLink, {}, t("pairing.viewActivity"))}</div>
+        // On its own line the link is a control rather than a word in a
+        // sentence, so on a phone it is 44px tall like any other control.
+        <div className="text-ui">
+          {cloneElement(
+            activityLink,
+            {
+              className: cn(
+                activityLink.props.className,
+                "max-md:inline-flex max-md:min-h-11 max-md:items-center",
+              ),
+            },
+            t("pairing.viewActivity"),
+          )}
+        </div>
       )}
     </section>
   );

@@ -92,7 +92,8 @@ export function FilterChipGroup<T extends string = string>({
             // toggling a width would resize the chip on selection and shunt
             // every chip after it sideways.
             className={cn(
-              "shrink-0 rounded-full border px-3 py-1 text-badge transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50",
+              // Below 768px a chip is painted at the 44px touch floor.
+              "shrink-0 rounded-full border px-3 py-1 text-badge max-md:min-h-11 max-md:px-4 transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50",
               option.alignEnd && "ml-auto",
               checked
                 ? "border-transparent bg-primary text-primary-foreground"
