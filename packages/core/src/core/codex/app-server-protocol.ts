@@ -177,6 +177,9 @@ export type ThreadHistoryMode = "legacy" | "paginated";
 /** Configuration overrides shared by thread/start, thread/resume, and thread/fork. */
 export interface ThreadConfigurationOverrides {
   model?: string | null;
+  /** Codex provider id. Resume falls back to the process default when absent,
+   *  so a thread off the default must name it on every start and resume. */
+  modelProvider?: string | null;
   cwd?: string | null;
   approvalPolicy?: AskForApproval | null;
   sandbox?: SandboxMode | null;

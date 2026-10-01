@@ -23,6 +23,8 @@ const log = createLogger("codex-app-server");
 export interface AppServerClientOptions {
   cwd: string;
   env: Record<string, string>;
+  /** Root `-c key=value` overrides passed to `codex` before `app-server`. */
+  configArgs?: readonly string[];
   /** Fired for every server→client notification. */
   onNotification: (method: string, params: unknown) => void;
   /** Fired for server→client requests; the resolved value becomes the JSON-RPC
@@ -59,10 +61,13 @@ export class AppServerClient {
 
   start(): void {
     log.info("spawning codex app-server");
-    const proc = spawnCodexAppServer({
-      cwd: this.opts.cwd,
-      env: this.opts.env,
-    });
+    const proc = spawnCodexAppServer(
+      {
+        cwd: this.opts.cwd,
+        env: this.opts.env,
+      },
+      this.opts.configArgs,
+    );
     this.proc = proc;
 
     proc.stdout.setEncoding("utf8");
