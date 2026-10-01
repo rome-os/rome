@@ -21,11 +21,6 @@ export function wechatAppRoutes(deps: Pick<ApiDeps, "wechatApp">): Hono {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
     await next();
   });
-  app.use("/wechat/app", async (c, next) => {
-    if ((await currentSessionActor())?.kind !== "guardian")
-      return c.json({ error: "Guardian authentication required" }, 403);
-    await next();
-  });
 
   const disabled = (c: Context) =>
     c.json({ error: "WeChat is not enabled on this instance." }, 404);

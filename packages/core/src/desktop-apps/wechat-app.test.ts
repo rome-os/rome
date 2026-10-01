@@ -70,6 +70,16 @@ describe("WechatApp", () => {
     expect(await app.status()).toEqual({ state: "installing" });
   });
 
+  it("starts nothing while the connection's setup owns the install", async () => {
+    const { runtime } = fakeRuntime({ installInFlight: true });
+    const app = new WechatApp(runtime);
+
+    expect(await app.install()).toEqual({ state: "installing" });
+    expect(await app.start()).toEqual({ state: "installing" });
+    expect(runtime.install).not.toHaveBeenCalled();
+    expect(runtime.start).not.toHaveBeenCalled();
+  });
+
   it("downloads the client in the background, then opens it", async () => {
     const { runtime, gates } = fakeRuntime();
     const app = new WechatApp(runtime);
