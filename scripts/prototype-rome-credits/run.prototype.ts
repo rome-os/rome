@@ -343,23 +343,54 @@ async function main(): Promise<void> {
     return turn;
   };
 
-  const resume = async (label: string, threadId: string, config: Record<string, unknown>): Promise<void> => {
+  // `modelProvider` null sends no explicit provider (config override only), to
+  // show whether thread/resume honors `config.model_provider` on its own.
+  const resume = async (
+    label: string,
+    threadId: string,
+    config: Record<string, unknown>,
+    modelProvider: string | null,
+  ): Promise<void> => {
     await client.request("thread/unsubscribe", { threadId }).catch((error) =>
       trace("codex.unsubscribeFailed", { error: (error as Error).message }),
     );
     try {
       const { historyMode: _h, dynamicTools: _d, ...overrides } = threadParams(config);
-      const result = (await client.request("thread/resume", { threadId, ...overrides, excludeTurns: true })) as Record<
+      const params = { threadId, ...overrides, ...(modelProvider ? { modelProvider } : {}), excludeTurns: true };
+      const result = (await client.request("thread/resume", params)) as Record<
         string,
         unknown
       >;
-      trace("codex.threadResumed", { label, thread: short(threadId), modelProvider: result.modelProvider ?? null });
+      trace("codex.threadResumed", {
+        label,
+        thread: short(threadId),
+        requestedModelProvider: modelProvider ?? `(config only: ${String(config.model_provider ?? "none")})`,
+        modelProvider: result.modelProvider ?? null,
+      });
     } catch (error) {
       trace("codex.threadResumeFailed", { label, error: (error as Error).message });
     }
   };
 
-  const section = (title: string) => console.log(`\n=== ${title}`);
+  const section = (title: string) => {
+    plan.length = 0;
+    console.log(`\n=== ${title}`);
+  };
+  const history = async (label: string, threadId: string) => {
+    const turns = (await client.request("thread/turns/list", { threadId, limit: 5 }).catch((error) => ({
+      error: (error as Error).message,
+    }))) as Record<string, unknown>;
+    trace(`check.${label}.history`, {
+      turns: Array.isArray(turns.data)
+        ? (turns.data as Record<string, unknown>[]).map((turn) => ({
+            status: turn.status,
+            items: Array.isArray(turn.items)
+              ? (turn.items as Record<string, unknown>[]).map((item) => item.type)
+              : null,
+          }))
+        : turns,
+    });
+  };
 
   // Q1 + Q2: Rome's thread config unchanged except for the provider. Does the
   // request Codex sends pass #108's admission rule as is?
@@ -387,7 +418,8 @@ async function main(): Promise<void> {
   // Q3: credits -> own login (spec D10). Rome's resume path: unsubscribe, then
   // thread/resume with the new config overrides.
   section("S3 move credits thread B to the ChatGPT login");
-  await resume("B -> own-login", b, ownLoginConfig);
+  await resume("B -> own-login (config only)", b, ownLoginConfig, null);
+  await resume("B -> own-login (explicit modelProvider)", b, ownLoginConfig, "openai");
   const beforeS3 = requestCount;
   await runTurn("B on own-login", b, "Reply with exactly: CHARLIE");
   trace("check.S3", { gatewayRequestsDuringS3: requestCount - beforeS3, bMessages: messages.get(b) ?? [] });
@@ -396,9 +428,16 @@ async function main(): Promise<void> {
   // limited). What history, including OpenAI-encrypted reasoning, does Codex
   // replay to the gateway?
   section("S4 move ChatGPT thread A to Rome credits");
-  await resume("A -> credits", a, creditsConfig(baseUrl, { web_search: "disabled" }));
+  await resume("A -> credits (config only)", a, creditsConfig(baseUrl, { web_search: "disabled" }), null);
+  await resume("A -> credits (explicit modelProvider)", a, creditsConfig(baseUrl, { web_search: "disabled" }), "rome_credits");
   plan.push({ kind: "text", text: "DELTA" });
   await runTurn("A on credits", a, "Reply with exactly: DELTA");
+  await history("S4", a);
+
+  section("S4b move credits thread B back to Rome credits after its own-login turn");
+  await resume("B -> credits", b, creditsConfig(baseUrl, { web_search: "disabled" }), "rome_credits");
+  plan.push({ kind: "text", text: "GOLF" });
+  await runTurn("B back on credits", b, "Reply with exactly: GOLF");
 
   // Q4: credits refused before a turn, and in the middle of a turn.
   section("S5 credits refused (402) before the first model step");
@@ -410,21 +449,13 @@ async function main(): Promise<void> {
   const d = await startThread("D credits", creditsConfig(baseUrl, { web_search: "disabled" }));
   plan.push({ kind: "tool" }, { kind: "error", status: 402 });
   await runTurn("D mid-turn", d, "Call rome_echo with text 'step one', then summarize.");
-  const turns = (await client.request("thread/turns/list", { threadId: d, limit: 5 }).catch((error) => ({
-    error: (error as Error).message,
-  }))) as Record<string, unknown>;
-  const turnItems = Array.isArray(turns.data)
-    ? (turns.data as Record<string, unknown>[]).map((turn) => ({
-        status: turn.status,
-        items: Array.isArray(turn.items) ? (turn.items as Record<string, unknown>[]).map((item) => item.type) : null,
-      }))
-    : turns;
-  trace("check.S6.history", { turns: turnItems });
+  await history("S6", d);
 
   section("S7 gateway concurrency limit (429 with retry-after: 60)");
   const e = await startThread("E credits", creditsConfig(baseUrl, { web_search: "disabled" }));
   plan.push({ kind: "error", status: 429 }, { kind: "error", status: 429 }, { kind: "error", status: 429 });
   await runTurn("E 429", e, "Reply with exactly: FOXTROT");
+  await history("S7", e);
 
   trace("done", { gatewayRequests: requestCount });
   client.close();
