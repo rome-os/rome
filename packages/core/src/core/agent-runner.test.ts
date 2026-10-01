@@ -550,6 +550,45 @@ describe("AgentRunner", () => {
   }
 
   describe("forked turn bracketing", () => {
+    it("drops an exact fork's tool input previews for subagent calls", async () => {
+      // Only an exact fork keeps the source's subagent tools.
+      const messages = await runForkAgainstLiveSession(
+        () =>
+          forkSessionStub({
+            events: (async function* (): AsyncIterable<AgentMessage> {
+              yield {
+                type: "tool_input_delta",
+                toolUseId: "tu-explore-1",
+                tool: "test-explore",
+                content: "{",
+              };
+              yield {
+                type: "tool_input_delta",
+                toolUseId: "tu-lookup-1",
+                tool: "lookup",
+                content: "{",
+              };
+              yield { type: "result", content: "Fork complete" };
+            })(),
+          }),
+        {
+          sourceProviderThreadId: "provider-thread",
+          fork: {
+            mode: "exact",
+            sourceCheckpoint: {
+              providerId: "mock",
+              providerThreadId: "provider-thread",
+              checkpointId: "provider-turn-t2",
+            },
+          },
+        },
+      );
+
+      expect(messages.filter((m) => m.type === "tool_input_delta")).toEqual([
+        expect.objectContaining({ toolUseId: "tu-lookup-1" }),
+      ]);
+    });
+
     it("validates and forwards the selected provider checkpoint", async () => {
       let providerFork: ModelSessionForkParams | undefined;
       const messages = await runForkAgainstLiveSession(
@@ -5006,6 +5045,65 @@ describe("AgentRunner", () => {
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
+    });
+
+    it("drops tool input previews for subagent calls, whose tool_use is never published", async () => {
+      let calls = 0;
+      const runImpl = async function* (
+        params: import("./agent-runner.js").ModelRunParams,
+      ): AsyncIterable<AgentMessage> {
+        calls += 1;
+        if (calls > 1) {
+          yield { type: "result", content: "Explore complete" };
+          return;
+        }
+        yield { type: "tool_input_delta", toolUseId: "tu-lookup-1", tool: "lookup", content: "{" };
+        yield { type: "tool_use", id: "tu-lookup-1", tool: "lookup", input: {} };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-lookup-1",
+          tool: "lookup",
+          output: { ok: true },
+        };
+        yield {
+          type: "tool_input_delta",
+          toolUseId: "tu-explore-1",
+          tool: "test-explore",
+          content: '{"prompt":',
+        };
+        yield {
+          type: "tool_use",
+          id: "tu-explore-1",
+          tool: "test-explore",
+          input: { prompt: "Inspect" },
+        };
+        const output = await params.executeSubagent(
+          "test-explore",
+          { prompt: "Inspect" },
+          { toolUseId: "tu-explore-1" },
+        );
+        yield { type: "tool_result", toolUseId: "tu-explore-1", tool: "test-explore", output };
+        yield { type: "result", content: "Delegated" };
+      };
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-subagent-preview",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", runImpl),
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Delegate" }),
+      );
+
+      const previews = messages.filter((m) => m.type === "tool_input_delta");
+      expect(previews).toEqual([expect.objectContaining({ toolUseId: "tu-lookup-1" })]);
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "subagent_start", toolUseId: "tu-explore-1" }),
+        ]),
+      );
     });
 
     it("keeps nested subagent runtime messages out of the Parent stream and observer", async () => {

@@ -1556,6 +1556,13 @@ async function openSession(
         interactiveSurfaceDetached: true,
       },
       projectProviderMessage: async (msg) => {
+        if (
+          msg.type === "tool_input_delta" &&
+          msg.tool !== undefined &&
+          subagentToolNames.has(msg.tool)
+        ) {
+          return [];
+        }
         if (msg.type === "tool_use" && subagentToolNames.has(msg.tool)) {
           forkPendingSubagentUses.set(msg.id, msg);
           maybeEmitForkSubagentStart(msg.id);
@@ -2147,6 +2154,15 @@ class AgentSessionImpl implements AgentSession {
         // block still follows. Fast-path them straight to the sink: no
         // span-translator capture, no per-delta DB touch, no metrics.
         if (isTransientDelta(msg)) {
+          // A subagent call publishes `subagent_start` instead of its
+          // `tool_use`, so its input preview would reference nothing.
+          if (
+            msg.type === "tool_input_delta" &&
+            msg.tool !== undefined &&
+            this.subagentToolNames.has(msg.tool)
+          ) {
+            continue;
+          }
           this.publishOutbound(sink, msg);
           continue;
         }

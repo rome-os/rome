@@ -355,6 +355,9 @@ interface ActiveTurn {
   errorHttpStatus?: number;
   /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
   nativeStatus: string | null;
+  /** Last reasoning part each in-flight reasoning item streamed, by item id.
+   *  Lives and dies with the turn, so an unfinished item leaves nothing behind. */
+  reasoningDeltaParts: Map<string, string>;
 }
 
 interface CodexAppServerProviderOptions {
@@ -540,8 +543,6 @@ export class CodexAppServerProvider implements ModelProvider {
     let lastCompletedTurnCheckpoint: string | undefined;
     let appliedReasoningEffort: string | undefined;
     const dynamicToolOutputs = new Map<string, FacadeToolResult>();
-    // Last reasoning part each in-flight reasoning item streamed, by item id.
-    const reasoningDeltaParts = new Map<string, string>();
     const usageByTurnId = new Map<
       string,
       { usage: ThreadTokenUsage; hasNewRequestUsage: boolean }
@@ -598,7 +599,7 @@ export class CodexAppServerProvider implements ModelProvider {
       }
       if (isReasoningItem(item)) {
         if (lifecycle !== "completed") return;
-        reasoningDeltaParts.delete(item.id);
+        activeTurn?.reasoningDeltaParts.delete(item.id);
         const text = [...item.summary, ...item.content].filter(Boolean).join("\n").trim();
         if (text)
           turnSink.push(
@@ -728,8 +729,8 @@ export class CodexAppServerProvider implements ModelProvider {
           // The completed `thinking` block joins every summary and content part
           // with a newline; separate parts the same way while streaming.
           const part = `${method}:${p.summaryIndex ?? p.contentIndex ?? 0}`;
-          const previousPart = reasoningDeltaParts.get(p.itemId);
-          reasoningDeltaParts.set(p.itemId, part);
+          const previousPart = activeTurn.reasoningDeltaParts.get(p.itemId);
+          activeTurn.reasoningDeltaParts.set(p.itemId, part);
           const content =
             previousPart !== undefined && previousPart !== part ? `\n${p.delta}` : p.delta;
           activeTurn.sink.push({ type: "thinking_delta", blockId: p.itemId, content });
@@ -966,6 +967,7 @@ export class CodexAppServerProvider implements ModelProvider {
         errorMessage: null,
         errorCode: null,
         nativeStatus: null,
+        reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
