@@ -7,9 +7,9 @@ export type SessionStreamState = {
   // Live preview of the CURRENT in-flight assistant text block (server
   // `assistant_text` SSE events, `{blockIx, text}`). Each completed block
   // becomes its own persisted message in the transcript, so the live tail only
-  // ever holds the block being typed right now; the server clears it (emits an
-  // empty text at the next blockIx) once a block commits. Empty until the first
-  // block streams.
+  // ever holds the block being typed right now. On commit the server clears
+  // its internal buffer and advances blockIx; the next block's first text
+  // event replaces this preview. Empty until the first block streams.
   assistantText: string;
   assistantBlockIx: number;
   /** Trace activity at or before this ordinal was superseded by text. */
@@ -53,8 +53,7 @@ export function updateSnapshot(
 // Turn-guarded like updateSnapshot. Block-guarded too: SSE events arrive in
 // order, so a lower blockIx than the one on screen is a stale frame — never
 // regress to an earlier block. A higher blockIx replaces the current block: the
-// completed block is now its own persisted message, and the server has already
-// cleared the live tail (empty text at the new blockIx), so the tail only holds
+// completed block is now its own persisted message, so the tail only holds
 // the block being typed now.
 export function updateAssistantText(
   prev: StreamingSessionMap,
@@ -67,8 +66,9 @@ export function updateAssistantText(
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
   if (blockIx < existing.assistantBlockIx) return prev;
-  // Reattached SSE streams replay from the beginning. A shorter prefix in
-  // the same block is older than the live preview already on screen.
+  // The agent-turn-stream SSE path can replay text deltas from the beginning;
+  // the main webchat path replays only the latest assistant_text frame. A
+  // shorter same-block prefix is older than the live preview already shown.
   if (
     !finalized &&
     blockIx === existing.assistantBlockIx &&

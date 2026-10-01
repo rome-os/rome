@@ -96,7 +96,7 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.assistantText).toBe("Hello");
     expect(state.get("A")?.assistantBlockIx).toBe(0);
     // Higher blockIx: the completed block is now its own message; the live tail
-    // moves to the new block (the server clears it with an empty text first).
+    // moves to the new block (the server clears its own buffer on commit).
     state = updateAssistantText(state, "A", "turn-1", 1, "");
     expect(state.get("A")?.assistantText).toBe("");
     expect(state.get("A")?.assistantBlockIx).toBe(1);

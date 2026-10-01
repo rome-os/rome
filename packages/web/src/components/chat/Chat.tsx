@@ -737,7 +737,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         shouldApply?: () => boolean;
         bounded?: boolean;
       } = {},
-    ): Promise<boolean> => {
+    ): Promise<boolean | null> => {
       if (!options.force && loadedSessionsRef.current.has(id)) return true;
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
@@ -760,7 +760,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           // leaving the user staring at an empty active-chat shell. A missing
           // handoff child must not redirect its still-valid parent chat.
           if (id === mainSessionIdRef.current) onSessionNotFoundRef.current?.(id);
-          return false;
+          return null;
         }
         if (options.shouldApply && !options.shouldApply()) return false;
         const fetchedMessages = orderChatMessages(data);
@@ -849,6 +849,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             return;
           }
           if (loaded) {
+            pendingMessageReconciliationsRef.current.delete(id);
+            return;
+          }
+          if (loaded === null) {
+            // /turns is intentionally session-agnostic (200 [] for deleted
+            // sessions). The subsequent /messages 404 is authoritative: this
+            // child is gone, so no answer can arrive through this poller.
             pendingMessageReconciliationsRef.current.delete(id);
             return;
           }
@@ -1134,7 +1141,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // background reconciliation must continue until the turn list empties.
         if (loaded && floorSessionIdRef.current === sessionId)
           pendingMessageReconciliationsRef.current.delete(sessionId);
-        return loaded;
+        return loaded === true;
       }
       return false;
     },

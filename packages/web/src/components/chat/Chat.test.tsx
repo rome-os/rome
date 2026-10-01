@@ -734,6 +734,52 @@ describe("Chat turn stream lifecycle", () => {
     );
   });
 
+  it("stops reconciling an off-floor child after its messages endpoint confirms 404", async () => {
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener("abort", () => controller.error(new Error("floor changed")));
+            },
+          }),
+        ),
+      ),
+    );
+    rs.mocked(listSessionTurns).mockImplementation((sid) =>
+      Promise.resolve(sid === "session-1" ? [{ turnId: "turn-1", status: "running" }] : []),
+    );
+    const onSessionNotFound = rs.fn();
+    const { rerender } = renderChat(
+      <Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" onSessionNotFound={onSessionNotFound} />
+      </MemoryRouter>,
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionMessages).mockResolvedValue(null);
+    rs.useFakeTimers();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    const lookupsAfterNotFound = rs.mocked(listSessionTurns).mock.calls.length;
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(35_000);
+    });
+    // Idle polling for the current floor continues, but the deleted former
+    // floor has no remaining reconciliation timer.
+    expect(
+      rs.mocked(listSessionTurns).mock.calls.filter(([sid]) => sid === "session-1"),
+    ).toHaveLength(2);
+    expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(lookupsAfterNotFound);
+  });
+
   it("reattaches a still-running off-floor turn without waiting for message reconciliation", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     rs.mocked(openTurnStream).mockImplementation(() =>
