@@ -1,10 +1,13 @@
+import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   AppState,
+  BackHandler,
   Easing,
   Linking,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -14,6 +17,13 @@ import { LauncherMessage } from "./launcher-screens";
 import { EMBER } from "./mobile-theme";
 import { sessionCoordinator } from "./mobile-runtime";
 import type { CloudInstance, InstanceSession } from "./native-auth-types";
+import {
+  handleHardwareBack,
+  PULL_TO_REFRESH_SCRIPT,
+  PULL_TO_REFRESH_THRESHOLD,
+  PullToRefreshController,
+  parsePullToRefreshMessage,
+} from "./webview-navigation";
 import { configureTokenUsageWidget } from "./widget-usage-runtime";
 
 interface InstanceWebViewScreenProps {
@@ -52,6 +62,38 @@ function RefreshingBanner() {
   );
 }
 
+const PULL_INDICATOR_SIZE = 36;
+
+function PullToRefreshIndicator({ pull, reloading }: { pull: Animated.Value; reloading: boolean }) {
+  const translateY = pull.interpolate({
+    inputRange: [0, PULL_TO_REFRESH_THRESHOLD, PULL_TO_REFRESH_THRESHOLD * 2],
+    outputRange: [-PULL_INDICATOR_SIZE, 64, 96],
+    extrapolate: "clamp",
+  });
+  const opacity = pull.interpolate({
+    inputRange: [0, PULL_TO_REFRESH_THRESHOLD / 2, PULL_TO_REFRESH_THRESHOLD],
+    outputRange: [0, 0.6, 1],
+    extrapolate: "clamp",
+  });
+  const rotate = pull.interpolate({
+    inputRange: [0, PULL_TO_REFRESH_THRESHOLD],
+    outputRange: ["0deg", "180deg"],
+    extrapolate: "clamp",
+  });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[styles.pullIndicator, { opacity, transform: [{ translateY }] }]}
+    >
+      {reloading ? (
+        <ActivityIndicator color={EMBER.primary} />
+      ) : (
+        <Animated.Text style={[styles.pullArrow, { transform: [{ rotate }] }]}>↓</Animated.Text>
+      )}
+    </Animated.View>
+  );
+}
+
 export function InstanceWebViewScreen({
   instance,
   session,
@@ -61,6 +103,34 @@ export function InstanceWebViewScreen({
   const webViewRef = useRef<WebView>(null);
   const [webViewKey, setWebViewKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const canGoBackRef = useRef(false);
+  const pull = useRef(new Animated.Value(0)).current;
+  const [reloading, setReloading] = useState(false);
+  const [pullController] = useState(
+    () =>
+      new PullToRefreshController({
+        showPull: (distance) => pull.setValue(distance),
+        settle: (toValue) =>
+          Animated.timing(pull, {
+            duration: 180,
+            easing: Easing.out(Easing.cubic),
+            toValue,
+            useNativeDriver: true,
+          }).start(),
+        setReloading,
+        thresholdReached: () =>
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined),
+        reload: () => webViewRef.current?.reload(),
+      }),
+  );
+
+  useEffect(() => () => pullController.dispose(), [pullController]);
+
+  const remountWebView = useCallback(() => {
+    canGoBackRef.current = false;
+    pullController.reset();
+    setWebViewKey((value) => value + 1);
+  }, [pullController]);
 
   const refresh = useCallback(async () => {
     if (refreshing) return;
@@ -68,13 +138,13 @@ export function InstanceWebViewScreen({
     try {
       const next = await sessionCoordinator.refresh(instance);
       onSession(next);
-      setWebViewKey((value) => value + 1);
+      remountWebView();
     } catch (error) {
       onFailure(error);
     } finally {
       setRefreshing(false);
     }
-  }, [instance, onFailure, onSession, refreshing]);
+  }, [instance, onFailure, onSession, refreshing, remountWebView]);
 
   useEffect(() => {
     const configureWidget = () => configureTokenUsageWidget(instance, session);
@@ -91,6 +161,22 @@ export function InstanceWebViewScreen({
       appState.remove();
     };
   }, [instance, session]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () =>
+      handleHardwareBack(canGoBackRef.current, webViewRef.current),
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const onMessage = useCallback<NonNullable<WebViewProps["onMessage"]>>(
+    (event) => {
+      const pullEvent = parsePullToRefreshMessage(event.nativeEvent.data);
+      if (pullEvent) pullController.handle(pullEvent);
+    },
+    [pullController],
+  );
 
   const onShouldStartLoadWithRequest = useCallback<
     NonNullable<WebViewProps["onShouldStartLoadWithRequest"]>
@@ -153,6 +239,13 @@ export function InstanceWebViewScreen({
             }
           }}
           onHttpError={onHttpError}
+          onMessage={onMessage}
+          injectedJavaScript={PULL_TO_REFRESH_SCRIPT}
+          onNavigationStateChange={(state) => {
+            canGoBackRef.current = state.canGoBack;
+          }}
+          onLoadEnd={() => pullController.loadEnded()}
+          allowsBackForwardNavigationGestures
           sharedCookiesEnabled
           thirdPartyCookiesEnabled={false}
           automaticallyAdjustContentInsets={false}
@@ -164,11 +257,12 @@ export function InstanceWebViewScreen({
             <LauncherMessage
               title="Rome is unavailable"
               action="Try again"
-              onAction={() => setWebViewKey((value) => value + 1)}
+              onAction={remountWebView}
               tone="error"
             />
           )}
         />
+        <PullToRefreshIndicator pull={pull} reloading={reloading} />
         {refreshing ? <RefreshingBanner /> : null}
       </View>
     </View>
@@ -194,5 +288,24 @@ const styles = StyleSheet.create({
     right: 24,
     top: 14,
   },
+  pullIndicator: {
+    alignItems: "center",
+    alignSelf: "center",
+    backgroundColor: EMBER.surfaceElevated,
+    borderColor: EMBER.border,
+    borderRadius: PULL_INDICATOR_SIZE / 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: PULL_INDICATOR_SIZE,
+    justifyContent: "center",
+    position: "absolute",
+    shadowColor: EMBER.foreground,
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+    top: 0,
+    width: PULL_INDICATOR_SIZE,
+  },
+  pullArrow: { color: EMBER.primary, fontSize: 18, fontWeight: "700" },
   refreshingLabel: { color: EMBER.mutedForeground, fontSize: 13, fontWeight: "600" },
 });
