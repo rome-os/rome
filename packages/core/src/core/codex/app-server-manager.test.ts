@@ -366,6 +366,40 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
+  it("keeps retrying while a thread's shutdown outlasts two seconds", async () => {
+    // Codex waits up to 10 s for a thread to shut down, so "is closing" can
+    // last well past a short retry budget.
+    let closingUntil = 0;
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-slow-close");
+        const request = client.request.bind(client);
+        client.request = async (method, params) => {
+          if (method === "thread/resume") {
+            closingUntil ||= Date.now() + 3_000;
+            if (Date.now() < closingUntil) {
+              throw new Error(
+                "thread thread-slow-close is closing; retry thread/resume after the thread is closed",
+              );
+            }
+          }
+          return await request(method, params);
+        };
+        return client;
+      },
+    });
+    try {
+      const handle = await manager.openThread(
+        config("rome_slow_close"),
+        binding("slow-close"),
+        "thread-slow-close",
+      );
+      expect(handle.threadId).toBe("thread-slow-close");
+    } finally {
+      manager.close();
+    }
+  }, 10_000);
+
   it("retries a resume while the thread is still closing", async () => {
     const clients: FakeConnection[] = [];
     let closingReplies = 2;

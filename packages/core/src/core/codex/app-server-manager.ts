@@ -74,7 +74,8 @@ function defaultCodexEnvironment(): Record<string, string> {
   return env;
 }
 
-const RESUME_CLOSING_RETRY_LIMIT = 20;
+// Codex 0.156 waits up to 10 s for a thread to shut down, so outlast that.
+const RESUME_CLOSING_BUDGET_MS = 12_000;
 const RESUME_CLOSING_RETRY_DELAY_MS = 100;
 
 /**
@@ -85,12 +86,13 @@ async function requestThreadResume(
   client: CodexAppServerConnection,
   params: ThreadResumeParams,
 ): Promise<unknown> {
-  for (let attempt = 1; ; attempt += 1) {
+  const deadline = Date.now() + RESUME_CLOSING_BUDGET_MS;
+  for (;;) {
     try {
       return await client.request(Method.threadResume, params);
     } catch (err) {
       const closing = err instanceof Error && err.message.includes("is closing");
-      if (!closing || attempt >= RESUME_CLOSING_RETRY_LIMIT) throw err;
+      if (!closing || Date.now() >= deadline) throw err;
       await new Promise((resolve) => setTimeout(resolve, RESUME_CLOSING_RETRY_DELAY_MS));
     }
   }
