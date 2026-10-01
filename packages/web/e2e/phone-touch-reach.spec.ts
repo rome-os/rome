@@ -71,7 +71,11 @@ for (const { path, ready } of ROUTES) {
 
     expect(await page.evaluate(measureHorizontalOverflow), `${path} scrolls sideways`).toBe(0);
 
-    const violations = await page.evaluate(collectTouchReachViolations, null);
+    const violations = await page.evaluate(collectTouchReachViolations, {
+      scope: null,
+      ownBox: false,
+      reach: true,
+    });
     expect(violations, `controls under 44px reach on ${path}:\n${report(violations)}`).toEqual([]);
   });
 }
@@ -84,8 +88,34 @@ test("the open sidebar at phone size: 44px reach", async ({ page }) => {
   // The slide-over animates in; measure it at rest.
   await expect.poll(async () => (await sidebar.boundingBox())?.x).toBe(0);
 
-  const violations = await page.evaluate(collectTouchReachViolations, "aside");
+  const violations = await page.evaluate(collectTouchReachViolations, {
+    scope: "aside",
+    ownBox: false,
+    reach: true,
+  });
   expect(violations, `controls under 44px reach in the sidebar:\n${report(violations)}`).toEqual(
     [],
   );
+});
+
+// The kit's own composites, independent of which routes the survey covers. A
+// gallery specimen is not laid out for a phone, so it is not held to the
+// 44px reach. It is held to the rule a default hit area could break: a tap on
+// a control's own box reaches that control, not a neighbour whose hit area
+// spills over it. Calendar's day grid and ButtonGroup pack controls edge to
+// edge, which is where that would happen first.
+test("kit composites keep every control's own box its own on touch", async ({ page }) => {
+  await page.goto("/dev/gallery");
+  await expect(page.locator("#calendar [data-day]").first()).toBeVisible({ timeout: 30_000 });
+  await page.evaluate(() => document.fonts.ready);
+
+  const violations = await page.evaluate(collectTouchReachViolations, {
+    scope: "#controls",
+    ownBox: true,
+    reach: false,
+  });
+  expect(
+    violations,
+    `taps on a control's own box that land elsewhere:\n${report(violations)}`,
+  ).toEqual([]);
 });

@@ -108,6 +108,12 @@ describe("the touch-hit cascade contract", () => {
     expect(hitArea[0]?.declarations).toMatch(/height:\s*max\(100%,/);
   });
 
+  it("never sets `display`, so `before:hidden` stays a working opt-out", () => {
+    // A grid packed edge to edge, such as Calendar's days, opts out this way.
+    // Were the unlayered rule to set `display`, it would outrank the utility.
+    expect(hitArea[0]?.declarations).not.toMatch(/(?:^|[\s;])display\s*:/);
+  });
+
   it("anchors the hit area in `base`, so an `absolute` or `sticky` caller still wins", () => {
     expect(anchor).toHaveLength(1);
     expect(anchor[0]?.layers).toEqual(["base"]);

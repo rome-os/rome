@@ -777,13 +777,17 @@
    kit draws its indicators (the tab and page-nav underlines). It is centred on
    the control and only ever grows it: a control already past the floor on an
    axis keeps its own extent there. Like `touch-target`'s floor it is
-   unlayered, so it outranks a `before:*` utility on the same element. Do not
-   pair the two.
+   unlayered, so it outranks a `before:*` utility that sets the same
+   properties. Do not pair the two.
 
-   The extension can land on a neighbor. A later positioned control paints
-   over an earlier one, so two controls closer than 44px centre to centre
-   share the overlap, and the layout has to space them on touch. A control
-   that clips its own overflow clips the extension with it. */
+   The extension can land on a neighbor's own box. A later positioned control
+   paints over an earlier one, so where two controls sit closer than 44px
+   centre to centre, a tap near the earlier one's edge reaches the later one.
+   Space them on touch, grow their boxes with `touch-target` instead, or opt
+   out with `before:hidden`. The opt-out works because this rule never sets
+   `display`, so the utility's `display: none` still applies. A grid packed
+   edge to edge, such as Calendar's days, opts out. A control that clips its
+   own overflow clips the extension with it. */
 @media (hover: none) {
   .touch-hit::before {
     content: "";

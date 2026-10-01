@@ -5,10 +5,12 @@
  * pseudo-element hit area rather than a larger visible control. A box size
  * alone cannot say whether that holds: a hit area can be clipped by a
  * scrolling ancestor, and a neighbor's hit area can paint over it. So this
- * asks the browser instead. For each control it hit-tests the centre and the
- * four points 21px out along each axis, and every one of them must land on
- * the control or something inside it. Points past the viewport edge are
- * pulled back onto it, because the screen edge already stops a finger.
+ * asks the browser instead. For each control it hit-tests the centre and, as
+ * asked, the four points 21px out along each axis (the reach) and a point just
+ * inside each edge of the control's own box (which no neighbour's hit area may
+ * take). Every one of them must land on the control or something inside it.
+ * Points past the viewport edge are pulled back onto it, because the screen
+ * edge already stops a finger.
  */
 
 export type ReachViolation = {
@@ -26,8 +28,19 @@ export type ReachViolation = {
  * `details`. Also skipped: a link that is a word in a running sentence,
  * which WCAG 2.5.8 exempts, since padding it would reflow the prose.
  */
-export function collectTouchReachViolations(scope: string | null): ReachViolation[] {
+export function collectTouchReachViolations({
+  scope,
+  ownBox,
+  reach,
+}: {
+  scope: string | null;
+  /** A point just inside each edge of the control's own box. */
+  ownBox: boolean;
+  /** The 44px reach: 21px out from the centre along each axis. */
+  reach: boolean;
+}): ReachViolation[] {
   const REACH = 21;
+  const EDGE = 2;
   const root = scope ? document.querySelector(scope) : document.body;
   if (!root) return [{ element: `scope ${scope}`, misses: ["not found"] }];
 
@@ -73,19 +86,21 @@ export function collectTouchReachViolations(scope: string | null): ReachViolatio
     const cy = r.top + r.height / 2;
     const clamp = (value: number, max: number) => Math.min(Math.max(value, 0.5), max - 0.5);
     const misses: string[] = [];
-    for (const [dx, dy] of [
-      [0, 0],
-      [-REACH, 0],
-      [REACH, 0],
-      [0, -REACH],
-      [0, REACH],
-    ]) {
+    // A point just inside each edge of the control's own box reached this
+    // control before any hit area existed, and a neighbour's hit area must
+    // not take it.
+    const halfW = Math.max(r.width / 2 - EDGE, 0);
+    const halfH = Math.max(r.height / 2 - EDGE, 0);
+    const points = [[0, 0]];
+    if (ownBox) points.push([-halfW, 0], [halfW, 0], [0, -halfH], [0, halfH]);
+    if (reach) points.push([-REACH, 0], [REACH, 0], [0, -REACH], [0, REACH]);
+    for (const [dx, dy] of points) {
       const hit = document.elementFromPoint(
         clamp(cx + dx, window.innerWidth),
         clamp(cy + dy, window.innerHeight),
       );
       if (hit && (hit === el || el.contains(hit))) continue;
-      misses.push(`${dx},${dy} -> ${hit ? describe(hit) : "nothing"}`);
+      misses.push(`${Math.round(dx)},${Math.round(dy)} -> ${hit ? describe(hit) : "nothing"}`);
     }
     if (misses.length > 0) {
       violations.push({
