@@ -99,6 +99,71 @@ export function createAction(config, deps) {
     }
   });
 
+  it("tells an action built against SDK 0.6 that deps.talkRouter is gone, in both loaders", async () => {
+    for (const register of [registerAppActions, registerLazyAppActions]) {
+      const app = resolvedApp("old-app");
+      const actionDir = await tempDir();
+      await writeFile(
+        join(actionDir, "index.js"),
+        `
+export function createAction(config, deps) {
+  return {
+    config,
+    execute: async () => {
+      const listed = Object.keys(deps).includes("talkRouter");
+      try {
+        await deps.talkRouter.send("c-1", "t-1", { text: "hi" });
+        return { status: "ok", data: { listed } };
+      } catch (err) {
+        return { status: "error", error: err.message, data: { listed } };
+      }
+    },
+  };
+}
+`,
+      );
+      const loader = {
+        getAllRecords: () =>
+          new Map([
+            [
+              "old_send",
+              {
+                config: actionConfig("old_send"),
+                directory: actionDir,
+                metadata: {
+                  kind: "action",
+                  ownerType: "app",
+                  ownerId: "old-app",
+                  publicName: "old_send",
+                  aliases: [],
+                  sourcePath: actionDir,
+                },
+              },
+            ],
+          ]),
+      } as unknown as ActionLoader;
+      const registry = new ActionRegistryImpl([]);
+      await register(
+        loader,
+        registry,
+        catalogFor(app),
+        {},
+        {
+          db: {} as RomeAppRuntimeServices["db"],
+          actionEngine: {} as ActionEngine,
+          repositories: createRepositories(),
+        },
+      );
+
+      expect(await registry.get("old_send")?.execute({})).toEqual({
+        status: "error",
+        error:
+          "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
+        data: { listed: false },
+      });
+    }
+  });
+
   afterEach(async () => {
     delete (globalThis as RuntimeContextGlobal).__romeAppRuntimeContexts;
     delete (globalThis as RuntimeContextGlobal).__lazyActionEvents;

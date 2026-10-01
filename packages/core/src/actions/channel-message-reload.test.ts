@@ -162,4 +162,29 @@ export function createHook() {
       { owner: "inbox" },
     );
   });
+
+  it("tells a hook built against SDK 0.6 that deps.talkRouter is gone", async () => {
+    const dir = await writeHookModule(`
+export function createHook(deps) {
+  return {
+    listed: Object.keys(deps).includes("talkRouter"),
+    channels: deps.channels,
+    async register() {
+      deps.talkRouter.subscribe("c-1", async () => {});
+    },
+  };
+}
+`);
+    const channels = [] as ChannelMessageHookDeps["channels"];
+
+    const hook = (await createChannelMessageHookFromCatalog(catalogWithHookDir(dir), {
+      channels,
+    } as ChannelMessageHookDeps)) as ChannelMessageHook & { listed: boolean; channels: unknown };
+
+    expect(hook.listed).toBe(false);
+    expect(hook.channels).toBe(channels);
+    await expect(hook.register()).rejects.toThrow(
+      "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",
+    );
+  });
 });

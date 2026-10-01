@@ -206,18 +206,30 @@ describe("connection-backed messages, shared reads", () => {
     const said = {
       ...line("only", 5),
       attachments: [{ type: "image" as const, caption: "a photo" }],
+      thread: { kind: "dm" as const, name: "Ada" },
+      replyTo: { messageId: "m0", content: "earlier" },
     };
     const { messages, query } = port(() => [said]);
+    const at = said.timestamp.getTime();
 
     const [first] = await messages.query({});
     first!.text = "edited";
     first!.attachments[0]!.caption = "edited";
     first!.attachments.push({ type: "document" });
+    first!.thread!.name = "edited";
+    first!.replyTo!.content = "edited";
+    first!.timestamp.setTime(0);
     const [second] = await messages.query({});
 
     expect(query).toHaveBeenCalledTimes(1);
-    expect(second).toMatchObject({ text: "only", attachments: [{ caption: "a photo" }] });
+    expect(second).toMatchObject({
+      text: "only",
+      attachments: [{ caption: "a photo" }],
+      thread: { name: "Ada" },
+      replyTo: { content: "earlier" },
+    });
     expect(second!.attachments).toHaveLength(1);
+    expect(second!.timestamp.getTime()).toBe(at);
   });
 
   it("does not keep a failed read", async () => {

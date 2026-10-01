@@ -221,7 +221,7 @@ Apps can also observe the agent turn lifecycle with the **agent-turn-started** a
 
 **Contracts:**
 
-- A channel-message hook subscribes in `register`, through `deps.channels`. The host calls `register` once per activation, and again only after `unregister`, so a hook handles `register`, `unregister`, then `register` again. It never calls the hook per Connection, because a channel's subscription follows whatever backs it. A hook written against the removed `registerConnection` hears nothing until it subscribes this way. Its deps carry no `talkRouter`: a hook hears through `channel.inbound` and answers through `channel.send`.
+- A channel-message hook subscribes in `register`, through `deps.channels`. The host calls `register` once per activation, and again only after `unregister`, so a hook handles `register`, `unregister`, then `register` again. It never calls the hook per Connection, because a channel's subscription follows whatever backs it. A hook written against the removed `registerConnection` hears nothing until it subscribes this way. Its deps carry no `talkRouter`: a hook hears through `channel.inbound` and answers through `channel.send`. Through the 0.7 release, reading `deps.talkRouter` throws an error that says so.
 - Lifecycle hooks are best-effort and non-blocking: Rome schedules every loaded app hook for the event, logs failures, and does not delay or fail the agent turn when a hook throws.
 - Lifecycle payloads never include the prompt text (start metrics carry only its length).
 - Lifecycle hooks fire for root agent turns and subagent turns. Subagent events carry a parent reference (parent session, turn, and agent). Apps that only care about root turns filter for events without one.

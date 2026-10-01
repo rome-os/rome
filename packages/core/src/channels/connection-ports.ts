@@ -144,13 +144,16 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
 }
 
 /** A shared read's message, copied for one caller, so a caller that edits what
- *  it was answered (its attachments, say) leaves the others' answers as read.
- *  `raw` stays shared: it is the provider's own, which no caller edits. */
+ *  it was answered leaves the others' answers as read: every field, the
+ *  timestamp, attachments, thread and reply included. `raw` alone stays
+ *  shared: it is the provider's own, which no caller edits. */
 function copyOf(message: ChannelMessage): ChannelMessage {
   return {
     ...message,
+    timestamp: new Date(message.timestamp.getTime()),
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
     ...(message.thread ? { thread: { ...message.thread } } : {}),
+    ...(message.replyTo ? { replyTo: { ...message.replyTo } } : {}),
   };
 }
 
