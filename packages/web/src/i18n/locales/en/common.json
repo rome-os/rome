@@ -196,27 +196,27 @@
     "retry": "Try again",
     "unavailable": {
       "title": "WeChat is not enabled",
-      "description": "This instance does not run WeChat. Set WECHAT_USER_ENABLED=true and restart Rome to turn it on."
+      "description": "WECHAT_USER_ENABLED is off on this instance. To turn WeChat on, set it to true and restart Rome."
     },
     "absent": {
       "title": "WeChat is not installed",
-      "description": "Install the WeChat desktop client on this instance? Rome downloads it once, which takes a few minutes, then opens it here.",
+      "description": "Rome downloads the WeChat desktop client once and opens it here. The download takes a few minutes.",
       "action": "Install WeChat",
-      "failed": "The install did not finish: {{error}}"
+      "failed": "Install did not finish: {{error}}"
     },
     "installing": {
       "title": "Installing WeChat",
-      "description": "Downloading and opening the WeChat client. This takes a few minutes, and you can leave this page."
+      "description": "Rome is downloading the WeChat client and opens it here when it finishes. Leaving this page does not stop the download."
     },
     "stopped": {
       "title": "WeChat is not running",
-      "description": "WeChat is installed on this instance but not open.",
+      "description": "The WeChat client is installed on this instance.",
       "action": "Start WeChat",
       "failed": "WeChat did not start: {{error}}"
     },
     "starting": {
       "title": "Starting WeChat",
-      "description": "Opening the WeChat client on its desktop."
+      "description": "Rome is opening the WeChat client on its own desktop."
     }
   },
   "chat": {

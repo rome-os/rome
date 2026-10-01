@@ -74,7 +74,7 @@ describe("WechatDesktopPage", () => {
     renderPage();
     expect(
       await screen.findByText(
-        "The install did not finish: Could not download the WeChat client: 503",
+        "Install did not finish: Could not download the WeChat client: 503",
       ),
     ).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
