@@ -412,12 +412,17 @@ async function main(): Promise<void> {
   client.close();
 
   // ----------------------------------------------------------- evidence
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
   const leaked: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else if (statSync(path).size < 50_000_000 && readFileSync(path).includes(INSTANCE_TOKEN)) leaked.push(path.replace(home, "~"));
+      try {
+        if (statSync(path).isDirectory()) walk(path);
+        else if (readFileSync(path).includes(INSTANCE_TOKEN)) leaked.push(path.replace(home, "~"));
+      } catch {
+        // SQLite side files can vanish while the app-server exits.
+      }
     }
   };
   walk(home);
