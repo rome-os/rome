@@ -579,6 +579,8 @@ export class WechatUserRuntime {
     // unpack owns the client's files until it completes; a second caller joins
     // it. A caller's signal stops only its own wait, so cancelling one caller
     // never fails another's install, and the download finishes in the background.
+    // A caller already cancelled starts nothing.
+    if (signal?.aborted && !this.installing) return Promise.reject(signal.reason);
     this.installing ??= this.installClient().finally(() => {
       this.installing = null;
     });

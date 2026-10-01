@@ -630,6 +630,20 @@ describe("WechatUserRuntime.install", () => {
     expect(download.calls.filter((call) => call[0] === "dpkg-deb")).toHaveLength(1);
   });
 
+  it("starts no download for a caller already cancelled", async () => {
+    const h = await tempHome();
+    await mkdir(join(h, ".local/share/wechat"), { recursive: true });
+    const { run, calls } = scriptedDownload();
+    const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
+
+    const cancelled = new AbortController();
+    cancelled.abort(new Error("setup cancelled"));
+    await expect(runtime.install(cancelled.signal)).rejects.toThrow("setup cancelled");
+
+    expect(calls.some((call) => call[0] === "curl")).toBe(false);
+    expect(runtime.installInFlight).toBe(false);
+  });
+
   it("keeps a cached archive that is the supported build", async () => {
     const h = await tempHome();
     const deb = await ensureFile(join(h, ".local/share/wechat/wechat.deb"));
