@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { desktopSlot, wechatUserDisplay } from "./desktops.js";
+import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**
@@ -249,8 +249,13 @@ export function loadConfig(): Config {
     throw new Error(`Invalid configuration:\n${(error as Error).message}`);
   }
   if (process.env.WECHAT_USER_ENABLED === "true" && !desktopSlot("wechat")) {
+    const shared = process.env.DISPLAY || ":99";
+    // wechatUserDisplay has already rejected a WECHAT_USER_DISPLAY equal to
+    // DISPLAY, so a clash here is the default display.
     throw new Error(
-      "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535, and a display other than DISPLAY",
+      !process.env.WECHAT_USER_DISPLAY && shared === WECHAT_DEFAULT_DISPLAY
+        ? `Invalid configuration:\nWeChat's desktop defaults to ${WECHAT_DEFAULT_DISPLAY}, which is the shared desktop. Set WECHAT_USER_DISPLAY to a display other than DISPLAY (${shared}).`
+        : "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535",
     );
   }
 

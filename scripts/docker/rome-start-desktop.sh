@@ -36,8 +36,11 @@ LOG_DIR="${ROME_DESKTOP_LOG_DIR:-${HOME:?}/.cache/rome-desktop}"
 # The lock lives in this directory, so first runs can race to create it: a
 # directory another run just made counts as success.
 if [ ! -d "$LOG_DIR" ]; then
-  mkdir -p "$(dirname "$LOG_DIR")"
-  mkdir -m 700 "$LOG_DIR" 2>/dev/null || [ -d "$LOG_DIR" ]
+  mkdir -p "$(dirname "$LOG_DIR")" 2>/dev/null || true
+  if ! mkdir -m 700 "$LOG_DIR" 2>/dev/null && [ ! -d "$LOG_DIR" ]; then
+    echo "Error: cannot create the desktop log directory ${LOG_DIR}." >&2
+    exit 1
+  fi
 fi
 # A caller-set ROME_DESKTOP_LOG_DIR must be as private as the default: another
 # account that can write there could create the lock first, or plant a symlink
@@ -113,6 +116,8 @@ fail() {
 
 wait_for_tcp_port() {
   local port="$1" label="$2" pid="$3" log_file="$4" tries=0
+  # 30 s per port. DESKTOP_START_TIMEOUT_MS in packages/core/src/channels/
+  # wechat-user.ts adds up these waits; change both together.
   while [ "$tries" -lt 30 ]; do
     tcp_port_listening "$port" && return 0
     if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
@@ -159,6 +164,7 @@ if ! process_env_contains openbox "DISPLAY=${DISPLAY_ID}"; then
   DISPLAY="$DISPLAY_ID" setsid openbox "${OPENBOX_ARGS[@]}" >"$OPENBOX_LOG" 2>&1 </dev/null 9>&- &
   OPENBOX_PID=$!
   # Openbox has no readiness signal. It exits at once when it cannot run.
+  # 5 s, also counted in DESKTOP_START_TIMEOUT_MS (wechat-user.ts).
   for _ in 1 2 3 4 5; do
     kill -0 "$OPENBOX_PID" 2>/dev/null || fail "Openbox for ${NAME} exited during startup." "$OPENBOX_LOG"
     sleep 1

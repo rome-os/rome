@@ -524,6 +524,13 @@ export function createWechatUserDescriptor(
                       reason:
                         "WeChat needs sign-in confirmation. Open Rome's desktop and confirm on your phone if asked. Saved history remains available.",
                     };
+                  } else if (status.state === "ready" && status.movePending) {
+                    // It works, but still beside Chrome. Rome never restarts a
+                    // live client itself, since that can ask the phone to confirm.
+                    degradation = {
+                      reason:
+                        "WeChat still runs on the shared desktop beside Rome's Chrome. To move it to its own desktop, quit WeChat at /desktop. Rome starts it again within a few minutes at /desktop/wechat, and your phone may ask you to confirm the sign-in.",
+                    };
                   } else if (status.state === "ready") {
                     degradation = null;
                   } else {

@@ -28,8 +28,8 @@ import {
 
 /** A status as a test writes it; `display` and `desktopPath` default to
  *  WeChat's own desktop. */
-type StatusInput = Omit<WechatUserStatus, "display" | "desktopPath"> &
-  Partial<Pick<WechatUserStatus, "display" | "desktopPath">>;
+type StatusInput = Omit<WechatUserStatus, "display" | "desktopPath" | "movePending"> &
+  Partial<Pick<WechatUserStatus, "display" | "desktopPath" | "movePending">>;
 
 const READY: StatusInput = {
   state: "ready",
@@ -70,6 +70,7 @@ function fakeRuntime(opts: {
       async (): Promise<WechatUserStatus> => ({
         display: ":100",
         desktopPath: "/desktop/wechat",
+        movePending: false,
         ...(statuses.length > 1 ? statuses.shift()! : statuses[0]!),
       }),
     ),
@@ -422,6 +423,23 @@ describe("the WeChat personal Talker", () => {
     }
   });
 
+  it("tells the guardian a client still on the shared desktop needs a restart to move", async () => {
+    const runtime = fakeRuntime({
+      statuses: [{ ...READY, display: ":99", desktopPath: "/desktop", movePending: true }],
+    });
+    const { talker, degradation } = buildTalker(runtime);
+    try {
+      await rs.waitFor(() => expect(degradation()?.reason).toContain("shared desktop"));
+      // There is no restart button: quitting WeChat on the shared desktop lets
+      // the probe start it again on its own.
+      expect(degradation()?.reason).toContain("quit WeChat at /desktop");
+      expect(degradation()?.reason).toContain("/desktop/wechat");
+      expect(runtime.start).not.toHaveBeenCalled();
+    } finally {
+      await talker.stop();
+    }
+  });
+
   it("leaves accessibility to start() for a client the probe restarts", async () => {
     const runtime = fakeRuntime({ statuses: [{ ...READY, running: false }, READY] });
     const { talker, degradation } = buildTalker(runtime);
@@ -504,7 +522,13 @@ describe("the WeChat personal Talker", () => {
     );
     const { talker } = buildTalker(runtime, undefined, 1);
     const stopped = talker.stop();
-    resolve({ display: ":100", desktopPath: "/desktop/wechat", ...READY, running: false });
+    resolve({
+      display: ":100",
+      desktopPath: "/desktop/wechat",
+      movePending: false,
+      ...READY,
+      running: false,
+    });
     await stopped;
     expect(runtime.start).not.toHaveBeenCalled();
     expect(runtime.status).toHaveBeenCalledTimes(1);
