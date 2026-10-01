@@ -258,6 +258,12 @@ export interface ModelSessionFork {
  * starts by itself (a finished background task) answers no input. The inputs a
  * turn answers come from the provider itself (the Claude SDK's echo of each
  * input's uuid), never from Rome's guesses.
+ *
+ * Every terminal (`result` or `error`) a provider yields falls inside a model
+ * turn, between its start and its end, including a terminal the provider
+ * makes up after an interrupt. If the stream itself ends or throws with a turn
+ * open (the provider process died), no end follows: the stream's end closes
+ * any open turn, and its inputs got no reply.
  */
 export type ModelTurnEvent =
   | {

@@ -39,6 +39,11 @@ function isReplay(message: SDKMessage): boolean {
 export class SdkTurnProjection {
   private current: { turnId: string; answers: Set<string> } | undefined;
 
+  /** An SDK turn is open: started, and its result not yet seen. */
+  get isOpen(): boolean {
+    return this.current !== undefined;
+  }
+
   /** Turn events to emit before handling `message`. */
   before(message: SDKMessage): ModelTurnEvent[] {
     const modelFrame = isTopLevelModelFrame(message);
@@ -59,6 +64,25 @@ export class SdkTurnProjection {
     events.push({ type: "model_turn_end", turnId: current.turnId, answers: [...current.answers] });
     this.current = undefined;
     return events;
+  }
+
+  /**
+   * Wrap a terminal the provider makes up itself (after an interrupt, or a
+   * stream error it classifies), which has no SDK result: open a turn if none
+   * is open, then `close()` after the terminal.
+   */
+  openForTerminal(): ModelTurnEvent[] {
+    if (this.current) return [];
+    this.current = { turnId: randomUUID(), answers: new Set() };
+    return [{ type: "model_turn_start", turnId: this.current.turnId, answers: [] }];
+  }
+
+  /** End the open turn with the inputs its echoes named so far. */
+  close(): ModelTurnEvent[] {
+    const current = this.current;
+    if (!current) return [];
+    this.current = undefined;
+    return [{ type: "model_turn_end", turnId: current.turnId, answers: [...current.answers] }];
   }
 
   private add(ids: string[]): ModelTurnEvent[] {

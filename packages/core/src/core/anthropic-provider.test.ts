@@ -450,6 +450,96 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
+    it("counts a turn the SDK starts by itself as running, so a fork waits for it", async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield { ...prompt, isReplay: true };
+        yield say("DONE", prompt.uuid);
+        yield result("DONE", [prompt.uuid], "human");
+        yield notification;
+        yield say("Checking the task.");
+        await gate;
+        yield result("Checking the task.", [], "task-notification");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Start it", inputId: a });
+      const events = session.events[Symbol.asyncIterator]();
+      let starts = 0;
+      while (starts < 2) {
+        const next = await events.next();
+        if (next.value?.type === "model_turn_start") starts++;
+      }
+      await expect(session.fork({ sessionId: "fork-1", mode: "thread" })).rejects.toThrow(
+        "Cannot fork while source session is running",
+      );
+      release();
+      for (;;) {
+        const next = await events.next();
+        if (next.done || next.value.type === "model_turn_end") break;
+      }
+      await expect(session.fork({ sessionId: "fork-2", mode: "thread" })).resolves.toBeDefined();
+      await session.close();
+    });
+
+    it("ends an interrupted turn the SDK started with a terminal, inside the turn", async () => {
+      let controller!: AbortController;
+      let started!: () => void;
+      const taskTurnStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      queryMock.mockImplementation(({ prompt, options }) => {
+        controller = options.abortController;
+        return {
+          async *[Symbol.asyncIterator]() {
+            const inputs = prompt[Symbol.asyncIterator]();
+            const first = (await inputs.next()).value;
+            yield { ...first, isReplay: true };
+            yield say("DONE", first.uuid);
+            yield result("DONE", [first.uuid], "human");
+            yield notification;
+            yield say("Checking the task.");
+            started();
+            await new Promise<void>((resolve) =>
+              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+            );
+            throw new AbortError("Cancelled");
+          },
+          close: rs.fn(),
+        };
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Start it", inputId: a });
+      const reading = read(session);
+      await taskTurnStarted;
+      await session.interrupt("user-stop");
+      const seen = await reading;
+      expect(seen.slice(-4)).toEqual([
+        "start []",
+        "text Checking the task.",
+        "result Checking the task.",
+        "end []",
+      ]);
+      expect(seen.filter((line) => line.startsWith("end"))).toEqual(["end [A]", "end []"]);
+      await session.close();
+    });
+
+    it("wraps a classified stream error in a turn of its own", async () => {
+      mockThrowingQuery(new Error("OAuth token revoked · Please run /login"));
+      const session = await new AnthropicProvider({ env: { PATH: "/usr/bin" } }).openSession(
+        buildParams(),
+      );
+      expect(await read(session)).toEqual([
+        "start []",
+        "error OAuth token revoked · Please run /login",
+        "end []",
+      ]);
+      await session.close();
+    });
+
     it("reports input status only for replays of Rome's own sends", async () => {
       const sends: { uuid?: string; origin?: unknown }[] = [];
       scripted(async function* (sent) {

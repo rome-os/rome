@@ -53,7 +53,7 @@ import {
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
-import { SdkTurnProjection } from "./sdk-turn-projection.js";
+import { echoedSendIds, SdkTurnProjection } from "./sdk-turn-projection.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -575,7 +575,11 @@ export class AnthropicProvider implements ModelProvider {
     // q.close() exactly once.
     let closed = false;
     let queryDisposed = false;
-    let running = false;
+    // Messages sent to the SDK that it hasn't picked up yet (no replay seen).
+    const unreadSends = new Set<string>();
+    // The SDK is working: a turn is open, or a sent message is still queued.
+    // A turn the SDK starts by itself counts as much as one Rome asked for.
+    const running = () => projection.isOpen || unreadSends.size > 0;
 
     // The SDK's own session id, captured from the first assistant message once a
     // transcript with real content exists. Exposed via `session.providerThreadId`
@@ -753,6 +757,7 @@ export class AnthropicProvider implements ModelProvider {
           } else if (isUserMessage(message)) {
             // The SDK picked up one of Rome's messages. Replays of messages
             // Rome didn't send (task notifications) carry another origin.
+            if ("isReplay" in message && message.isReplay) unreadSends.delete(message.uuid);
             if ("isReplay" in message && message.isReplay && message.origin?.kind === "human") {
               if (!mintedIds.delete(message.uuid)) {
                 yield { type: "input_status", inputId: message.uuid, state: "consumed" };
@@ -764,7 +769,6 @@ export class AnthropicProvider implements ModelProvider {
           } else if (isResultMessage(message)) {
             // Block ids are unique within a turn; start the next turn's count fresh.
             assistantBlockCounts.clear();
-            running = false;
             // The turn is ending: any text still held was the closing answer.
             if (!params.outputSchema && pendingText !== null) {
               yield textBlock(pendingText, "final", pendingTextBlockId);
@@ -865,20 +869,25 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
             yield terminal;
+            // A result names the sends its turn took, whether or not their
+            // replay arrived.
+            for (const id of echoedSendIds(message)) unreadSends.delete(id);
             yield* projection.end(message);
           }
         }
-        if (abortController.signal.aborted && running) {
+        if (abortController.signal.aborted && running()) {
           await queryProcess.abort();
+          yield* projection.openForTerminal();
           if (!params.outputSchema && pendingText !== null) {
             yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
           }
           if (!params.outputSchema && partialText)
             yield textBlock(partialText, "final", partialTextBlockId);
-          running = false;
+          unreadSends.clear();
           yield params.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
             : { type: "result", content: partialText || pendingText || "" };
+          yield* projection.close();
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -894,11 +903,13 @@ export class AnthropicProvider implements ModelProvider {
           yield textBlock(partialText, "final", partialTextBlockId);
         if (abortController.signal.aborted && err instanceof AbortError) {
           await queryProcess.abort();
-          if (running) {
-            running = false;
+          if (running()) {
+            yield* projection.openForTerminal();
+            unreadSends.clear();
             yield params.outputSchema
               ? { type: "error", error: "Claude structured-output turn was interrupted" }
               : { type: "result", content: partialText || pendingText || "" };
+            yield* projection.close();
           }
           return;
         }
@@ -906,23 +917,25 @@ export class AnthropicProvider implements ModelProvider {
         // with `subtype: error`. Convert it to a classified terminal and persist
         // the marker instead of rethrowing a raw 401 up the events loop.
         if (isAnthropicUsageLimitError(err)) {
-          running = false;
           onQuotaExhausted?.();
+          yield* projection.openForTerminal();
           yield {
             type: "error",
             error: err instanceof Error ? err.message : String(err),
             code: "usage_limit",
           };
+          yield* projection.close();
           return;
         }
         if (isAnthropicAuthRevokedError(err)) {
-          running = false;
           await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
+          yield* projection.openForTerminal();
           yield {
             type: "error",
             error: err instanceof Error ? err.message : String(err),
             ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
           };
+          yield* projection.close();
           return;
         }
         throw err;
@@ -957,7 +970,6 @@ export class AnthropicProvider implements ModelProvider {
         // transcript, so never let a prior or partial UUID stand in for the
         // current turn.
         lastCompletedTurnCheckpoint = undefined;
-        running = true;
         const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
         if (input.injectedToolResult) {
           content.push({
@@ -969,12 +981,9 @@ export class AnthropicProvider implements ModelProvider {
         if (input.text) {
           content.push({ type: "text", text: input.text });
         }
-        if (content.length > 0) {
-          activeTurnLastAssistantMessageId = undefined;
-          running = true;
-        }
         const uuid = input.inputId ?? randomUUID();
         if (!input.inputId) mintedIds.add(uuid);
+        unreadSends.add(uuid);
         const sdkMsg: SDKUserMessage = {
           type: "user",
           uuid: uuid as SDKUserMessage["uuid"],
@@ -998,6 +1007,7 @@ export class AnthropicProvider implements ModelProvider {
         if (!input.inputId || input.injectedToolResult) return "deferred";
         if (input.reasoningEffort && toAnthropicEffort(input.reasoningEffort) !== effort)
           return "deferred";
+        unreadSends.add(input.inputId);
         inputQueue.push({
           type: "user",
           uuid: input.inputId as SDKUserMessage["uuid"],
@@ -1013,7 +1023,7 @@ export class AnthropicProvider implements ModelProvider {
         if (closed || abortController.signal.aborted) {
           throw new Error("Cannot fork a closed ModelSession");
         }
-        if (running) throw new Error("Cannot fork while source session is running");
+        if (running()) throw new Error("Cannot fork while source session is running");
         const mode = forkParams.mode ?? "ephemeral";
         const sourceSessionId = params.sessionId;
         const sourceProviderThreadId = establishedThreadId ?? params.providerThreadId;
