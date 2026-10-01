@@ -63,6 +63,7 @@ import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
+import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -257,6 +258,9 @@ async function main() {
   // The channel list and the Connection's Talk share this one client runtime.
   const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
   const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
+  // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
+  // the same client, and needs no connection.
+  const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -1292,6 +1296,7 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
+      wechatApp,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,

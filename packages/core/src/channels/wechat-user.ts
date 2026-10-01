@@ -322,6 +322,11 @@ export class WechatUserRuntime {
     return join(this.prefix, "client", "opt", "wechat");
   }
 
+  /** Whether the client is unpacked in this container. */
+  installed(): Promise<boolean> {
+    return exists(join(this.clientDir, "wechat"));
+  }
+
   /** The python environment holding the reader's dependencies. */
   get venvDir(): string {
     return join(this.prefix, "cli");
@@ -484,7 +489,7 @@ export class WechatUserRuntime {
   }
 
   async status(): Promise<WechatUserStatus> {
-    const installed = await exists(join(this.clientDir, "wechat"));
+    const installed = await this.installed();
     const pid = installed ? await this.pid() : null;
     const display = pid ? await this.clientDisplay(pid) : this.startDisplay;
     const account = installed ? await this.accountDir() : null;

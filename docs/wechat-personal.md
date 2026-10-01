@@ -39,6 +39,16 @@ The display outlives Rome, so a Rome restart finds the client still running and 
 
 `WECHAT_USER_DISPLAY`, `ROME_WECHAT_VNC_PORT` and `ROME_WECHAT_NOVNC_PORT` still override the display and ports.
 
+### The WeChat app
+
+`/desktop/wechat` works without a connection. Until the client runs, the page says what is missing and offers the button that fixes it:
+
+- **Not installed:** "Install WeChat" downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
+- **Installed but stopped:** "Start WeChat" opens it.
+- **Failed:** the page shows why the last install or start failed, with "Try again".
+
+Once the client runs, the page shows its desktop. `GET /api/wechat/app` reports the state, and `POST /api/wechat/app/install` and `POST /api/wechat/app/start` act on it ([`wechat-app.ts`](../packages/core/src/desktop-apps/wechat-app.ts)). A client opened this way is signed in on the desktop, not through **Connect**, so Rome has not captured its store key. Reading history still needs **Connect** below, which restarts the client under the debugger and asks for one more confirmation on the phone.
+
 A client that was already running on the shared desktop stays there until it next exits. It then starts on its own display, which can need one sign-in confirmed on the phone. Open `/desktop/wechat` then, so the login window is visible when it appears.
 
 ## Connect

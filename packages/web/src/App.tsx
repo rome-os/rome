@@ -42,6 +42,7 @@ const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
 const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
+const WechatDesktopPage = lazy(() => import("./pages/WechatDesktopPage"));
 const NamedDesktopPage = lazy(() =>
   import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
 );
@@ -182,6 +183,7 @@ export default function App() {
             <Route path="/app-details/:appId" element={<AppDetailPage />} />
             <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
             <Route path="/desktop" element={<DesktopPage />} />
+            <Route path="/desktop/wechat" element={<WechatDesktopPage />} />
             <Route path="/desktop/:name" element={<NamedDesktopPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />

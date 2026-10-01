@@ -188,6 +188,37 @@
     "namedIframeTitle": "Rome 桌面“{{name}}”",
     "notFound": "没有名为“{{name}}”的桌面。"
   },
+  "wechatApp": {
+    "loading": "正在检查微信…",
+    "loadFailed": "无法检查微信状态",
+    "installFailed": "无法安装微信",
+    "startFailed": "无法启动微信",
+    "retry": "重试",
+    "unavailable": {
+      "title": "微信未启用",
+      "description": "这个实例没有运行微信。设置 WECHAT_USER_ENABLED=true 并重启 Rome 即可开启。"
+    },
+    "absent": {
+      "title": "微信未安装",
+      "description": "要在这个实例上安装微信桌面客户端吗？Rome 只需下载一次，需要几分钟，然后会在这里打开它。",
+      "action": "安装微信",
+      "failed": "安装没有完成：{{error}}"
+    },
+    "installing": {
+      "title": "正在安装微信",
+      "description": "正在下载并打开微信客户端。需要几分钟，你可以先离开这个页面。"
+    },
+    "stopped": {
+      "title": "微信未运行",
+      "description": "微信已安装在这个实例上，但没有打开。",
+      "action": "启动微信",
+      "failed": "微信没有启动：{{error}}"
+    },
+    "starting": {
+      "title": "正在启动微信",
+      "description": "正在微信自己的桌面上打开客户端。"
+    }
+  },
   "chat": {
     "add": "打开一个应用",
     "addChat": "对话",

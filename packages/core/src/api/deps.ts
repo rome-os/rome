@@ -52,6 +52,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
+import type { WechatApp } from "../desktop-apps/wechat-app.js";
 
 export interface ApiConfig {
   port: number;
@@ -129,6 +130,8 @@ export interface ApiDeps {
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
+  /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
+  wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:

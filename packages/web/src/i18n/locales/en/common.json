@@ -188,6 +188,37 @@
     "namedIframeTitle": "Rome desktop “{{name}}”",
     "notFound": "There is no desktop called “{{name}}”."
   },
+  "wechatApp": {
+    "loading": "Checking WeChat…",
+    "loadFailed": "Could not check WeChat",
+    "installFailed": "Could not install WeChat",
+    "startFailed": "Could not start WeChat",
+    "retry": "Try again",
+    "unavailable": {
+      "title": "WeChat is not enabled",
+      "description": "This instance does not run WeChat. Set WECHAT_USER_ENABLED=true and restart Rome to turn it on."
+    },
+    "absent": {
+      "title": "WeChat is not installed",
+      "description": "Install the WeChat desktop client on this instance? Rome downloads it once, which takes a few minutes, then opens it here.",
+      "action": "Install WeChat",
+      "failed": "The install did not finish: {{error}}"
+    },
+    "installing": {
+      "title": "Installing WeChat",
+      "description": "Downloading and opening the WeChat client. This takes a few minutes, and you can leave this page."
+    },
+    "stopped": {
+      "title": "WeChat is not running",
+      "description": "WeChat is installed on this instance but not open.",
+      "action": "Start WeChat",
+      "failed": "WeChat did not start: {{error}}"
+    },
+    "starting": {
+      "title": "Starting WeChat",
+      "description": "Opening the WeChat client on its desktop."
+    }
+  },
   "chat": {
     "add": "Open an app",
     "addChat": "Chat",

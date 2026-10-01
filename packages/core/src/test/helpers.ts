@@ -706,6 +706,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
+    wechatApp: null,
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },
