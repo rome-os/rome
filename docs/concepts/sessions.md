@@ -91,7 +91,8 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 **Contracts:**
 
 - A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. For a subagent call, the subagent start and result events that stand in for those two blocks carry the same tool-use id.
-- A consumer places a text or thinking block by its order in the turn's stream.
+- A text or thinking block is identified by its block id when the provider gives it one. A block the provider gives no id has none. Rome never borrows another block's id for it.
+- A block has one identity, unique within its turn: a block id or a tool-use id, never both.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
 **Not to be confused with:**
@@ -102,12 +103,12 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 ## Delta
 
-A delta is an increment of a [block](#block) that is still being produced. Rome publishes deltas for text blocks: each delta is a few tokens of the text.
+A delta is an increment of a [block](#block) that is still being produced: a few tokens of text or thinking, a piece of a tool's input, or the latest output of a running command.
 
 **Contracts:**
 
 - A delta is transient. The durable trace, persistence, and accounting never keep it.
-- A consumer matches a delta to its block by order: a delta belongs to the next text block in the turn's stream.
+- A delta carries the identity of its block whenever the block has one: the block id of a text or thinking block, or the tool-use id of a tool use and its result. A consumer matches a delta to its block by that identity, not by event order.
 - The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it.
 
 **Not to be confused with:**
