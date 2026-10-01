@@ -21,6 +21,7 @@
     "./apps-runtime": "./src/apps-runtime.ts",
     "./discord-broker": "./src/discord-broker.ts",
     "./favors": "./src/favors.ts",
+    "./rome-credits": "./src/rome-credits.ts",
     "./message": "./src/message.ts",
     "./people": "./src/people.ts",
     "./persons": "./src/persons.ts",
