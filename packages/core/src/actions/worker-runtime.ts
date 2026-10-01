@@ -30,7 +30,6 @@ import {
   NotifyServiceProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
-  TalkRouterProxy,
   ChannelsServiceProxy,
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
@@ -111,8 +110,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
-  // Deprecated for app actions; `channelsService` replaces it.
-  const talkRouter = new TalkRouterProxy();
   const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
@@ -150,7 +147,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     {
       agentRunner,
       resolveArtifactReference,
-      talkRouter,
       channelsService,
       conversationSettings,
       capabilityDiscovery,

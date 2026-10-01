@@ -15,15 +15,8 @@
 
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
-import type {
-  ChatStopHandler,
-  TalkActivity,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkHistory,
-  TalkInboundMedia,
-} from "@rome-os/app-runtime";
+import type { ChatStopHandler, TalkActivity, TalkInboundMedia } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";

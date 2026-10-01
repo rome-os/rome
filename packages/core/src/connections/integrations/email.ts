@@ -29,7 +29,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,

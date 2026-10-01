@@ -267,13 +267,39 @@ describe("send_message chat recipient aliases", () => {
 });
 
 describe("send_message connection choice", () => {
-  // The channels service owns the rule for which Connection a send goes
-  // through, so the action asks it nothing first: in a worker every question
-  // is an RPC round trip.
-  it("leaves the Connection to the channels service", async () => {
+  // A channel no Connection can send on is refused before anything else, so
+  // the error names the channel rather than an attachment or a recipient.
+  it("refuses an unconfigured channel before checking attachments or recipients", async () => {
     const adapter = makeAdapter("telegram_user");
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
+    };
 
-    await executeSendMessage(adapter, { channel: "telegram_user", threadId: "t1", text: "a" });
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "discord",
+        threadId: "thread-1",
+        attachments: [{ type: "document", source: "/outside/secret.txt" }],
+      }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "whatsapp", to: "guardian", text: "hello guardian" },
+        { personMappingRepo },
+      ),
+    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    expect(personMappingRepo.findByBondLevel).not.toHaveBeenCalled();
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a channel with several Connections when none is named", async () => {
+    const adapter = makeAdapter("telegram_user");
+    adapter.list = rs.fn(async () => [{ name: "telegram_user", connectionIds: ["tg-a", "tg-b"] }]);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram_user", threadId: "t1", text: "a" }),
+    ).rejects.toThrow('Channel "telegram_user" has multiple connections; connectionId is required');
     await executeSendMessage(adapter, {
       channel: "telegram_user",
       threadId: "t1",
@@ -282,8 +308,7 @@ describe("send_message connection choice", () => {
     });
 
     const calls = (adapter.send as ReturnType<typeof rs.fn>).mock.calls;
-    expect(calls.map((call) => call[3])).toEqual([undefined, { connectionId: "tg-b" }]);
-    expect(adapter.list).not.toHaveBeenCalled();
+    expect(calls.map((call) => call[3])).toEqual([{ connectionId: "tg-b" }]);
   });
 });
 

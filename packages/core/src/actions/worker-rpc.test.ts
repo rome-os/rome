@@ -11,8 +11,6 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
-import { createChannelsService } from "../channels/channels-service.js";
-import type { Channels } from "../channels/channel.js";
 import type { ActionResult } from "./types.js";
 
 interface SubprocessEngine {
@@ -219,26 +217,6 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toMatch(/apps\.create: invalid params/);
   });
 
-  it("serves the current main-process Talk connection list", async () => {
-    const list = rs
-      .fn()
-      .mockResolvedValueOnce([{ name: "discord", connectionIds: ["discord-1"] }])
-      .mockResolvedValueOnce([
-        { name: "wechat", connectionIds: ["wechat-1"] },
-        { name: "email", connectionIds: [] },
-      ]);
-    const { server } = makeServer({ channelsService: { list } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
-
-    const first = await rpc(fake, "talk.list", {});
-    const second = await rpc(fake, "talk.list", {});
-
-    expect(first.result).toEqual([{ connectionId: "discord-1", service: "discord" }]);
-    expect(second.result).toEqual([{ connectionId: "wechat-1", service: "wechat" }]);
-    expect(list).toHaveBeenCalledTimes(2);
-  });
-
   describe("channels.*", () => {
     it("serves the channel list, sends and reads by channel name", async () => {
       const service = {
@@ -303,121 +281,6 @@ describe("WorkerRpcServer param validation", () => {
 
       expect(response.error).toMatch(/channels\.query: invalid params/);
       expect(query).not.toHaveBeenCalled();
-    });
-  });
-
-  it("says a Connection with no Talk cannot send, as the router did", async () => {
-    const send = rs.fn();
-    const { server } = makeServer({
-      channelsService: { list: async () => [{ name: "github", connectionIds: [] }], send },
-      connectionRegistry: { all: () => [{ id: "gh-1", service: "github" }] },
-    });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
-
-    const response = await rpc(fake, "talk.send", {
-      connectionId: "gh-1",
-      conversationId: "c1",
-      message: { text: "hi" },
-    });
-
-    expect(response.error).toContain('Talk is unavailable for connection "gh-1"');
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  describe("talk.history.query", () => {
-    const line = (messageId: string, at: number) => ({
-      messageId,
-      conversationId: "c1",
-      senderId: "s1",
-      text: messageId,
-      attachments: [],
-      timestamp: new Date(at),
-      channel: "email",
-      direction: "inbound",
-    });
-    const connectionRegistry = {
-      all: () => [
-        { id: "email-a", service: "email" },
-        { id: "email-b", service: "email" },
-        { id: "wa-1", service: "whatsapp" },
-      ],
-    };
-    // The real service over the registry's Connections, so these read what
-    // `fetch_channel_history` reads.
-    const channelsService = (feature: ReturnType<typeof rs.fn>, channels: unknown[] = []) =>
-      createChannelsService({
-        channels: () => channels as Channels,
-        router: {
-          list: async () =>
-            connectionRegistry.all().map(({ id, service }) => ({ connectionId: id, service })),
-          feature: feature as never,
-          send: rs.fn() as never,
-        },
-      });
-
-    it("reads a channel with no store from the connection it names", async () => {
-      const feature = rs.fn((connectionId: string) => ({
-        query: async () => [line(`from-${connectionId}`, 1_000)],
-      }));
-      const { server } = makeServer({
-        channelsService: channelsService(feature, [
-          { name: "email", send: null, inbound: null, accounts: null, messages: null },
-        ]),
-        connectionRegistry,
-      });
-      const fake = makeFakeWorker();
-      server.attach(fake.worker);
-
-      const response = await rpc(fake, "talk.history.query", { connectionId: "email-b" });
-
-      expect(response.error).toBeUndefined();
-      expect((response.result as Array<{ messageId: string }>).map((m) => m.messageId)).toEqual([
-        "from-email-b",
-      ]);
-      expect(feature).toHaveBeenCalledWith("email-b", "history");
-    });
-
-    it("reads a store's channel through its query, oldest first", async () => {
-      const query = rs.fn(async () => [line("newer", 2_000), line("older", 1_000)]);
-      const { server } = makeServer({
-        channelsService: channelsService(
-          rs.fn(() => null),
-          [
-            {
-              name: "whatsapp",
-              send: null,
-              inbound: null,
-              accounts: null,
-              messages: { query, byAccount: null },
-            },
-          ],
-        ),
-        connectionRegistry,
-      });
-      const fake = makeFakeWorker();
-      server.attach(fake.worker);
-
-      const response = await rpc(fake, "talk.history.query", { connectionId: "wa-1" });
-
-      expect((response.result as Array<{ messageId: string }>).map((m) => m.messageId)).toEqual([
-        "older",
-        "newer",
-      ]);
-      expect(query).toHaveBeenCalledTimes(1);
-    });
-
-    it("says an unknown connection has no history", async () => {
-      const { server } = makeServer({
-        channelsService: channelsService(rs.fn(() => null)),
-        connectionRegistry,
-      });
-      const fake = makeFakeWorker();
-      server.attach(fake.worker);
-
-      const response = await rpc(fake, "talk.history.query", { connectionId: "nope" });
-
-      expect(response.error).toMatch(/Talk history is unavailable for connection "nope"/);
     });
   });
 

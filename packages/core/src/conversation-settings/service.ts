@@ -14,9 +14,9 @@ import type {
   ResetConversationSettingsInput,
   SettingsActor,
   StoredConversationSettings,
-  TalkDirectory,
   UpdateConversationSettingsInput,
 } from "@rome-os/app-runtime";
+import type { TalkDirectory } from "../connections/types.js";
 import { CONVERSATION_SETTING_FIELDS } from "@rome-os/app-runtime";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";

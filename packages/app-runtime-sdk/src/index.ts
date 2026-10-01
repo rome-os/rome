@@ -1152,9 +1152,6 @@ export interface Attachment {
   mimeType?: string;
   fileName?: string;
   caption?: string;
-  /** @deprecated Nothing reads it: an attachment's bytes come through the
-   *  channel's `inbound.media`. Removed in the next breaking release. */
-  data?: Buffer;
   /** Absolute local path after an inbound channel attachment has been saved. */
   localPath?: string;
 }
@@ -1231,7 +1228,7 @@ export interface OutgoingEmailMessage extends OutgoingMessageBase {
 
 /**
  * A `kind`-discriminated outbound message. Chat is the default branch; the
- * email branch carries the email-only fields. `Talk.send` receives this union;
+ * email branch carries the email-only fields. A channel's `send` receives this union;
  * non-email integrations read only the shared base fields.
  */
 export type OutgoingMessage = OutgoingChatMessage | OutgoingEmailMessage;
@@ -1461,17 +1458,27 @@ export interface ConversationDescriptor {
   containerName?: string;
 }
 
-/** Provider-neutral message delivered by Talk. Provider-native data is an
- * opaque pass-through token reserved for a feature on the same provider.
+/**
+ * One message as a channel carries it: what an inbound event delivers and what
+ * a channel read answers. It says which channel carried it and which way it
+ * went, so a read answers what Rome said as well as what it was told.
+ * Provider-native data (`raw`) is an opaque pass-through token reserved for a
+ * feature on the same provider.
  *
- * @deprecated Read {@link ChannelMessage}, the record every channel read
- * answers. Inbound events carry a `ChannelMessage` in the next breaking
- * release, which removes this name. */
-export interface InboundMessage {
+ * `senderDisplayName`, `thread` and `attachments` carry what the source holds:
+ * a store that never recorded a sender's name or a file's type leaves them
+ * out rather than guessing.
+ */
+export interface ChannelMessage {
+  /** The channel's name, as every stored row and link spells it. */
+  channel: string;
+  direction: "inbound" | "outbound";
   messageId: string;
   conversationId: ConversationId;
   /** Parent conversation when this message belongs to a native thread. */
   parentConversationId?: ConversationId;
+  /** Who said it, as the channel addresses them. Empty when the channel
+   *  recorded no sender for the line. */
   senderId: string;
   senderDisplayName?: string;
   senderUsername?: string;
@@ -1482,25 +1489,6 @@ export interface InboundMessage {
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
   addressing?: MessageAddressing;
   raw?: unknown;
-}
-
-/**
- * One message as a channel reads it back: an {@link InboundMessage} that also
- * says which channel carried it and which way it went. A read answers what
- * Rome said as well as what it was told, so the direction is part of the
- * record rather than implied by the port it came through.
- *
- * `senderDisplayName`, `thread` and `attachments` carry what the source holds:
- * a store that never recorded a sender's name or a file's type leaves them
- * out rather than guessing.
- */
-export interface ChannelMessage extends InboundMessage {
-  /** The channel's name, as every stored row and link spells it. */
-  channel: string;
-  direction: "inbound" | "outbound";
-  /** Who said it, as the channel addresses them. Empty when the channel
-   *  recorded no sender for the line. */
-  senderId: string;
 }
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
@@ -1575,18 +1563,6 @@ export interface ChannelsService {
   history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
 }
 
-/**
- * The sender id a WhatsApp group line carried when the channel recorded no
- * sender for it.
- *
- * @deprecated No longer emitted: such a line now carries an empty `senderId`,
- * the provider-neutral way to say no sender was recorded
- * ({@link ChannelMessage.senderId}), so a comparison against this constant
- * no longer matches. Compare against `""` instead. Removed in the next
- * breaking release.
- */
-export const WHATSAPP_UNKNOWN_SENDER = "whatsapp:unknown";
-
 /** Exact provider-neutral chat command recognized before an agent turn. */
 export function isStopCommand(text: string): boolean {
   return text.trim().toLowerCase() === "/stop";
@@ -1625,24 +1601,8 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-/**
- * The platform's own history of a Connection's conversations: at most `limit`
- * of them at or after `since`, oldest first, each saying which channel carried
- * it and which way it went.
- *
- * @deprecated Read a channel's messages through {@link ChannelsService}.
- * Removed from this package in the next breaking release.
- */
-export interface TalkHistory {
-  query(input: {
-    conversationId?: ConversationId;
-    since?: Date;
-    limit?: number;
-  }): Promise<ChannelMessage[]>;
-}
-
 export interface TalkInboundMedia {
-  materialize(message: InboundMessage): Promise<Attachment[]>;
+  materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
 export interface TalkActivitySession {
@@ -1655,15 +1615,6 @@ export interface TalkActivity {
     conversationId: ConversationId;
     messageId?: string;
   }): Promise<TalkActivitySession | null>;
-}
-
-export interface TalkDirectory {
-  listConversations(input: {
-    query?: string;
-    cursor?: string;
-    limit: number;
-    includeTopics?: boolean;
-  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
 }
 
 /**
@@ -1701,44 +1652,6 @@ export interface TalkDirectMessaging {
   conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
 
-/** @deprecated Reach a channel through {@link ChannelsService} or the
- *  `channels` a hook is given. Removed in the next breaking release. */
-export interface TalkFeatureMap {
-  history: TalkHistory;
-  inboundMedia: TalkInboundMedia;
-  activity: TalkActivity;
-  directory: TalkDirectory;
-  directMessaging: TalkDirectMessaging;
-}
-
-export type TalkFeatureName = keyof TalkFeatureMap;
-
-/** @deprecated Reach a channel through {@link ChannelsService} or the
- *  `channels` a hook is given. Removed in the next breaking release. */
-export interface Talk {
-  subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
-}
-
-/**
- * Provider-neutral routing surface keyed by Connection id.
- *
- * @deprecated Send and read through {@link ChannelsService}, keyed by channel
- * name; a hook subscribes through its `channels`. Removed from this package in
- * the next breaking release.
- */
-export interface TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>>;
-  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
-}
-
 /** Sending on a channel. */
 export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
@@ -1757,7 +1670,7 @@ export interface ChannelSend {
  * {@link ConversationRef} (conversation settings, stop), resolved by the
  * channel so a subscriber does not track what backs it.
  */
-export type InboundEvent = { kind: "message"; message: InboundMessage; ref: ConversationRef };
+export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ConversationRef };
 
 /**
  * Hearing what arrives on a channel. Every implementation owes all five:
@@ -1818,9 +1731,6 @@ export interface Channel {
  */
 export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
-  /** @deprecated A hook hears and answers through `channels`. Removed in the
-   *  next breaking release. */
-  talkRouter: TalkRouter;
   conversationSettings: ConversationSettingsControl;
   chatStop: ChatStopHandler;
   channels: readonly Channel[];

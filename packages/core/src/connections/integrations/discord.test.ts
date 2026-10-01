@@ -12,7 +12,7 @@
 
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
-import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ConversationId, NormalizedMessage, ChannelMessage } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -196,6 +196,8 @@ describe("discord descriptor shape", () => {
     h.start();
     const inboundMedia = h.talker.feature("inboundMedia");
     const message = {
+      channel: "discord",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "chan-1" as ConversationId,
       senderId: "user-1",
@@ -203,7 +205,7 @@ describe("discord descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
       raw: { channel: "discord", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);

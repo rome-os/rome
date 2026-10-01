@@ -17,8 +17,8 @@ import type {
   ConversationId,
   MessageReceipt,
   OutgoingMessage,
-  TalkRouter,
 } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../connections/types.js";
 import type { Channels } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
 

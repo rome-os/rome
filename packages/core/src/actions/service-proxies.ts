@@ -47,15 +47,11 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkRouter,
   ChannelHistoryRead,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
-  InboundMessage,
   MessageReceipt,
   OutgoingMessage,
   ListConversationSettingsInput,
@@ -248,52 +244,6 @@ export class ChannelsServiceProxy implements ChannelsService {
         ...(input.since ? { since: input.since.toISOString() } : {}),
       }),
     );
-  }
-}
-
-/** Worker-side proxy for the live main-process Talk router.
- *  @deprecated App actions reach channels through {@link ChannelsServiceProxy}. */
-export class TalkRouterProxy implements TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>> {
-    return getWorkerRpc().call("talk.list", {});
-  }
-
-  subscribe(
-    _connectionId: string,
-    _handler: (message: InboundMessage) => Promise<void>,
-  ): () => void {
-    throw new Error("Talk subscriptions are only available in the main process");
-  }
-
-  async send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt> {
-    return getWorkerRpc().call<MessageReceipt>("talk.send", {
-      connectionId,
-      conversationId,
-      message,
-    });
-  }
-
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null {
-    if (name !== "history") return null;
-    return {
-      query: async (input: {
-        conversationId?: ConversationId;
-        since?: Date;
-        limit?: number;
-      }): Promise<ChannelMessage[]> => {
-        return fromWire(
-          await getWorkerRpc().call<WireChannelMessage[]>("talk.history.query", {
-            connectionId,
-            ...input,
-            ...(input.since ? { since: input.since.toISOString() } : {}),
-          }),
-        );
-      },
-    } as unknown as TalkFeatureMap[K];
   }
 }
 

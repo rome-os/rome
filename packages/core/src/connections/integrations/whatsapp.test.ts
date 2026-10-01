@@ -4,7 +4,7 @@
 // threading, migration — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ConversationId, NormalizedMessage, ChannelMessage } from "@rome-os/app-runtime";
 import type { WhatsAppAdapter, WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
@@ -147,6 +147,8 @@ describe("whatsapp descriptor shape", () => {
       () => {},
     );
     const message = {
+      channel: "whatsapp",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "chat-1@s.whatsapp.net" as ConversationId,
       senderId: "user-1",
@@ -154,7 +156,7 @@ describe("whatsapp descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
       raw: { channel: "whatsapp", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     await expect(talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
     await talker.stop();
     expect(fake.stopped).toBe(true);

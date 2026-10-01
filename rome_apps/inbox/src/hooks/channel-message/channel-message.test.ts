@@ -5,19 +5,26 @@ import type {
   ChatStopHandler,
   ConversationId,
   ConversationSettingsControl,
+  ChannelMessage,
   InboundEvent,
-  InboundMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkRouter,
+  TalkActivity,
+  TalkInboundMedia,
 } from "@rome-os/app-runtime";
 import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
 
 const TELEGRAM_ID = "connection:telegram";
 const WHATSAPP_ID = "connection:whatsapp";
 
-function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
+// What a channel's port reads for activity and inbound media, per Connection.
+interface ChannelFeatures {
+  activity: TalkActivity;
+  inboundMedia: TalkInboundMedia;
+}
+
+function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
+    channel: "telegram",
+    direction: "inbound",
     messageId: "message-1",
     conversationId: "chat-1" as ConversationId,
     senderId: "user-1",
@@ -60,7 +67,7 @@ function snapshot(
 
 function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>[4] = {}) {
   const handlers = new Map<string, (event: InboundEvent) => Promise<void>>();
-  const features = new Map<string, Partial<TalkFeatureMap>>();
+  const features = new Map<string, Partial<ChannelFeatures>>();
   const run = rs.fn(async () => ({ status: "ok" as const }));
   const actionEngine = { run } as unknown as ActionEngineLike;
   const get = rs.fn(async ({ connectionId, conversationId }) =>
@@ -74,8 +81,8 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
       conversationId,
     }),
   );
-  const feature = <K extends TalkFeatureName>(connectionId: string, name: K) =>
-    (features.get(connectionId)?.[name] ?? null) as TalkFeatureMap[K] | null;
+  const feature = <K extends keyof ChannelFeatures>(connectionId: string, name: K) =>
+    (features.get(connectionId)?.[name] ?? null) as ChannelFeatures[K] | null;
   // One channel per Connection, as the channel list builds them.
   const channel = (name: string, connectionId: string): Channel => ({
     name,
@@ -106,7 +113,7 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   // A conversation's events reach the handler one at a time, each after the
   // previous one settles, as rule R4 of `ChannelInbound` requires of a channel.
   const tails = new Map<string, Promise<void>>();
-  const emit = (connectionId: string, incoming: InboundMessage): Promise<void> => {
+  const emit = (connectionId: string, incoming: ChannelMessage): Promise<void> => {
     const handler = handlers.get(connectionId);
     if (!handler) return Promise.reject(new Error(`no subscription for ${connectionId}`));
     const key = `${connectionId}:${incoming.conversationId}`;
@@ -365,7 +372,6 @@ describe("ChannelMessageHook", () => {
     expect(() =>
       createHook({
         actionEngine: {} as ActionEngineLike,
-        talkRouter: {} as TalkRouter,
         conversationSettings: {} as ConversationSettingsControl,
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),

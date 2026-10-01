@@ -23,7 +23,7 @@
 // post-migration.
 
 import { WEBCHAT_GUARDIAN_USER_ID, WebChatAdapter } from "../../channels/webchat.js";
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { ConnectionDescriptor, Talker } from "../types.js";
 import { historyFeature, toInboundMessage, toMessageReceipt } from "./talk-features.js";

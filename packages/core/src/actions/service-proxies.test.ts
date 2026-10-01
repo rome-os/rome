@@ -3,7 +3,6 @@ import {
   BackendTurnRunnerProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
-  TalkRouterProxy,
 } from "./service-proxies.js";
 import {
   setWorkerRpcInProcessDispatcher,
@@ -11,54 +10,6 @@ import {
   WorkerRpcSendError,
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
-
-describe("TalkRouterProxy", () => {
-  const originalSend = process.send;
-
-  afterEach(() => {
-    process.send = originalSend;
-    setWorkerRpcInProcessDispatcher(null);
-  });
-
-  it("reads the live main-process connection list on every call", async () => {
-    process.send = undefined;
-    let connections = [{ connectionId: "discord-1", service: "discord" }];
-    const calls: string[] = [];
-    setWorkerRpcInProcessDispatcher(async (method) => {
-      calls.push(method);
-      return connections;
-    });
-    const proxy = new TalkRouterProxy();
-
-    await expect(proxy.list()).resolves.toEqual(connections);
-    connections = [{ connectionId: "wechat-1", service: "wechat" }];
-    await expect(proxy.list()).resolves.toEqual(connections);
-    expect(calls).toEqual(["talk.list", "talk.list"]);
-  });
-
-  it("rehydrates history timestamps after worker RPC serialization", async () => {
-    process.send = undefined;
-    setWorkerRpcInProcessDispatcher(async (method) => {
-      expect(method).toBe("talk.history.query");
-      return [
-        {
-          messageId: "message-1",
-          conversationId: "conversation-1",
-          senderId: "user-1",
-          text: "hello",
-          attachments: [],
-          timestamp: "2026-08-04T10:00:00.000Z",
-        },
-      ];
-    });
-    const history = new TalkRouterProxy().feature("discord-1", "history");
-
-    const messages = await history?.query({});
-
-    expect(messages?.[0]?.timestamp).toBeInstanceOf(Date);
-    expect(messages?.[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
-  });
-});
 
 describe("ChannelsServiceProxy", () => {
   const originalSend = process.send;

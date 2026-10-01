@@ -33,21 +33,6 @@ const log = createLogger("worker-rpc");
 
 const AppIdSchema = z.string().min(1);
 
-const TalkSendParams = z.object({
-  connectionId: z.string().min(1),
-  conversationId: z.string(),
-  message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
-    message: "message must be an object",
-  }),
-});
-
-const TalkHistoryParams = z.object({
-  connectionId: z.string().min(1),
-  conversationId: z.string().optional(),
-  since: z.string().datetime().optional(),
-  limit: z.number().int().positive().optional(),
-});
-
 const ChannelsSendParams = z.object({
   channel: z.string().min(1),
   conversationId: z.string(),
@@ -187,8 +172,7 @@ interface RpcResponseMessage {
 }
 
 export interface WorkerRpcServices {
-  /** How a worker's actions send and read on channels (`channels.*`), and what
-   *  the deprecated `talk.*` calls are answered through. */
+  /** How a worker's actions send and read on channels (`channels.*`). */
   channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
   conversationSettings: ConversationSettingsControl;
@@ -300,16 +284,6 @@ export class WorkerRpcServer {
         return await this.handleChannelsQuery(params);
       case "channels.history":
         return await this.handleChannelsHistory(params);
-      // The deprecated `TalkRouterProxy`'s calls, answered through the same
-      // channels service by the connection's channel.
-      case "talk.list":
-        return (await this.services.channelsService.list()).flatMap((channel) =>
-          channel.connectionIds.map((connectionId) => ({ connectionId, service: channel.name })),
-        );
-      case "talk.send":
-        return await this.handleTalkSend(params);
-      case "talk.history.query":
-        return await this.handleTalkHistory(params);
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(
           parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,
@@ -451,53 +425,6 @@ export class WorkerRpcServer {
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
       ...(connectionId ? { connectionId } : {}),
-    });
-  }
-
-  /** The channel a connection backs, by the service it belongs to. */
-  private channelOf(connectionId: string): string | undefined {
-    return this.services.connectionRegistry
-      .all()
-      .find((connection) => connection.id === connectionId)?.service;
-  }
-
-  private async handleTalkSend(params: unknown) {
-    const { connectionId, conversationId, message } = parseParams(
-      "talk.send",
-      TalkSendParams,
-      params,
-    );
-    const channel = this.channelOf(connectionId);
-    if (!channel) throw new Error(`unknown connection "${connectionId}"`);
-    // A Connection whose service has no Talk backs no channel. Say so as the
-    // router did, rather than that it does not provide its own channel.
-    const backing = (await this.services.channelsService.list()).find(
-      (candidate) => candidate.name === channel,
-    );
-    if (!backing?.connectionIds.includes(connectionId)) {
-      throw new Error(`Talk is unavailable for connection "${connectionId}"`);
-    }
-    return await this.services.channelsService.send(
-      channel,
-      conversationId as ConversationId,
-      message,
-      { connectionId },
-    );
-  }
-
-  private async handleTalkHistory(params: unknown): Promise<ChannelMessage[]> {
-    const { connectionId, conversationId, since, limit } = parseParams(
-      "talk.history.query",
-      TalkHistoryParams,
-      params,
-    );
-    const channel = this.channelOf(connectionId);
-    if (!channel) throw new Error(`Talk history is unavailable for connection "${connectionId}"`);
-    return await this.services.channelsService.history(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(limit ? { limit } : {}),
-      connectionId,
     });
   }
 

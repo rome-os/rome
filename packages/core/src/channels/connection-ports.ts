@@ -5,12 +5,8 @@
  * Contract: `Channel` and `Inbound` (channel.ts), `Messages` (messages.ts).
  */
 
-import type {
-  ChannelMessage,
-  InboundMessage,
-  TalkDirectMessaging,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, TalkDirectMessaging } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkRouter } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
@@ -140,9 +136,21 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
         .reverse()
-        .slice(0, queryLimit(limit));
+        .slice(0, queryLimit(limit))
+        .map(copyOf);
     },
     byAccount: null,
+  };
+}
+
+/** A shared read's message, copied for one caller, so a caller that edits what
+ *  it was answered (its attachments, say) leaves the others' answers as read.
+ *  `raw` stays shared: it is the provider's own, which no caller edits. */
+function copyOf(message: ChannelMessage): ChannelMessage {
+  return {
+    ...message,
+    attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    ...(message.thread ? { thread: { ...message.thread } } : {}),
   };
 }
 
@@ -200,9 +208,10 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
     (connectionId: string) =>
     async (message: InboundMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
+      // What a Talk delivers is the record a channel names itself on.
       const event: InboundEvent = {
         kind: "message",
-        message,
+        message: { ...message, channel: service, direction: "inbound" },
         ref: { connectionId, conversationId: message.conversationId },
       };
       // A Connection id is a UUID, so the first colon ends it.

@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ChannelMessage,
-  ConversationId,
-  NormalizedMessage,
-  TalkHistory,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId, NormalizedMessage } from "@rome-os/app-runtime";
+import type { TalkHistory } from "../connections/types.js";
 import { historyFeature } from "../connections/integrations/talk-features.js";
 import {
   connectionPorts,
@@ -204,6 +200,24 @@ describe("connection-backed messages, shared reads", () => {
     expect(ids(await messages.query({}))).toEqual(["day-2", "day-1"]);
     expect(ids(await messages.query({ since: new Date(NOW - 60 * 60_000) }))).toEqual(["recent"]);
     expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("answers each caller its own copy of a shared read", async () => {
+    const said = {
+      ...line("only", 5),
+      attachments: [{ type: "image" as const, caption: "a photo" }],
+    };
+    const { messages, query } = port(() => [said]);
+
+    const [first] = await messages.query({});
+    first!.text = "edited";
+    first!.attachments[0]!.caption = "edited";
+    first!.attachments.push({ type: "document" });
+    const [second] = await messages.query({});
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ text: "only", attachments: [{ caption: "a photo" }] });
+    expect(second!.attachments).toHaveLength(1);
   });
 
   it("does not keep a failed read", async () => {

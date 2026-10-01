@@ -19,7 +19,8 @@
 // Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type { ConversationId, TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,

@@ -743,8 +743,6 @@ async function main() {
   const appActionDeps = {
     agentRunner,
     resolveArtifactReference,
-    // Deprecated for app actions; `channelsService` replaces it.
-    talkRouter,
     channelsService,
     conversationSettings,
     capabilityDiscovery,
@@ -1028,7 +1026,6 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        talkRouter,
         conversationSettings,
         chatStop,
         channels,
@@ -1064,7 +1061,7 @@ async function main() {
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: { actionEngine, talkRouter, conversationSettings, chatStop, channels },
+        deps: { actionEngine, conversationSettings, chatStop, channels },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;

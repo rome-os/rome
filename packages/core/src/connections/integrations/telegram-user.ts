@@ -34,7 +34,7 @@
 // epoch and the old epoch's in-flight probe fault is discarded).
 
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,

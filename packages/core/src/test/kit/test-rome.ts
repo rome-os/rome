@@ -41,7 +41,7 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { TalkRouter } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../../connections/types.js";
 import type { AgentConfig, AgentMessage } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";

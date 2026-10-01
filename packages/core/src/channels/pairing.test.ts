@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkRouter } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";

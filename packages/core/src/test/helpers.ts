@@ -42,13 +42,8 @@ import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
-import type {
-  ConversationId,
-  TalkFeatureMap,
-  ConversationSettingsControl,
-  InboundMessage,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";

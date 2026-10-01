@@ -2,11 +2,10 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ChannelMessage,
   ConversationId,
-  InboundMessage,
   TalkActivity,
   TalkDirectMessaging,
-  TalkHistory,
 } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";

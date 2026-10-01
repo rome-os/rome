@@ -10,7 +10,8 @@
 // were kept, and in what order. Stores answer `query` newest first, and this
 // answers oldest first, as the retired reads did.
 
-import type { ChannelMessage, ConversationId, TalkHistory } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { TalkHistory } from "../connections/types.js";
 import type { Channel } from "./channel.js";
 import { MAX_QUERY_LIMIT } from "./messages.js";
 import { WECHAT_USER_CHANNEL } from "./wechat-user-messages.js";

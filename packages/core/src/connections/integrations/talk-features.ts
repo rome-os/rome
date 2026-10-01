@@ -2,14 +2,13 @@ import type {
   Attachment,
   ChannelMessage,
   ConversationId,
-  InboundMessage,
   MessageReceipt,
   NormalizedMessage,
   TalkActivity,
   TalkDirectMessaging,
-  TalkHistory,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkHistory } from "../types.js";
 import type { HistoryLine } from "../../channels/types.js";
 
 /** Adapters still normalize their provider SDK events into the established

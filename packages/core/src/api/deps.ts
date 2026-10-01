@@ -44,8 +44,8 @@ import type {
   AppRuntimeRepositories,
   ConversationSettingsControl,
   ChannelsService,
-  TalkRouter,
 } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../connections/types.js";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { SetupManager } from "../connections/setup/manager.js";

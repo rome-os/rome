@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ChannelMessage, ConversationId, TalkHistory } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { TalkHistory } from "../connections/types.js";
 import type { Channel } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
 

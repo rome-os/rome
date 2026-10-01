@@ -11,7 +11,8 @@
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage } from "../types.js";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";

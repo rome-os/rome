@@ -1,4 +1,5 @@
-import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkRouter } from "../connections/types.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";

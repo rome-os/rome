@@ -235,6 +235,31 @@ async function resolveChatThreadId(
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
+/**
+ * Refuse a channel no Connection can send on before anything else is checked,
+ * so an unconfigured channel is not reported as a bad attachment or a missing
+ * guardian mapping. The channels service applies the same rule, with the same
+ * texts, when it sends.
+ */
+async function requireSendableChannel(
+  channels: ChannelsService,
+  channel: string,
+  requested?: string,
+): Promise<void> {
+  const backing =
+    (await channels.list()).find((candidate) => candidate.name === channel)?.connectionIds ?? [];
+  if (requested) {
+    if (!backing.includes(requested)) {
+      throw new Error(`Connection "${requested}" does not provide channel "${channel}"`);
+    }
+    return;
+  }
+  if (backing.length === 0) throw new Error(`No Talk connection registered for "${channel}"`);
+  if (backing.length > 1) {
+    throw new Error(`Channel "${channel}" has multiple connections; connectionId is required`);
+  }
+}
+
 export async function executeSendMessage(
   channels: ChannelsService,
   input: SendMessageInput,
@@ -244,7 +269,8 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  // The channels service chooses the Connection, and refuses when it cannot.
+  await requireSendableChannel(channels, channel, input.connectionId);
+  // The channels service chooses the Connection among those backing it.
   const via = input.connectionId ? { connectionId: input.connectionId } : undefined;
 
   const safeInput = await validateAttachmentSources(input);

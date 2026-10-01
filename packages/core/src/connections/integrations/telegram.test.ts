@@ -9,7 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import type { ConversationId, InboundMessage } from "@rome-os/app-runtime";
+import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { createTestDb } from "../../test/helpers.js";
@@ -203,6 +203,8 @@ describe("telegram descriptor shape", () => {
     const stopped = talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
     const message = {
+      channel: "telegram",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "999" as ConversationId,
       senderId: "111",
@@ -210,7 +212,7 @@ describe("telegram descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
       raw: { channel: "telegram", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     void talker.feature("inboundMedia")?.materialize(message);
     return stopped as Promise<void>;
   });

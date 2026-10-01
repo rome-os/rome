@@ -1,12 +1,5 @@
-import type {
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  OutgoingMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkFeatureName, TalkRouter } from "./types.js";
 import type { Connection, ConnectionId } from "./types.js";
 import type { ConnectionRegistry } from "./registry.js";
 import { createLogger } from "../logger.js";

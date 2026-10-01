@@ -24,7 +24,7 @@
 // → CredentialRejected{ grant: "session" }; any other terminal → Disconnected.
 
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";

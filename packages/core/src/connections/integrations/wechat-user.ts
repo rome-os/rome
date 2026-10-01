@@ -23,13 +23,8 @@
 
 import { z } from "zod";
 import { rm } from "node:fs/promises";
-import type {
-  ConversationDescriptor,
-  ConversationId,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ConversationDescriptor, ConversationId } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,

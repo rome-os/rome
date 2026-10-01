@@ -13,7 +13,7 @@
 
 import { Bot, GrammyError } from "grammy";
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";

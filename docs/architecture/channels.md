@@ -16,6 +16,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - The `send` port reaches one account directly through `direct`, where the channel offers it. While no Connection exists for the channel, that lookup rejects as a send does, which is how People tells an unconnected channel from one that cannot be written to. A Connection that exists but has no live Talk reads as a channel that cannot be written to, as it did before.
 - The `send` port shows a typing indicator through `activity`, where the channel offers it. It is cosmetic, and nothing waits on it.
 - An inbound event carries its conversation's `ConversationRef`, the address that conversation settings and stop take, so a subscriber does not track what backs the channel.
+- An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
 - `messages` answers one `query` for what was said on the channel: every conversation or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
 - Only a copy Rome keeps answers the per-person reads a People timeline makes (`messages.byAccount`). A channel without one leaves them null, and People reads it from Rome's own transcript instead.
@@ -33,7 +34,7 @@ App actions reach channels through one service, `deps.channelsService` ([`Channe
 - It chooses the Connection: the one an action names, which must back the channel, or else the channel's only one. With several and none named, it refuses rather than guessing.
 - `query` is the general read. `history` is the read `fetch_channel_history` has always made, with the windows and pages the retired per-channel reads cut, oldest first. It is kept only so the tool's output does not change.
 - Admission and pairing stay in the router that dispatches a Connection's inbound events, and an account directory stays on the Connection. The service adds no path around either.
-- The deprecated `TalkRouter` that actions used to receive is answered through this service in a worker.
+- A Connection's Talk, its features (history, inbound media, typing, the directory, direct messaging) and the router that dispatches them are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). No app receives them. An app reaches a channel through this service or a hook's `channels`.
 
 ## Connection setup
 

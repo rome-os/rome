@@ -4,7 +4,6 @@ import type {
   ChannelMessage,
   ChannelsService,
   ConversationId,
-  InboundMessage,
 } from "@rome-os/app-runtime";
 import { createAction } from "./index.js";
 
@@ -18,8 +17,10 @@ const actionConfig = {
   sideEffects: "read-only",
 } as const;
 
-function makeMessage(overrides: Partial<InboundMessage> = {}): InboundMessage {
+function makeMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
+    channel: "discord",
+    direction: "inbound",
     messageId: "msg1",
     conversationId: "general" as ConversationId,
     senderId: "user1",
@@ -33,7 +34,7 @@ function makeMessage(overrides: Partial<InboundMessage> = {}): InboundMessage {
 }
 
 interface HistoryAdapter {
-  fetchHistory?: (conversationId: string | null, windowHours: number) => Promise<InboundMessage[]>;
+  fetchHistory?: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>;
 }
 
 function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
@@ -54,7 +55,7 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
         const hours = since
           ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
           : 24;
-        return (await adapter.fetchHistory(conversationId ?? null, hours)) as ChannelMessage[];
+        return adapter.fetchHistory(conversationId ?? null, hours);
       },
     },
   };
