@@ -386,7 +386,7 @@ export function FreeGrid() {
                   size="md"
                   label={t("nav.more")}
                   icon={<MoreHorizontal />}
-                  className="touch-target text-muted-foreground hover:text-foreground"
+                  className="text-muted-foreground hover:text-foreground"
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">

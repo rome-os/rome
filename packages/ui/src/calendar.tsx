@@ -175,9 +175,8 @@ function CalendarDayButton({
     if (modifiers.focused) ref.current?.focus();
   }, [modifiers.focused]);
 
-  // The days sit edge to edge, so each day opts out of Button's touch hit
-  // area: a 44px one would spill onto the next day and take taps on that
-  // day's own box.
+  // A day is a square `Button`, so on touch its box grows to 44px instead of
+  // a hit area spilling onto the next day, and the grid widens to fit.
   return (
     <Button
       ref={ref}
@@ -194,7 +193,7 @@ function CalendarDayButton({
       data-range-end={modifiers.range_end}
       data-range-middle={modifiers.range_middle}
       className={cn(
-        "relative isolate z-10 flex aspect-square size-auto before:hidden w-full min-w-(--cell-size) flex-col gap-1 group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:outline-solid group-data-[focused=true]/day:outline-2 group-data-[focused=true]/day:outline-offset-0 group-data-[focused=true]/day:outline-ring data-[range-end=true]:rounded-8 data-[range-end=true]:rounded-r-8 data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-muted data-[range-middle=true]:text-foreground data-[range-start=true]:rounded-8 data-[range-start=true]:rounded-l-8 data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground dark:hover:text-foreground [&>span]:text-aux [&>span]:opacity-70",
+        "relative isolate z-10 flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:outline-solid group-data-[focused=true]/day:outline-2 group-data-[focused=true]/day:outline-offset-0 group-data-[focused=true]/day:outline-ring data-[range-end=true]:rounded-8 data-[range-end=true]:rounded-r-8 data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-muted data-[range-middle=true]:text-foreground data-[range-start=true]:rounded-8 data-[range-start=true]:rounded-l-8 data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground dark:hover:text-foreground [&>span]:text-aux [&>span]:opacity-70",
         defaultClassNames.day,
         className,
       )}

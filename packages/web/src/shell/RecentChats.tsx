@@ -751,7 +751,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               title={t("recentChats.searchShortcut", { shortcut: searchShortcut })}
               onClick={onSearch}
               icon={<Search aria-hidden />}
-              className="touch-target text-subtle-foreground hover:text-foreground"
+              className="text-subtle-foreground hover:text-foreground"
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -759,7 +759,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                   size="sm"
                   label={t("recentChats.settings")}
                   icon={<Ellipsis aria-hidden />}
-                  className="touch-target text-subtle-foreground hover:text-foreground"
+                  className="text-subtle-foreground hover:text-foreground"
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">

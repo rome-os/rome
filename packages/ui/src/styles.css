@@ -771,7 +771,7 @@
 
 /* Extends a control's hit area to the 44px touch floor on pointerless devices
    without changing the box it paints, which is what a bordered or filled
-   control needs: `touch-target` would grow the visible control instead.
+   labelled control needs: `touch-target` would grow the visible control.
 
    The hit area is a `::before`, not an `::after`, because `::after` is where the
    kit draws its indicators (the tab and page-nav underlines). It is centred on
@@ -780,14 +780,18 @@
    unlayered, so it outranks a `before:*` utility that sets the same
    properties. Do not pair the two.
 
-   The extension can land on a neighbor's own box. A later positioned control
-   paints over an earlier one, so where two controls sit closer than 44px
-   centre to centre, a tap near the earlier one's edge reaches the later one.
-   Space them on touch, grow their boxes with `touch-target` instead, or opt
-   out with `before:hidden`. The opt-out works because this rule never sets
-   `display`, so the utility's `display: none` still applies. A grid packed
-   edge to edge, such as Calendar's days, opts out. A control that clips its
-   own overflow clips the extension with it. */
+   A hit area that reaches past the box can land on a neighbour's own box: a
+   later positioned control paints over an earlier one, and no stacking order
+   can put one control's hit area beneath another's box. So it belongs only
+   where the extension stays clear of neighbours. Square controls cluster, so
+   IconButton and Button's square sizes take `touch-target` and grow the box
+   instead, and so does anything packed edge to edge. A labelled Button is
+   wider than 44px, so its hit area reaches only up and down, and never more
+   than 8px (`xs` grows to 28px on touch). Buttons laid out at least
+   `gap-2` apart therefore stay clear. A list packed tighter, such as
+   `space-y-1` rows, holds its rows at 44px with `touch-row` instead. To opt one control out, add `before:hidden`. That works because this
+   rule never sets `display`, so the utility's `display: none` still applies.
+   A control that clips its own overflow clips the extension with it. */
 @media (hover: none) {
   .touch-hit::before {
     content: "";

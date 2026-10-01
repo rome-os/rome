@@ -394,7 +394,7 @@ function Toolbar({ searchPlaceholder }: { searchPlaceholder: string }) {
             disabled={creating}
             label={t("sidebar.new")}
             icon={<Plus strokeWidth={1.8} aria-hidden="true" />}
-            className="touch-target text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+            className="text-muted-foreground hover:bg-surface-muted hover:text-foreground"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={6} className="min-w-[10rem]">

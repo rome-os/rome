@@ -12,7 +12,10 @@ import { canonicalControlSize } from "./control-size.js";
 // working; `md` is the one to write.
 const SIZE_MD =
   "h-[var(--control-h-md)] gap-[var(--control-gap)] rounded-[var(--control-r-md)] px-[var(--control-px-center-md)]";
-const SIZE_ICON_MD = "size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
+// Every square step under 44px also carries `touch-target`, for the reason
+// IconButton does: square controls cluster, so on touch the box grows to the
+// floor instead of a hit area spilling onto the neighbour.
+const SIZE_ICON_MD = "touch-target size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
 
 // The transparent border is the width reservation, and that is its whole job:
 // height is explicit but width is auto, so a variant that paints a border —
@@ -62,15 +65,20 @@ const buttonVariants = cva(
       // toolbars, with no field counterpart to line up with — so it pads from a
       // spacing step, neither group carrying a step that low.
       size: {
-        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+        // On touch `xs` grows to 28px, so its hit area reaches 8px past the
+        // box, as `sm`'s does, not 10px. 8px is `gap-2`, the gap a wrapped row
+        // of buttons keeps, so a hit area never lands on the next row. The
+        // floor is a box size, not `--control-h-sm`: `xs` stays off the scale
+        // and joins no row's size agreement.
+        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 [@media(hover:none)]:min-h-7 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-[var(--control-h-sm)] gap-[var(--control-gap)] rounded-[var(--control-r-sm)] px-[var(--control-px-center-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         md: SIZE_MD,
         /** @deprecated Spelling of `md` that predates the shared vocabulary. */
         default: SIZE_MD,
         "icon-xs":
-          "size-6 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+          "touch-target size-6 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
-          "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
+          "touch-target size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-md": SIZE_ICON_MD,
         /** @deprecated Spelling of `icon-md` that predates the shared vocabulary. */
         icon: SIZE_ICON_MD,

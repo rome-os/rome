@@ -1160,7 +1160,7 @@ function RoutineCard({
               size="sm"
               label={t("menu.ariaLabel")}
               icon={<MoreHorizontal />}
-              className="touch-target text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground"
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

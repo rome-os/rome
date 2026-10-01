@@ -206,7 +206,7 @@ export function RomeShellLayout() {
                     label={t("nav.closeSidebar")}
                     icon={<Cross1Icon aria-hidden />}
                     onClick={() => setSidebarOpen(false)}
-                    className="touch-target text-subtle-foreground hover:text-foreground md:hidden"
+                    className="text-subtle-foreground hover:text-foreground md:hidden"
                   />
                 </div>
               </div>

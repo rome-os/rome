@@ -98,24 +98,57 @@ test("the open sidebar at phone size: 44px reach", async ({ page }) => {
   );
 });
 
-// The kit's own composites, independent of which routes the survey covers. A
-// gallery specimen is not laid out for a phone, so it is not held to the
-// 44px reach. It is held to the rule a default hit area could break: a tap on
-// a control's own box reaches that control, not a neighbour whose hit area
-// spills over it. Calendar's day grid and ButtonGroup pack controls edge to
-// edge, which is where that would happen first.
-test("kit composites keep every control's own box its own on touch", async ({ page }) => {
-  await page.goto("/dev/gallery");
-  await expect(page.locator("#calendar [data-day]").first()).toBeVisible({ timeout: 30_000 });
-  await page.evaluate(() => document.fonts.ready);
+// The rule a default hit area could break, held on every route mock mode
+// serves rather than only the surveyed ones: a tap on a control's own box
+// reaches that control, not a neighbour whose hit area spills over it. These
+// pages are not all laid out for a phone, so they are not held to the 44px
+// reach. /dev/gallery carries the kit's composites, such as Calendar's day
+// grid, ButtonGroup and a packed icon toolbar, which pack controls closest.
+const EVERY_ROUTE = [
+  ...ROUTES.map(({ path }) => path),
+  "/people/directory",
+  "/people/person/wei-chen",
+  "/sessions/all",
+  "/routines/routine-brief",
+  "/app-details/weather",
+  "/settings/appearance",
+  "/settings/devices",
+  "/settings/channels",
+  "/settings/ai-tools",
+  "/settings/favors",
+  "/settings/advanced",
+  "/settings/connections/github",
+  "/settings/connections/app-keys",
+  "/events",
+  "/guide",
+  "/dev/gallery",
+  "/dev/styleguide",
+  "/dev/chat-blocks",
+  "/dev/connections",
+];
 
-  const violations = await page.evaluate(collectTouchReachViolations, {
-    scope: "#controls",
-    ownBox: true,
-    reach: false,
+for (const path of EVERY_ROUTE) {
+  test(`${path} at phone size: every control's own box is its own`, async ({ page }) => {
+    await page.goto(path);
+    // Some /dev pages render outside the shell, so the readiness signal is
+    // any control at all rather than the shell's header.
+    await expect(page.locator("button").filter({ visible: true }).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    if (path === "/dev/gallery") {
+      await expect(page.locator("#calendar [data-day]").first()).toBeVisible({ timeout: 30_000 });
+    }
+    await page.waitForLoadState("networkidle");
+    await page.evaluate(() => document.fonts.ready);
+
+    const violations = await page.evaluate(collectTouchReachViolations, {
+      scope: null,
+      ownBox: true,
+      reach: false,
+    });
+    expect(
+      violations,
+      `taps on a control's own box that land elsewhere on ${path}:\n${report(violations)}`,
+    ).toEqual([]);
   });
-  expect(
-    violations,
-    `taps on a control's own box that land elsewhere:\n${report(violations)}`,
-  ).toEqual([]);
-});
+}

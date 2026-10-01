@@ -4,6 +4,7 @@ import { Check, ChevronRight, Copy, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger, PopoverArrow } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -399,7 +400,7 @@ export function PairingRequestsSection({
         <div className="text-ui">
           {cloneElement(
             activityLink,
-            { className: `${activityLink.props.className ?? ""} touch-hit` },
+            { className: cn(activityLink.props.className, "touch-hit") },
             t("pairing.viewActivity"),
           )}
         </div>
