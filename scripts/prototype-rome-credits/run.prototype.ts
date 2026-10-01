@@ -17,6 +17,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { gunzipSync, zstdDecompressSync } from "node:zlib";
+import { chmodSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { AppServerClient } from "../../packages/core/src/core/codex/app-server-client.js";
 import { CODEX_ENV_ALLOWLIST } from "../../packages/core/src/core/codex/common.js";
@@ -80,6 +84,12 @@ function decode(req: IncomingMessage, body: Buffer): unknown {
   return JSON.parse(raw.toString("utf8"));
 }
 
+function toolLabel(tool: unknown): string {
+  if (!isRecord(tool)) return "?";
+  const nested = Array.isArray(tool.tools) ? `[${tool.tools.map(toolLabel).join(",")}]` : "";
+  return `${String(tool.type)}:${String(tool.name ?? "")}${nested}`;
+}
+
 function summarizeInput(input: unknown): Record<string, unknown> {
   if (!Array.isArray(input)) return { kind: typeof input };
   const types: Record<string, number> = {};
@@ -98,7 +108,7 @@ function summarizeInput(input: unknown): Record<string, unknown> {
       const tools = Array.isArray(record.tools) ? record.tools : [];
       return {
         keys: Object.keys(record),
-        tools: tools.map((tool) => (isRecord(tool) ? `${String(tool.type)}:${String(tool.name ?? "")}` : "?")),
+        tools: tools.map(toolLabel),
       };
     });
   return { types, encryptedReasoning, additionalTools };
@@ -284,20 +294,24 @@ async function main(): Promise<void> {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
-  const client = new AppServerClient({
-    cwd: process.cwd(),
-    env,
-    onNotification,
-    onServerRequest,
-    onExit: (code) => trace("codex.exit", { code }),
-  });
-  client.start();
-  const initialized = (await client.request("initialize", {
-    clientInfo: { name: "rome", title: "Rome prototype", version: "0" },
-    capabilities: { experimentalApi: true },
-  })) as Record<string, unknown>;
-  client.notify("initialized", {});
-  trace("codex.initialized", { userAgent: initialized.userAgent ?? null, envKeys: Object.keys(env) });
+  let client!: AppServerClient;
+  const startClient = async (clientEnv: Record<string, string>): Promise<void> => {
+    client = new AppServerClient({
+      cwd: process.cwd(),
+      env: clientEnv,
+      onNotification,
+      onServerRequest,
+      onExit: (code) => trace("codex.exit", { code }),
+    });
+    client.start();
+    const initialized = (await client.request("initialize", {
+      clientInfo: { name: "rome", title: "Rome prototype", version: "0" },
+      capabilities: { experimentalApi: true },
+    })) as Record<string, unknown>;
+    client.notify("initialized", {});
+    trace("codex.initialized", { userAgent: initialized.userAgent ?? null, envKeys: Object.keys(clientEnv) });
+  };
+  await startClient(env);
   try {
     const account = (await client.request("account/read", { refreshToken: false })) as Record<string, unknown>;
     const acct = isRecord(account.account) ? account.account : {};
@@ -456,6 +470,49 @@ async function main(): Promise<void> {
   plan.push({ kind: "error", status: 429 }, { kind: "error", status: 429 }, { kind: "error", status: 429 });
   await runTurn("E 429", e, "Reply with exactly: FOXTROT");
   await history("S7", e);
+
+  // Q3 again, with the credits provider defined for the whole app-server
+  // process (`-c` at spawn, token from the process env) instead of per thread.
+  section("S8 restart app-server with the credits provider defined process-wide");
+  client.close();
+  const shim = createRequire(join(process.cwd(), "packages/core/package.json")).resolve("@openai/codex/bin/codex.js");
+  const provider = [
+    `name="Rome credits"`,
+    `base_url="${baseUrl}"`,
+    `env_key="ROME_CREDITS_TOKEN"`,
+    `wire_api="responses"`,
+    `requires_openai_auth=false`,
+    `supports_websockets=false`,
+    `request_max_retries=1`,
+    `stream_max_retries=0`,
+  ].join(",");
+  const wrapper = join(tmpdir(), "rome-credits-prototype-codex.sh");
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nexec "${process.execPath}" "${shim}" -c 'model_providers.rome_credits={${provider}}' -c 'web_search="disabled"' "$@"\n`,
+  );
+  chmodSync(wrapper, 0o700);
+  process.env.ROME_CODEX_BIN = wrapper;
+  await startClient({ ...env, ROME_CREDITS_TOKEN: INSTANCE_TOKEN });
+  const globalCredits = { ...ownLoginConfig, model_provider: "rome_credits" };
+
+  const p = await startThread("P credits (process-wide provider)", globalCredits);
+  plan.push({ kind: "text", text: "HOTEL" });
+  await runTurn("P on credits", p, "Reply with exactly: HOTEL");
+  await resume("P -> own-login", p, ownLoginConfig, "openai");
+  const beforeP = requestCount;
+  await runTurn("P on own-login", p, "Reply with exactly: INDIA");
+  trace("check.S8.ownLogin", { gatewayRequests: requestCount - beforeP });
+  await resume("P -> credits", p, globalCredits, "rome_credits");
+  plan.push({ kind: "text", text: "JULIET" });
+  await runTurn("P back on credits", p, "Reply with exactly: JULIET");
+  await history("S8.P", p);
+
+  const q = await startThread("Q own-login", ownLoginConfig);
+  await runTurn("Q on own-login", q, "Reply with exactly: KILO");
+  await resume("Q -> credits", q, globalCredits, "rome_credits");
+  plan.push({ kind: "text", text: "LIMA" });
+  await runTurn("Q on credits", q, "Reply with exactly: LIMA");
 
   trace("done", { gatewayRequests: requestCount });
   client.close();
