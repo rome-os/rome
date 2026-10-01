@@ -3608,8 +3608,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               const resultBlockId =
                 finalTextBlockIx !== undefined
                   ? finalTextBlockId
-                  : lastCompletedText && resultBlockIx === lastCompletedText.blockIx
-                    ? lastCompletedText.blockId
+                  : reusableResultBlockIx !== undefined
+                    ? lastCompletedText?.blockId
                     : undefined;
               await deps.actionEngine.run(
                 "send_message",

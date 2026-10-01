@@ -33,7 +33,7 @@ interface TraceEventBase {
 
 export type RomeSessionRefDto = RomeSessionRef;
 
-export interface SessionInitEvent extends TraceEventBase {
+export interface TraceSessionInitEvent extends TraceEventBase {
   type: "session_init";
   sessionId: string;
   romeSession?: RomeSessionRefDto;
@@ -42,7 +42,7 @@ export interface SessionInitEvent extends TraceEventBase {
   projectPath?: string;
 }
 
-export interface TurnStartEvent extends TraceEventBase {
+export interface TraceTurnStartEvent extends TraceEventBase {
   type: "turn_start";
   turnId: string;
   sessionId: string;
@@ -50,7 +50,7 @@ export interface TurnStartEvent extends TraceEventBase {
 }
 
 /** Follows the terminal result or error and closes its turn. */
-export interface TurnEndEvent extends TraceEventBase {
+export interface TraceTurnEndEvent extends TraceEventBase {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
@@ -205,9 +205,9 @@ export interface PlanUpdateEvent extends TraceEventBase {
 }
 
 export type TraceEventDto =
-  | SessionInitEvent
-  | TurnStartEvent
-  | TurnEndEvent
+  | TraceSessionInitEvent
+  | TraceTurnStartEvent
+  | TraceTurnEndEvent
   | TextBlock
   | ThinkingBlock
   | ToolUseBlock
@@ -269,7 +269,7 @@ export interface TraceSummary {
   totalDurationMs?: number;
   /** Authoritative outcome from the latest `turn_end` block. Absent while the
    *  turn is still running and on legacy traces without lifecycle brackets. */
-  turnStatus?: TurnEndEvent["status"];
+  turnStatus?: TraceTurnEndEvent["status"];
   /** Per-app invocation totals for the icon-strip tooltip. Keyed by app.id. */
   invocationCounts: Record<string, number>;
   /** True when the turn was interrupted by the user via Stop. */
