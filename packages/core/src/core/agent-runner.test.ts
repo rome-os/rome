@@ -898,6 +898,85 @@ describe("AgentRunner", () => {
       }
     });
 
+    describe("idle webchat sessions with background tasks", () => {
+      const task = { id: "b1", type: "local_bash", description: "sleep 900", seenAt: 1 };
+
+      // Two turns' worth of results; each opened session's task listener is
+      // kept by channel key.
+      function setUp() {
+        rs.useFakeTimers();
+        const provider = new MockModelProvider([
+          [{ type: "result", content: "Started" }],
+          [{ type: "result", content: "Started" }],
+        ]);
+        const listeners: ModelBackgroundTaskListener[] = [];
+        const baseOpen = provider.openSession.bind(provider);
+        provider.openSession = async (params: ModelSessionParams) => ({
+          ...(await baseOpen(params)),
+          onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
+            listeners.push(listener);
+            return () => {};
+          },
+        });
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [provider] })),
+          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
+        );
+        const open = async (channelThreadKey: string) => {
+          const key = { agentName: "test-main", channelThreadKey };
+          await collectMessages(new AgentRunner(manager).run({ ...key, prompt: "Start a task" }));
+          return { key, tasks: listeners.at(-1)! };
+        };
+        return { manager, open };
+      }
+
+      afterEach(() => {
+        rs.useRealTimers();
+      });
+
+      it("stay alive while a task runs, up to the cap", async () => {
+        const { manager, open } = setUp();
+        try {
+          const { key, tasks } = await open("webchat:tasks-cap");
+          tasks.onChange?.([task]);
+          await rs.advanceTimersByTimeAsync(800);
+          expect(manager.peek(key)?.backgroundTasks).toEqual([task]);
+          await rs.advanceTimersByTimeAsync(400);
+          expect(manager.peek(key)).toBeUndefined();
+        } finally {
+          await manager.shutdown();
+        }
+      });
+
+      it("close the idle TTL after their last task ends", async () => {
+        const { manager, open } = setUp();
+        try {
+          const { key, tasks } = await open("webchat:tasks-end");
+          tasks.onChange?.([task]);
+          await rs.advanceTimersByTimeAsync(500);
+          tasks.onChange?.([]);
+          await rs.advanceTimersByTimeAsync(50);
+          expect(manager.peek(key)).toBeDefined();
+          await rs.advanceTimersByTimeAsync(200);
+          expect(manager.peek(key)).toBeUndefined();
+        } finally {
+          await manager.shutdown();
+        }
+      });
+
+      it("apply only to webchat", async () => {
+        const { manager, open } = setUp();
+        try {
+          const { key, tasks } = await open("discord:tasks");
+          tasks.onChange?.([task]);
+          await rs.advanceTimersByTimeAsync(300);
+          expect(manager.peek(key)).toBeUndefined();
+        } finally {
+          await manager.shutdown();
+        }
+      });
+    });
+
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
       rs.useFakeTimers();
       const provider = withForkSupport(
