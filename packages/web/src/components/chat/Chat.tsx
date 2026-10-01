@@ -1178,6 +1178,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
       recoveringSessionIdsRef.current.delete(recoveringSessionId);
       setRecoveryNotice((current) => (current?.sessionId === recoveringSessionId ? null : current));
+      setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
       const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
       if (turnId) {
         endSessionStream(recoveringSessionId, turnId);
@@ -1935,6 +1936,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     const { sessionId, turnId } = recoveryNotice;
     if (streamingSessionsRef.current.get(sessionId)?.turnId !== turnId) return;
     suppressedTurnIdsRef.current.set(sessionId, turnId);
+    // Reset hides only the local projection. Keep tracking the server turn so
+    // its eventual answer is fetched even if this handoff child loses floor.
+    queueOffFloorReconciliation(sessionId, turnId);
     turnStreamControllersRef.current.get(turnId)?.abort();
     recoveringSessionIdsRef.current.delete(sessionId);
     endSessionStream(sessionId, turnId);
@@ -1942,7 +1946,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
     setStreamReconnectRevision((revision) => revision + 1);
     void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
-  }, [recoveryNotice, streamingSessionsRef, endSessionStream, loadMessages]);
+  }, [
+    recoveryNotice,
+    streamingSessionsRef,
+    endSessionStream,
+    loadMessages,
+    queueOffFloorReconciliation,
+  ]);
 
   const retryRecoveryView = useCallback(() => {
     if (!recoveryNotice) return;

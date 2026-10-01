@@ -1515,6 +1515,67 @@ describe("Chat turn stream lifecycle", () => {
     expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object));
   });
 
+  it("reconciles a reset turn's eventual answer after its child loses the floor", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+            },
+          }),
+        ),
+      ),
+    );
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(listSessionTurns).mockResolvedValue(null);
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(14_000);
+    });
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reset-recovery"));
+      await Promise.resolve();
+    });
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" />
+      </MemoryRouter>,
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionMessages).mockImplementation((sid) =>
+      Promise.resolve(
+        sid === "session-1"
+          ? [
+              {
+                id: "answer-after-reset",
+                sessionId: "session-1",
+                turnId: "turn-1",
+                role: "assistant",
+                content: JSON.stringify([{ type: "text", content: "Finished" }]),
+                createdAt: "2026-09-30T14:00:00.000Z",
+              },
+            ]
+          : [],
+      ),
+    );
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(6_000);
+    });
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("answer-after-reset");
+  });
+
   it("Retry rechecks a recovery stream whose HTTP 200 reader has not yielded", async () => {
     const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
     rs.mocked(openTurnStream).mockImplementation((_turnId, signal) =>
@@ -1907,6 +1968,39 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(8_000);
     });
     expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false");
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("clears a former floor's reconnect error when its live entry is released", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller;
+              },
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 503 }));
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.useFakeTimers();
+    await act(async () => {
+      streamController!.error(new Error("connection dropped"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await rs.advanceTimersByTimeAsync(2_000);
+    });
+    expect(screen.getByTestId("chat-composer").dataset.error).toBe("stream.errors.reconnectStatus");
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-2" />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
   });
 
