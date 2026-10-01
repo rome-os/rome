@@ -1,0 +1,52 @@
+{
+  "case": "3-folded-followup",
+  "seconds": 10,
+  "turns": [
+    {
+      "turn": "e61689ff",
+      "startedBy": "replay",
+      "answers": [
+        "A",
+        "S"
+      ],
+      "subtype": "success",
+      "ms": 6722,
+      "text": "OK BANANA",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "e61689ff",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 2908,
+      "totalMs": 9630,
+      "terminal": "result",
+      "text": "OK BANANA"
+    },
+    "S": {
+      "turn": "e61689ff",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 4117,
+      "totalMs": 4117,
+      "terminal": "result",
+      "text": "OK BANANA"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  2908 turn e61689ff start (replay) answers=[]",
+    "  2908 read A",
+    "  2908 turn e61689ff also answers [A]",
+    "  5513 send S",
+    "  8054 read S",
+    "  9630 turn e61689ff also answers [S]",
+    "  9630 turn e61689ff end success answers=[A,S]"
+  ]
+}

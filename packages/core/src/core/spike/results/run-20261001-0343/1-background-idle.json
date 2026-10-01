@@ -1,0 +1,81 @@
+{
+  "case": "1-background-idle",
+  "seconds": 14,
+  "turns": [
+    {
+      "turn": "6c4d8fb3",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 3012,
+      "text": "DONE",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "ae7a66df",
+      "startedBy": "frame",
+      "answers": [],
+      "subtype": "success",
+      "ms": 1409,
+      "text": "Acknowledged. The background task completed successfully (exit code 0).",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "e5ec0b41",
+      "startedBy": "replay",
+      "answers": [
+        "B"
+      ],
+      "subtype": "success",
+      "ms": 718,
+      "text": "MARKER-41",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "6c4d8fb3",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3917,
+      "totalMs": 6928,
+      "terminal": "result",
+      "text": "DONE"
+    },
+    "B": {
+      "turn": "e5ec0b41",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 563,
+      "totalMs": 1280,
+      "terminal": "result",
+      "text": "MARKER-41"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     1 send A",
+    "  3917 turn 6c4d8fb3 start (replay) answers=[]",
+    "  3917 read A",
+    "  3918 turn 6c4d8fb3 also answers [A]",
+    "  6929 turn 6c4d8fb3 end success answers=[A]",
+    " 11255 turn ae7a66df start (frame) answers=[]",
+    " 12664 turn ae7a66df end success answers=[]",
+    " 12748 send B (exclusive)",
+    " 13310 turn e5ec0b41 start (replay) answers=[]",
+    " 13311 read B",
+    " 13311 turn e5ec0b41 also answers [B]",
+    " 14028 turn e5ec0b41 end success answers=[B]"
+  ]
+}

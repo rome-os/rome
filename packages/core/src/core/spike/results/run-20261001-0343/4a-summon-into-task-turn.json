@@ -1,0 +1,70 @@
+{
+  "case": "4a-summon-into-task-turn",
+  "seconds": 23,
+  "sawTaskTurn": true,
+  "turns": [
+    {
+      "turn": "f65b541a",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 3168,
+      "text": "READY",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "7891a6e5",
+      "startedBy": "frame",
+      "answers": [
+        "Q"
+      ],
+      "subtype": "success",
+      "ms": 10859,
+      "text": "The background command completed. It printed: DONE-77",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "f65b541a",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 5123,
+      "totalMs": 8290,
+      "terminal": "result",
+      "text": "READY"
+    },
+    "Q": {
+      "turn": "7891a6e5",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 7658,
+      "totalMs": 10144,
+      "terminal": "result",
+      "text": "The background command completed. It printed: DONE-77"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  5122 turn f65b541a start (replay) answers=[]",
+    "  5122 read A",
+    "  5123 turn f65b541a also answers [A]",
+    "  8290 turn f65b541a end success answers=[A]",
+    " 11688 turn 7891a6e5 start (frame) answers=[]",
+    " 12402 send Q",
+    " 18391 read Q",
+    " 20060 turn 7891a6e5 also answers [Q]",
+    " 22546 turn 7891a6e5 end success answers=[Q]"
+  ]
+}

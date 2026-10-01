@@ -1,0 +1,65 @@
+{
+  "case": "2-late-followup",
+  "seconds": 6,
+  "turns": [
+    {
+      "turn": "83968c34",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 2031,
+      "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "e78988d3",
+      "startedBy": "replay",
+      "answers": [
+        "S"
+      ],
+      "subtype": "success",
+      "ms": 1029,
+      "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "83968c34",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 2918,
+      "totalMs": 4949,
+      "terminal": "result",
+      "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+    },
+    "S": {
+      "turn": "e78988d3",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 1892,
+      "totalMs": 2922,
+      "terminal": "result",
+      "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  2918 turn 83968c34 start (replay) answers=[]",
+    "  2918 read A",
+    "  2918 turn 83968c34 also answers [A]",
+    "  3311 send S",
+    "  4949 turn 83968c34 end success answers=[A]",
+    "  5203 turn e78988d3 start (replay) answers=[]",
+    "  5203 read S",
+    "  5203 turn e78988d3 also answers [S]",
+    "  6233 turn e78988d3 end success answers=[S]"
+  ]
+}
