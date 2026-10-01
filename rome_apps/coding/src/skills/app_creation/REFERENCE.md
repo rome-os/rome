@@ -418,7 +418,7 @@ export function createAction(
   | --- | --- | --- |
   | Lifecycle | `turn_start`, `turn_end`, `session_init` | Bracketing: `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `session_init` describes the session. |
   | Content | `thinking`, `text`, `tool_use`, `tool_result`, `structured_output`, `result`, `error` | Durable blocks. `structured_output` is reserved for interactive handback submissions. `result`/`error` is the agent's terminal block (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. |
-  | Transient | `text_delta` | Streaming preview of an in-flight `text` block; never persisted — ignore unless you render live text. |
+  | Transient | `text_delta`, `thinking_delta`, `tool_input_delta`, `tool_output_delta` | Streaming previews of an in-flight block; never persisted — ignore unless you render live output. `text_delta` and `thinking_delta` carry the `blockId` of the `text` or `thinking` block they preview; `tool_input_delta` and `tool_output_delta` carry the `toolUseId` of their `tool_use` and `tool_result`. The complete block normally follows; discard previews left unmatched when the turn ends. |
 
   Typical consumption: read `sessionId` from `turn_start` (to resume the
   session later), accumulate or forward content blocks, and take the final
