@@ -33,6 +33,7 @@
     "lint:sh": "scripts/lint-shell.sh",
     "lint:prose": "node scripts/check-prose.mjs",
     "lint:agents": "tsx scripts/check-agents-symlinks.ts",
+    "prototype:rome-credits": "tsx scripts/prototype-rome-credits/run.prototype.ts",
     "lint:deadcode": "knip --no-config-hints",
     "lint:deadcode:report": "knip --no-exit-code",
     "typecheck:lint-agents": "tsc -p tsconfig.lint-agents.json",
