@@ -260,10 +260,13 @@ export interface ModelSessionFork {
  * input's uuid), never from Rome's guesses.
  *
  * Every terminal (`result` or `error`) a provider yields falls inside a model
- * turn, between its start and its end, including a terminal the provider
- * makes up after an interrupt. If the stream itself ends or throws with a turn
- * open (the provider process died), no end follows: the stream's end closes
- * any open turn, and its inputs got no reply.
+ * turn, between its start and its end. When Rome ends the session (an
+ * interrupt, or a stream error the provider classifies), the provider closes
+ * the open turn with a terminal it makes up, naming only what the turn already
+ * named; inputs it never picked up get one made-up turn that names exactly
+ * them. No turn is ever made up that names nothing. If the stream itself ends
+ * or throws with a turn open (the provider process died), no end follows: the
+ * stream's end closes any open turn, and inputs still waiting got no reply.
  */
 export type ModelTurnEvent =
   | {

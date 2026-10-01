@@ -608,6 +608,41 @@ export class AnthropicProvider implements ModelProvider {
       let pendingTextBlockId: string | undefined;
       let partialText = "";
       let partialTextBlockId: string | undefined;
+      // Rome ends what the SDK didn't finish (an interrupt, or a stream error
+      // it classifies). The open SDK turn, if any, closes with `terminal(true)`
+      // after its held text; it names only what the SDK's echo named. Messages
+      // the SDK never picked up get no reply from it: one made-up turn names
+      // exactly those and carries `terminal(false)`, with a warning. Nothing
+      // else is made up: no turn naming nothing, no repeat of a finished turn.
+      const endUnfinished = function* (
+        terminal: (forOpenTurn: boolean) => AgentMessage,
+      ): Generator<ModelSessionEvent, boolean> {
+        let answered = false;
+        if (projection.isOpen) {
+          answered = true;
+          const closing = terminal(true);
+          if (!params.outputSchema && pendingText !== null) {
+            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+            pendingText = null;
+          }
+          if (!params.outputSchema && partialText)
+            yield textBlock(partialText, "final", partialTextBlockId);
+          yield closing;
+          yield* projection.close();
+        }
+        const unread = [...unreadSends].filter((id) => !mintedIds.has(id));
+        unreadSends.clear();
+        if (unread.length === 0) return answered;
+        log.warn("ending messages the Claude SDK never picked up", { inputIds: unread });
+        yield* projection.openForTerminal(unread);
+        yield terminal(false);
+        yield* projection.close();
+        return true;
+      };
+      const interrupted = (forOpenTurn: boolean): AgentMessage =>
+        params.outputSchema
+          ? { type: "error", error: "Claude structured-output turn was interrupted" }
+          : { type: "result", content: forOpenTurn ? partialText || pendingText || "" : "" };
       // Block identity is `<API message id>:<content block index>`. The stream
       // reports the index on each `content_block_*` event; the SDK then sends
       // each completed block as its own assistant message, in index order, so
@@ -627,7 +662,12 @@ export class AnthropicProvider implements ModelProvider {
           : { type: "text", content, turnPhase };
       try {
         for await (const message of q) {
-          yield* projection.before(message);
+          for (const event of projection.before(message)) {
+            // A send the SDK names in its echo has been picked up.
+            const named = event.type === "model_turn_answers" ? event.added : event.answers;
+            for (const id of named) unreadSends.delete(id);
+            yield event;
+          }
           // First assistant message means the SDK has written user+assistant
           // turns to the transcript: record the SDK's own session id so the
           // host can persist it and safely `{ resume }` next time. Capturing
@@ -877,17 +917,7 @@ export class AnthropicProvider implements ModelProvider {
         }
         if (abortController.signal.aborted && running()) {
           await queryProcess.abort();
-          yield* projection.openForTerminal();
-          if (!params.outputSchema && pendingText !== null) {
-            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-          }
-          if (!params.outputSchema && partialText)
-            yield textBlock(partialText, "final", partialTextBlockId);
-          unreadSends.clear();
-          yield params.outputSchema
-            ? { type: "error", error: "Claude structured-output turn was interrupted" }
-            : { type: "result", content: partialText || pendingText || "" };
-          yield* projection.close();
+          yield* endUnfinished(interrupted);
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -896,21 +926,9 @@ export class AnthropicProvider implements ModelProvider {
         // isn't silently dropped. Done in `catch` rather than `finally` on
         // purpose: a `yield` in `finally` re-suspends the generator when the
         // consumer abandons iteration via `.return()`, swallowing the close.
-        if (!params.outputSchema && pendingText !== null) {
-          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-        }
-        if (!params.outputSchema && partialText)
-          yield textBlock(partialText, "final", partialTextBlockId);
         if (abortController.signal.aborted && err instanceof AbortError) {
           await queryProcess.abort();
-          if (running()) {
-            yield* projection.openForTerminal();
-            unreadSends.clear();
-            yield params.outputSchema
-              ? { type: "error", error: "Claude structured-output turn was interrupted" }
-              : { type: "result", content: partialText || pendingText || "" };
-            yield* projection.close();
-          }
+          yield* endUnfinished(interrupted);
           return;
         }
         // A 401 can also surface as a thrown stream error rather than a result
@@ -918,26 +936,31 @@ export class AnthropicProvider implements ModelProvider {
         // the marker instead of rethrowing a raw 401 up the events loop.
         if (isAnthropicUsageLimitError(err)) {
           onQuotaExhausted?.();
-          yield* projection.openForTerminal();
-          yield {
-            type: "error",
-            error: err instanceof Error ? err.message : String(err),
-            code: "usage_limit",
-          };
-          yield* projection.close();
+          const error = err instanceof Error ? err.message : String(err);
+          if (!(yield* endUnfinished(() => ({ type: "error", error, code: "usage_limit" })))) {
+            log.warn("Claude usage-limit error with no turn or message waiting", { error });
+          }
           return;
         }
         if (isAnthropicAuthRevokedError(err)) {
           await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
-          yield* projection.openForTerminal();
-          yield {
+          const error = err instanceof Error ? err.message : String(err);
+          const ended = yield* endUnfinished(() => ({
             type: "error",
-            error: err instanceof Error ? err.message : String(err),
+            error,
             ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
-          };
-          yield* projection.close();
+          }));
+          if (!ended)
+            log.warn("Claude credential error with no turn or message waiting", { error });
           return;
         }
+        // Any other error ends the stream: an open turn gets no end, and the
+        // stream's end closes it (see ModelTurnEvent). Flush held text into it.
+        if (projection.isOpen && !params.outputSchema && pendingText !== null) {
+          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+        }
+        if (projection.isOpen && !params.outputSchema && partialText)
+          yield textBlock(partialText, "final", partialTextBlockId);
         throw err;
       } finally {
         closed = true;
