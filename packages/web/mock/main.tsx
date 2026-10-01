@@ -2,7 +2,14 @@ import { HttpResponse, http } from "msw";
 import { setupWorker } from "msw/browser";
 import { handlers, strictE2eHandlers } from "./handlers";
 import { renderApp } from "../src/main";
+import { createRoot } from "react-dom/client";
 import "./embedded-tour.css";
+// PROTOTYPE — phone redesign variants (`?variant=a|b|c`), mock mode only.
+import "./phone-variants.prototype.css";
+import { initPhoneVariant } from "../src/prototype/phone-variant.prototype";
+import { PhoneVariantSwitcher } from "../src/prototype/PhoneVariantSwitcher.prototype";
+
+initPhoneVariant();
 
 if (
   window.parent !== window &&
@@ -37,6 +44,11 @@ void (async () => {
     // provided, without isolating the app in an async chunk where React Fast
     // Refresh's $RefreshReg$ global is never established (rome-os/rome#383).
     renderApp();
+    if (new URLSearchParams(window.location.search).get("switcher") !== "0") {
+      const host = document.createElement("div");
+      document.body.append(host);
+      createRoot(host).render(<PhoneVariantSwitcher />);
+    }
   } catch (error) {
     // Without this the page stays blank with no diagnostic when service-worker
     // registration or the app import fails.

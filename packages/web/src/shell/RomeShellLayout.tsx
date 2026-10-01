@@ -17,6 +17,8 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
 import { routeTitle } from "@/lib/page-title";
+import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
+import { PhoneTabBar } from "@/prototype/PhoneTabBar.prototype";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -142,8 +144,23 @@ export function RomeShellLayout() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hideSidebar, navigate, toggleCollapsed]);
 
+  // PROTOTYPE: the phone redesign variant. C replaces the hamburger with a
+  // bottom tab bar, and outside chat drops the top header, so the page's own
+  // large title heads the screen.
+  const phoneVariant = usePhoneVariant();
+  const tabbed = phoneVariant === "c" && !hideSidebar;
+  const headerless = tabbed && !location.pathname.startsWith("/chat");
+
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div
+      className="flex min-h-dvh flex-col bg-background"
+      data-proto-tabbed-page={headerless || undefined}
+      style={
+        headerless
+          ? ({ "--rome-mobile-header-height": "var(--rome-safe-area-top)" } as CSSProperties)
+          : undefined
+      }
+    >
       <UpgradeCountdownBanner />
       <div className="relative flex flex-1">
         {sidebarOpen && !hideSidebar ? (
@@ -244,17 +261,20 @@ export function RomeShellLayout() {
           }
         >
           <div data-app-titlebar="strip" aria-hidden />
-          {!hideSidebar ? (
+          {headerless ? <div className="h-[var(--rome-safe-area-top)] md:hidden" /> : null}
+          {!hideSidebar && !headerless ? (
             <header
               data-app-titlebar="header"
               className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
             >
-              <IconButton
-                size="md"
-                label={t("nav.openSidebar")}
-                icon={<HamburgerMenuIcon aria-hidden />}
-                onClick={() => setSidebarOpen(true)}
-              />
+              {tabbed ? null : (
+                <IconButton
+                  size="md"
+                  label={t("nav.openSidebar")}
+                  icon={<HamburgerMenuIcon aria-hidden />}
+                  onClick={() => setSidebarOpen(true)}
+                />
+              )}
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}
@@ -276,6 +296,9 @@ export function RomeShellLayout() {
           <div className="flex min-h-0 flex-1 flex-col">
             <Outlet />
           </div>
+          {tabbed ? (
+            <PhoneTabBar onMore={() => setSidebarOpen(true)} moreOpen={sidebarOpen} />
+          ) : null}
         </main>
       </div>
     </div>

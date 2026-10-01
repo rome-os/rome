@@ -1,0 +1,322 @@
+{
+  "a-chat": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 28,
+      "median": 44,
+      "max": 82,
+      "n": 28
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "13": 66,
+      "14": 1610,
+      "15": 5,
+      "16": 2008,
+      "18": 4,
+      "20": 36
+    },
+    "composerBottom": 828,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "a-activity": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 28,
+      "median": 32,
+      "max": 44,
+      "n": 19
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "13": 1850,
+      "14": 1048,
+      "15": 5,
+      "18": 62
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "a-routines": {
+    "truncatedLabels": 7,
+    "controlHeights": {
+      "min": 24,
+      "median": 28,
+      "max": 44,
+      "n": 13
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "13": 296,
+      "14": 312,
+      "15": 135,
+      "18": 15
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "a-settings": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 32,
+      "median": 44,
+      "max": 44,
+      "n": 6
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "13": 17,
+      "14": 321,
+      "15": 5,
+      "18": 12
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "a-settings-connections": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 32,
+      "median": 44,
+      "max": 62,
+      "n": 22
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "13": 209,
+      "14": 1103,
+      "15": 16,
+      "18": 73
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "b-chat": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 112,
+      "n": 28
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 195,
+      "16": 3489,
+      "17": 5,
+      "20": 40
+    },
+    "composerBottom": 828,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "b-activity": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 19
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 1850,
+      "16": 1048,
+      "17": 5,
+      "20": 62
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "b-routines": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 36,
+      "median": 44,
+      "max": 44,
+      "n": 13
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 296,
+      "16": 312,
+      "17": 135,
+      "20": 15
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "b-settings": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 6
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 17,
+      "16": 321,
+      "17": 5,
+      "20": 12
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "b-settings-connections": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 62,
+      "n": 22
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "14": 209,
+      "16": 1103,
+      "17": 16,
+      "20": 73
+    },
+    "composerBottom": null,
+    "tabBarTop": null,
+    "controlsUnderTabBarAtRest": []
+  },
+  "c-chat": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 112,
+      "n": 27
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "11": 28,
+      "14": 129,
+      "15": 66,
+      "16": 2008,
+      "17": 1486,
+      "20": 36,
+      "28": 4
+    },
+    "composerBottom": 772,
+    "tabBarTop": 788,
+    "controlsUnderTabBarAtRest": []
+  },
+  "c-activity": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 18
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "11": 28,
+      "15": 1784,
+      "17": 1053,
+      "28": 62
+    },
+    "composerBottom": null,
+    "tabBarTop": 788,
+    "controlsUnderTabBarAtRest": []
+  },
+  "c-routines": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 36,
+      "median": 44,
+      "max": 44,
+      "n": 12
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "11": 28,
+      "15": 296,
+      "17": 443,
+      "28": 15
+    },
+    "composerBottom": null,
+    "tabBarTop": 788,
+    "controlsUnderTabBarAtRest": []
+  },
+  "c-settings": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 44,
+      "n": 5
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "11": 28,
+      "15": 17,
+      "17": 273,
+      "28": 14
+    },
+    "composerBottom": null,
+    "tabBarTop": 788,
+    "controlsUnderTabBarAtRest": []
+  },
+  "c-settings-connections": {
+    "truncatedLabels": 4,
+    "controlHeights": {
+      "min": 44,
+      "median": 44,
+      "max": 62,
+      "n": 21
+    },
+    "overflowX": 0,
+    "under44": [],
+    "ownBoxTaken": [],
+    "textPx": {
+      "11": 28,
+      "15": 209,
+      "17": 1066,
+      "28": 76
+    },
+    "composerBottom": null,
+    "tabBarTop": 788,
+    "controlsUnderTabBarAtRest": []
+  }
+}

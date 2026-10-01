@@ -1,0 +1,91 @@
+/* PROTOTYPE — phone token overrides for the redesign variants. Imported from
+   the mock entry only. Variant A sets nothing, so it is the dashboard as #584
+   leaves it. B and C move sizes and text together: every control's visible
+   box reaches 44px, so the hidden touch hit areas have nothing left to add,
+   and the type ramp rises with it. Everything sits under the phone breakpoint,
+   so desktop never changes. */
+
+@media (max-width: 767px) {
+  /* ── B: scaled, same structure ──────────────────────────────────────────
+     16px controls, 14px annotations, 44px controls, 56px header. */
+  html[data-phone-variant="b"] {
+    --text-ui: 1rem;
+    --text-ui--line-height: 1.375; /* 22px */
+    --text-aux: 0.875rem;
+    --text-aux--line-height: calc(18 / 14);
+    --text-badge: 0.875rem;
+    --text-badge--line-height: calc(18 / 14);
+    --text-section: 1.0625rem;
+    --text-section--line-height: calc(22 / 17);
+    --text-title: 1.25rem;
+    --text-title--line-height: 1.3; /* 26px */
+
+    --control-h-sm: 2.75rem;
+    --control-h-md: 2.75rem;
+    --control-px-center-sm: 14px;
+    --control-px-center-md: 16px;
+    --control-px-start-sm: 12px;
+    --control-px-start-md: 14px;
+
+    --rome-mobile-header-height: calc(3.5rem + var(--rome-safe-area-top));
+  }
+
+  /* ── C: phone-native ───────────────────────────────────────────────────
+     17px controls (iOS body), 15px annotations, a 28px large page title,
+     44px controls, and a 56px bottom tab bar the safe-area inset now includes,
+     so the composer and every safe-area-aware scroller clear it. */
+  html[data-phone-variant="c"] {
+    --proto-tabbar-h: 3.5rem;
+
+    --text-ui: 1.0625rem;
+    --text-ui--line-height: calc(22 / 17);
+    --text-aux: 0.9375rem;
+    --text-aux--line-height: calc(20 / 15);
+    --text-badge: 0.9375rem;
+    --text-badge--line-height: calc(20 / 15);
+    --text-section: 1.0625rem;
+    --text-section--line-height: calc(22 / 17);
+    --text-section--font-weight: 600;
+    --text-title: 1.75rem;
+    --text-title--line-height: calc(34 / 28);
+    --text-title--font-weight: 700;
+
+    --control-h-sm: 2.75rem;
+    --control-h-md: 2.75rem;
+    --control-px-center-sm: 16px;
+    --control-px-center-md: 18px;
+    --control-px-start-sm: 14px;
+    --control-px-start-md: 16px;
+
+    --rome-safe-area-bottom: calc(env(safe-area-inset-bottom) + var(--proto-tabbar-h));
+  }
+
+  /* A page that scrolls the document ends above the bar. Chat pins its
+     composer through the safe-area inset instead, so it is left alone. */
+  html[data-phone-variant="c"] [data-proto-tabbed-page] main {
+    padding-bottom: var(--rome-safe-area-bottom);
+  }
+
+  /* ── Shared by B and C: visible 44px boxes where a token does not reach ── */
+  html:is([data-phone-variant="b"], [data-phone-variant="c"]) [data-slot="button"][data-size="xs"] {
+    min-height: 2.75rem;
+    padding-inline: 14px;
+    font-size: var(--text-ui);
+  }
+
+  html:is([data-phone-variant="b"], [data-phone-variant="c"]) [data-slot="filter-chip"] {
+    min-height: 2.75rem;
+    padding-inline: 16px;
+  }
+
+  /* An iOS-sized switch: 48 by 28. */
+  html:is([data-phone-variant="b"], [data-phone-variant="c"])
+    [data-slot="switch"][data-size="default"] {
+    --switch-thumb: 1.625rem;
+    --switch-w: 3rem;
+  }
+
+  html:is([data-phone-variant="b"], [data-phone-variant="c"]) :is(input, textarea, select) {
+    font-size: max(1rem, var(--text-ui));
+  }
+}

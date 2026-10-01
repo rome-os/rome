@@ -1,3 +1,4 @@
+import { usePhoneVariant } from "@/prototype/phone-variant.prototype";
 import { useState, useEffect, useId, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useForm } from "@tanstack/react-form";
@@ -1096,14 +1097,28 @@ function RoutineCard({
   // Two non-overlapping zones: a text-only link that navigates, and a sibling
   // action cluster that never does. The flex gap is dead space between them, so
   // a near-miss on the controls can't trigger navigation.
+  //
+  // PROTOTYPE: B wraps the actions under the name once it would drop below
+  // 12rem; C always stacks them, with Run filling the row.
+  const phoneVariant = usePhoneVariant();
   return (
-    <div className="flex items-center justify-between gap-4 rounded-12 border border-border bg-surface px-4 py-3 shadow-1">
+    <div
+      className={
+        phoneVariant === "c"
+          ? "flex flex-col items-stretch gap-3 rounded-12 border border-border bg-surface px-4 py-3 shadow-1"
+          : phoneVariant === "b"
+            ? "flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-12 border border-border bg-surface px-4 py-3 shadow-1"
+            : "flex items-center justify-between gap-4 rounded-12 border border-border bg-surface px-4 py-3 shadow-1"
+      }
+    >
       {/* Left zone — the ONLY navigation target. Wraps text content only; no
           interactive elements live inside the link. */}
       <Link
         to={`/routines/${routine.id}`}
         aria-label={accessibleName}
-        className="touch-row group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={`touch-row group flex flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          phoneVariant === "b" ? "min-w-[12rem]" : "min-w-0"
+        }`}
       >
         <span
           className={`h-2 w-2 flex-none rounded-full ${
@@ -1138,7 +1153,15 @@ function RoutineCard({
       </Link>
 
       {/* Right zone — actions; never navigates. */}
-      <div className="flex flex-none items-center gap-2">
+      <div
+        className={
+          phoneVariant === "c"
+            ? "flex items-center gap-3 [&>*:first-child]:flex-1"
+            : phoneVariant === "b"
+              ? "ml-auto flex flex-none items-center gap-3"
+              : "flex flex-none items-center gap-2"
+        }
+      >
         {isStoppable ? (
           <StopButton routineId={routine.id} label={accessibleName} onError={onError} />
         ) : (
