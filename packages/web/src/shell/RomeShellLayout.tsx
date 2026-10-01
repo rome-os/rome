@@ -172,7 +172,7 @@ export function RomeShellLayout() {
   }, [pushed, clipped]);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
       <UpgradeCountdownBanner />
       <div
         ref={frameRef}

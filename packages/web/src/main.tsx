@@ -9,6 +9,7 @@ import { ThemeProvider } from "./hooks/use-theme";
 import { initAnalytics } from "./lib/analytics";
 import { injectThemeCss } from "./lib/theme";
 import { queryClient } from "./lib/query-client";
+import { trackVisualViewport } from "./lib/visual-viewport";
 import "./globals.css";
 import "./i18n";
 
@@ -20,6 +21,9 @@ injectThemeCss();
 // No-op unless the boot-written /runtime-config.js carried a GA4 measurement
 // ID — and never inside widget iframes (see lib/analytics.ts).
 initAnalytics();
+
+// Sizes the shell to the screen area above an open keyboard (lib/visual-viewport.ts).
+trackVisualViewport();
 
 /**
  * Mounts the dashboard into #root. Exported so the regular entry
