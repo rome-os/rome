@@ -85,7 +85,7 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 
 ## Block
 
-A block is one completed piece of model content inside a turn: text, thinking, a tool use, or a tool result. Blocks are the content the model produced or received; everything else in a turn's stream is an [event](#event) about the turn.
+A block is one completed piece of model content inside a turn: text, thinking, a tool use, or a tool result. Blocks are the content the model produced or received. Everything else in a turn's stream is an [event](#event) about the turn.
 
 **Contracts:**
 
