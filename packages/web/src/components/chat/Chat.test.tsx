@@ -673,7 +673,7 @@ describe("Chat turn stream lifecycle", () => {
     );
     rs.mocked(listSessionMessages).mockImplementation((sid) =>
       Promise.resolve(
-        sid === "session-1" && activeTurnIds.length === 0
+        sid === "session-1" && !activeTurnIds.includes("turn-1")
           ? [
               {
                 id: "background-answer",
@@ -682,14 +682,6 @@ describe("Chat turn stream lifecycle", () => {
                 role: "assistant",
                 content: JSON.stringify([{ type: "text", content: "Finished" }]),
                 createdAt: "2026-09-30T14:00:00.000Z",
-              },
-              {
-                id: "second-background-answer",
-                sessionId: "session-1",
-                turnId: "turn-2",
-                role: "assistant",
-                content: JSON.stringify([{ type: "text", content: "Second finished" }]),
-                createdAt: "2026-09-30T14:01:00.000Z",
               },
             ]
           : [],
@@ -715,13 +707,6 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(
       rs.mocked(listSessionMessages).mock.calls.filter(([sid]) => sid === "session-1"),
-    ).toHaveLength(1);
-    activeTurnIds = [];
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(8_000);
-    });
-    expect(
-      rs.mocked(listSessionMessages).mock.calls.filter(([sid]) => sid === "session-1"),
     ).toHaveLength(2);
     rerender(
       <MemoryRouter>
@@ -729,9 +714,6 @@ describe("Chat turn stream lifecycle", () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId("message-list").dataset.rowKeys).toContain("background-answer");
-    expect(screen.getByTestId("message-list").dataset.rowKeys).toContain(
-      "second-background-answer",
-    );
   });
 
   it("stops reconciling an off-floor child after its messages endpoint confirms 404", async () => {
@@ -1997,12 +1979,22 @@ describe("Chat turn stream lifecycle", () => {
 
   it("does not retain a live placeholder when an idle poll's stream open returns 404", async () => {
     rs.mocked(openTurnStream).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledWith("turn-1", expect.any(Object)));
     await waitFor(() =>
       expect(screen.getByTestId("chat-composer").dataset.streaming).toBe("false"),
     );
     expect(screen.queryByTestId("stop-button")).toBeNull();
+  });
+
+  it("retains a fresh live placeholder if stream-open 404 still has an active turn", async () => {
+    rs.mocked(openTurnStream).mockResolvedValue(new Response(null, { status: 404 }));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionTurns).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("stop-button")).toBeTruthy();
   });
 
   it("shows recovery controls after repeated stream-open 404 mismatches", async () => {
@@ -2228,6 +2220,24 @@ describe("Chat turn stream lifecycle", () => {
       await rs.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByTestId("chat-composer").dataset.error).toBe("");
+  });
+
+  it("stops retrying Stop reconciliation when messages confirm the session is gone", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(screen.getByTestId("stop-button")).toBeTruthy());
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(listSessionMessages).mockResolvedValue(null);
+    rs.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await rs.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByTestId("stop-button")).toBeNull();
+    const reloads = rs.mocked(listSessionMessages).mock.calls.length;
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(30_000);
+    });
+    expect(listSessionMessages).toHaveBeenCalledTimes(reloads);
   });
 
   it("uses a later Stop 404 to upgrade an active Stop reconciliation", async () => {

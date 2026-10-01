@@ -827,9 +827,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const check = async (delayMs: number) => {
         const stillPending = () =>
           isChatMountedRef.current && pendingMessageReconciliationsRef.current.get(id) === turnId;
-        const observedSendRevision = acceptedSendRevisionsRef.current.get(id) ?? 0;
-        const sameSendRevision = () =>
-          (acceptedSendRevisionsRef.current.get(id) ?? 0) === observedSendRevision;
         if (!stillPending()) return;
         if (floorSessionIdRef.current === id) {
           schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
@@ -847,21 +844,17 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
           return;
         }
-        // Another off-floor turn may have started while this one was pending.
-        // One empty lookup and reload reconciles all of their durable answers.
-        if (turns && turns.length === 0) {
+        // Reconcile this turn as soon as it disappears, even if another turn
+        // in the same child is still running. A later dropped turn gets its
+        // own marker; its poller must not be cleared by this older reload.
+        if (turns && !turns.some((turn) => turn.turnId === turnId)) {
           const loaded = await loadMessages(id, {
             force: true,
             dropLocalOptimistic: true,
             bounded: true,
-            shouldApply: () =>
-              stillPending() && floorSessionIdRef.current !== id && sameSendRevision(),
+            shouldApply: () => isChatMountedRef.current && floorSessionIdRef.current !== id,
           });
           if (!stillPending()) return;
-          if (!sameSendRevision()) {
-            schedule(RECONNECT_BASE_DELAY_MS);
-            return;
-          }
           if (floorSessionIdRef.current === id) {
             schedule(Math.min(delayMs * 2, RECONNECT_MAX_DELAY_MS));
             return;
@@ -1370,7 +1363,19 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!streamRes.ok || !streamRes.body) {
           if (!cancelled) {
             noteRecoveryFailure();
-            streamMissing = streamRes.status === 404;
+            if (streamRes.status === 404 && !wasRecovering) {
+              // /turns and stream-open can race. A 404 alone does not prove
+              // the turn finished; verify it left the active-turn list before
+              // discarding a freshly created live placeholder.
+              const confirmController = new AbortController();
+              const latestTurns = await withRequestTimeout(
+                listSessionTurns(reattachSessionId, confirmController.signal),
+                () => confirmController.abort(),
+              ).catch(() => null);
+              streamMissing = Boolean(
+                latestTurns && !latestTurns.some((turn) => turn.turnId === attachedTurnId),
+              );
+            }
             if (streamRes.status !== 404) {
               const reconnectError = t("stream.errors.reconnectStatus", {
                 status: streamRes.status,
@@ -1873,7 +1878,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             stillOwnsStream() &&
             (acceptedSendRevisionsRef.current.get(sid) ?? 0) === observedSendRevision,
         });
-        if (!loaded) {
+        if (loaded === false) {
           if (stillOwnsStream()) {
             forceReleaseIfStuck(
               retryDelayMs,
