@@ -1,0 +1,67 @@
+{
+  "case": "6a-error-max-turns",
+  "seconds": 6,
+  "turns": [
+    {
+      "turn": "874073ac",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "error_max_turns",
+      "ms": 1171,
+      "text": "",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "error"
+    },
+    {
+      "turn": "abcce895",
+      "startedBy": "replay",
+      "answers": [
+        "B"
+      ],
+      "subtype": "success",
+      "ms": 378,
+      "text": "AGAIN",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "874073ac",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3611,
+      "totalMs": 4782,
+      "terminal": "error",
+      "text": ""
+    },
+    "B": {
+      "turn": "abcce895",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 637,
+      "totalMs": 1015,
+      "terminal": "result",
+      "text": "AGAIN"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  3611 turn 874073ac start (replay) answers=[]",
+    "  3611 read A",
+    "  3611 turn 874073ac also answers [A]",
+    "  4782 turn 874073ac end error_max_turns answers=[A]",
+    "  4782 send B (exclusive)",
+    "  5419 turn abcce895 start (replay) answers=[]",
+    "  5419 read B",
+    "  5419 turn abcce895 also answers [B]",
+    "  5797 turn abcce895 end success answers=[B]"
+  ]
+}

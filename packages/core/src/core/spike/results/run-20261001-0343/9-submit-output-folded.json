@@ -1,0 +1,80 @@
+{
+  "case": "9-submit-output-folded",
+  "seconds": 11,
+  "turns": [
+    {
+      "turn": "02408bd9",
+      "startedBy": "replay",
+      "answers": [
+        "A",
+        "S"
+      ],
+      "subtype": "success",
+      "ms": 7990,
+      "text": "DONE",
+      "tools": [
+        "Bash",
+        "submit_output",
+        "submit_output"
+      ],
+      "cards": [],
+      "submits": [
+        {
+          "answering": [
+            "A"
+          ],
+          "payload": {
+            "title": "Fruit",
+            "items": [
+              "apple"
+            ]
+          }
+        },
+        {
+          "answering": [
+            "A"
+          ],
+          "payload": {
+            "title": "Fruit",
+            "items": [
+              "apple",
+              "banana"
+            ]
+          }
+        }
+      ],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "02408bd9",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 2925,
+      "totalMs": 10915,
+      "terminal": "result",
+      "text": "DONE"
+    },
+    "S": {
+      "turn": "02408bd9",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 5405,
+      "totalMs": 5405,
+      "terminal": "result",
+      "text": "DONE"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  2925 turn 02408bd9 start (replay) answers=[]",
+    "  2925 read A",
+    "  2925 turn 02408bd9 also answers [A]",
+    "  5510 send S",
+    "  8073 submit_output in turn 02408bd9 answering [A]",
+    "  8089 read S",
+    "  9729 submit_output in turn 02408bd9 answering [A]",
+    " 10915 turn 02408bd9 also answers [S]",
+    " 10915 turn 02408bd9 end success answers=[A,S]"
+  ]
+}

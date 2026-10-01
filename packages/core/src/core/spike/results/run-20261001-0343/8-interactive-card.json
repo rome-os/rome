@@ -1,0 +1,75 @@
+{
+  "case": "8-interactive-card",
+  "seconds": 10,
+  "turns": [
+    {
+      "turn": "94b62866",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 6045,
+      "text": "The question card has been displayed. I'm waiting for your answer.",
+      "tools": [
+        "ask_question"
+      ],
+      "cards": [
+        {
+          "tool": "ask_question",
+          "answering": [
+            "A"
+          ]
+        }
+      ],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "2e1aa916",
+      "startedBy": "replay",
+      "answers": [
+        "B"
+      ],
+      "subtype": "success",
+      "ms": 1524,
+      "text": "You prefer red.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "94b62866",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 1633,
+      "totalMs": 7678,
+      "terminal": "result",
+      "text": "The question card has been displayed. I'm waiting for your answer."
+    },
+    "B": {
+      "turn": "2e1aa916",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 627,
+      "totalMs": 2151,
+      "terminal": "result",
+      "text": "You prefer red."
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  1633 turn 94b62866 start (replay) answers=[]",
+    "  1633 read A",
+    "  1633 turn 94b62866 also answers [A]",
+    "  3227 turn 94b62866 card from ask_question",
+    "  7678 turn 94b62866 end success answers=[A]",
+    "  7678 send B (exclusive)",
+    "  8305 turn 2e1aa916 start (replay) answers=[]",
+    "  8305 read B",
+    "  8305 turn 2e1aa916 also answers [B]",
+    "  9829 turn 2e1aa916 end success answers=[B]"
+  ]
+}

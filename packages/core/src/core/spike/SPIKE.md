@@ -48,7 +48,9 @@ Committed runs are in `results/`.
 The runs:
 - **Runs 1 and 2:** two full runs of every case.
 - **Case 5:** two extra re-runs.
-- **Run 3:** in `results/` (see the end of this file).
+- **Run 3:** committed in `results/run-20261001-0343/`, one JSON file per case.
+
+Run 3 matched runs 1 and 2 on every case.
 
 "Results naming it" counts the results whose echo listed that message.
 **Every message got exactly one, or failed cleanly when the process was
@@ -96,6 +98,18 @@ None of them breaks the model.
    itself closed. Nothing else is needed.
 4. **Unchanged from #524:** every task notification runs the model, and
    that now shows in the chat.
+5. **`submit_output` can be called twice in one turn** (run 3, case 9).
+   - The model called it before S was folded in (`apple`) and again after
+     (`apple, banana`). The tool's own description allows a later candidate
+     to supersede an earlier one.
+   - **The problem:** AgentSession's current rule keeps only the first call
+     per turn (`captureSubmittedOutput`), which would drop the corrected one.
+     That happens today too, when a steer folds into a Rome turn, so it is
+     not new to this model.
+   - **Fix:** keep the last call per turn, settled when the result arrives.
+6. **Close sends share context** (run 3, case 5). Y's reply ("One. Two.")
+   shows the model saw X as well. Each message was still answered by its own
+   turn.
 
 **Not covered by this spike:**
 - real AgentSession and webchat client wiring;

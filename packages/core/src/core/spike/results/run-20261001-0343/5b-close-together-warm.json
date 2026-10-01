@@ -1,0 +1,92 @@
+{
+  "case": "5b-close-together-warm",
+  "seconds": 6,
+  "turns": [
+    {
+      "turn": "bd69cbdc",
+      "startedBy": "replay",
+      "answers": [
+        "W"
+      ],
+      "subtype": "success",
+      "ms": 724,
+      "text": "WARM.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "0193c21d",
+      "startedBy": "replay",
+      "answers": [
+        "X"
+      ],
+      "subtype": "success",
+      "ms": 459,
+      "text": "ONE.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "c9d30c35",
+      "startedBy": "replay",
+      "answers": [
+        "Y"
+      ],
+      "subtype": "success",
+      "ms": 256,
+      "text": "TWO.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "W": {
+      "turn": "bd69cbdc",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3462,
+      "totalMs": 4186,
+      "terminal": "result",
+      "text": "WARM."
+    },
+    "X": {
+      "turn": "0193c21d",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 666,
+      "totalMs": 1125,
+      "terminal": "result",
+      "text": "ONE."
+    },
+    "Y": {
+      "turn": "c9d30c35",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 1795,
+      "totalMs": 2051,
+      "terminal": "result",
+      "text": "TWO."
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send W",
+    "  3462 turn bd69cbdc start (replay) answers=[]",
+    "  3462 read W",
+    "  3463 turn bd69cbdc also answers [W]",
+    "  4186 turn bd69cbdc end success answers=[W]",
+    "  4186 send X",
+    "  4186 send Y",
+    "  4852 turn 0193c21d start (replay) answers=[]",
+    "  4852 read X",
+    "  4852 turn 0193c21d also answers [X]",
+    "  5311 turn 0193c21d end success answers=[X]",
+    "  5981 turn c9d30c35 start (replay) answers=[]",
+    "  5981 read Y",
+    "  5981 turn c9d30c35 also answers [Y]",
+    "  6237 turn c9d30c35 end success answers=[Y]"
+  ]
+}

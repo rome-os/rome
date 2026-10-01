@@ -1,0 +1,65 @@
+{
+  "case": "5-close-together",
+  "seconds": 7,
+  "turns": [
+    {
+      "turn": "090f1b7c",
+      "startedBy": "replay",
+      "answers": [
+        "X"
+      ],
+      "subtype": "success",
+      "ms": 2422,
+      "text": "Acknowledged.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "59e9f830",
+      "startedBy": "replay",
+      "answers": [
+        "Y"
+      ],
+      "subtype": "success",
+      "ms": 685,
+      "text": "One. Two.",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "X": {
+      "turn": "090f1b7c",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3260,
+      "totalMs": 5682,
+      "terminal": "result",
+      "text": "Acknowledged."
+    },
+    "Y": {
+      "turn": "59e9f830",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 5933,
+      "totalMs": 6617,
+      "terminal": "result",
+      "text": "One. Two."
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send X",
+    "     0 send Y",
+    "  3260 turn 090f1b7c start (replay) answers=[]",
+    "  3260 read X",
+    "  3260 turn 090f1b7c also answers [X]",
+    "  5682 turn 090f1b7c end success answers=[X]",
+    "  5932 turn 59e9f830 start (replay) answers=[]",
+    "  5932 read Y",
+    "  5933 turn 59e9f830 also answers [Y]",
+    "  6617 turn 59e9f830 end success answers=[Y]"
+  ]
+}

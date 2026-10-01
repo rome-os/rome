@@ -1,0 +1,84 @@
+{
+  "case": "4b-summon-gated",
+  "seconds": 20,
+  "sawTaskTurn": true,
+  "turns": [
+    {
+      "turn": "c7aaba31",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 2518,
+      "text": "READY",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "d0d078f2",
+      "startedBy": "frame",
+      "answers": [],
+      "subtype": "success",
+      "ms": 8009,
+      "text": "The background command printed: **DONE-77**",
+      "tools": [
+        "Bash"
+      ],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    },
+    {
+      "turn": "cda77c97",
+      "startedBy": "replay",
+      "answers": [
+        "Q"
+      ],
+      "subtype": "success",
+      "ms": 220,
+      "text": "SUMMONED",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "c7aaba31",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3420,
+      "totalMs": 5938,
+      "terminal": "result",
+      "text": "READY"
+    },
+    "Q": {
+      "turn": "cda77c97",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 615,
+      "totalMs": 835,
+      "terminal": "result",
+      "text": "SUMMONED"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  3420 turn c7aaba31 start (replay) answers=[]",
+    "  3420 read A",
+    "  3420 turn c7aaba31 also answers [A]",
+    "  5938 turn c7aaba31 end success answers=[A]",
+    " 11189 turn d0d078f2 start (frame) answers=[]",
+    " 19198 turn d0d078f2 end success answers=[]",
+    " 19198 send Q (exclusive)",
+    " 19813 turn cda77c97 start (replay) answers=[]",
+    " 19813 read Q",
+    " 19813 turn cda77c97 also answers [Q]",
+    " 20033 turn cda77c97 end success answers=[Q]"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "case": "7-kill-process",
+  "seconds": 4,
+  "killedPids": 3,
+  "afterKill": "send B rejected: ModelSession is closed",
+  "streamEnded": true,
+  "turns": [
+    {
+      "turn": "179895c6",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30",
+      "tools": [],
+      "cards": [],
+      "submits": []
+    }
+  ],
+  "replies": {
+    "A": {
+      "error": "A: the SDK stream ended without a reply"
+    }
+  },
+  "warnings": [
+    "A got no reply: the stream ended"
+  ],
+  "log": [
+    "     0 send A",
+    "  2978 turn 179895c6 start (replay) answers=[]",
+    "  2978 read A",
+    "  2978 turn 179895c6 also answers [A]",
+    "  4104 stream threw: Claude Code process terminated by signal SIGKILL",
+    "  4104 send B"
+  ]
+}

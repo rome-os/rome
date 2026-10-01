@@ -1,0 +1,38 @@
+{
+  "case": "6b-error-api",
+  "seconds": 3,
+  "turns": [
+    {
+      "turn": "05f6a198",
+      "startedBy": "replay",
+      "answers": [
+        "A"
+      ],
+      "subtype": "success",
+      "ms": 262,
+      "text": "There's an issue with the selected model (claude-nonexistent-model-x). It may no",
+      "tools": [],
+      "cards": [],
+      "submits": [],
+      "terminal": "result"
+    }
+  ],
+  "replies": {
+    "A": {
+      "turn": "05f6a198",
+      "resultsNamingIt": 1,
+      "firstFrameMs": 3021,
+      "totalMs": 3282,
+      "terminal": "result",
+      "text": "There's an issue with the selected model (claude-nonexistent-model-x). It may no"
+    }
+  },
+  "warnings": [],
+  "log": [
+    "     0 send A",
+    "  3020 turn 05f6a198 start (replay) answers=[]",
+    "  3020 read A",
+    "  3021 turn 05f6a198 also answers [A]",
+    "  3282 turn 05f6a198 end success answers=[A]"
+  ]
+}
