@@ -73,7 +73,9 @@ describe("WechatDesktopPage", () => {
     state = { state: "absent", error: "Could not download the WeChat client: 503" };
     renderPage();
     expect(
-      await screen.findByText("The install did not finish: Could not download the WeChat client: 503"),
+      await screen.findByText(
+        "The install did not finish: Could not download the WeChat client: 503",
+      ),
     ).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(posts).toEqual(["/api/wechat/app/install"]);

@@ -42,9 +42,9 @@ describe("WechatApp", () => {
     expect(await new WechatApp(fakeRuntime({ installed: true }).runtime).status()).toEqual({
       state: "stopped",
     });
-    expect(
-      await new WechatApp(fakeRuntime({ installed: true, pid: 7 }).runtime).status(),
-    ).toEqual({ state: "running" });
+    expect(await new WechatApp(fakeRuntime({ installed: true, pid: 7 }).runtime).status()).toEqual({
+      state: "running",
+    });
   });
 
   it("downloads the client in the background, then opens it", async () => {
