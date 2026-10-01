@@ -344,6 +344,11 @@ export class WechatUserRuntime {
     return join(this.prefix, "client", "opt", "wechat");
   }
 
+  /** Whether an install is running for any caller. */
+  get installInFlight(): boolean {
+    return this.installing !== null;
+  }
+
   /** Whether the client is unpacked in this container. */
   installed(): Promise<boolean> {
     return exists(join(this.clientDir, "wechat"));

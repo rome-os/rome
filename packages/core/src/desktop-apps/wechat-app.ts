@@ -18,7 +18,7 @@ export interface WechatAppStatus {
 
 export type WechatAppRuntime = Pick<
   WechatUserRuntime,
-  "installed" | "install" | "start" | "pid" | "clientDisplay" | "display"
+  "installed" | "install" | "installInFlight" | "start" | "pid" | "clientDisplay" | "display"
 >;
 
 /**
@@ -35,6 +35,10 @@ export class WechatApp {
   async status(): Promise<WechatAppStatus> {
     const error = this.error ? { error: this.error } : {};
     if (this.job) return { state: this.job.kind };
+    // The connection's setup installs through the same runtime. Reporting its
+    // install keeps the page from offering a second one, which would start the
+    // client just as the setup's key capture replaces it.
+    if (this.runtime.installInFlight) return { state: "installing" };
     if (!(await this.runtime.installed())) return { state: "absent", ...error };
     const pid = await this.runtime.pid();
     if (!pid) return { state: "stopped", ...error };

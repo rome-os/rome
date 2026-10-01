@@ -596,7 +596,10 @@ describe("WechatUserRuntime.install", () => {
     const { run, calls } = scriptedDownload();
     const runtime = new WechatUserRuntime({ home: h, canonicalPrefix: join(h, "wechat"), run });
 
-    await Promise.all([runtime.install(), runtime.install()]);
+    const installs = Promise.all([runtime.install(), runtime.install()]);
+    expect(runtime.installInFlight).toBe(true);
+    await installs;
+    expect(runtime.installInFlight).toBe(false);
 
     expect(calls.filter((call) => call[0] === "curl")).toHaveLength(1);
     expect(calls.filter((call) => call[0] === "dpkg-deb")).toHaveLength(1);

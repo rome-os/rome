@@ -3,7 +3,12 @@ import { WechatApp, WechatAppNotInstalled, type WechatAppRuntime } from "./wecha
 
 /** A runtime whose install and start wait until the test releases them. */
 function fakeRuntime(
-  options: { installed?: boolean; pid?: number | null; clientDisplay?: string } = {},
+  options: {
+    installed?: boolean;
+    pid?: number | null;
+    clientDisplay?: string;
+    installInFlight?: boolean;
+  } = {},
 ) {
   let installed = options.installed ?? false;
   let pid = options.pid ?? null;
@@ -19,6 +24,7 @@ function fakeRuntime(
       });
     });
   const runtime = {
+    installInFlight: options.installInFlight ?? false,
     display: ":100",
     clientDisplay: rs.fn(async () => options.clientDisplay ?? ":100"),
     installed: rs.fn(async () => installed),
@@ -57,6 +63,11 @@ describe("WechatApp", () => {
       state: "running",
       sharedDesktop: true,
     });
+  });
+
+  it("reports an install the connection's setup started, so the page offers no second one", async () => {
+    const app = new WechatApp(fakeRuntime({ installInFlight: true }).runtime);
+    expect(await app.status()).toEqual({ state: "installing" });
   });
 
   it("downloads the client in the background, then opens it", async () => {
