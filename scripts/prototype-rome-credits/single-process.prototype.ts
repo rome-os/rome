@@ -57,8 +57,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const payer: Payer | null = req.url?.startsWith("/own/") ? "own" : req.url?.startsWith("/credits/") ? "credits" : null;
-  if (!payer || !req.url?.endsWith("/responses")) {
-    trace("stub.unexpected", { method: req.method, url: req.url });
+  if (!payer || req.method !== "POST" || !req.url?.endsWith("/responses")) {
+    // Codex probes the built-in provider with a websocket GET first, then
+    // falls back to HTTP; answer everything but POST /responses with 404.
+    if (req.method !== "GET") trace("stub.unexpected", { method: req.method, url: req.url });
     writeError(res, 404, { error: { message: "not found" } });
     return;
   }
@@ -254,8 +256,25 @@ async function main(): Promise<void> {
     return threadId;
   };
 
+  // A thread that is unloading answers "is closing; retry", so retry briefly.
   const resume = async (label: string, threadId: string, modelProvider: string | null): Promise<unknown> => {
-    try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await resumeOnce(label, threadId, modelProvider);
+      } catch (error) {
+        const message = (error as Error).message;
+        if (!message.includes("is closing") || attempt >= 20) {
+          trace("thread.resumeFailed", { label, thread: short(threadId), error: message });
+          return null;
+        }
+        trace("thread.resumeRetry", { label, thread: short(threadId), attempt });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  };
+
+  const resumeOnce = async (label: string, threadId: string, modelProvider: string | null): Promise<unknown> => {
+    {
       const result = (await client.request("thread/resume", {
         threadId,
         ...overrides(modelProvider),
@@ -263,9 +282,6 @@ async function main(): Promise<void> {
       })) as Record<string, unknown>;
       trace("thread.resumed", { label, thread: short(threadId), requested: modelProvider, modelProvider: result.modelProvider });
       return result.modelProvider;
-    } catch (error) {
-      trace("thread.resumeFailed", { label, thread: short(threadId), error: (error as Error).message });
-      return null;
     }
   };
 
