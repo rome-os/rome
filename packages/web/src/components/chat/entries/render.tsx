@@ -334,7 +334,7 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
               ? paired.error
               : undefined
           }
-          durationMs={subagentStepDurationMs(block, paired)}
+          durationMs={subagentCallDurationMs(block, paired)}
           live={live}
         />,
       );
@@ -434,7 +434,7 @@ function toolCallDurationMs(use: ChatEntry, result: ChatEntry | null): number | 
   return delta >= 0 ? delta : undefined;
 }
 
-function subagentStepDurationMs(start: ChatEntry, result: ChatEntry | null): number | undefined {
+function subagentCallDurationMs(start: ChatEntry, result: ChatEntry | null): number | undefined {
   if (start.type !== "subagent_start") return undefined;
   if (!result || result.type !== "subagent_result") return undefined;
   const startedAt = parseTimestamp(start.startedAt);

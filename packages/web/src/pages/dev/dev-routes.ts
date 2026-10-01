@@ -71,9 +71,9 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
       },
       {
         path: "/dev/chat-entries",
-        title: "Transcript blocks",
+        title: "Chat entries",
         description:
-          "Every component renderSingleEntry dispatches to, rendered from a literal ChatEntry — the blocks an agent state gates, which no product route renders on load.",
+          "Every component renderSingleEntry dispatches to, rendered from a literal ChatEntry — the entries an agent state gates, which no product route renders on load.",
         Component: lazy(() => import("./ChatEntriesPage")),
       },
       {

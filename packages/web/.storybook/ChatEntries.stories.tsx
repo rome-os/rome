@@ -18,7 +18,7 @@ type Story = StoryObj<typeof meta>;
 
 function specimen(id: string) {
   const found = CHAT_ENTRY_SPECIMENS.find((item) => item.id === id);
-  if (!found) throw new Error(`Missing chat block specimen: ${id}`);
+  if (!found) throw new Error(`Missing chat entry specimen: ${id}`);
   return found;
 }
 

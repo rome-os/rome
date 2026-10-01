@@ -173,7 +173,7 @@ export default function ChatEntriesGalleryPage() {
     <div className="min-h-screen bg-background p-8">
       <div className="mx-auto max-w-5xl space-y-10">
         <div>
-          <h1 className="font-serif text-display text-foreground">Transcript blocks</h1>
+          <h1 className="font-serif text-display text-foreground">Chat entries</h1>
           <p className="mt-1 max-w-2xl text-ui text-muted-foreground">
             Every component <code className="font-mono">renderSingleEntry</code> dispatches to,
             rendered from a literal <code className="font-mono">ChatEntry</code>. Specimens must

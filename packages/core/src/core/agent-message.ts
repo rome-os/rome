@@ -7,8 +7,8 @@ export function isTerminalEvent<T extends { type: string }>(
   return m.type === "result" || m.type === "error";
 }
 
-/** Delta event types. Each is followed by the complete block it
- *  previews, so traces, persistence, and accounting skip them. */
+/** Delta event types. Each is followed by the complete block its
+ *  deltas build up to, so traces, persistence, and accounting skip them. */
 const TRANSIENT_DELTA_TYPE_LIST = [
   "text_delta",
   "thinking_delta",
