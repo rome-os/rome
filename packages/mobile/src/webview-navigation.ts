@@ -56,6 +56,105 @@ export function parsePullToRefreshMessage(data: string): PullToRefreshEvent | nu
   return null;
 }
 
+/** Longest a pull-triggered reload holds the spinner before the gesture unlocks. */
+export const PULL_TO_REFRESH_RELOAD_TIMEOUT_MS = 15_000;
+
+/** Native side of pull-to-refresh, driven by `PullToRefreshController`. */
+export interface PullToRefreshView {
+  /** Moves the indicator to follow the finger, without animation. */
+  showPull(distance: number): void;
+  /** Animates the indicator to a resting distance. */
+  settle(distance: number): void;
+  setReloading(reloading: boolean): void;
+  thresholdReached(): void;
+  reload(): void;
+}
+
+/**
+ * Turns WebView pull messages and load events into indicator and reload calls.
+ * While a reload is in flight it ignores pull messages. The reload ends at the
+ * next `loadEnded`, a `reset`, or after PULL_TO_REFRESH_RELOAD_TIMEOUT_MS,
+ * whichever comes first. Call `dispose` on unmount to drop the pending timeout.
+ */
+export class PullToRefreshController {
+  #view: PullToRefreshView;
+  #schedule: (run: () => void, ms: number) => () => void;
+  #showing = false;
+  #pastThreshold = false;
+  #cancelTimeout: (() => void) | null = null;
+
+  constructor(
+    view: PullToRefreshView,
+    schedule: (run: () => void, ms: number) => () => void = (run, ms) => {
+      const timer = setTimeout(run, ms);
+      return () => clearTimeout(timer);
+    },
+  ) {
+    this.#view = view;
+    this.#schedule = schedule;
+  }
+
+  handle(event: PullToRefreshEvent): void {
+    if (this.#cancelTimeout) return;
+    if (event.phase === "move") {
+      this.#showing = true;
+      this.#view.showPull(event.distance);
+      const pastThreshold = event.distance >= PULL_TO_REFRESH_THRESHOLD;
+      if (pastThreshold && !this.#pastThreshold) this.#view.thresholdReached();
+      this.#pastThreshold = pastThreshold;
+      return;
+    }
+    if (event.phase === "end" && event.distance >= PULL_TO_REFRESH_THRESHOLD) {
+      this.#pastThreshold = false;
+      this.#cancelTimeout = this.#schedule(
+        () => this.loadEnded(),
+        PULL_TO_REFRESH_RELOAD_TIMEOUT_MS,
+      );
+      this.#view.setReloading(true);
+      this.#view.settle(PULL_TO_REFRESH_THRESHOLD);
+      this.#view.reload();
+      return;
+    }
+    this.#clearPull();
+  }
+
+  /**
+   * Call when a load starts. The document that reported a partial pull may be
+   * gone and will never send its `end` or `cancel`, so the indicator retracts.
+   * An in-flight reload keeps its spinner.
+   */
+  loadStarted(): void {
+    if (!this.#cancelTimeout) this.#clearPull();
+  }
+
+  loadEnded(): void {
+    if (!this.#cancelTimeout) return;
+    this.#cancelTimeout();
+    this.#cancelTimeout = null;
+    this.#view.setReloading(false);
+    this.#showing = true;
+    this.#clearPull();
+  }
+
+  /** Call when the WebView remounts. Ends any reload and retracts any pull. */
+  reset(): void {
+    this.loadEnded();
+    this.#clearPull();
+  }
+
+  dispose(): void {
+    this.#cancelTimeout?.();
+    this.#cancelTimeout = null;
+  }
+
+  #clearPull(): void {
+    this.#pastThreshold = false;
+    if (!this.#showing) return;
+    this.#showing = false;
+    this.#view.settle(0);
+  }
+}
+
 /**
  * Page script for `injectedJavaScript`. It reads only `window`, so a test can
  * run it against a stand-in. It installs once per document.

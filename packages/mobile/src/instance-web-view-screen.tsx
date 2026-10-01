@@ -21,6 +21,7 @@ import {
   handleHardwareBack,
   PULL_TO_REFRESH_SCRIPT,
   PULL_TO_REFRESH_THRESHOLD,
+  PullToRefreshController,
   parsePullToRefreshMessage,
 } from "./webview-navigation";
 import { configureTokenUsageWidget } from "./widget-usage-runtime";
@@ -104,34 +105,32 @@ export function InstanceWebViewScreen({
   const [refreshing, setRefreshing] = useState(false);
   const canGoBackRef = useRef(false);
   const pull = useRef(new Animated.Value(0)).current;
-  const pastThresholdRef = useRef(false);
-  const reloadingRef = useRef(false);
   const [reloading, setReloading] = useState(false);
-
-  const settlePull = useCallback(
-    (toValue: number) => {
-      Animated.timing(pull, {
-        duration: 180,
-        easing: Easing.out(Easing.cubic),
-        toValue,
-        useNativeDriver: true,
-      }).start();
-    },
-    [pull],
+  const [pullController] = useState(
+    () =>
+      new PullToRefreshController({
+        showPull: (distance) => pull.setValue(distance),
+        settle: (toValue) =>
+          Animated.timing(pull, {
+            duration: 180,
+            easing: Easing.out(Easing.cubic),
+            toValue,
+            useNativeDriver: true,
+          }).start(),
+        setReloading,
+        thresholdReached: () =>
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined),
+        reload: () => webViewRef.current?.reload(),
+      }),
   );
 
-  const finishReload = useCallback(() => {
-    if (!reloadingRef.current) return;
-    reloadingRef.current = false;
-    setReloading(false);
-    settlePull(0);
-  }, [settlePull]);
+  useEffect(() => () => pullController.dispose(), [pullController]);
 
   const remountWebView = useCallback(() => {
     canGoBackRef.current = false;
-    finishReload();
+    pullController.reset();
     setWebViewKey((value) => value + 1);
-  }, [finishReload]);
+  }, [pullController]);
 
   const refresh = useCallback(async () => {
     if (refreshing) return;
@@ -174,27 +173,9 @@ export function InstanceWebViewScreen({
   const onMessage = useCallback<NonNullable<WebViewProps["onMessage"]>>(
     (event) => {
       const pullEvent = parsePullToRefreshMessage(event.nativeEvent.data);
-      if (!pullEvent || reloadingRef.current) return;
-      if (pullEvent.phase === "move") {
-        pull.setValue(pullEvent.distance);
-        const pastThreshold = pullEvent.distance >= PULL_TO_REFRESH_THRESHOLD;
-        if (pastThreshold && !pastThresholdRef.current) {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-        }
-        pastThresholdRef.current = pastThreshold;
-        return;
-      }
-      pastThresholdRef.current = false;
-      if (pullEvent.phase === "end" && pullEvent.distance >= PULL_TO_REFRESH_THRESHOLD) {
-        reloadingRef.current = true;
-        setReloading(true);
-        settlePull(PULL_TO_REFRESH_THRESHOLD);
-        webViewRef.current?.reload();
-        return;
-      }
-      settlePull(0);
+      if (pullEvent) pullController.handle(pullEvent);
     },
-    [pull, settlePull],
+    [pullController],
   );
 
   const onShouldStartLoadWithRequest = useCallback<
@@ -263,7 +244,8 @@ export function InstanceWebViewScreen({
           onNavigationStateChange={(state) => {
             canGoBackRef.current = state.canGoBack;
           }}
-          onLoadEnd={finishReload}
+          onLoadStart={() => pullController.loadStarted()}
+          onLoadEnd={() => pullController.loadEnded()}
           allowsBackForwardNavigationGestures
           sharedCookiesEnabled
           thirdPartyCookiesEnabled={false}

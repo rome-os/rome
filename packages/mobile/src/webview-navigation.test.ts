@@ -2,7 +2,9 @@ import { describe, expect, it, rs } from "@rstest/core";
 import {
   handleHardwareBack,
   PULL_TO_REFRESH_MESSAGE,
+  PULL_TO_REFRESH_RELOAD_TIMEOUT_MS,
   PULL_TO_REFRESH_SCRIPT,
+  PullToRefreshController,
   type PullToRefreshEvent,
   parsePullToRefreshMessage,
 } from "./webview-navigation.js";
@@ -230,5 +232,92 @@ describe("PULL_TO_REFRESH_SCRIPT", () => {
     pane.scrollTop = 5;
     p.move(target, 150);
     expect(p.posted).toEqual([{ phase: "move", distance: 30 }, { phase: "cancel" }]);
+  });
+});
+
+describe("PullToRefreshController", () => {
+  function controller() {
+    const calls: string[] = [];
+    const timers: { run: () => void; ms: number; cancelled: boolean }[] = [];
+    const pull = new PullToRefreshController(
+      {
+        showPull: (distance) => calls.push(`show ${distance}`),
+        settle: (distance) => calls.push(`settle ${distance}`),
+        setReloading: (reloading) => calls.push(`reloading ${reloading}`),
+        thresholdReached: () => calls.push("threshold"),
+        reload: () => calls.push("reload"),
+      },
+      (run, ms) => {
+        const timer = { run, ms, cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    );
+    return { pull, calls, timers };
+  }
+
+  it("reloads on a release past the threshold and settles when the load ends", () => {
+    const { pull, calls, timers } = controller();
+    pull.handle({ phase: "move", distance: 40 });
+    pull.handle({ phase: "move", distance: 80 });
+    pull.handle({ phase: "end", distance: 80 });
+    pull.handle({ phase: "move", distance: 30 });
+    pull.loadStarted();
+    pull.loadEnded();
+    expect(calls).toEqual([
+      "show 40",
+      "show 80",
+      "threshold",
+      "reloading true",
+      "settle 72",
+      "reload",
+      "reloading false",
+      "settle 0",
+    ]);
+    expect(timers[0]?.cancelled).toBe(true);
+  });
+
+  it("retracts without reloading on a short release or a cancel", () => {
+    const { pull, calls } = controller();
+    pull.handle({ phase: "move", distance: 40 });
+    pull.handle({ phase: "end", distance: 40 });
+    pull.handle({ phase: "move", distance: 20 });
+    pull.handle({ phase: "cancel" });
+    expect(calls).toEqual(["show 40", "settle 0", "show 20", "settle 0"]);
+  });
+
+  it("retracts a partial pull when a load starts or the WebView remounts", () => {
+    const { pull, calls } = controller();
+    pull.handle({ phase: "move", distance: 50 });
+    pull.loadStarted();
+    pull.handle({ phase: "move", distance: 30 });
+    pull.reset();
+    pull.loadStarted();
+    expect(calls).toEqual(["show 50", "settle 0", "show 30", "settle 0"]);
+  });
+
+  it("unlocks the gesture when a reload never reports its end", () => {
+    const { pull, calls, timers } = controller();
+    pull.handle({ phase: "end", distance: 90 });
+    expect(timers.map((timer) => timer.ms)).toEqual([PULL_TO_REFRESH_RELOAD_TIMEOUT_MS]);
+    timers[0]?.run();
+    pull.handle({ phase: "move", distance: 10 });
+    expect(calls).toEqual([
+      "reloading true",
+      "settle 72",
+      "reload",
+      "reloading false",
+      "settle 0",
+      "show 10",
+    ]);
+  });
+
+  it("drops the pending timeout on dispose", () => {
+    const { pull, timers } = controller();
+    pull.handle({ phase: "end", distance: 90 });
+    pull.dispose();
+    expect(timers[0]?.cancelled).toBe(true);
   });
 });
