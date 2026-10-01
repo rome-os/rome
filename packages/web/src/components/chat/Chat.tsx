@@ -1160,8 +1160,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         });
         // An off-floor child may already have another running turn. Its
         // background reconciliation must continue until the turn list empties.
-        if (loaded && floorSessionIdRef.current === sessionId)
+        if (loaded && floorSessionIdRef.current === sessionId) {
           pendingMessageReconciliationsRef.current.delete(sessionId);
+          offFloorReconcileWakeRef.current.delete(sessionId);
+        }
         return loaded === true;
       }
       return false;
@@ -1322,6 +1324,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             if (!reloaded) return;
           }
           pendingMessageReconciliationsRef.current.delete(reattachSessionId);
+          offFloorReconcileWakeRef.current.delete(reattachSessionId);
           suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
@@ -1364,6 +1367,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
         if (pendingTurnId && target.turnId !== pendingTurnId) {
           pendingMessageReconciliationsRef.current.delete(reattachSessionId);
+          offFloorReconcileWakeRef.current.delete(reattachSessionId);
         }
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
@@ -1404,11 +1408,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         streamOpenedAt = Date.now();
         finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId, () => {
           if (
-            !cancelled &&
-            streamingSessionsRef.current.get(reattachSessionId)?.turnId === attachedTurnId
-          ) {
-            noteRecoveryConnected();
-          }
+            cancelled ||
+            !attachedTurnId ||
+            !streamController ||
+            streamController.signal.aborted ||
+            turnStreamControllersRef.current.get(attachedTurnId) !== streamController ||
+            streamingSessionsRef.current.get(reattachSessionId)?.turnId !== attachedTurnId
+          )
+            return;
+          noteRecoveryConnected();
           setStreamError(null);
           setRecoveryNotice((current) =>
             current?.sessionId === reattachSessionId ? null : current,

@@ -1591,8 +1591,22 @@ describe("Chat turn stream lifecycle", () => {
 
   it("Retry rechecks a recovery stream whose HTTP 200 reader has not yielded", async () => {
     const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
-    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) =>
-      Promise.resolve(
+    let resolveStaleRead: ((result: ReadableStreamReadResult<Uint8Array>) => void) | null = null;
+    rs.mocked(openTurnStream).mockImplementation((_turnId, signal) => {
+      if (rs.mocked(openTurnStream).mock.calls.length === 2) {
+        // Model a reader that delivers an already-queued chunk after abort.
+        const body = {
+          getReader: () => ({
+            read: () =>
+              new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) => {
+                resolveStaleRead = resolve;
+              }),
+            cancel: () => Promise.resolve(),
+          }),
+        };
+        return Promise.resolve({ ok: true, body } as unknown as Response);
+      }
+      return Promise.resolve(
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
@@ -1607,8 +1621,8 @@ describe("Chat turn stream lifecycle", () => {
             },
           }),
         ),
-      ),
-    );
+      );
+    });
     renderChat(<Chat sessionId="session-1" />);
     await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
     rs.mocked(listSessionTurns).mockResolvedValue(null);
@@ -1636,6 +1650,13 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(lookupsBeforeRetry);
     expect(openTurnStream).toHaveBeenCalledTimes(3);
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
+    await act(async () => {
+      resolveStaleRead!({ done: false, value: new TextEncoder().encode(": stale\n\n") });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("recovery-notice")).toBeTruthy();
   });
 
   it("times out a stalled recovery lookup and keeps retry available", async () => {
