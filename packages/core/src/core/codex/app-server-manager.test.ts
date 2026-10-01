@@ -354,7 +354,12 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     try {
       await manager.warmup();
       expect(clients[0].options.env).not.toHaveProperty("ROME_CREDITS_TOKEN");
-      expect(clients[0].options.configArgs).toEqual(["-c", "thread_unload_delay_secs=0"]);
+      expect(clients[0].options.configArgs).toEqual([
+        "-c",
+        "thread_unload_delay_secs=0",
+        "-c",
+        'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]',
+      ]);
     } finally {
       manager.close();
       rs.unstubAllEnvs();

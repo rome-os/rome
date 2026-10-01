@@ -29,9 +29,17 @@ function tomlString(value: string): string {
  * leaves while it is idle, so the next resume can switch its provider even
  * after a failed turn. The credits provider is defined only when this instance
  * has a Rome Cloud origin.
+ *
+ * Codex keeps `*TOKEN*` variables in agent shell commands by default, so the
+ * instance credential is excluded explicitly: only the provider may read it.
  */
 export function codexAppServerConfigArgs(romeCloudOrigin: string | null): string[] {
-  const args = ["-c", "thread_unload_delay_secs=0"];
+  const args = [
+    "-c",
+    "thread_unload_delay_secs=0",
+    "-c",
+    `shell_environment_policy.exclude=[${tomlString(ROME_CREDITS_TOKEN_ENV)}]`,
+  ];
   if (!romeCloudOrigin) return args;
   const provider = [
     `name=${tomlString("Rome credits")}`,

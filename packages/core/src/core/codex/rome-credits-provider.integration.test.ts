@@ -140,6 +140,16 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
         { threadId, status: "completed" },
       ]);
       expect(authorizations).toEqual([`Bearer ${TOKEN}`, `Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
+
+      // command/exec builds its env with the same shell environment policy
+      // as the agent's shell tool, so it shows what an agent command sees.
+      const shell = await manager.request<{ exitCode: number; stdout: string }>("command/exec", {
+        command: ["sh", "-c", `printenv ${ROME_CREDITS_TOKEN_ENV}; echo exit=$?`],
+        cwd: home,
+        sandboxPolicy: { type: "dangerFullAccess" },
+      });
+      expect(shell.stdout).not.toContain(TOKEN);
+      expect(shell.stdout.trim()).toBe("exit=1");
       manager.close();
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(await filesContaining(home, TOKEN)).toEqual([]);
