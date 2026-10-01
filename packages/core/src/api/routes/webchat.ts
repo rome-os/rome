@@ -3272,11 +3272,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let lastCompletedText:
               | {
                   blockIx: number;
+                  blockId?: string;
                   content: string;
                   turnPhase?: "commentary" | "final";
                 }
               | undefined;
             let finalTextBlockIx: number | undefined;
+            // Block id of the in-flight text block, from its deltas.
+            let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
@@ -3288,6 +3291,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // accumulated text.
               if (msg.type === "text_delta") {
                 stream.assistantText += msg.content;
+                if (msg.blockId) inFlightTextBlockId = msg.blockId;
                 emitToStream(
                   stream,
                   "assistant_text",
@@ -3329,6 +3333,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         type: "text",
                         content: msg.content,
                         turnPhase: "commentary",
+                        ...(msg.blockId ? { blockId: msg.blockId } : {}),
                         blockIx,
                       },
                     ]);
@@ -3342,21 +3347,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 lastCompletedText = {
                   blockIx,
+                  ...(msg.blockId ? { blockId: msg.blockId } : {}),
                   content: msg.content,
                   turnPhase: msg.turnPhase,
                 };
                 if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                inFlightTextBlockId = undefined;
               }
               if (msg.type === "turn_end" && stream.assistantText) {
                 const blockIx = stream.assistantBlockIx;
+                const blockId = inFlightTextBlockId;
                 const partial = {
                   type: "text" as const,
                   content: stream.assistantText,
                   turnPhase: "final" as const,
                 };
-                lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
+                lastCompletedText = {
+                  blockIx,
+                  ...(blockId ? { blockId } : {}),
+                  content: partial.content,
+                  turnPhase: "final",
+                };
+                inFlightTextBlockId = undefined;
                 finalTextBlockIx = blockIx;
                 stream.traceEvents.push(partial);
                 emitTraceEvent(stream, partial);
@@ -3584,6 +3598,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   : undefined;
               const resultBlockIx =
                 finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
+              // The completed block the answer reuses, when there is one.
+              const resultBlockId =
+                lastCompletedText && resultBlockIx === lastCompletedText.blockIx
+                  ? lastCompletedText.blockId
+                  : undefined;
               await deps.actionEngine.run(
                 "send_message",
                 {
@@ -3595,6 +3614,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       type: "text" as const,
                       content: resultContent,
                       turnPhase: "final" as const,
+                      ...(resultBlockId ? { blockId: resultBlockId } : {}),
                       blockIx: resultBlockIx,
                     },
                   ],
