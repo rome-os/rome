@@ -110,12 +110,17 @@ function makeAppLookup(catalog: AppCatalog): AppLookup {
  * Deps that @rome-os/app-runtime 0.7 removed, answered for that release with
  * the change an app built against 0.6 has to make, rather than with a
  * `Cannot read properties of undefined` from deep inside the app. Each is a
- * non-enumerable getter, so copying or listing the deps never trips it.
+ * non-enumerable getter, so copying or listing the deps never trips it. It is
+ * still an own property, so `"talkRouter" in deps` answers true while the
+ * getter is here: an app feature-testing with `in` must read the value.
+ *
+ * TODO(0.8): remove, with REMOVED_HOOK_DEPS and withRemovedDeps.
  */
 const REMOVED_ACTION_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
 };
+// TODO(0.8): remove, with REMOVED_ACTION_DEPS and withRemovedDeps.
 const REMOVED_HOOK_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",

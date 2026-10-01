@@ -1,7 +1,12 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import {
+  chooseConnection,
+  connectionRefusalMessage,
+  createAppLogger,
+  getCurrentActionContext,
+} from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -238,8 +243,8 @@ async function resolveChatThreadId(
 /**
  * Refuse a channel no Connection can send on before anything else is checked,
  * so an unconfigured channel is not reported as a bad attachment or a missing
- * guardian mapping. The channels service applies the same rule, with the same
- * texts, when it sends.
+ * guardian mapping. The rule and its texts are the SDK's, which the channels
+ * service applies again when it sends.
  */
 async function requireSendableChannel(
   channels: ChannelsService,
@@ -248,15 +253,9 @@ async function requireSendableChannel(
 ): Promise<void> {
   const backing =
     (await channels.list()).find((candidate) => candidate.name === channel)?.connectionIds ?? [];
-  if (requested) {
-    if (!backing.includes(requested)) {
-      throw new Error(`Connection "${requested}" does not provide channel "${channel}"`);
-    }
-    return;
-  }
-  if (backing.length === 0) throw new Error(`No Talk connection registered for "${channel}"`);
-  if (backing.length > 1) {
-    throw new Error(`Channel "${channel}" has multiple connections; connectionId is required`);
+  const choice = chooseConnection(backing, requested);
+  if ("refused" in choice) {
+    throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
   }
 }
 

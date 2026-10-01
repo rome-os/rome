@@ -1,4 +1,4 @@
-import { createAppLogger } from "@rome-os/app-runtime";
+import { chooseConnection, createAppLogger } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -163,19 +163,19 @@ export function createAction(
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
-      // The service applies the same none/several rule in `history`, but with
-      // `send_message`'s error texts. These are the texts this tool has always
-      // answered, so the check stays here.
+      // The SDK's rule, which the service applies again in `history`, but
+      // answered in the texts this tool has always given.
       const connections =
         (await channels.list()).find((item) => item.name === channel)?.connectionIds ?? [];
-      if (connections.length === 0) {
+      const choice = chooseConnection(connections);
+      if ("refused" in choice && choice.refused === "none") {
         return {
           status: "error",
           error: `Channel "${channel}" is not configured or not running.`,
         };
       }
 
-      if (connections.length > 1) {
+      if ("refused" in choice) {
         return {
           status: "error",
           error: `Channel "${channel}" has multiple connections; connectionId is required.`,

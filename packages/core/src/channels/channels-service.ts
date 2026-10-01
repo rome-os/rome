@@ -18,6 +18,7 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { chooseConnection, connectionRefusalMessage } from "@rome-os/app-runtime";
 import type { TalkRouter } from "../connections/types.js";
 import type { Channels } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
@@ -40,17 +41,11 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const backing = (await deps.router.list())
       .filter((connection) => connection.service === channel)
       .map((connection) => connection.connectionId);
-    if (requested) {
-      if (!backing.includes(requested)) {
-        throw new Error(`Connection "${requested}" does not provide channel "${channel}"`);
-      }
-      return requested;
+    const choice = chooseConnection(backing, requested);
+    if ("refused" in choice) {
+      throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
     }
-    if (backing.length === 0) throw new Error(`No Talk connection registered for "${channel}"`);
-    if (backing.length > 1) {
-      throw new Error(`Channel "${channel}" has multiple connections; connectionId is required`);
-    }
-    return backing[0]!;
+    return choice.connectionId;
   }
 
   return {

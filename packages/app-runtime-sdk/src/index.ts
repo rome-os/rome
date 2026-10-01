@@ -1514,6 +1514,48 @@ export interface ChannelSummary {
   connectionIds: string[];
 }
 
+/** Why no Connection could be chosen for a channel: none backs it, several do
+ *  and none was named, or the one named does not back it. */
+export type ConnectionRefusal = "none" | "several" | "not-backing";
+
+/**
+ * The Connection a send or a history read on a channel goes through, given
+ * the Connections backing the channel ({@link ChannelSummary.connectionIds}):
+ * the one named, which must back the channel, or else the channel's only one.
+ * With several and none named it refuses rather than guessing. The rule
+ * `ChannelsService.send` and `history` apply, for a caller that checks first.
+ */
+export function chooseConnection(
+  connectionIds: readonly string[],
+  requested?: string,
+): { connectionId: string } | { refused: ConnectionRefusal } {
+  if (requested) {
+    return connectionIds.includes(requested)
+      ? { connectionId: requested }
+      : { refused: "not-backing" };
+  }
+  if (connectionIds.length === 0) return { refused: "none" };
+  if (connectionIds.length > 1) return { refused: "several" };
+  return { connectionId: connectionIds[0]! };
+}
+
+/** What `ChannelsService.send` and `history` say when {@link chooseConnection}
+ *  refuses. */
+export function connectionRefusalMessage(
+  channel: string,
+  refused: ConnectionRefusal,
+  requested?: string,
+): string {
+  switch (refused) {
+    case "not-backing":
+      return `Connection "${requested}" does not provide channel "${channel}"`;
+    case "none":
+      return `No Talk connection registered for "${channel}"`;
+    case "several":
+      return `Channel "${channel}" has multiple connections; connectionId is required`;
+  }
+}
+
 /** What {@link ChannelsService.history} reads. */
 export interface ChannelHistoryRead {
   conversationId?: ConversationId;
