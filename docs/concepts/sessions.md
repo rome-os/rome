@@ -9,12 +9,12 @@ A Rome session is the durable product boundary around one continuous body of age
 - A conversation does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same conversation and the same provider thread.
 - Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another conversation. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
-- Usage belongs to the session that executed it: a first-class child subagent session owns its own [runs](#agent-run) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
+- Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
 - Project attribution matches the session's project directory (exact path or child path). A project's display name is metadata, not an attribution fallback. Forks and subagents inherit the parent's project. Sessions created without project context stay unattributed.
 
 **Not to be confused with:**
 
-- **[Agent run](#agent-run)** — a run is one turn of work. A session is the durable boundary around many turns.
+- **[Turn](#turn)** — a turn is one unit of work inside a session. A session is the durable boundary around many turns.
 - **[Forked turn](#forked-turns)** — a fork branches from a session's context but can never mutate it.
 - **Provider execution state** — the provider-side thread is an implementation resource the session resumes. The session is the product boundary.
 
@@ -37,39 +37,101 @@ A session remembers the concrete model that produced its history — the **sessi
 - **Agent model pin** — `provider` with `modelId` supplies an exact default for a new or unpinned session. The session model pin records the model that produced existing history and takes precedence over that default.
 - **Model tier** — the portable agent-level default the session pin overrides once a turn has run.
 
-## Agent run
+## Turn
 
-An agent run is one turn of agent work, identified by its turn id — the unit usage reporting counts and aggregates.
+A turn is one user request, or one provider-started wake, plus the agent work that follows until the agent answers or stops. Each turn has a turn id, and usage reporting counts and aggregates turns.
+
+*Deprecated alias:* **Agent run** — surfaces that still say "agent run" or "run" for this unit mean a turn.
 
 **Contracts:**
 
-- The user inputs, assistant output, and trace evidence produced by the same turn count as one run, not several. A run can consume more than one user input.
-- Failed and interrupted turns still count as runs.
-- Stop targets one run and requests provider cancellation. Until that run ends, Stop can be retried. Accepting the request does not mean execution has ended.
+- The user inputs, assistant output, and trace evidence produced by the same turn count as one turn, not several. A turn can consume more than one user input.
+- Failed and interrupted turns still count as turns.
+- Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
 - Cancelling provider execution does not close the conversation. The next message opens usable execution state and resumes available history without replaying the cancelled message.
-- A run's outcome and wall-clock duration come from the bracket that closes it, and its model attribution and token cost come from the terminal block's accounting. Neither is read from fields mirrored onto individual messages.
+- A turn's outcome and wall-clock duration come from the [event](#event) that closes it, and its model attribution and token cost come from the accounting on its terminal event. Neither is read from fields mirrored onto individual messages.
 
 **Not to be confused with:**
 
-- **[Session](#sessions)** — a session accumulates many runs. A run is a single turn.
+- **[Session](#sessions)** — a session accumulates many turns. A turn is one unit of work inside it.
+- **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
+- **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
 
-## Conversational inputs
+## Event
 
-A conversational input is one independently submitted user message. Its identity remains the same whether it starts a run or joins one already in progress.
+An event is one item of a turn's stream, as Rome publishes it to its consumers. Events fall into four groups:
+
+- **Block events** carry a completed [block](#block).
+- **Delta events** carry a [delta](#delta) of a block that is still being produced.
+- **Lifecycle events** mark the turn's edges and progress: its start and end, the status of each user input, and the terminal result or error.
+- **Other events** report plan updates, structured output, and subagent activity.
+
+*Deprecated alias:* **Agent message** — surfaces that still call an item of a turn's stream a "message" mean an event.
 
 **Contracts:**
 
-- WebChat persists an input before dispatch. Sending during a run attempts non-interrupting provider steering. It does not start a concurrent run or replace the active output stream.
+- A turn's stream opens with its start event and closes with its end event. The terminal result or error comes before the end event.
+- Each agent emits at most one terminal event per turn.
+- The durable trace keeps every event of a turn except delta events and input-status events.
+- Delta events never open, close, or reorder a turn.
+
+**Not to be confused with:**
+
+- **[Message](messaging.md#message)** — a message is a conversation entry that a person or an agent sends. An event is an item of one turn's stream.
+- **[Block](#block)** — every block reaches consumers as a block event, but results, errors, plan updates, and subagent reports are events that are not blocks.
+- **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
+- **Segment** — a display group of a turn's trace events. It groups events and is not one itself.
+
+## Block
+
+A block is one completed piece of model content inside a turn: text, thinking, a tool use, or a tool result. Blocks are the content the model produced or received; everything else in a turn's stream is an [event](#event) about the turn.
+
+**Contracts:**
+
+- A block has one identity, unique within its turn. A text or thinking block is identified by its block id. A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. No block carries two unrelated ids.
+- A block's [deltas](#delta) carry the same identity as the completed block, so a consumer matches them without relying on event order.
+- When a provider gives a text or thinking block no identity, the block has none. Rome never borrows another block's identity for it.
+- Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
+
+**Not to be confused with:**
+
+- **[Event](#event)** — a result, an error, a plan update, or a subagent report is an event, not a block.
+- **Message part** — a piece of a stored conversation [message](messaging.md#message). A text part can hold the text of a text block, but parts belong to the conversation and blocks belong to a turn.
+- **Content block** (Anthropic) and **item** (Codex) — the providers' own units, which Rome translates into blocks and events.
+
+## Delta
+
+A delta is an increment of a [block](#block) that is still being produced: a few tokens of text or thinking, part of a tool's input, or the latest output of a running command.
+
+**Contracts:**
+
+- A delta is transient. The durable trace, persistence, and accounting never keep it.
+- A delta carries the identity of the block it belongs to.
+- The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it, and a consumer that shows deltas discards the ones left without a block when the turn ends.
+
+**Not to be confused with:**
+
+- **Chunk** — a whole partial response object that some provider APIs stream. A delta belongs to a single block.
+- **Preview** — what a surface shows while a block is in progress. The delta is the data a preview is built from.
+- **Fragment** — any partial piece of something. A delta is the specific increment Rome publishes with its block's identity.
+
+## Conversational inputs
+
+A conversational input is one independently submitted user message. Its identity remains the same whether it starts a turn or joins one already in progress.
+
+**Contracts:**
+
+- WebChat persists an input before dispatch. Sending during a turn attempts non-interrupting provider steering. It does not start a concurrent turn or replace the active output stream.
 - Provider acceptance and consumption are distinct. An accepted input is not shown as consumed until the provider includes it in context.
-- A definitely unconsumed input can start the next run. If the provider already holds it, the next run adopts it without sending another copy.
+- A definitely unconsumed input can start the next turn. If the provider already holds it, the next turn adopts it without sending another copy.
 - An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery. They are not silently replayed.
 - Stop targets the specified running turn. It cannot stop another turn, and it does not cancel separately queued inputs.
 - Independent action, approval, and external-channel callers retain their serial, one-result-per-call turn contract. They do not implicitly opt into the WebChat input lane.
 
 **Not to be confused with:**
 
-- **Output streaming** — incremental assistant output says nothing about whether new input can join an active run.
+- **Output streaming** — incremental assistant output says nothing about whether new input can join an active turn.
 - **Interrupting** — steering changes a later model step without cancelling an in-flight tool or model request.
 
 ## Owning app
@@ -78,12 +140,12 @@ The owning app is the app that owns the agent attached to the session. Core agen
 
 **Contracts:**
 
-- Every run has at most one owner, so grouping usage by app cannot double-count. Apps whose tools happen to be invoked inside a run are evidence in that run's trace, but they are not additional owners.
+- Every turn has at most one owner, so grouping usage by app cannot double-count. Apps whose tools happen to be invoked inside a turn are evidence in that turn's trace, but they are not additional owners.
 - Ownership is resolved from the live agent catalog. If the agent is missing from the catalog because its app was removed, the session remains inspectable under **Uninstalled App**. Rome does not persist a second owner snapshot.
 
 **Not to be confused with:**
 
-- **Apps invoked in a run** — an app whose action ran inside a turn appears in the trace but is not the owner. Only the agent's owning app is.
+- **Apps invoked in a turn** — an app whose action ran inside a turn appears in the trace but is not the owner. Only the agent's owning app is.
 
 ## Forked turns
 
@@ -104,7 +166,7 @@ The caller also chooses how long the fork's provider branch lives:
 - In both modes the source conversation is untouched: its next turn never sees the fork's prompt, output, or tool calls.
 - The fork's model is the caller's choice in both modes: it follows the source's live model unless the caller overrides the tier. Exact-mode callers that want provider prompt-cache reuse keep the source's model. A fork never writes a [model pin](#model-pin) onto its source. A continuable fork records provider and model on its own agent session, which is what a later turn resumes from. It also records the reasoning effort its turn ran with, for display only.
 - A turn can be forked only after it completes successfully and Rome persists that exact turn's provider checkpoint. Running, stopped, failed, and checkpoint-less turns are not forkable. Rome never substitutes another turn's transcript head or reconstructs provider history from visible output.
-- Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other agent run.
+- Every forked turn is recorded as its own fork session, linked back to the parent session and the turn the fork branched from, so its trajectory can be inspected like any other turn.
 - A fork is continuable only when it completed on a provider thread of its own. A branch whose turn errored, and one whose provider ran it inside the source thread, stay one-shot and read-only.
 - A fork holds no scheduled wake-ups and hosts no approval continuation, continuable or not. Both resume through the top-level session host, which answers into the conversation that scheduled them.
 
