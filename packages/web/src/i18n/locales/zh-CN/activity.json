@@ -32,6 +32,7 @@
       "pending_approval": "待批准",
       "cancelled": "已取消"
     },
+    "filterLabel": "显示",
     "pagination": {
       "previous": "‹ 上一页",
       "next": "下一页 ›",

@@ -338,7 +338,9 @@ function ApprovalCard({
 
   return (
     <CardShell status={displayStatus}>
-      <div className="flex items-start justify-between gap-3">
+      {/* On a phone the actions go under the text as one full-width row, so
+          the description keeps the card's width. */}
+      <div className="flex items-start justify-between gap-3 max-md:flex-col max-md:items-stretch">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <TypeTag type={approval.type} />
@@ -394,9 +396,9 @@ function ApprovalCard({
             </Collapsible>
           )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
+        <div className="flex shrink-0 flex-col items-end gap-2 max-md:items-stretch">
           {isPending && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 max-md:*:flex-1">
               <Button
                 type="button"
                 variant="outline"
@@ -562,7 +564,7 @@ function ExecutionGroupCard({
 
   return (
     <CardShell status={root.status}>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3 max-md:flex-col max-md:items-stretch">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <TypeTag type="action_execution" />
@@ -893,15 +895,31 @@ export default function ActivityPage() {
           </button>
         )}
 
-        {/* Filter pills */}
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
+        {/* Filter pills. On a phone they become one native picker, which the
+            phone presents as its own wheel or sheet, instead of a row that
+            scrolls sideways. */}
+        <label className="flex items-center gap-3 text-ui text-muted-foreground md:hidden">
+          {t("page.filterLabel")}
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+            className="h-11 min-w-0 flex-1 rounded-10 border border-border-strong bg-surface px-3 text-foreground outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+          >
+            {FILTER_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {t(`page.filters.${value}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 max-md:hidden">
           {FILTER_VALUES.map((value) => {
             const active = statusFilter === value;
             return (
               <button
                 key={value}
                 onClick={() => setStatusFilter(value)}
-                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors max-md:min-h-11 max-md:px-4 ${
+                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
                   active
                     ? "bg-primary text-primary-foreground"
                     : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"

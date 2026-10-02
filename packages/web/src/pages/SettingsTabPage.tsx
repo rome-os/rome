@@ -46,6 +46,8 @@ import {
   Sun,
   WalletCards,
   X,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   FormRow,
@@ -236,7 +238,15 @@ export default function SettingsPage() {
   const redirectToInbox = isMovedToInbox(params.tab);
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
-  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
+  // On a phone Settings is a list of sections, and each section is its own
+  // screen with a way back, instead of a sideways strip of tabs. Bare
+  // /settings is that list; it renders here only on a phone, since from 768px
+  // up SettingsPage sends it to Appearance. So the list names no section and
+  // mounts none.
+  const onSection = Boolean(params.tab);
+  useDocumentTitle(
+    onSection ? [t(`tabs.${activeTab}` as const), t("page.title")] : [t("page.title")],
+  );
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -310,8 +320,9 @@ export default function SettingsPage() {
   }, [t]);
 
   useEffect(() => {
+    if (!onSection) return;
     loadAll();
-  }, [loadAll]);
+  }, [loadAll, onSection]);
 
   useEffect(() => {
     if (activeTab !== "Connections") return;
@@ -372,13 +383,49 @@ export default function SettingsPage() {
 
   return (
     <Page>
+      {onSection ? (
+        <Link
+          to="/settings"
+          className="flex min-h-11 items-center gap-1 self-start text-ui text-primary md:hidden"
+        >
+          <ChevronLeft className="size-5" aria-hidden />
+          {t("page.title")}
+        </Link>
+      ) : null}
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
+          <PageTitle>
+            {onSection ? (
+              <>
+                <span className="md:hidden">{t(`tabs.${activeTab}` as const)}</span>
+                <span className="max-md:hidden">{t("page.title")}</span>
+              </>
+            ) : (
+              t("page.title")
+            )}
+          </PageTitle>
         </PageHeading>
       </PageHeader>
 
-      <PageNav aria-label={t("page.title")}>
+      {onSection ? null : (
+        <nav aria-label={t("page.title")} className="md:hidden">
+          <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+            {VISIBLE_TABS.map((tab) => (
+              <li key={tab}>
+                <Link
+                  to={`/settings/${tabToSlug(tab)}`}
+                  className="flex min-h-12 items-center justify-between gap-3 px-4 text-ui text-foreground"
+                >
+                  {t(`tabs.${tab}` as const)}
+                  <ChevronRight className="size-5 text-subtle-foreground" aria-hidden />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
+
+      <PageNav aria-label={t("page.title")} className="max-md:hidden">
         {VISIBLE_TABS.map((tab) => (
           <PageNavLink asChild key={tab} active={tab === activeTab}>
             <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
@@ -386,7 +433,7 @@ export default function SettingsPage() {
         ))}
       </PageNav>
 
-      {tabNeedsSettings && loading ? (
+      {!onSection ? null : tabNeedsSettings && loading ? (
         <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
       ) : tabNeedsSettings && loadError ? (
         <Measure>

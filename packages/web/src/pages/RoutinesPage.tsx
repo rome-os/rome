@@ -1095,9 +1095,11 @@ function RoutineCard({
 
   // Two non-overlapping zones: a text-only link that navigates, and a sibling
   // action cluster that never does. The flex gap is dead space between them, so
-  // a near-miss on the controls can't trigger navigation.
+  // a near-miss on the controls can't trigger navigation. On a phone the two
+  // zones stack: the name keeps the card's width, and Run fills the row of
+  // actions under it.
   return (
-    <div className="flex items-center justify-between gap-4 rounded-12 border border-border bg-surface px-4 py-3 shadow-1">
+    <div className="flex items-center justify-between gap-4 rounded-12 border border-border bg-surface px-4 py-3 shadow-1 max-md:flex-col max-md:items-stretch max-md:gap-3">
       {/* Left zone — the ONLY navigation target. Wraps text content only; no
           interactive elements live inside the link. */}
       <Link
@@ -1138,7 +1140,7 @@ function RoutineCard({
       </Link>
 
       {/* Right zone — actions; never navigates. */}
-      <div className="flex flex-none items-center gap-2">
+      <div className="flex flex-none items-center gap-2 max-md:gap-3 max-md:[&>*:first-child]:flex-1">
         {isStoppable ? (
           <StopButton routineId={routine.id} label={accessibleName} onError={onError} />
         ) : (

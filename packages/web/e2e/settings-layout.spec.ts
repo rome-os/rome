@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 
 const tabs = ["appearance", "connections", "channels", "ai-tools", "favors", "advanced"];
+const sectionTitles: Record<string, string> = {
+  appearance: "Appearance",
+  connections: "Connections",
+  channels: "Channels",
+  "ai-tools": "AI Tools",
+  favors: "Favors",
+  advanced: "Advanced",
+};
 
 for (const width of [390, 1440]) {
   test(`Settings keeps its header and controls inside the viewport at ${width}px`, async ({
@@ -11,12 +19,23 @@ for (const width of [390, 1440]) {
     let headerLeft: number | undefined;
     for (const tab of tabs) {
       await page.goto(`/settings/${tab}`);
-      const heading = page.getByRole("heading", { name: "Settings", exact: true });
+      // On a phone a section is its own screen: it is titled by the section
+      // and has a way back to the list of sections, instead of the strip.
+      const phone = width < 768;
+      const heading = page.locator("main h1");
       await expect(heading).toBeVisible();
+      await expect(heading).toHaveAccessibleName(phone ? sectionTitles[tab] : "Settings");
       await expect(page.locator("main h1")).toHaveCount(1);
-      await expect(
-        page.locator('[data-slot="page-nav-link"][aria-current="page"]'),
-      ).toHaveAttribute("href", `/settings/${tab}`);
+      if (phone) {
+        await expect(
+          page.locator("main").getByRole("link", { name: "Settings", exact: true }),
+        ).toHaveAttribute("href", "/settings");
+        await expect(page.locator('[data-slot="page-nav"]')).toBeHidden();
+      } else {
+        await expect(
+          page.locator('[data-slot="page-nav-link"][aria-current="page"]'),
+        ).toHaveAttribute("href", `/settings/${tab}`);
+      }
       const body = page.locator('[data-slot="page"]').first();
       await expect(
         body
@@ -77,3 +96,36 @@ for (const width of [390, 1440]) {
     }
   });
 }
+
+test("bare /settings on a phone is the list of sections alone, and Appearance past 768px", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
+  // Only the Settings page asks for the tailnet devices (/api/settings has
+  // other readers across the app), so this request marks a section's load.
+  const sectionLoads: string[] = [];
+  page.on("request", (request) => {
+    const { pathname } = new URL(request.url());
+    if (pathname.startsWith("/api/tailscale")) sectionLoads.push(pathname);
+  });
+  await page.goto("/settings");
+  await expect(page.locator("main h1")).toHaveAccessibleName("Settings");
+  await expect(
+    page.locator("main nav").getByRole("link", { name: "Appearance", exact: true }),
+  ).toHaveAttribute("href", "/settings/appearance");
+  // The list names no section, mounts none and loads nothing a section reads.
+  await expect(page).toHaveTitle(/^Settings · /);
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator('[data-slot="form-row"]')).toHaveCount(0);
+  expect(sectionLoads).toEqual([]);
+
+  // Turning the phone, or widening the window, past 768px shows the page a
+  // desktop gets at this URL.
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(page).toHaveURL(/\/settings\/appearance$/);
+  await expect(page.locator('[data-slot="page-nav-link"][aria-current="page"]')).toHaveAttribute(
+    "href",
+    "/settings/appearance",
+  );
+});

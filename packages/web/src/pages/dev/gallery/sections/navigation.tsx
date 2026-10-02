@@ -94,6 +94,19 @@ export function NavigationSection() {
         </Specimen>
 
         <Specimen
+          label="Tabs — vertical"
+          note="Triggers stacked gap-1 apart. On a phone each is a 44px box, so a tap on one never lands on the next."
+        >
+          <Tabs defaultValue="recent" orientation="vertical">
+            <TabsList aria-label="Activity, vertical">
+              <TabsTrigger value="recent">Recent</TabsTrigger>
+              <TabsTrigger value="routines">Routines</TabsTrigger>
+              <TabsTrigger value="archive">Archive</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </Specimen>
+
+        <Specimen
           label="Tabs with a glyph"
           note="A trigger names no size — its list sits between the shared heights — so the glyph takes the same sm step the label already pads on: 14px."
         >

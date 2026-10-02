@@ -604,6 +604,14 @@
     flex-direction: row;
   }
 
+  /* The 44px buttons float over the diagram: the action row at the top, the
+     zoom row at the bottom. In Streamdown's 112px minimum canvas they cover
+     half of it and leave little room to pan, so a phone gives the canvas a
+     taller floor. The diagram stays centred in it. */
+  [data-streamdown="mermaid"] > :first-child {
+    min-height: 12rem;
+  }
+
   .rome-markdown
     :is(
       [data-streamdown="code-block-header"],
