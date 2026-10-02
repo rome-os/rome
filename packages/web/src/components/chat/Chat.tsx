@@ -552,6 +552,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [onSessionsChanged]);
   useEffect(() => {
     onSessionNotFoundRef.current = onSessionNotFound;
+    return () => {
+      // A late 404 from a chat we left must not redirect the current page.
+      onSessionNotFoundRef.current = undefined;
+    };
   }, [onSessionNotFound]);
   useEffect(() => {
     onSessionMessageRef.current = onSessionMessage;

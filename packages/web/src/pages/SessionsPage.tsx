@@ -1336,6 +1336,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const fullMode = location.pathname.startsWith("/full/apps/sessions");
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const [session, setSession] = useState<RomeSessionDetail | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1371,9 +1372,16 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
         if (!sessionResult || !messageResult) {
-          setError("Session not found");
-          setSession(null);
-          setMessages([]);
+          const path = hideSidebar ? "/chat?hideSidebar=1" : "/chat";
+          if (fullMode && window.parent !== window) {
+            // Workspace tiles must navigate the host, or the chat shell nests inside the iframe.
+            window.parent.postMessage(
+              { type: "rome:host-navigate", detail: { path } },
+              window.location.origin,
+            );
+            return;
+          }
+          navigate(path, { replace: true });
           return;
         }
         setSession(sessionResult);
@@ -1388,7 +1396,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, navigate, hideSidebar, fullMode]);
 
   useEffect(() => {
     if (!session) {

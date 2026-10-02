@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import { useHostNavigation } from "./use-host-navigation";
 
 function Harness() {
@@ -11,9 +11,12 @@ function Harness() {
 
 function LocationProbe() {
   const location = useLocation();
+  const navigationType = useNavigationType();
   return (
     <>
       <div data-testid="pathname">{location.pathname}</div>
+      <div data-testid="search">{location.search}</div>
+      <div data-testid="navigation-type">{navigationType}</div>
       <div data-testid="draft">{(location.state as { draft?: string } | null)?.draft ?? ""}</div>
     </>
   );
@@ -32,7 +35,10 @@ function renderHarness() {
 afterEach(() => cleanup());
 
 describe("useHostNavigation", () => {
-  it("handles same-origin host navigation messages from iframes", async () => {
+  it.each([
+    "",
+    "?hideSidebar=1",
+  ])("handles iframe chat navigation with query '%s'", async (search) => {
     renderHarness();
 
     act(() => {
@@ -41,13 +47,15 @@ describe("useHostNavigation", () => {
           origin: window.location.origin,
           data: {
             type: "rome:host-navigate",
-            detail: { path: "/chat", state: { draft: "Review this" } },
+            detail: { path: `/chat${search}`, state: { draft: "Review this" } },
           },
         }),
       );
     });
 
     await waitFor(() => expect(screen.getByTestId("pathname").textContent).toBe("/chat"));
+    expect(screen.getByTestId("search").textContent).toBe(search);
+    expect(screen.getByTestId("navigation-type").textContent).toBe("PUSH");
     expect(screen.getByTestId("draft").textContent).toBe("Review this");
   });
 
