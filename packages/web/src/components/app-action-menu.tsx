@@ -24,7 +24,7 @@ import {
   dropdownMenuItemVariants,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import type { AppLifecycle } from "@/hooks/use-app-lifecycle";
+import { type AppLifecycle, canChatWithApp } from "@/hooks/use-app-lifecycle";
 import { cn } from "@/lib/utils";
 
 // One installed app's actions menu as data, shared by every surface that
@@ -118,13 +118,13 @@ export function getAppActionMenuEntries({
     icon: Info,
     to: `/app-details/${encodeURIComponent(app.id)}`,
   });
-  if (app.projectPath !== null) {
+  if (canChatWithApp(app)) {
     entries.push({
       type: "action",
       key: "chat",
-      label: t("installed.chatToUpdate"),
+      label: t("installed.chatWithApp"),
       icon: MessageCircle,
-      onSelect: () => lifecycle.startChatToUpdate(app),
+      onSelect: () => lifecycle.chatWithApp(app),
     });
   }
   if (app.fullHref) {

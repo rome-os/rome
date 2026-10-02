@@ -314,8 +314,8 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
       const destination = currentChat
         ? `${location.pathname}${location.search}${location.hash}`
         : "/chat";
-      // A new chat starts in the app's source folder, as "Start chat here"
-      // does. A conversation already under way keeps its folder.
+      // A new chat starts in the app's source folder, as Chat with app does
+      // everywhere else. A conversation already under way keeps its folder.
       const projectPath = location.pathname.startsWith("/chat/") ? null : app.projectPath;
       navigate(destination, {
         state: {

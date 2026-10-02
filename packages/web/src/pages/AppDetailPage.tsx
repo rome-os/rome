@@ -123,10 +123,11 @@ export default function AppDetailPage() {
   };
 
   const renderManageSection = (app: InstalledAppCard) => {
-    const canChatToUpdate = app.projectPath !== null;
+    // The row's hint speaks of the source project, so it stays with apps that have one.
+    const hasSourceProject = app.projectPath !== null;
     const hasManageRow =
       app.canToggle ||
-      canChatToUpdate ||
+      hasSourceProject ||
       app.canManagePublicAccess ||
       app.canPublish ||
       app.canUninstall;
@@ -160,19 +161,19 @@ export default function AppDetailPage() {
               }
             />
           ) : null}
-          {canChatToUpdate ? (
+          {hasSourceProject ? (
             <ManageRow
               icon={MessageCircle}
-              title={t("detail.chatTitle")}
+              title={t("installed.chatWithApp")}
               description={t("detail.chatHint")}
               control={
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => lifecycle.startChatToUpdate(app)}
+                  onClick={() => lifecycle.chatWithApp(app)}
                 >
-                  {t("installed.chatToUpdate")}
+                  {t("detail.open")}
                 </Button>
               }
             />

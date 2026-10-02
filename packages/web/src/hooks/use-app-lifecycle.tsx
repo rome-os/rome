@@ -76,9 +76,19 @@ export interface AppLifecycle {
   requestUninstall: (app: InstalledAppCard, purge: boolean) => void;
   requestPublish: (app: InstalledAppCard) => void;
   requestAccess: (app: InstalledAppCard) => void;
-  startChatToUpdate: (app: InstalledAppCard) => void;
+  chatWithApp: (app: InstalledAppCard) => void;
   /** Render once per page — the uninstall/publish confirms and access dialog. */
   dialogs: ReactNode;
+}
+
+function hasAppPage(app: InstalledAppCard): boolean {
+  return app.hasFrontend && app.href !== null;
+}
+
+// Chat with app opens a new chat in the app's source folder, beside the app's
+// own page. An app with neither would get only a blank chat, so it offers none.
+export function canChatWithApp(app: InstalledAppCard): boolean {
+  return hasAppPage(app) || app.projectPath !== null;
 }
 
 export function useAppLifecycle(
@@ -516,9 +526,13 @@ export function useAppLifecycle(
     );
   };
 
-  const startChatToUpdate = (app: InstalledAppCard) => {
-    if (!app.projectPath) return;
-    navigate("/chat", { state: { projectPath: app.projectPath } });
+  const chatWithApp = (app: InstalledAppCard) => {
+    navigate("/chat", {
+      state: {
+        ...(hasAppPage(app) ? { widgets: [{ type: "app", appId: app.id }] } : {}),
+        ...(app.projectPath ? { projectPath: app.projectPath } : {}),
+      },
+    });
   };
 
   const uninstallDialogOpen = uninstallTarget !== null;
@@ -834,7 +848,7 @@ export function useAppLifecycle(
     requestUninstall,
     requestPublish,
     requestAccess,
-    startChatToUpdate,
+    chatWithApp,
     dialogs,
   };
 }
