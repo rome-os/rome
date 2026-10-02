@@ -138,7 +138,7 @@ function ChatHomeProbe() {
   );
 }
 
-function renderDetail(initialEntry = "/sessions/feedback-fork-session") {
+function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -147,6 +147,7 @@ function renderDetail(initialEntry = "/sessions/feedback-fork-session") {
         <Route path="/chat" element={<ChatHomeProbe />} />
       </Routes>
     </MemoryRouter>,
+    { container },
   );
 }
 
@@ -204,6 +205,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  rs.restoreAllMocks();
   rs.clearAllMocks();
 });
 
@@ -226,6 +228,39 @@ describe("SessionsPage missing sessions", () => {
     expect((await screen.findByTestId("chat-home")).textContent).toBe(
       "/chat?hideSidebar=1 REPLACE",
     );
+  });
+
+  it.each([
+    "",
+    "?hideSidebar=1",
+  ])("asks the parent to recover an embedded session%s", async (search) => {
+    const frame = document.createElement("iframe");
+    frame.src = `/full/apps/sessions/missing${search}`;
+    document.body.appendChild(frame);
+    frame.contentDocument!.write("<!doctype html><html><body></body></html>");
+    const parentWindow = frame.contentWindow!.parent;
+    const postMessage = rs.spyOn(parentWindow, "postMessage").mockImplementation(() => {});
+    rs.stubGlobal("window", frame.contentWindow!);
+    rs.mocked(getRomeSession).mockResolvedValue(null);
+
+    try {
+      const view = renderDetail(
+        `/full/apps/sessions/missing${search}`,
+        frame.contentDocument!.body,
+      );
+
+      await waitFor(() =>
+        expect(postMessage).toHaveBeenCalledWith(
+          { type: "rome:host-navigate", detail: { path: `/chat${search}` } },
+          window.location.origin,
+        ),
+      );
+      expect(view.queryByTestId("chat-home")).toBeNull();
+    } finally {
+      cleanup();
+      rs.unstubAllGlobals();
+      frame.remove();
+    }
   });
 
   it("keeps temporary server errors on the session page", async () => {

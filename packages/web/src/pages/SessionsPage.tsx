@@ -1372,7 +1372,16 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
         if (!sessionResult || !messageResult) {
-          navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+          const path = hideSidebar ? "/chat?hideSidebar=1" : "/chat";
+          if (fullMode && window.parent !== window) {
+            // Workspace tiles must navigate the host, or the chat shell nests inside the iframe.
+            window.parent.postMessage(
+              { type: "rome:host-navigate", detail: { path } },
+              window.location.origin,
+            );
+            return;
+          }
+          navigate(path, { replace: true });
           return;
         }
         setSession(sessionResult);
@@ -1387,7 +1396,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, navigate, hideSidebar]);
+  }, [sessionId, navigate, hideSidebar, fullMode]);
 
   useEffect(() => {
     if (!session) {
