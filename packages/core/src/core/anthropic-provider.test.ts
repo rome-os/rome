@@ -665,6 +665,15 @@ describe("AnthropicProvider", () => {
     expect(provider.builtinTools.has("TodoWrite")).toBe(true);
   });
 
+  it("limits MCP servers to the ones Rome passes", async () => {
+    const provider = new AnthropicProvider();
+    const session = await provider.openSession(buildParams());
+
+    expect(queryMock.mock.calls[0]![0].options.strictMcpConfig).toBe(true);
+
+    await session.close();
+  });
+
   it("uses SDK outputFormat and publishes only the native structured terminal", async () => {
     const schema = {
       type: "object",

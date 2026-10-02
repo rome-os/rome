@@ -587,6 +587,9 @@ export class AnthropicProvider implements ModelProvider {
         maxTurns,
         tools: params.builtinTools ?? [],
         mcpServers,
+        // Only the servers above. Without this, a claude.ai subscription login
+        // also loads that account's claude.ai connectors (Gmail, Drive, ...).
+        strictMcpConfig: true,
         debug: true,
         // Surface raw API stream events so the events loop below can yield
         // `text_delta` events while a text block is still being generated.
