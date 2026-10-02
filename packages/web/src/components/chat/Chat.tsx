@@ -887,6 +887,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     [loadMessages],
   );
 
+  // Call only after confirming this turn still owns the session's live entry.
+  const settleLostTurn = useCallback(
+    (sessionId: string, turnId: string, finished: boolean) => {
+      recoveringSessionIdsRef.current.delete(sessionId);
+      endSessionStream(sessionId, turnId);
+      if (finished) return;
+      if (sessionId !== floorSessionIdRef.current) {
+        queueOffFloorReconciliation(sessionId, turnId);
+      } else {
+        void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      }
+    },
+    [endSessionStream, loadMessages, queueOffFloorReconciliation],
+  );
+
   // Load messages when the main session changes (also covers initial mount).
   useEffect(() => {
     if (mainSessionId) {
@@ -1181,14 +1196,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       ) {
         continue;
       }
-      recoveringSessionIdsRef.current.delete(recoveringSessionId);
       setRecoveryNotice((current) => (current?.sessionId === recoveringSessionId ? null : current));
       setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
       const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
-      if (turnId) {
-        endSessionStream(recoveringSessionId, turnId);
-        queueOffFloorReconciliation(recoveringSessionId, turnId);
-      }
+      if (turnId) settleLostTurn(recoveringSessionId, turnId, false);
+      else recoveringSessionIdsRef.current.delete(recoveringSessionId);
     }
 
     // Reattach to whichever session holds the floor — during a handoff that's
@@ -1435,19 +1447,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               reattachSessionId !== floorSessionIdRef.current ||
               (streamMissing && !wasRecovering && !streamOpened)
             ) {
-              recoveringSessionIdsRef.current.delete(reattachSessionId);
-              endSessionStream(reattachSessionId, attachedTurnId);
+              settleLostTurn(reattachSessionId, attachedTurnId, finished);
               noteRecoverySuccess();
-              if (!finished) {
-                if (reattachSessionId !== floorSessionIdRef.current) {
-                  queueOffFloorReconciliation(reattachSessionId, attachedTurnId);
-                } else {
-                  void loadMessages(reattachSessionId, {
-                    force: true,
-                    dropLocalOptimistic: true,
-                  });
-                }
-              }
             } else {
               // Cleanup aborts the reader too. The next effect must reattach
               // rather than skip this retained entry forever.
@@ -1483,7 +1484,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     startSessionStream,
     endSessionStream,
     loadMessages,
-    queueOffFloorReconciliation,
+    settleLostTurn,
     createTurnStreamController,
     releaseTurnStreamController,
     t,
@@ -1645,20 +1646,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 sendingSessionId === floorSessionIdRef.current &&
                 releasedTurnIdsRef.current.get(sendingSessionId) !== pendingTurnId;
               if (canRecover) recoveringSessionIdsRef.current.add(sendingSessionId);
-              else recoveringSessionIdsRef.current.delete(sendingSessionId);
-              if (!canRecover) {
-                endSessionStream(sendingSessionId, pendingTurnId);
-                if (!finished) {
-                  if (sendingSessionId !== floorSessionIdRef.current) {
-                    queueOffFloorReconciliation(sendingSessionId, pendingTurnId);
-                  } else {
-                    void loadMessages(sendingSessionId, {
-                      force: true,
-                      dropLocalOptimistic: true,
-                    });
-                  }
-                }
-              }
+              else settleLostTurn(sendingSessionId, pendingTurnId, finished);
             }
             setStreamReconnectRevision((revision) => revision + 1);
           }
@@ -1668,15 +1656,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [
       consumeStream,
-      endSessionStream,
       startSessionStream,
       streamingSessionsRef,
       t,
       scrollToBottom,
       createTurnStreamController,
       releaseTurnStreamController,
-      loadMessages,
-      queueOffFloorReconciliation,
+      settleLostTurn,
     ],
   );
 
