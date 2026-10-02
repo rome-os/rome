@@ -45,7 +45,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 
 **Contracts:**
 
-- The user inputs, assistant output, and trace evidence produced by the same turn count as one turn, not several. A turn can consume more than one user input.
+- Usage reporting counts the user inputs, assistant output, and trace evidence of one turn once, not once per input. A turn can consume more than one user input.
 - Failed and interrupted turns still count as turns.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
@@ -72,14 +72,14 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 **Contracts:**
 
 - A turn's stream opens with its start event and closes with its end event.
-- A turn's stream carries at most one terminal event, the result or error, and it comes before the end event. A turn the user stops can end with no terminal event, and its end event reports the turn as interrupted.
+- A turn's stream normally carries one terminal event, the result or error, before its end event. A turn can end with no terminal event, for example when the user stops it, and the end event then reports how it ended.
 - The durable trace keeps every event of a turn except delta events and input-status events.
 - Delta events never open, close, or reorder a turn.
 
 **Not to be confused with:**
 
 - **[Message](messaging.md#message)** — a message is a conversation entry that a person or an agent sends. An event is an item of one turn's stream.
-- **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which reach them as subagent start and result events. Results, errors, plan updates, and subagent reports are events that are not blocks.
+- **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which normally reach them as subagent start and result events. A subagent call with no linked execution reaches them as a plain tool use and tool result. Results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
 - **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
 - **Segment** — a display group of a turn's trace events. It groups events and is not one itself.
@@ -91,8 +91,8 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 **Contracts:**
 
 - A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. For a subagent call, the subagent start and result events that stand in for those two blocks carry the same tool-use id.
-- A text or thinking block is identified by its block id when the provider gives it one. A block the provider gives no id has none. Rome never borrows another block's id for it.
-- A block has one identity, unique within its turn: a block id or a tool-use id, never both.
+- A text or thinking block is identified by its block id when the provider adapter can derive one from the provider's own identifiers. The id is opaque, and a block for which the adapter cannot derive one has none. Rome never borrows another block's id for it.
+- A block has at most one identity, unique within its turn: a block id or a tool-use id, never both.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
 **Not to be confused with:**
@@ -103,12 +103,13 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 ## Delta
 
-A delta is an increment of a [block](#block) that is still being produced: a few tokens of text or thinking, a piece of a tool's input, or the latest output of a running command.
+A delta is an increment of a [block](#block) that is still being produced: a few tokens of text or thinking, a piece of a tool's input, or a chunk of a running command's output.
 
 **Contracts:**
 
 - A delta is transient. The durable trace, persistence, and accounting never keep it.
-- A delta carries the identity of its block whenever the block has one: the block id of a text or thinking block, or the tool-use id of a tool use and its result. A consumer matches a delta to its block by that identity, not by event order.
+- A delta carries the identity of its block whenever the block has one: the block id of a text or thinking block, or the tool-use id of a tool use and its result. A consumer can match a delta to its block by that identity, without relying on event order.
+- A text delta whose block has no id belongs to the text block in progress, which a consumer finds by stream order.
 - The completed block normally follows its deltas. A turn interrupted or failed mid-block can end without it.
 
 **Not to be confused with:**
