@@ -197,6 +197,46 @@ afterEach(() => {
   MockEventSource.instances = [];
 });
 
+describe("Chat missing-session detection", () => {
+  it("reports a confirmed missing session", async () => {
+    rs.mocked(listSessionMessages).mockResolvedValueOnce(null);
+    const onSessionNotFound = rs.fn();
+    renderChat(<Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />);
+
+    await waitFor(() => expect(onSessionNotFound).toHaveBeenCalledWith("missing"));
+  });
+
+  it("does not report a temporary fetch failure as a missing session", async () => {
+    rs.mocked(listSessionMessages).mockRejectedValueOnce(new Error("Service unavailable"));
+    const onSessionNotFound = rs.fn();
+    await act(async () => {
+      renderChat(<Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />);
+    });
+
+    expect(listSessionMessages).toHaveBeenCalledWith("session-1");
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late missing-session response after leaving the chat", async () => {
+    let resolveMessages!: (value: null) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMessages = resolve;
+        }),
+    );
+    const onSessionNotFound = rs.fn();
+    const { unmount } = renderChat(
+      <Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />,
+    );
+    unmount();
+
+    await act(async () => resolveMessages(null));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+});
+
 describe("Chat agent identity", () => {
   it("binds generic canvas consumers to the chat canvas", () => {
     const { container } = renderChat(<Chat sessionId="session-1" />);

@@ -2,20 +2,40 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
+import type { ChatProps } from "./Chat";
 
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
 
 rs.mock("./Chat", () => ({
-  Chat: ({ mainAgentDisplayName }: { mainAgentDisplayName?: string }) => (
-    <div data-testid="session-chat">{mainAgentDisplayName}</div>
+  Chat: ({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) => (
+    <>
+      <div data-testid="session-chat">{mainAgentDisplayName}</div>
+      <button type="button" onClick={() => onSessionNotFound?.(sessionId)}>
+        Missing session
+      </button>
+      <button type="button" onClick={() => onSessionNotFound?.("missing-child")}>
+        Missing child
+      </button>
+    </>
   ),
 }));
+
+function LocationProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="chat-location">
+      {location.pathname}
+      {location.search} {navigationType}
+    </output>
+  );
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -68,6 +88,7 @@ function renderChatComponent(
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
   },
+  initialEntry = "/chat",
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -114,9 +135,10 @@ function renderChatComponent(
   }) as typeof fetch);
 
   const result = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
         <ChatComponent onSessionCreated={() => {}} {...props} />
+        <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -165,6 +187,44 @@ describe("ChatComponent agent identity", () => {
     renderChatComponent({ sessionId: "session-1" });
 
     await waitFor(() => expect(screen.getByTestId("session-chat").textContent).toBe("Atlas"));
+  });
+});
+
+describe("ChatComponent missing sessions", () => {
+  it.each(["", "?hideSidebar=1"])("replaces a missing chat URL with home%s", (search) => {
+    renderChatComponent({ sessionId: "session-1" }, undefined, `/chat/session-1${search}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
+  });
+
+  it("keeps the parent chat open when a handoff child is missing", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "session-1", onSessionNotFound },
+      undefined,
+      "/chat/session-1",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing child" }));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/session-1 POP");
+  });
+
+  it("lets a pinned chat remove its card without leaving the current page", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "pinned-session", onSessionNotFound },
+      undefined,
+      "/chat/main",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(onSessionNotFound).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/main POP");
   });
 });
 
