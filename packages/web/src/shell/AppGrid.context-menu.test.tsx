@@ -15,6 +15,7 @@ const apps = [
     hasFrontend: true,
     href: "/apps/recipe-box",
     iconUrl: null,
+    projectPath: "recipe-box" as string | null,
   },
 ];
 
@@ -101,6 +102,7 @@ afterEach(() => {
   rs.unstubAllGlobals();
   localStorage.clear();
   delete window.rome;
+  apps[0].projectPath = "recipe-box";
 });
 
 describe.each([
@@ -162,7 +164,41 @@ it("keeps a plain Open in the Mac app, where a new tab lands in a browser with n
   expect(screen.queryByRole("menuitem", { name: "Open in new tab" })).toBeNull();
 });
 
-it("opens a pinned app beside a new chat from another page", async () => {
+it("opens a pinned app beside a new chat in its source folder from another page", async () => {
+  const user = userEvent.setup();
+  renderSidebar(false, "/projects");
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+  expect(screen.getByTestId("location").textContent).toBe(
+    JSON.stringify({
+      pathname: "/chat",
+      search: "",
+      state: { widgets: [{ type: "app", appId: "recipe-box" }], projectPath: "recipe-box" },
+    }),
+  );
+});
+
+it("starts an unsent new chat in the app's source folder", async () => {
+  const user = userEvent.setup();
+  renderSidebar(false, "/chat");
+
+  fireEvent.contextMenu(await findPinnedAppLink());
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+  expect(screen.getByTestId("location").textContent).toBe(
+    JSON.stringify({
+      pathname: "/chat",
+      search: "",
+      state: { widgets: [{ type: "app", appId: "recipe-box" }], projectPath: "recipe-box" },
+    }),
+  );
+});
+
+it("leaves the folder to the chat for an app without a source folder", async () => {
+  apps[0].projectPath = null;
+  localStorage.setItem("rome-sidebar-apps", JSON.stringify(apps));
   const user = userEvent.setup();
   renderSidebar(false, "/projects");
 
@@ -178,7 +214,7 @@ it("opens a pinned app beside a new chat from another page", async () => {
   );
 });
 
-it("keeps the active chat when chatting with a pinned app", async () => {
+it("keeps the active chat and its folder when chatting with a pinned app", async () => {
   const user = userEvent.setup();
   renderSidebar(false, "/chat/session-1?hideSidebar=1");
 

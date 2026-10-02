@@ -139,6 +139,7 @@ interface CachedApp {
   status: string;
   origin?: AppOrigin;
   installedAt?: string | null;
+  projectPath?: string | null;
 }
 
 function parsePins(raw: unknown): PinnedEntry[] | null {
@@ -198,6 +199,7 @@ function writeLocalApps(apps: InstalledAppCard[]): void {
       status: a.status,
       origin: a.origin,
       installedAt: a.installedAt ?? null,
+      projectPath: a.projectPath,
     }));
     localStorage.setItem(APPS_CACHE_KEY, JSON.stringify(cached));
   } catch {}
@@ -307,13 +309,19 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   );
 
   const openAppInSplitView = useCallback(
-    (appId: string) => {
+    (app: InstalledAppCard | CachedApp) => {
       const currentChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
       const destination = currentChat
         ? `${location.pathname}${location.search}${location.hash}`
         : "/chat";
+      // A new chat starts in the app's source folder, as "Start chat here"
+      // does. A conversation already under way keeps its folder.
+      const projectPath = location.pathname.startsWith("/chat/") ? null : app.projectPath;
       navigate(destination, {
-        state: { widgets: [{ type: "app", appId }] },
+        state: {
+          widgets: [{ type: "app", appId: app.id }],
+          ...(projectPath ? { projectPath } : {}),
+        },
       });
     },
     [location.hash, location.pathname, location.search, navigate],
@@ -386,7 +394,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
           {renderOpenMenuItem(app.href, onSelect)}
           <ContextMenuItem
             onSelect={() => {
-              openAppInSplitView(app.id);
+              openAppInSplitView(app);
               onSelect?.();
             }}
           >
