@@ -169,7 +169,7 @@ describe("Markdown fenced-block chrome", () => {
     // the kit paints every control at 44px, each button takes that floor as its
     // own box. It is not scoped to `.rome-markdown`, so a fullscreen diagram's
     // zoom stack, which is portaled out of it, gets the floor too.
-    const touch = media("width < 48rem");
+    const touch = media("width < 48rem), (any-pointer: coarse");
     const buttons = [...touch.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) =>
       selector.includes("button"),
     );

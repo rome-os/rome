@@ -389,7 +389,7 @@ function DashboardBody({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search chats…"
-                className="min-w-0 flex-1 border-0 bg-transparent font-[inherit] text-aux text-foreground outline-none placeholder:text-muted-foreground"
+                className="min-w-0 flex-1 border-0 bg-transparent font-[inherit] text-aux touch:text-ui text-foreground outline-none placeholder:text-muted-foreground"
               />
               {query && (
                 <button

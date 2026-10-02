@@ -13,6 +13,7 @@ import {
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
@@ -259,7 +260,7 @@ function Collapsible({ label, children }: { label: string; children: React.React
     <div className="mt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground max-md:min-h-11"
+        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground touch:min-h-11"
       >
         <span
           className={`inline-block transition-transform duration-200 ${open ? "rotate-90" : ""}`}
@@ -867,7 +868,7 @@ export default function ActivityPage() {
         {stats.pendingApprovals > 0 && statusFilter === "all" && (
           <button
             onClick={() => setStatusFilter("pending")}
-            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left max-md:min-h-11 transition-colors hover:bg-warning-bg/70"
+            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left touch:min-h-11 transition-colors hover:bg-warning-bg/70"
           >
             <div className="flex items-center gap-2">
               <span
@@ -893,25 +894,12 @@ export default function ActivityPage() {
           </button>
         )}
 
-        {/* Filter pills */}
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
-          {FILTER_VALUES.map((value) => {
-            const active = statusFilter === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
-                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors max-md:min-h-11 max-md:px-4 ${
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
-                }`}
-              >
-                {t(`page.filters.${value}`)}
-              </button>
-            );
-          })}
-        </div>
+        <FilterChipGroup
+          aria-label={t("page.filterStatus")}
+          options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+        />
 
         <ApprovalHistoryButton />
 

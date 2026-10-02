@@ -238,7 +238,7 @@ function DatePickerInput({
           <ChevronDown className="h-4 w-4 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+      <PopoverContent className="w-auto overflow-hidden p-0" align="start" collisionPadding={4}>
         <Calendar
           mode="single"
           selected={date}
@@ -1103,7 +1103,7 @@ function RoutineCard({
       <Link
         to={`/routines/${routine.id}`}
         aria-label={accessibleName}
-        className="group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11"
+        className="group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch:min-h-11"
       >
         <span
           className={`h-2 w-2 flex-none rounded-full ${

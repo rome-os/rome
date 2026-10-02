@@ -92,7 +92,14 @@ export function PageHeading({ className, ...props }: ComponentProps<"div">) {
 /** The one `h1` a page carries. */
 export function PageTitle({ className, ...props }: ComponentProps<"h1">) {
   return (
-    <h1 data-slot="page-title" className={cn("text-title text-foreground", className)} {...props} />
+    <h1
+      data-slot="page-title"
+      className={cn(
+        "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -173,8 +180,7 @@ export function PageNavLink({
         data-slot="page-nav-link"
         aria-current={active ? "page" : undefined}
         className={cn(
-          // Below 768px an entry is 44px tall, the touch floor.
-          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors max-md:min-h-11",
+          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors touch:min-h-11",
           // A 2px border on a zero-content pseudo-element, not a sized box, so
           // it authors no off-scale edge length.
           "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",

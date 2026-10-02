@@ -571,7 +571,7 @@
    padding the taller buttons no longer need, and the zoom stack turns into a
    row, which keeps it inside a short diagram's canvas. Fullscreen diagrams
    are portaled outside `.rome-markdown`, so none of this depends on it. */
-@media (width < 48rem) {
+@media (width < 48rem), (any-pointer: coarse) {
   /* The row's own buttons only: each is a child of the row, or of the wrapper
      around a button that opens a format menu. The menu's items sit a level
      deeper, in its `absolute` panel, and keep their left-aligned layout. */

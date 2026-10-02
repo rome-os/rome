@@ -37,15 +37,11 @@ const iconSizeClass = {
 } as const;
 
 const inputVariants = cva(
-  // UI is the field role at every size and breakpoint, the role of the Button
-  // and SelectTrigger on the field's row. The host's viewport meta suppresses
-  // iOS Safari's focus zoom below 16px, so nothing restores Body.
-  //
   // The role stays in the base rather than moving onto each size, because
   // `size` admits `null` and cva emits no variant class for it. A null-size
   // field would otherwise declare no role at all and fall back to the document
   // size.
-  "w-full min-w-0 border border-input bg-transparent text-ui transition-colors enabled:hover:border-border-strong outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-ui file:text-foreground placeholder:text-muted-foreground outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive dark:bg-input/30 dark:disabled:bg-input/80",
+  "w-full min-w-0 border border-input bg-transparent text-ui touch:text-ui transition-colors enabled:hover:border-border-strong outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-ui file:text-foreground placeholder:text-muted-foreground outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive dark:bg-input/30 dark:disabled:bg-input/80",
   {
     variants: {
       // Geometry comes from the --control-* scale, and the names match

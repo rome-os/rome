@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { getThemeDefinitions } from "./theme";
+import { splitPhoneBlock } from "../../../ui/src/test/phone-block.js";
 import type { ThemeDefinition } from "./themes";
 
 const repoRoot = new URL("../../../../", import.meta.url);
@@ -108,22 +109,7 @@ function designFrontmatter(): Frontmatter {
  * reads, and the phone ramp is a table in the prose.
  */
 function cssCustomProperties(): Map<string, string> {
-  const sheet = read("packages/ui/src/styles.css");
-  const phone = sheet.indexOf("@media (width < 48rem) {");
-  let css = sheet;
-  if (phone >= 0) {
-    let depth = 0;
-    for (let index = sheet.indexOf("{", phone); index < sheet.length; index += 1) {
-      if (sheet[index] === "{") depth += 1;
-      if (sheet[index] === "}" && (depth -= 1) === 0) {
-        css = sheet.slice(0, phone) + sheet.slice(index + 1);
-        break;
-      }
-    }
-    // The same contract as the kit's `splitPhoneBlock`: an unterminated block
-    // fails loudly rather than leaving the phone values in.
-    if (css === sheet) throw new Error("Unterminated phone block in styles.css");
-  }
+  const css = splitPhoneBlock(read("packages/ui/src/styles.css")).rest;
   const out = new Map<string, string>();
   for (const m of css.matchAll(/(--[a-z0-9-]+):\s*([^;}]+);/gi)) {
     out.set(m[1], m[2].replace(/\s+/g, " ").trim());

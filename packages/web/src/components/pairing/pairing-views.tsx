@@ -403,7 +403,7 @@ export function PairingRequestsSection({
             {
               className: cn(
                 activityLink.props.className,
-                "max-md:inline-flex max-md:min-h-11 max-md:items-center",
+                "touch:inline-flex touch:min-h-11 touch:items-center",
               ),
             },
             t("pairing.viewActivity"),

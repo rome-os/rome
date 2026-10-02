@@ -58,6 +58,12 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@custom-variant touch {
+  @media (width < 48rem), (any-pointer: coarse) {
+    @slot;
+  }
+}
+
 /* Radix sets data-state / data-orientation; shadcn-derived primitives use
    these as short Tailwind variants. The mapping is centralized here so any
    newly-dropped shadcn piece works in every consumer without per-file
@@ -311,8 +317,9 @@
 }
 
 /* ─────────────────────────────── PHONE ─────────────────────────────────────
-   Below 768px (Tailwind's `md`, where the dashboard's sidebar becomes a
-   slide-over) the kit moves size and type together. Every control the scale
+   Narrow viewports and devices with a coarse pointer share comfortable
+   control geometry and typography. Layout breakpoints remain width-based.
+   Every control the scale
    sizes is painted at 44px, the touch floor, rather than reaching it through a
    hidden hit area; text rises to match, so a 44px control does not hold
    desktop-sized text. The roles keep their names and their 4px line grid:
@@ -320,17 +327,17 @@
      ui        17/24     controls, rows, fields
      composer  17/24     the chat composer
      section   17/24     600
-     title     28/36     700, a large page title
      aux       15/20     metadata
      badge     15/20     500
 
-   Display keeps its desktop value. Every row floor follows the
+   Display and Title keep their desktop values. Page headings own their
+   narrow-viewport title treatment. Every row floor follows the
    control step, so `--row-h-*` rises to 52px with it.
 
    Unlayered and after the roles' `@theme`, so it outranks both the theme layer
    and the constant block above. `:host` carries it into app shadow roots,
    which on a phone are phone-sized too. */
-@media (width < 48rem) {
+@media (width < 48rem), (any-pointer: coarse) {
   :root,
   :host {
     --text-ui: var(--rome-font-size-17);
@@ -342,10 +349,6 @@
     --text-section: var(--rome-font-size-17);
     --text-section--line-height: var(--rome-line-height-141);
     --text-section--font-weight: 600;
-
-    --text-title: var(--rome-font-size-28);
-    --text-title--line-height: var(--rome-line-height-129);
-    --text-title--font-weight: 700;
 
     --text-aux: var(--rome-font-size-15);
     --text-aux--line-height: var(--rome-line-height-133);
@@ -369,7 +372,7 @@
    than `:where()`, to match the specificity of the preflight's
    `font: inherit` on the same elements, which this comes after. */
 @layer base {
-  @media (width < 48rem) {
+  @media (width < 48rem), (any-pointer: coarse) {
     :is(input, textarea, select) {
       font-size: max(var(--rome-font-size-16), var(--text-ui));
     }

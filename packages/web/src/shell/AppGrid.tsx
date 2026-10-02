@@ -631,7 +631,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         <button
           type="button"
           aria-label={t("sidebar.edit")}
-          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 max-md:flex max-md:size-11 max-md:items-center max-md:justify-center"
+          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 touch:flex touch:size-11 touch:items-center touch:justify-center"
         >
           <Ellipsis className="h-4 w-4" aria-hidden />
         </button>

@@ -55,7 +55,6 @@ describe("the phone scale", () => {
     ["ui", 17, 24],
     ["composer", 17, 24],
     ["section", 17, 24],
-    ["title", 28, 36],
     ["aux", 15, 20],
     ["badge", 15, 20],
   ])("sets %s to %spx on a %spx line box", (role, size, line) => {
@@ -65,7 +64,7 @@ describe("the phone scale", () => {
   });
 
   it("keeps every phone line box on the 4px grid, above the 1.2 descender floor", () => {
-    for (const role of ["ui", "composer", "section", "title", "aux", "badge"]) {
+    for (const role of ["ui", "composer", "section", "aux", "badge"]) {
       const size = step(`--text-${role}`);
       const ratio = step(`--text-${role}--line-height`);
       expect(Math.round(size * ratio * 1000) % 4000, role).toBe(0);
@@ -73,8 +72,9 @@ describe("the phone scale", () => {
     }
   });
 
-  it("weights the large title and the section heading", () => {
-    expect(tokens.get("--text-title--font-weight")).toBe("700");
+  it("keeps the shared title role unchanged and weights section headings", () => {
+    expect(tokens.has("--text-title")).toBe(false);
+    expect(tokens.has("--text-title--font-weight")).toBe(false);
     expect(tokens.get("--text-section--font-weight")).toBe("600");
   });
 
@@ -85,7 +85,7 @@ describe("the phone scale", () => {
     const floor = sheet.indexOf(":is(input, textarea, select)");
     const before = sheet.slice(0, floor);
     expect(before.slice(before.lastIndexOf("@layer base"))).toMatch(
-      /^@layer base\s*\{\s*@media \(width < 48rem\)\s*\{\s*$/,
+      /^@layer base\s*\{\s*@media \(width < 48rem\), \(any-pointer: coarse\)\s*\{\s*$/,
     );
     expect(sheet.slice(floor)).toMatch(
       /^:is\(input, textarea, select\)\s*\{\s*font-size: max\(var\(--rome-font-size-16\), var\(--text-ui\)\);/,
@@ -94,7 +94,7 @@ describe("the phone scale", () => {
   });
 
   it("is not inside a cascade layer, so it outranks the roles' theme layer", () => {
-    const before = sheet.slice(0, sheet.indexOf(PHONE_QUERY));
+    const before = sheet.slice(0, sheet.indexOf(`${PHONE_QUERY} {\n  :root,`));
     const opened = (before.match(/@layer[^{;]*\{/g) ?? []).length;
     // Every layer block opened before the phone block has closed by then.
     let depth = 0;
