@@ -7,6 +7,8 @@ describe("isAnthropicUsageLimitError", () => {
       "Claude usage limit reached. Resets at 3pm.",
       "You've reached your usage limit",
       "You've hit your usage limit",
+      "You've hit your session limit · resets 5pm",
+      "You've hit your weekly limit · resets Oct 6, 9am",
       "usage limit exceeded",
       "Your usage limit has been reached",
     ]) {

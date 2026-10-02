@@ -184,6 +184,8 @@ export async function executeSummon(
     let romeSession: RomeSessionRef | undefined;
     let output: unknown;
     let runError: string | undefined;
+    // The error that ended the latest turn; a later result clears it.
+    let terminalError: string | undefined;
 
     for await (const msg of deps.agentRunner.run({
       agentName,
@@ -210,11 +212,15 @@ export async function executeSummon(
         });
       }
 
-      if (msg.type === "error") runError ??= msg.error;
+      if (msg.type === "error") {
+        runError ??= msg.error;
+        terminalError = msg.error;
+      }
 
       deps.emitAgentMessage?.({ ...msg, agent: agentName });
 
       if (msg.type === "result") {
+        terminalError = undefined;
         result = msg.content;
         if (Object.prototype.hasOwnProperty.call(msg, "structuredOutput")) {
           output = msg.structuredOutput;
@@ -230,6 +236,12 @@ export async function executeSummon(
           ? `Summoned agent "${agentName}" failed to start: ${runError}`
           : `Summoned agent "${agentName}" did not provide a durable Rome session`,
       );
+    }
+
+    if (terminalError !== undefined) {
+      // A run that started but ended on an error (a provider usage or session
+      // limit, a rejected credential) has no reply to return.
+      throw new Error(`Summoned agent "${agentName}" failed: ${terminalError}`);
     }
 
     return {
