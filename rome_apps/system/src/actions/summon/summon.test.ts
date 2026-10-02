@@ -182,6 +182,12 @@ describe("summon", () => {
           userPrompt: "fix bug",
         };
         yield { type: "result" as const, content: "done" };
+        yield {
+          type: "turn_end" as const,
+          turnId: "turn-001",
+          status: "completed" as const,
+          durationMs: 5,
+        };
       },
     } as unknown as AgentRunner;
     const tool = createSummonAction(actionConfig, summonDeps(runner));
@@ -449,5 +455,130 @@ describe("summon", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/Invalid input/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("summon terminal outcomes", () => {
+  const session: AgentMessage = {
+    type: "session_init",
+    sessionId: "session-001",
+    romeSession: { _romeSessionId: "action:exec-1:coder", _type: "action" },
+  };
+  const start: AgentMessage = {
+    type: "turn_start",
+    turnId: "turn-001",
+    sessionId: "session-001",
+    userPrompt: "test",
+  };
+  const end = (status: "completed" | "interrupted" | "error"): AgentMessage => ({
+    type: "turn_end",
+    turnId: "turn-001",
+    status,
+    durationMs: 5,
+  });
+
+  it.each([
+    {
+      name: "provider rejection after session creation",
+      messages: [session, start, { type: "error", error: "Model is unsupported" }, end("error")],
+      error: 'Summoned agent "coder" failed: Model is unsupported',
+    },
+    {
+      name: "error without a turn boundary",
+      messages: [session, { type: "error", error: "Connection failed" }],
+      error: 'Summoned agent "coder" failed: Connection failed',
+    },
+    {
+      name: "error outcome without a detail block",
+      messages: [session, start, end("error")],
+      error: 'Summoned agent "coder" failed: turn ended with an error',
+    },
+    {
+      name: "interruption overrides abort error and partial output",
+      messages: [
+        session,
+        start,
+        { type: "result", content: "partial" },
+        { type: "error", error: "aborted" },
+        end("interrupted"),
+      ],
+      error: 'Summoned agent "coder" was interrupted',
+    },
+    {
+      name: "interruption without an error block",
+      messages: [session, start, end("interrupted")],
+      error: 'Summoned agent "coder" was interrupted',
+    },
+    {
+      name: "session only is not a success",
+      messages: [session],
+      error: 'Summoned agent "coder" ended without a completed result',
+    },
+    {
+      name: "completed boundary without a result",
+      messages: [session, start, end("completed")],
+      error: 'Summoned agent "coder" ended without a completed result',
+    },
+    {
+      name: "started turn must finish even after a result",
+      messages: [session, start, { type: "result", content: "partial" }],
+      error: 'Summoned agent "coder" ended without a completed result',
+    },
+    {
+      name: "result cannot hide an explicit failure",
+      messages: [
+        session,
+        start,
+        { type: "error", error: "Provider failed" },
+        { type: "result", content: "partial" },
+        end("completed"),
+      ],
+      error: 'Summoned agent "coder" failed: Provider failed',
+    },
+  ] satisfies Array<{
+    name: string;
+    messages: AgentMessage[];
+    error: string;
+  }>)("rejects $name", async ({ messages, error }) => {
+    const emitted: unknown[] = [];
+    const tool = createSummonAction(actionConfig, {
+      ...summonDeps(createMockRunner(messages)),
+      emitAgentMessage: (message) => emitted.push(message),
+    });
+    await expect(tool.execute({ agentName: "coder", prompt: "test" })).rejects.toThrow(error);
+    expect(emitted).toEqual(
+      messages
+        .filter((message) => message.type !== "turn_start" && message.type !== "turn_end")
+        .map((message) => ({ ...message, agent: "coder" })),
+    );
+  });
+
+  it("accepts explicit empty structured results without treating them as failure", async () => {
+    const tool = createSummonAction(
+      actionConfig,
+      summonDeps(
+        createMockRunner([
+          session,
+          start,
+          { type: "result", content: "", structuredOutput: { findings: [] } },
+          end("completed"),
+        ]),
+      ),
+    );
+    await expect(tool.execute({ agentName: "coder", prompt: "test" })).resolves.toMatchObject({
+      status: "ok",
+      data: { result: "", output: { findings: [] }, sessionId: "session-001" },
+    });
+  });
+
+  it("keeps result-only runners compatible", async () => {
+    const tool = createSummonAction(
+      actionConfig,
+      summonDeps(createMockRunner([session, { type: "result", content: "done" }])),
+    );
+    await expect(tool.execute({ agentName: "coder", prompt: "test" })).resolves.toMatchObject({
+      status: "ok",
+      data: { result: "done" },
+    });
   });
 });
