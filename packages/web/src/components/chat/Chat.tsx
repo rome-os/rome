@@ -57,6 +57,11 @@ import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
+import {
+  BackgroundTasksComposerSlot,
+  BackgroundTasksHeaderSlot,
+  BackgroundTasksTranscriptSlot,
+} from "@/components/chat/background-tasks-prototype-slot";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useSseEvents } from "@/hooks/use-sse-events";
@@ -1633,6 +1638,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 </span>
               )}
             </div>
+            <BackgroundTasksHeaderSlot />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton
@@ -1742,6 +1748,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 actions={blockActions}
                 feedback
               />
+              <BackgroundTasksTranscriptSlot />
 
               {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
@@ -1786,6 +1793,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                   )}
                 />
                 <div className="pointer-events-auto mx-auto max-w-5xl">
+                  <BackgroundTasksComposerSlot />
                   {shareMode ? (
                     <ShareBar
                       sessionId={mainSessionId}

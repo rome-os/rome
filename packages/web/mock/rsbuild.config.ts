@@ -33,6 +33,10 @@ export default defineConfig({
     rspack: {
       ...baseConfig.tools?.rspack,
       plugins: [
+        // PROTOTYPE ONLY: the webchat background-task UI prototype.
+        new rspack.NormalModuleReplacementPlugin(/background-tasks-prototype-slot$/, (resource) => {
+          resource.request = resolve(mockDir, "prototype-background-tasks/slots.tsx");
+        }),
         new rspack.NormalModuleReplacementPlugin(/^\.\/pages\/AppsIndexPage$/, (resource) => {
           resource.request = resolve(mockDir, "TourAppsPage.tsx");
         }),
