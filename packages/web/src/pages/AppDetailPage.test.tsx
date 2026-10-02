@@ -408,7 +408,7 @@ describe("AppDetailPage manage section", () => {
     const manage = await screen.findByRole("region", { name: "Manage" });
     expect(within(manage).getByRole("switch", { name: "Enabled" })).toBeTruthy();
     expect(within(manage).getByText("Chat with app")).toBeTruthy();
-    expect(within(manage).getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(within(manage).getByRole("button", { name: "Chat with app" })).toBeTruthy();
     expect(within(manage).getByRole("button", { name: "Change" })).toBeTruthy();
     expect(within(manage).getByRole("button", { name: "Publish" })).toBeTruthy();
     expect(within(manage).getByRole("button", { name: "Uninstall" })).toBeTruthy();

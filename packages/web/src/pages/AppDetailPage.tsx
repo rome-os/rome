@@ -171,6 +171,7 @@ export default function AppDetailPage() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  aria-label={t("installed.chatWithApp")}
                   onClick={() => lifecycle.chatWithApp(app)}
                 >
                   {t("detail.open")}
