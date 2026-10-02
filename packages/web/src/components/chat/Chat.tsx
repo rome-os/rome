@@ -377,14 +377,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const offFloorReconcileTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const offFloorReconcileControllersRef = useRef<Map<string, AbortController>>(new Map());
   const offFloorReconcileWakeRef = useRef<Map<string, () => void>>(new Map());
-  const suppressedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
   const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
   const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
-  const stopRetryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
-  const stopRetryActiveTurnIdsRef = useRef<Set<string>>(new Set());
-  const stopRetryConfirmedTurnIdsRef = useRef<Set<string>>(new Set());
+  const stopReconciliationsRef = useRef<
+    Map<string, { timer: ReturnType<typeof setTimeout> | null; confirmedFinished: boolean }>
+  >(new Map());
   const isChatMountedRef = useRef(true);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
@@ -653,10 +652,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     isChatMountedRef.current = true;
     return () => {
       isChatMountedRef.current = false;
-      for (const timer of stopRetryTimersRef.current) clearTimeout(timer);
-      stopRetryTimersRef.current.clear();
-      stopRetryActiveTurnIdsRef.current.clear();
-      stopRetryConfirmedTurnIdsRef.current.clear();
+      for (const { timer } of stopReconciliationsRef.current.values()) {
+        if (timer) clearTimeout(timer);
+      }
+      stopReconciliationsRef.current.clear();
       for (const timer of offFloorReconcileTimersRef.current.values()) clearTimeout(timer);
       offFloorReconcileTimersRef.current.clear();
       offFloorReconcileWakeRef.current.clear();
@@ -1304,10 +1303,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           return;
         }
         if (!turns.length) {
-          const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
           const needsReload =
             pendingMessageReconciliationsRef.current.has(reattachSessionId) ||
-            Boolean(suppressedTurnId) ||
             (wasRecovering && recoveringSessionIdsRef.current.has(reattachSessionId));
           if (needsReload) {
             const reloaded = await reloadWhileObserving();
@@ -1325,7 +1322,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           pendingMessageReconciliationsRef.current.delete(reattachSessionId);
           offFloorReconcileWakeRef.current.delete(reattachSessionId);
-          suppressedTurnIdsRef.current.delete(reattachSessionId);
           releasedTurnIdsRef.current.delete(reattachSessionId);
           if (!wasRecovering) noteRecoverySuccess();
           // The lookup may have started before a foreground send replaced the
@@ -1350,20 +1346,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (releasedTurnIdsRef.current.get(reattachSessionId) !== target.turnId) {
           releasedTurnIdsRef.current.delete(reattachSessionId);
         }
-        const suppressedTurnId = suppressedTurnIdsRef.current.get(reattachSessionId);
         const pendingTurnId = pendingMessageReconciliationsRef.current.get(reattachSessionId);
-        if (target.turnId === suppressedTurnId) return;
         if (
-          suppressedTurnId ||
           (pendingTurnId && target.turnId !== pendingTurnId) ||
           (observedTurnId && target.turnId !== observedTurnId)
         ) {
           // Preserve the prior turn's durable answer before switching to a
           // different active turn. One fetch reconciles all pending markers.
           if (!(await reloadWhileObserving())) return;
-        }
-        if (suppressedTurnId) {
-          suppressedTurnIdsRef.current.delete(reattachSessionId);
         }
         if (pendingTurnId && target.turnId !== pendingTurnId) {
           pendingMessageReconciliationsRef.current.delete(reattachSessionId);
@@ -1436,8 +1426,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
           if (
             (!currentTurnId || currentTurnId === attachedTurnId) &&
-            (suppressedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId ||
-              releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId)
+            releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId
           ) {
             recoveringSessionIdsRef.current.delete(reattachSessionId);
           } else if (!currentTurnId || currentTurnId === attachedTurnId) {
@@ -1563,7 +1552,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       const createResp: CreateTurnResponse = result.data;
-      suppressedTurnIdsRef.current.delete(sendingSessionId);
       acceptedSendRevisionsRef.current.set(
         sendingSessionId,
         (acceptedSendRevisionsRef.current.get(sendingSessionId) ?? 0) + 1,
@@ -1842,32 +1830,39 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       retryDelayMs = RECONNECT_BASE_DELAY_MS,
       continuation = false,
     ): void => {
+      let chain = stopReconciliationsRef.current.get(turnId);
       if (!continuation) {
-        if (stopRetryActiveTurnIdsRef.current.has(turnId)) {
-          if (confirmedFinished) stopRetryConfirmedTurnIdsRef.current.add(turnId);
+        if (chain) {
+          if (confirmedFinished) chain.confirmedFinished = true;
           return;
         }
-        stopRetryActiveTurnIdsRef.current.add(turnId);
-        if (confirmedFinished) stopRetryConfirmedTurnIdsRef.current.add(turnId);
+        chain = { timer: null, confirmedFinished };
+        stopReconciliationsRef.current.set(turnId, chain);
       }
+      if (!chain) return;
+      if (confirmedFinished) chain.confirmedFinished = true;
+      const clearChain = () => {
+        if (stopReconciliationsRef.current.get(turnId) === chain)
+          stopReconciliationsRef.current.delete(turnId);
+      };
       const stillOwnsStream = () =>
         isChatMountedRef.current &&
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
       const timer = setTimeout(async () => {
-        stopRetryTimersRef.current.delete(timer);
+        if (stopReconciliationsRef.current.get(turnId) !== chain) return;
+        chain.timer = null;
         if (!stillOwnsStream()) {
-          stopRetryActiveTurnIdsRef.current.delete(turnId);
-          stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+          clearChain();
           return;
         }
-        if (!confirmedFinished && !stopRetryConfirmedTurnIdsRef.current.has(turnId)) {
+        if (!chain.confirmedFinished) {
           const lookupController = new AbortController();
           const turns = await withRequestTimeout(
             listSessionTurns(sid, lookupController.signal),
             () => lookupController.abort(),
           ).catch(() => null);
-          if (!turns && !stopRetryConfirmedTurnIdsRef.current.has(turnId)) {
+          if (!turns && !chain.confirmedFinished) {
             if (stillOwnsStream()) {
               forceReleaseIfStuck(
                 retryDelayMs,
@@ -1876,22 +1871,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 true,
               );
             } else {
-              stopRetryActiveTurnIdsRef.current.delete(turnId);
-              stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+              clearChain();
             }
             return;
           }
-          if (
-            turns?.some((turn) => turn.turnId === turnId) &&
-            !stopRetryConfirmedTurnIdsRef.current.has(turnId)
-          ) {
-            stopRetryActiveTurnIdsRef.current.delete(turnId);
-            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+          if (turns?.some((turn) => turn.turnId === turnId) && !chain.confirmedFinished) {
+            clearChain();
             return;
           }
           if (!stillOwnsStream()) {
-            stopRetryActiveTurnIdsRef.current.delete(turnId);
-            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+            clearChain();
             return;
           }
         }
@@ -1913,14 +1902,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               true,
             );
           } else {
-            stopRetryActiveTurnIdsRef.current.delete(turnId);
-            stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+            clearChain();
           }
           return;
         }
         if (!stillOwnsStream()) {
-          stopRetryActiveTurnIdsRef.current.delete(turnId);
-          stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+          clearChain();
           return;
         }
         targetController?.abort();
@@ -1931,10 +1918,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         );
         setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
         endSessionStream(sid, turnId);
-        stopRetryActiveTurnIdsRef.current.delete(turnId);
-        stopRetryConfirmedTurnIdsRef.current.delete(turnId);
+        clearChain();
       }, delayMs);
-      stopRetryTimersRef.current.add(timer);
+      chain.timer = timer;
     };
 
     try {
@@ -1955,39 +1941,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       setStreamError(t("stream.errors.stopFallback"));
     }
   }, [streamingSessionsRef, endSessionStream, loadMessages, t]);
-
-  const resetRecoveryView = useCallback(() => {
-    if (!recoveryNotice) return;
-    const { sessionId, turnId } = recoveryNotice;
-    if (streamingSessionsRef.current.get(sessionId)?.turnId !== turnId) return;
-    suppressedTurnIdsRef.current.set(sessionId, turnId);
-    // Reset hides only the local projection. Keep tracking the server turn so
-    // its eventual answer is fetched even if this handoff child loses floor.
-    queueOffFloorReconciliation(sessionId, turnId);
-    turnStreamControllersRef.current.get(turnId)?.abort();
-    recoveringSessionIdsRef.current.delete(sessionId);
-    endSessionStream(sessionId, turnId);
-    setRecoveryNotice(null);
-    setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
-    setStreamReconnectRevision((revision) => revision + 1);
-    const acceptedSendRevision = acceptedSendRevisionsRef.current.get(sessionId) ?? 0;
-    void loadMessages(sessionId, {
-      force: true,
-      dropLocalOptimistic: true,
-      bounded: true,
-      shouldApply: () =>
-        isChatMountedRef.current &&
-        floorSessionIdRef.current === sessionId &&
-        suppressedTurnIdsRef.current.get(sessionId) === turnId &&
-        (acceptedSendRevisionsRef.current.get(sessionId) ?? 0) === acceptedSendRevision,
-    });
-  }, [
-    recoveryNotice,
-    streamingSessionsRef,
-    endSessionStream,
-    loadMessages,
-    queueOffFloorReconciliation,
-  ]);
 
   const retryRecoveryView = useCallback(() => {
     if (!recoveryNotice) return;
@@ -2449,7 +2402,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                           ? {
                               message: t("stream.recoveryUnavailable"),
                               onRetry: retryRecoveryView,
-                              onReset: resetRecoveryView,
                             }
                           : null
                       }

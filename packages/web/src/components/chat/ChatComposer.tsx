@@ -140,7 +140,6 @@ export interface ChatComposerProps {
   recoveryNotice?: {
     message: string;
     onRetry: () => void;
-    onReset: () => void;
   } | null;
   // When a suspendable action has handed off to a sub-agent, the composer shows
   // a banner naming who the guardian is now collaborating with. Turns route to
@@ -985,9 +984,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <span className="min-w-0 flex-1">{recoveryNotice.message}</span>
           <Button type="button" size="sm" variant="outline" onClick={recoveryNotice.onRetry}>
             {t("stream.retryConnection")}
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={recoveryNotice.onReset}>
-            {t("stream.resetView")}
           </Button>
         </div>
       )}

@@ -349,9 +349,8 @@
     }
   },
   "stream": {
-    "recoveryUnavailable": "Connection lost. The reply status cannot be confirmed. Retry, or reset the view and ignore this reply until it ends (this will not stop the server task).",
+    "recoveryUnavailable": "Connection lost. The reply status cannot be confirmed. Reconnecting automatically.",
     "retryConnection": "Retry connection",
-    "resetView": "Reset view",
     "errors": {
       "createChatFallback": "Failed to create chat.",
       "createChatStatus": "Failed to create chat ({{status}}).",
