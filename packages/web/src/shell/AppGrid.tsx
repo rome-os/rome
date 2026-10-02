@@ -15,8 +15,8 @@ import {
   FolderKanban,
   GripVertical,
   Info,
+  MessageCircle,
   MessagesSquare,
-  PanelRightOpen,
   Pencil,
   Pin,
   PinOff,
@@ -390,8 +390,8 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
               onSelect?.();
             }}
           >
-            <PanelRightOpen aria-hidden />
-            {tApps("installed.openSplitTitle")}
+            <MessageCircle aria-hidden />
+            {tApps("installed.chatWithApp")}
           </ContextMenuItem>
           <ContextMenuItem asChild onSelect={onSelect}>
             <Link to={`/app-details/${encodeURIComponent(app.id)}`}>

@@ -107,7 +107,7 @@ describe.each([
   ["expanded sidebar", false],
   ["collapsed rail", true],
 ] as const)("pinned app context menu in the %s", (_name, collapsed) => {
-  it("offers new-tab, split-view, details, and unpin actions", async () => {
+  it("offers new-tab, chat-with-app, details, and unpin actions", async () => {
     renderSidebar(collapsed);
 
     fireEvent.contextMenu(await findPinnedAppLink());
@@ -117,7 +117,7 @@ describe.each([
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Open in split view", "View details", "Unpin from sidebar"]);
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Unpin from sidebar"]);
   });
 });
 
@@ -167,7 +167,7 @@ it("opens a pinned app beside a new chat from another page", async () => {
   renderSidebar(false, "/projects");
 
   fireEvent.contextMenu(await findPinnedAppLink());
-  await user.click(await screen.findByRole("menuitem", { name: "Open in split view" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
   expect(screen.getByTestId("location").textContent).toBe(
     JSON.stringify({
@@ -178,12 +178,12 @@ it("opens a pinned app beside a new chat from another page", async () => {
   );
 });
 
-it("keeps the active chat when opening a pinned app in split view", async () => {
+it("keeps the active chat when chatting with a pinned app", async () => {
   const user = userEvent.setup();
   renderSidebar(false, "/chat/session-1?hideSidebar=1");
 
   fireEvent.contextMenu(await findPinnedAppLink());
-  await user.click(await screen.findByRole("menuitem", { name: "Open in split view" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
   expect(screen.getByTestId("location").textContent).toBe(
     JSON.stringify({

@@ -100,7 +100,7 @@
     "loading": "Loading apps...",
     "openLabelAria": "Open {{name}} in full view",
     "openFullTitle": "Open full view",
-    "openSplitTitle": "Open in split view",
+    "chatWithApp": "Chat with app",
     "openNewTabTitle": "Open in new tab",
     "openButton": "Open",
     "upgradeButton": "Upgrade → v{{version}}",

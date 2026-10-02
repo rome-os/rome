@@ -199,7 +199,7 @@ describe("Recent zone, expanded sidebar", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Open in split view", "View details", "Pin to sidebar"]);
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Pin to sidebar"]);
   });
 
   it("keeps Edit mode's Add list complete and without a New badge", async () => {
@@ -271,7 +271,7 @@ describe("Recent zone, collapsed rail", () => {
       within(contextMenu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Open in split view", "View details", "Pin to sidebar"]);
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Pin to sidebar"]);
 
     // A choice closes the More list too, instead of leaving it over the page.
     await user.click(within(contextMenu).getByRole("menuitem", { name: "View details" }));
