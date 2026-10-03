@@ -3272,15 +3272,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let lastCompletedText:
               | {
                   blockIx: number;
+                  blockId?: string;
                   content: string;
                   turnPhase?: "commentary" | "final";
                 }
               | undefined;
             let finalTextBlockIx: number | undefined;
+            let finalTextBlockId: string | undefined;
+            // Block id of the in-flight text block, from its deltas.
+            let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              // Previews other than text have no webchat consumer yet.
+              // Deltas other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -3288,6 +3292,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // accumulated text.
               if (msg.type === "text_delta") {
                 stream.assistantText += msg.content;
+                if (msg.blockId) inFlightTextBlockId = msg.blockId;
                 emitToStream(
                   stream,
                   "assistant_text",
@@ -3296,8 +3301,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 );
                 continue;
               }
-              // Block boundary: a complete `text` block closes the in-flight
-              // preview. If the deltas didn't cover the block (non-streaming
+              // Block boundary: a complete `text` block ends its in-flight
+              // deltas. If the deltas didn't cover the block (non-streaming
               // provider, or a dropped frame), emit a corrective event with the
               // full text — this is what gives block-level previews on
               // providers that never stream deltas. The next text block gets a
@@ -3329,6 +3334,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         type: "text",
                         content: msg.content,
                         turnPhase: "commentary",
+                        ...(msg.blockId ? { blockId: msg.blockId } : {}),
                         blockIx,
                       },
                     ]);
@@ -3342,22 +3348,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 lastCompletedText = {
                   blockIx,
+                  ...(msg.blockId ? { blockId: msg.blockId } : {}),
                   content: msg.content,
                   turnPhase: msg.turnPhase,
                 };
-                if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
+                if (msg.turnPhase === "final") {
+                  finalTextBlockIx = blockIx;
+                  finalTextBlockId = msg.blockId;
+                }
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                inFlightTextBlockId = undefined;
               }
               if (msg.type === "turn_end" && stream.assistantText) {
                 const blockIx = stream.assistantBlockIx;
+                const blockId = inFlightTextBlockId;
                 const partial = {
                   type: "text" as const,
                   content: stream.assistantText,
                   turnPhase: "final" as const,
+                  ...(blockId ? { blockId } : {}),
                 };
-                lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
+                lastCompletedText = {
+                  blockIx,
+                  ...(blockId ? { blockId } : {}),
+                  content: partial.content,
+                  turnPhase: "final",
+                };
+                inFlightTextBlockId = undefined;
                 finalTextBlockIx = blockIx;
+                finalTextBlockId = blockId;
                 stream.traceEvents.push(partial);
                 emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
@@ -3584,6 +3604,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   : undefined;
               const resultBlockIx =
                 finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
+              // The id of the block whose index the answer takes, when it has one.
+              const resultBlockId =
+                finalTextBlockIx !== undefined
+                  ? finalTextBlockId
+                  : reusableResultBlockIx !== undefined
+                    ? lastCompletedText?.blockId
+                    : undefined;
               await deps.actionEngine.run(
                 "send_message",
                 {
@@ -3595,6 +3622,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       type: "text" as const,
                       content: resultContent,
                       turnPhase: "final" as const,
+                      ...(resultBlockId ? { blockId: resultBlockId } : {}),
                       blockIx: resultBlockIx,
                     },
                   ],

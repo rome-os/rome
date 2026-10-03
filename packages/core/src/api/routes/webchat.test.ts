@@ -1977,6 +1977,108 @@ describe("Webchat API", () => {
       ]);
     });
 
+    it("persists each text block's block id beside its block index", async () => {
+      const { sendMessageRun, sessionId } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text_delta", content: "Let me ", blockId: "b-0" };
+            yield {
+              type: "text",
+              content: "Let me check the weather.",
+              turnPhase: "commentary",
+              blockId: "b-0",
+            };
+            yield { type: "tool_use", id: "tu-1", tool: "some_tool", input: {} };
+            yield { type: "tool_result", toolUseId: "tu-1", tool: "some_tool", output: {} };
+            yield { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "b-1" };
+            yield { type: "result", content: "It's sunny." };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [
+            {
+              type: "text",
+              content: "It's sunny.",
+              turnPhase: "final",
+              blockId: "b-1",
+              blockIx: 1,
+            },
+          ],
+        }),
+        expect.anything(),
+      );
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      const commentary = messages.filter(
+        (m) => m.role === "assistant" && m.content.includes('"commentary"'),
+      );
+      expect(JSON.parse(commentary[0].content)).toEqual([
+        {
+          type: "text",
+          content: "Let me check the weather.",
+          turnPhase: "commentary",
+          blockId: "b-0",
+          blockIx: 0,
+        },
+      ]);
+    });
+
+    it("gives the answer the final block's id when a text block completes after it", async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "b-0" };
+            yield { type: "text", content: "(Source: forecast.)", blockId: "b-1" };
+            yield { type: "result", content: "It's sunny." };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [
+            {
+              type: "text",
+              content: "It's sunny.",
+              turnPhase: "final",
+              blockId: "b-0",
+              blockIx: 0,
+            },
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("keeps the block id of a text block cut off by the end of its turn", async () => {
+      const { sendMessageRun } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text_delta", content: "Partial ", blockId: "b-0" };
+            yield { type: "text_delta", content: "answer", blockId: "b-0" };
+            yield { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 1 };
+          })() as AsyncGenerator<never>,
+      );
+
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({
+          parts: [
+            {
+              type: "text",
+              content: "Partial answer",
+              turnPhase: "final",
+              blockId: "b-0",
+              blockIx: 0,
+            },
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+
     it("emits a corrective block event for providers that never stream deltas", async () => {
       // Codex-shaped turn: whole text blocks only. Each block must still
       // produce an assistant_text event so the live bubble works at block

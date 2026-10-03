@@ -8,7 +8,7 @@ interface TraceEventBase {
   agent?: string;
 }
 
-export interface SessionInitEvent extends TraceEventBase {
+export interface TraceSessionInitEvent extends TraceEventBase {
   type: "session_init";
   sessionId: string;
   systemPrompt?: string;
@@ -16,14 +16,14 @@ export interface SessionInitEvent extends TraceEventBase {
   projectPath?: string;
 }
 
-export interface TurnStartEvent extends TraceEventBase {
+export interface TraceTurnStartEvent extends TraceEventBase {
   type: "turn_start";
   turnId: string;
   sessionId: string;
   userPrompt: string;
 }
 
-export interface TurnEndEvent extends TraceEventBase {
+export interface TraceTurnEndEvent extends TraceEventBase {
   type: "turn_end";
   turnId: string;
   status: "completed" | "interrupted" | "error";
@@ -103,9 +103,9 @@ export interface StructuredOutputEvent extends TraceEventBase {
 }
 
 export type TraceEventDto =
-  | SessionInitEvent
-  | TurnStartEvent
-  | TurnEndEvent
+  | TraceSessionInitEvent
+  | TraceTurnStartEvent
+  | TraceTurnEndEvent
   | TextBlock
   | ThinkingBlock
   | ToolUseBlock
