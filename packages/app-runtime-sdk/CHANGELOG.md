@@ -1,5 +1,31 @@
 # @rome-os/app-runtime
 
+## [0.7.0](https://github.com/rome-os/rome/compare/app-runtime-v0.6.7...app-runtime-v0.7.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **app-runtime:** `TalkRouter`, `Talk`, `TalkFeatureMap`, `TalkFeatureName`, `TalkHistory`, `TalkDirectory`, `InboundMessage`, `Attachment.data`, `WHATSAPP_UNKNOWN_SENDER` and `ChannelMessageHookDeps.talkRouter` are removed from `@rome-os/app-runtime`, and app actions no longer receive `deps.talkRouter`. Through the 0.7 release, an action or a channel-message hook that reads `deps.talkRouter` gets an error naming its replacement. Migrate an action to `deps.channelsService` (`ChannelsService`). `talkRouter.list()` becomes `channelsService.list()`, which names each channel with its `connectionIds`. `talkRouter.send(connectionId, conversationId, message)` becomes `channelsService.send(channel, conversationId, message, { connectionId })`, and the `connectionId` is needed only when several Connections back the channel. `talkRouter.feature(id, "history").query(input)` becomes `channelsService.query(channel, { conversationId, since, limit })`, newest first. A hook drops `deps.talkRouter`, hears through `channel.inbound.subscribe` and answers through `channel.send`. `InboundMessage` becomes `ChannelMessage`, which adds the required `channel` and `direction` fields. A WhatsApp group line with no recorded sender carries `senderId: ""` instead of `"whatsapp:unknown"`, and the People API's `sender.id` for such a line is `null` instead of `"whatsapp:unknown"`.
+* **app-runtime:** `ChannelMessageHook.registerConnection` is removed, and the host no longer calls a channel-message hook on each Talk unlock. Migrate a hook by subscribing in `register()` through `deps.channels` (typed `ChannelMessageHookDeps`): for each channel whose `inbound` is not null, call `channel.inbound.subscribe(handler)`, where each event carries its conversation's `ConversationRef` in `event.ref`. The host calls `register()` once per activation and again only after `unregister()`, so a hook must handle `register → unregister → register`. A hook that still defines `registerConnection` gets a warning when it loads. The `interactions` Talk feature is removed: `TalkFeatureMap.interactions`, `TalkInteractions`, `ConversationInteraction` and `ConversationPresentation`. No channel implemented it.
+
+### Features
+
+* **app-runtime:** add a name-keyed channels service for app actions and deprecate TalkRouter ([#572](https://github.com/rome-os/rome/issues/572)) ([66ec9b2](https://github.com/rome-os/rome/commit/66ec9b2516d23ca8d163403a3479f6b3889a8758))
+* **app-runtime:** add ChannelMessage and give every message store one query ([#561](https://github.com/rome-os/rome/issues/561)) ([48f0fd0](https://github.com/rome-os/rome/commit/48f0fd0b33d56e42033b02a3def915063455f9a1))
+* **app-runtime:** flag failed tool results the same way on every provider ([#564](https://github.com/rome-os/rome/issues/564)) ([6b8b9b9](https://github.com/rome-os/rome/commit/6b8b9b96742044ec264f4aa3be83d4d513ee4c53))
+* **app-runtime:** hear channels in the channel-message hook ([#543](https://github.com/rome-os/rome/issues/543)) ([eddb311](https://github.com/rome-os/rome/commit/eddb3118366a76e283e3c819662f2229793b537c))
+* **app-runtime:** read history through each channel's messages query ([#568](https://github.com/rome-os/rome/issues/568)) ([a63df8f](https://github.com/rome-os/rome/commit/a63df8f5bfd945a21345cf620a72092076206f26))
+* **app-runtime:** remove registerConnection and the interactions Talk feature ([#556](https://github.com/rome-os/rome/issues/556)) ([836b137](https://github.com/rome-os/rome/commit/836b137aa619dafcfcb3b68d0913c24eff2d6352))
+* **app-runtime:** remove TalkRouter, Talk and InboundMessage from the SDK ([#579](https://github.com/rome-os/rome/issues/579)) ([b8db82e](https://github.com/rome-os/rome/commit/b8db82e2a8f156ccd02237a6b47753016f1e1c07))
+* **app-runtime:** stream reasoning, tool input, and command output with block ids ([#593](https://github.com/rome-os/rome/issues/593)) ([69cce01](https://github.com/rome-os/rome/commit/69cce014648f13c9e05a2a497bb86b14d0941402))
+* **app-runtime:** type the channel-message hook's deps and show typing on the send port ([#555](https://github.com/rome-os/rome/issues/555)) ([ef523c4](https://github.com/rome-os/rome/commit/ef523c4659149e2711744deb04ec42c3be339907))
+* **app-runtime:** unify stop reason, reasoning tokens, and error codes across providers ([#563](https://github.com/rome-os/rome/issues/563)) ([3e8c862](https://github.com/rome-os/rome/commit/3e8c8623ebc404088e1e982d205eb16d60db7f96))
+
+
+### Bug Fixes
+
+* **favors:** reject bare-key displayFields pointers at load time ([#609](https://github.com/rome-os/rome/issues/609)) ([3befd83](https://github.com/rome-os/rome/commit/3befd83ce018e36ec65d8fca5c66a069f984ba48))
+
 ## [0.6.7](https://github.com/rome-os/rome/compare/app-runtime-v0.6.6...app-runtime-v0.6.7) (2026-09-25)
 
 

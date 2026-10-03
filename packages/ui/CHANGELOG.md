@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.4](https://github.com/rome-os/rome/compare/ui-v0.3.3...ui-v0.3.4) (2026-10-03)
+
+
+### Features
+
+* message an agent from Cmd-K ([#502](https://github.com/rome-os/rome/issues/502)) ([9298dc3](https://github.com/rome-os/rome/commit/9298dc39ba17c079c2a26e0159b96e014bd3db14))
+
+
+### Bug Fixes
+
+* **ui:** drop a markdown list's trailing empty items ([#542](https://github.com/rome-os/rome/issues/542)) ([30d3213](https://github.com/rome-os/rome/commit/30d32137cf52ee687c20975e4a170fcfb122b352))
+* **ui:** let markdown tables grow to their full height ([#571](https://github.com/rome-os/rome/issues/571)) ([b7b0dd4](https://github.com/rome-os/rome/commit/b7b0dd47cd99165d4eb93c4049171ef470ba8920))
+* **ui:** repair Mermaid diagram downloads ([#521](https://github.com/rome-os/rome/issues/521)) ([a23a01a](https://github.com/rome-os/rome/commit/a23a01a1dca75604791f766e303b2a736e98a5b6))
+
 ## [0.3.3](https://github.com/rome-os/rome/compare/ui-v0.3.2...ui-v0.3.3) (2026-09-25)
 
 
