@@ -287,7 +287,7 @@ export function ChangedFilesDialog({
                     const { dir, name } = splitPath(file.path);
                     return (
                       <li key={`${file.change}:${file.path}`}>
-                        <div className="group flex items-center gap-1 rounded-8 transition hover:bg-surface-muted focus-within:bg-surface-muted">
+                        <div className="touch-row group flex items-center gap-1 rounded-8 transition hover:bg-surface-muted focus-within:bg-surface-muted">
                           <button
                             type="button"
                             className="flex min-w-0 flex-1 items-center gap-2 rounded-8 px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"

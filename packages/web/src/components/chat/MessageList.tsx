@@ -356,7 +356,7 @@ const RowView = memo(function RowView({
         // the row visible while the feedback draft is open (its popover is
         // portaled, so group-focus-within can't see it) and once a rating is
         // recorded.
-        <div className="-ml-2 mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
+        <div className="-ml-2 mt-1 flex items-center [@media(hover:none)]:-ml-4 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
           {copyText ? <CopyMessageButton text={copyText} /> : null}
           {showFeedback && feedbackTurn?.turnId ? (
             <TurnFeedbackButtons

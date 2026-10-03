@@ -508,7 +508,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition ${
+        className={`touch-row group flex h-8 items-center gap-1 rounded-8 text-ui transition ${
           session.archived ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
@@ -542,13 +542,13 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
           <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
-          className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
+          className={`touch-target relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
             isEditing ? "hidden" : ""
           }`}
         >
           {unread ? (
             <span
-              className="h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0"
+              className="pointer-events-none h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0 [@media(hover:none)]:absolute [@media(hover:none)]:-left-2"
               role="img"
               aria-label={t("recentChats.unread")}
             />
@@ -562,7 +562,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 type="button"
                 aria-label={t("recentChats.chatActions")}
                 title={t("recentChats.chatActions")}
-                className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100"
+                className="touch-show absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <Ellipsis className="h-3 w-3" aria-hidden />
               </button>
@@ -663,7 +663,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     );
     return (
       <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
-        <div className="group/project flex h-8 items-center gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="touch-row group/project flex h-8 items-center gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           <button
             type="button"
             onClick={() => toggleGroup(key)}
@@ -683,20 +683,20 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               }
               aria-label={t("recentChats.newChatInProject")}
               title={t("recentChats.newChatInProject")}
-              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show touch-target shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
               <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
             </button>
           ) : null}
           {projectPath ? (
-            <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
+            <span className="touch-target relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
                     aria-label={t("recentChats.projectActions")}
                     title={t("recentChats.projectActions")}
-                    className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+                    className="touch-show absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
                   >
                     <Ellipsis className="h-3 w-3" aria-hidden />
                   </button>
@@ -722,7 +722,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="touch-row ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>

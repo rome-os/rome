@@ -4,6 +4,7 @@ import { Check, ChevronRight, Copy, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger, PopoverArrow } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -221,7 +222,7 @@ export function PairingCodeSection({
   const { t } = useTranslation("activity");
   return (
     <details className="group">
-      <summary className="flex min-h-[var(--control-h-md)] cursor-pointer list-none items-center gap-2 rounded-4 text-ui text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+      <summary className="touch-row flex min-h-[var(--control-h-md)] cursor-pointer list-none items-center gap-2 rounded-4 text-ui text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-4 shrink-0 group-open:rotate-90" aria-hidden="true" />
         {t("pairing.codeAlternative")}
       </summary>
@@ -336,7 +337,7 @@ export function PairingConfirmationDialog({
 
 export interface PairingRequestsSectionProps {
   state: "loading" | "error" | "empty" | "ready";
-  activityLink: ReactElement<{ children?: ReactNode }>;
+  activityLink: ReactElement<{ children?: ReactNode; className?: string }>;
   onRetry: () => void;
   children?: ReactNode;
 }
@@ -394,7 +395,15 @@ export function PairingRequestsSection({
         children
       )}
       {state !== "empty" && (
-        <div className="text-ui">{cloneElement(activityLink, {}, t("pairing.viewActivity"))}</div>
+        // Standing on its own line, the link is a control rather than a word in
+        // a sentence, so it takes the touch hit area the inline one above does not.
+        <div className="text-ui">
+          {cloneElement(
+            activityLink,
+            { className: cn(activityLink.props.className, "touch-hit") },
+            t("pairing.viewActivity"),
+          )}
+        </div>
       )}
     </section>
   );

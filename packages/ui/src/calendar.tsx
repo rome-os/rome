@@ -175,6 +175,8 @@ function CalendarDayButton({
     if (modifiers.focused) ref.current?.focus();
   }, [modifiers.focused]);
 
+  // A day is a square `Button`, so on touch its box grows to 44px instead of
+  // a hit area spilling onto the next day, and the grid widens to fit.
   return (
     <Button
       ref={ref}

@@ -22,7 +22,14 @@ function Switch({
         // placed by transform rather than by padding on the track: a 1px inset
         // is not a step on the spacing scale, and it is geometry rather than
         // spacing.
-        "peer group/switch relative inline-flex h-[var(--switch-h)] w-[var(--switch-w)] shrink-0 items-center rounded-full transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2",
+        //
+        // The pointer hit area is the `after:` inset, 12px to each side. On
+        // touch `touch-hit` gives the 44px floor instead, reaching 6px to each
+        // side of the default track and 10px of the 24px `sm` one, so the
+        // wider inset is dropped there. At 12px it took taps on the own box of
+        // a control 8px away, such as a routine row's menu. An `sm` switch
+        // still needs 10px clear on each side.
+        "peer group/switch touch-hit relative inline-flex h-[var(--switch-h)] w-[var(--switch-w)] shrink-0 items-center rounded-full transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2 [@media(hover:none)]:after:hidden",
         "[--switch-inset:1px] [--switch-h:calc(var(--switch-thumb)_+_2_*_var(--switch-inset))] [--switch-travel:calc(var(--switch-w)_-_var(--switch-inset)_-_var(--switch-thumb))]",
         "data-[size=default]:[--switch-thumb:1rem] data-[size=default]:[--switch-w:2rem]",
         "data-[size=sm]:[--switch-thumb:0.75rem] data-[size=sm]:[--switch-w:1.5rem]",

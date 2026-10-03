@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { ArrowRight, Check, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUpFromLine,
+  Check,
+  Plus,
+  RotateCcw,
+  Search,
+  Sparkles,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { Toggle } from "@rome-os/ui/toggle";
 import { Calendar } from "@rome-os/ui/calendar";
 import { Button } from "@/components/ui/button";
@@ -212,6 +223,17 @@ export function ControlsSection() {
               </Item>
             ))}
           </Row>
+        </Specimen>
+
+        <Specimen
+          label="IconButton — a packed toolbar"
+          note="Icon actions `gap-1` apart, as a panel's toolbar packs them. On touch each box grows to 44px, so the cluster widens and a tap on one never lands on its neighbour."
+        >
+          <div className="flex items-center gap-1">
+            <IconButton size="sm" label="Download" icon={<ArrowDownToLine />} />
+            <IconButton size="sm" label="Upload" icon={<ArrowUpFromLine />} />
+            <IconButton size="sm" label="Reset" icon={<RotateCcw />} />
+          </div>
         </Specimen>
       </Component>
 

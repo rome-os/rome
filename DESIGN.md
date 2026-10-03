@@ -362,7 +362,7 @@ The guardian shell is a sidebar plus a content column. On desktop (768px and up)
 
 Density is operational but not cramped. Cards carry 16px inner padding, tiles 12px, menu items 4px by 8px. Controls sit on three heights: 28px (`sm`), 32px (`md`, the default), and 44px (`lg`, square icon buttons only, for touch). Badges are 22px. Avatars are 24, 32, and 40px. When a control shares a row with loose text, the row takes the taller of the two, and the air around the text inside a control is never more than the text's own line box.
 
-Touch targets on compact surfaces reach 44 to 48px through padding or a `::after` hit area, not by enlarging the visible control. Hover-only disclosure is never the only path to an action.
+Touch targets on compact surfaces reach 44 to 48px through padding or a pseudo-element hit area, not by enlarging the visible control. Hover-only disclosure is never the only path to an action.
 
 ## Elevation & Depth
 
