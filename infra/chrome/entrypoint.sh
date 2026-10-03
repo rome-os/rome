@@ -5,9 +5,9 @@
 # keep-alives Chrome and socat-forwards CDP to $ROME_CHROME_BIND_ADDRESS:9222
 # (127.0.0.1 — the network namespace is shared with the rome container).
 #
-# Unlike the production docker-entrypoint.sh there is no reuse / port-conflict
-# logic here: the container is always created fresh by compose
-# (`up --force-recreate` in dev-up.sh), so a plain sequential boot suffices.
+# There is no port-conflict logic here: the container is always created fresh
+# by compose (`up --force-recreate` in dev-up.sh), so a plain sequential boot
+# suffices.
 set -euo pipefail
 
 export DISPLAY="${DISPLAY:-:99}"

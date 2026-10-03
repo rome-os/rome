@@ -1,0 +1,32 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+set -euo pipefail
+
+display_num="${DISPLAY#:}"
+screen_size="${ROME_SCREEN_SIZE:-1280x800x24}"
+if [[ ! "$screen_size" =~ ^([0-9]+x[0-9]+)(x([0-9]+))?$ ]]; then
+  echo "Error: ROME_SCREEN_SIZE must use WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH."
+  exit 1
+fi
+geometry="${BASH_REMATCH[1]}"
+depth="${BASH_REMATCH[3]:-24}"
+
+# s6 starts this service only after the previous X server has exited, so a lock
+# or socket left on disk is stale.
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+rm -f "/tmp/.X${display_num}-lock" "/tmp/.X11-unix/X${display_num}"
+
+echo "Starting TigerVNC on ${DISPLAY}, RFB :${ROME_VNC_PORT:-5900} ..."
+# data/check decides readiness, which openbox, noVNC and Chrome wait for.
+exec s6-notifyoncheck -d -w 250 -n 0 \
+  rome-run-as rome Xtigervnc "$DISPLAY" \
+  -geometry "$geometry" \
+  -depth "$depth" \
+  -SecurityTypes None \
+  -localhost yes \
+  -rfbport "${ROME_VNC_PORT:-5900}" \
+  -AlwaysShared \
+  -AcceptCutText \
+  -SendCutText \
+  -ac >>/tmp/xtigervnc.log 2>&1
