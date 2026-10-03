@@ -403,7 +403,7 @@ export function PairingRequestsSection({
             {
               className: cn(
                 activityLink.props.className,
-                "touch:inline-flex touch:min-h-11 touch:items-center",
+                "inline-flex min-h-[var(--control-min-h)] items-center",
               ),
             },
             t("pairing.viewActivity"),

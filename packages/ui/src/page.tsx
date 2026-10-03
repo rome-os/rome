@@ -180,7 +180,7 @@ export function PageNavLink({
         data-slot="page-nav-link"
         aria-current={active ? "page" : undefined}
         className={cn(
-          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors touch:min-h-11",
+          "relative inline-flex items-center whitespace-nowrap px-2 py-1 text-ui transition-colors min-h-[var(--control-min-h)]",
           // A 2px border on a zero-content pseudo-element, not a sized box, so
           // it authors no off-scale edge length.
           "after:absolute after:inset-x-0 after:bottom-[-1px] after:border-b-2 after:border-foreground after:opacity-0 after:transition-opacity",

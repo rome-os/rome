@@ -16,7 +16,7 @@ export interface IconButtonProps
    * 2.5.8 minimum, for an action inside a row rather than beside it.
    *
    * Narrow viewports and coarse-pointer devices paint every step at 44px.
-   * Geometry follows `@rome-os/ui/styles.css`, including the `touch:` floor
+   * Geometry follows `@rome-os/ui/styles.css`, including the selected platform scale
    * on `xs`. Layout breakpoints remain width-based.
    */
   size?: IconButtonSize;
@@ -37,7 +37,7 @@ export interface IconButtonProps
 // the base below holds the 16px the other two take, exactly as `Button` is
 // arranged.
 const sizeClasses: Record<IconButtonSize, string> = {
-  xs: "size-6 touch:size-11 rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3",
+  xs: "size-[var(--control-h-xs)] rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3",
   sm: "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3.5",
   md: "size-[var(--control-h-md)] rounded-[var(--control-r-md)]",
   lg: "size-[var(--control-h-lg)] rounded-[var(--control-r-lg)]",

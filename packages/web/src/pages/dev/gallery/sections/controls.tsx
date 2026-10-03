@@ -1,3 +1,10 @@
+import { UiScaleProvider, type UiScalePreference } from "@rome-os/ui/ui-scale";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { ArrowRight, Check, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
 import { Toggle } from "@rome-os/ui/toggle";
@@ -47,6 +54,7 @@ const DENSITY = [
 ];
 
 export function ControlsSection() {
+  const [scale, setScale] = useState<UiScalePreference>("auto");
   const [pushEnabled, setPushEnabled] = useState(true);
   const [digest, setDigest] = useState(true);
   const [access, setAccess] = useState("private");
@@ -62,6 +70,41 @@ export function ControlsSection() {
       title="Controls"
       description="Primitives and composites that take input. Core controls use the --control-* / --field-* scale, so a button and a field on the same row agree."
     >
+      <Component id="platform-scale" name="Platform scale" source="@rome-os/ui/ui-scale">
+        <Specimen
+          label="Control scale"
+          note="Auto follows the primary pointer. Explicit scales also apply to menus, independent of screen width."
+        >
+          <div className="mb-4">
+            <SegmentedControl
+              aria-label="Preview scale"
+              value={scale}
+              onValueChange={setScale}
+              options={[
+                { value: "auto", label: "Auto" },
+                { value: "medium", label: "Medium" },
+                { value: "large", label: "Large" },
+              ]}
+            />
+          </div>
+          <UiScaleProvider scale={scale}>
+            <div data-scale-preview className="flex flex-wrap items-center gap-3">
+              <Button size="xs">Scale button</Button>
+              <div className="w-64">
+                <Input aria-label="Scale field" placeholder="Shared field sizing" />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button>Scale menu</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem>Scale option</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </UiScaleProvider>
+        </Specimen>
+      </Component>
       <Component id="button" name="Button" source="@rome-os/ui/button">
         <Specimen label="Button — variants" note="One primary action per screen.">
           <Row>

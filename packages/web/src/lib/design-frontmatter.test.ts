@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { getThemeDefinitions } from "./theme";
-import { splitPhoneBlock } from "../../../ui/src/test/phone-block.js";
+import { splitLargeScale } from "../../../ui/src/test/scale-block.js";
 import type { ThemeDefinition } from "./themes";
 
 const repoRoot = new URL("../../../../", import.meta.url);
@@ -105,11 +105,11 @@ function designFrontmatter(): Frontmatter {
 
 /**
  * `--name: value;` declarations from `styles.css`, last one wins, without the
- * phone block: the frontmatter records the values every width from 768px up
- * reads, and the phone ramp is a table in the prose.
+ * large scale: the frontmatter records the medium defaults, and the large
+ * scale is a table in the prose.
  */
 function cssCustomProperties(): Map<string, string> {
-  const css = splitPhoneBlock(read("packages/ui/src/styles.css")).rest;
+  const css = splitLargeScale(read("packages/ui/src/styles.css")).rest;
   const out = new Map<string, string>();
   for (const m of css.matchAll(/(--[a-z0-9-]+):\s*([^;}]+);/gi)) {
     out.set(m[1], m[2].replace(/\s+/g, " ").trim());

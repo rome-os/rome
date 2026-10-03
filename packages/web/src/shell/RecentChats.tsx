@@ -508,7 +508,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition touch:min-h-11 ${
+        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
           session.archived ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
@@ -663,7 +663,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     );
     return (
       <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
-        <div className="group/project flex h-8 items-center touch:min-h-11 gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           <button
             type="button"
             onClick={() => toggleGroup(key)}
@@ -722,7 +722,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux touch:min-h-11 text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>

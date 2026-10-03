@@ -1,3 +1,4 @@
+import { UiScaleProvider } from "@rome-os/ui/ui-scale";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -31,13 +32,15 @@ export function renderApp() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <GuardianTimestampProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </GuardianTimestampProvider>
-        </ThemeProvider>
+        <UiScaleProvider>
+          <ThemeProvider>
+            <GuardianTimestampProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </GuardianTimestampProvider>
+          </ThemeProvider>
+        </UiScaleProvider>
       </QueryClientProvider>
     </StrictMode>,
   );

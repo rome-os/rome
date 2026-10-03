@@ -119,7 +119,7 @@ export function SegmentedControl<T extends string = string>({
                 // the segment's own 1px border. The padding is the track's own,
                 // so no other control's box is under it. An icon-only segment
                 // is 44px wide.
-                "inline-flex h-full items-center justify-center rounded-[var(--control-r-sm)] touch:relative touch:min-w-11 touch:before:absolute touch:before:inset-x-0 touch:before:-inset-y-[5px] border border-transparent text-ui whitespace-nowrap text-foreground/60 transition-colors outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-checked:bg-background aria-checked:text-foreground aria-checked:shadow-1 dark:text-muted-foreground dark:hover:text-foreground dark:aria-checked:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0",
+                "inline-flex h-full items-center justify-center rounded-[var(--control-r-sm)] relative min-w-[var(--segment-min-w)] before:absolute before:inset-x-0 before:-inset-y-[var(--segment-hit-inset)] border border-transparent text-ui whitespace-nowrap text-foreground/60 transition-colors outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-checked:bg-background aria-checked:text-foreground aria-checked:shadow-1 dark:text-muted-foreground dark:hover:text-foreground dark:aria-checked:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0",
                 s.segment,
               )}
             >

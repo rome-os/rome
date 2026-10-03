@@ -169,13 +169,11 @@ describe("Markdown fenced-block chrome", () => {
     // the kit paints every control at 44px, each button takes that floor as its
     // own box. It is not scoped to `.rome-markdown`, so a fullscreen diagram's
     // zoom stack, which is portaled out of it, gets the floor too.
-    const touch = media("width < 48rem), (any-pointer: coarse");
-    const buttons = [...touch.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, selector]) =>
-      selector.includes("button"),
+    const scope = rules().find(({ declarations }) =>
+      declarations.includes("min-width: var(--control-min-h"),
     );
-
-    expect(buttons).toBeDefined();
-    const [, selector, declarations] = buttons!;
+    expect(scope).toBeDefined();
+    const { selector, declarations } = scope!;
     for (const hook of [CODE_ACTIONS, DIAGRAM_ACTIONS, ZOOM_STACK, TABLE_ACTIONS]) {
       expect(selector.replace(/\s+/g, " ")).toContain(hook);
     }
@@ -187,8 +185,8 @@ describe("Markdown fenced-block chrome", () => {
     expect(selector).not.toMatch(/\)\s+button/);
     expect(selector).toMatch(/\)\s*>\s*button/);
     expect(selector).toMatch(/\)\s*>\s*div\s*>\s*button/);
-    expect(declarations).toContain("min-width: var(--rome-size-44, 2.75rem);");
-    expect(declarations).toContain("min-height: var(--rome-size-44, 2.75rem);");
+    expect(declarations).toContain("min-width: var(--control-min-h, 0px);");
+    expect(declarations).toContain("min-height: var(--control-min-h, 0px);");
   });
 
   it("leaves a fullscreen diagram's zoom stack alone", () => {

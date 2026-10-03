@@ -113,7 +113,7 @@ The tokens are the whole scale. Which members *offer* a step is a separate quest
 
 The groups agree at `md` and `lg` and diverge at `sm`, where a start edge takes 10px to keep a field's text off its border and centred content takes 8px. Both set symmetric padding. Neither word names a side.
 
-Two members sit outside the groups. `Button size="xs"` is 24px, below the scale, and neither group carries an `xs` step, so it pads from a spacing step. `TabsTrigger` has no size axis and its list is 32px, between the shared heights — it takes the `sm` centred step, recorded as a divergence in [`ui/component-roles.md`](ui/component-roles.md#known-divergences) rather than pretending to fit. The vertical inset on Textarea, the one control that pads vertically at all, is a spacing step too, with nothing to agree with.
+Two members sit outside the groups. `Button size="xs"` is 24px in medium scale, below the shared scale, and the centered group carries its own `xs` inset. `TabsTrigger` has no size axis and its list is 32px, between the shared heights — it takes the `sm` centred step, recorded as a divergence in [`ui/component-roles.md`](ui/component-roles.md#known-divergences) rather than pretending to fit. The vertical inset on Textarea, the one control that pads vertically at all, is a spacing step too, with nothing to agree with.
 
 Padding is symmetric except for one role-level optical correction: a glyph at the edge of centred content sits `--control-gap` from that edge, the same distance it sits from its label. Start-aligned members keep the full inset on every side.
 
@@ -129,7 +129,7 @@ Controls set an explicit height and pad horizontally only. Height is specified, 
 
 ### Sizes
 
-**The shared size vocabulary is two steps, `sm` and `md`, and each means the same height on every control.** Their heights are 28px and 32px on wide pointer-only surfaces. Below 768px, or when any pointer is coarse, both are 44px. `Button`, `Toggle`, `Input`, `SelectTrigger`, `SegmentedControl`, and `IconButton` all read the `--control-h-*` step of the name they were given. A row that names one size therefore cannot come out ragged. `Button` and `Input` still accept `default`, and `Button` accepts `icon`, as the older spellings of `md` and `icon-md`. Both resolve to the same geometry. Write `md`.
+**The shared size vocabulary is two steps, `sm` and `md`, and each means the same height on every control.** Their heights are 28px and 32px on wide pointer-only surfaces. In the large platform scale, both are 44px. `Button`, `Toggle`, `Input`, `SelectTrigger`, `SegmentedControl`, and `IconButton` all read the `--control-h-*` step of the name they were given. A row that names one size therefore cannot come out ragged. `Button` and `Input` still accept `default`, and `Button` accepts `icon`, as the older spellings of `md` and `icon-md`. Both resolve to the same geometry. Write `md`.
 
 **`lg` (44px) and `xs` (24px) belong to the Button family, not the shared vocabulary.** `Button` and `IconButton` carry them. `Input`, `SelectTrigger`, and `SegmentedControl` do not, on purpose.
 
@@ -137,9 +137,21 @@ They are prominence steps. Every `lg` in the tree is a standalone call to action
 
 **Two ladders offer a square icon button at every step, and the overlap is deliberate.** `IconButton`'s steps and `Button`'s `icon-*` variants are value-identical, with the same height and the same radius. Reach for `IconButton` by default, because its required `label` prop makes an icon-only control accessible by construction rather than by reviewer vigilance. Reach for `Button size="icon-sm"` and friends in two cases. The first is a control needing a `Button` variant the icon primitive has no equivalent for, such as `ghost`'s `aria-expanded` paint or `destructive`. The second is a control sitting in a `ButtonGroup`.
 
-**Text inputs use `text-ui` at every width, like every other control.** A field matches the Button and SelectTrigger beside it, and a combobox matches its options. Narrow viewports and coarse-pointer devices read controls at 17px on a 24px line box. Kit inputs and textareas keep that role even when a caller supplies smaller metadata typography. Native editable fields take the same role. The viewport allows pinch zoom.
+**Text inputs use `text-ui` at every width, like every other control.** A field matches the Button and SelectTrigger beside it, and a combobox matches its options. Large-scale controls read at 17px on a 24px line box. Kit inputs and textareas keep that role even when a caller supplies smaller metadata typography. Native editable fields take the same role. The viewport allows pinch zoom.
 
-**Touch sizing and layout are separate.** The kit's `touch:` variant applies below 768px or when any pointer is coarse. It sizes controls on landscape phones, tablets, and hybrid devices without changing their layout. Width and container queries choose the screen composition. Menu and command options take a 44px minimum height through their own shared components.
+**Platform scale and layout are separate.** `UiScaleProvider` from `@rome-os/ui/ui-scale` selects `medium`, `large`, or `auto` (the default). Auto follows the primary pointer: coarse input selects large, and fine input selects medium. A narrow mouse window therefore keeps medium controls, and a wide touch tablet gets large controls. Width and container queries choose the screen composition.
+
+The two variable sets in `styles.css` own control heights, insets, type roles, menu floors, calendar cells, tabs, switches, and Markdown actions. Components consume those variables without device-specific size overrides. To retune large controls, change that set once. Medium is the standalone CSS default. Consumers opt into automatic selection by mounting the provider. Providers can nest, and the kit carries the nearest scale into its portals. The dashboard mirrors its root scale onto the document for third-party fullscreen content and onto app shadow hosts. An app can mount its own provider to override that inherited scale.
+
+```tsx
+<UiScaleProvider> {/* automatic pointer-based selection */}
+  <Dashboard />
+</UiScaleProvider>
+
+<UiScaleProvider scale="medium"> {/* explicit density for this region */}
+  <EditorToolbar />
+</UiScaleProvider>
+```
 
 **Large phone titles belong to page headings.** Below 768px, `PageTitle` sets its local Title role to 28px/36px at weight 700. Other Title consumers keep 18px/24px at weight 500. Routed pages share content and behavior, and their layouts own breakpoint changes. A different interaction flow may use a separate composition.
 

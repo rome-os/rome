@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
-import { PHONE_QUERY, splitPhoneBlock } from "./test/phone-block.js";
+import { LARGE_SCALE_SELECTOR, splitLargeScale } from "./test/scale-block.js";
 
 const sheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
   "",
 );
 
-const block = splitPhoneBlock(sheet).phone;
+const block = splitLargeScale(sheet).large;
 const tokens = new Map(
   [...block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [
     name,
@@ -41,11 +41,11 @@ const step = (token: string) => {
 };
 
 /**
- * Below 768px the kit paints every control it sizes at the 44px touch floor
+ * The large scale paints every control it sizes at the 44px touch floor
  * and raises the type to match. The block is the whole mechanism: components
  * read these tokens, so a value that drifts here drifts on every phone.
  */
-describe("the phone scale", () => {
+describe("the large platform scale", () => {
   it("paints both shared control steps at the 44px floor", () => {
     expect(step("--control-h-sm")).toBe(44);
     expect(step("--control-h-md")).toBe(44);
@@ -84,17 +84,15 @@ describe("the phone scale", () => {
     // field at all. In `base` it fills in only where no role is named.
     const floor = sheet.indexOf(":is(input, textarea, select)");
     const before = sheet.slice(0, floor);
-    expect(before.slice(before.lastIndexOf("@layer base"))).toMatch(
-      /^@layer base\s*\{\s*@media \(width < 48rem\), \(any-pointer: coarse\)\s*\{\s*$/,
-    );
+    expect(before.slice(before.lastIndexOf("@layer base"))).toMatch(/^@layer base\s*\{\s*$/);
     expect(sheet.slice(floor)).toMatch(
-      /^:is\(input, textarea, select\)\s*\{\s*font-size: max\(var\(--rome-font-size-16\), var\(--text-ui\)\);/,
+      /^:is\(input, textarea, select\)\s*\{\s*font-size: max\(var\(--field-min-font-size\), var\(--text-ui\)\);/,
     );
     expect(block).not.toMatch(/:(?:is|where)\(input/);
   });
 
   it("is not inside a cascade layer, so it outranks the roles' theme layer", () => {
-    const before = sheet.slice(0, sheet.indexOf(`${PHONE_QUERY} {\n  :root,`));
+    const before = sheet.slice(0, sheet.indexOf(`${LARGE_SCALE_SELECTOR} {`));
     const opened = (before.match(/@layer[^{;]*\{/g) ?? []).length;
     // Every layer block opened before the phone block has closed by then.
     let depth = 0;

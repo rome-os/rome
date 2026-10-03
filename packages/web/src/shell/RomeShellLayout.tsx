@@ -190,7 +190,7 @@ export function RomeShellLayout() {
               >
                 <Link
                   to="/"
-                  className="text-title text-foreground touch:flex touch:min-h-11 touch:items-center"
+                  className="text-title text-foreground flex min-h-[var(--control-min-h)] items-center"
                 >
                   {t("appName")}
                 </Link>
@@ -265,7 +265,7 @@ export function RomeShellLayout() {
                 name="mobileHeader"
                 className="flex min-w-0 flex-1 items-center gap-2"
                 fallback={
-                  <Link to="/" className="flex items-center gap-2 touch:min-h-11">
+                  <Link to="/" className="flex items-center gap-2 min-h-[var(--control-min-h)]">
                     <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
                     <span className="text-ui text-foreground">{t("appName")}</span>
                   </Link>

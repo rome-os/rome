@@ -35,7 +35,7 @@ export function CollapsibleCard({ className, ...props }: ComponentProps<"div">) 
 // never be painted. The full recipe is in docs/design-system.md, and
 // `outline-solid` is the part that makes it visible at all.
 const HEADER_CLASS =
-  "flex min-h-8 w-full items-center justify-between gap-3 px-4 py-1 text-left touch:min-h-11 outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-muted/60 focus-visible:bg-surface-muted/60 focus-visible:outline-solid focus-visible:outline-ring/50";
+  "flex min-h-8 w-full items-center justify-between gap-3 px-4 py-1 text-left min-h-[var(--control-min-h)] outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-muted/60 focus-visible:bg-surface-muted/60 focus-visible:outline-solid focus-visible:outline-ring/50";
 
 export interface CollapsibleSectionProps extends Omit<ComponentProps<"div">, "title"> {
   open: boolean;

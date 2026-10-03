@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useEffect, useRef, useState } from "react";
 import {
   appendScopedStyles,
@@ -70,6 +71,7 @@ export function AppComponentView({
   onDismiss,
 }: AppComponentViewProps) {
   const { resolved: theme, theme: themeName } = useTheme();
+  const scale = useUiScale();
   const rootRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,5 +174,5 @@ export function AppComponentView({
     );
   }
 
-  return <div ref={rootRef} className="mb-4" />;
+  return <div data-ui-scale={scale} ref={rootRef} className="mb-4" />;
 }
