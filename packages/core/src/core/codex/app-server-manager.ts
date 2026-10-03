@@ -1,5 +1,8 @@
 import { createLogger } from "../../logger.js";
+import { getInstanceToken } from "../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
+import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -51,7 +54,10 @@ export interface CodexThreadHandle {
 
 export interface CodexAppServerManagerOptions {
   cwd?: string;
+  /** Fixed child env. Defaults to the allowlist plus the instance credential, read at each spawn. */
   env?: Record<string, string>;
+  /** Fixed root `-c` overrides. Defaults to {@link codexAppServerConfigArgs} for this instance. */
+  configArgs?: readonly string[];
   createClient?: (options: AppServerClientOptions) => CodexAppServerConnection;
 }
 
@@ -61,7 +67,35 @@ function defaultCodexEnvironment(): Record<string, string> {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
+  // The Rome credits provider reads the instance credential from the child
+  // env, so it never appears in a thread's config or rollout.
+  const instanceToken = getInstanceToken();
+  if (instanceToken) env[ROME_CREDITS_TOKEN_ENV] = instanceToken;
   return env;
+}
+
+// Codex 0.156 waits up to 10 s for a thread to shut down, so outlast that.
+const RESUME_CLOSING_BUDGET_MS = 12_000;
+const RESUME_CLOSING_RETRY_DELAY_MS = 100;
+
+/**
+ * With a zero unload delay, a thread unsubscribed a moment ago may still be
+ * shutting down; Codex then rejects thread/resume with "is closing; retry".
+ */
+async function requestThreadResume(
+  client: CodexAppServerConnection,
+  params: ThreadResumeParams,
+): Promise<unknown> {
+  const deadline = Date.now() + RESUME_CLOSING_BUDGET_MS;
+  for (;;) {
+    try {
+      return await client.request(Method.threadResume, params);
+    } catch (err) {
+      const closing = err instanceof Error && err.message.includes("is closing");
+      if (!closing || Date.now() >= deadline) throw err;
+      await new Promise((resolve) => setTimeout(resolve, RESUME_CLOSING_RETRY_DELAY_MS));
+    }
+  }
 }
 
 function threadFromResponse(result: unknown, method: string): CodexThreadHandle {
@@ -93,7 +127,8 @@ function buildThreadResumeParams(threadId: string, config: ThreadStartParams): T
 
 export class CodexAppServerManager {
   private readonly cwd: string;
-  private readonly env: Record<string, string>;
+  private readonly env: Record<string, string> | undefined;
+  private readonly configArgs: readonly string[] | undefined;
   private readonly createClient: (options: AppServerClientOptions) => CodexAppServerConnection;
   private readonly bindings = new Map<string, StoredThreadBinding>();
   private readonly notificationListeners = new Map<
@@ -109,7 +144,8 @@ export class CodexAppServerManager {
 
   constructor(options: CodexAppServerManagerOptions = {}) {
     this.cwd = options.cwd ?? process.cwd();
-    this.env = options.env ?? defaultCodexEnvironment();
+    this.env = options.env;
+    this.configArgs = options.configArgs;
     this.createClient =
       options.createClient ?? ((clientOptions) => new AppServerClient(clientOptions));
   }
@@ -157,10 +193,12 @@ export class CodexAppServerManager {
     const connection = await this.ensureConnection();
     const method = resumeThreadId ? Method.threadResume : Method.threadStart;
     const startedAt = Date.now();
-    const result = await connection.client.request(
-      method,
-      resumeThreadId ? buildThreadResumeParams(resumeThreadId, config) : config,
-    );
+    const result = resumeThreadId
+      ? await requestThreadResume(
+          connection.client,
+          buildThreadResumeParams(resumeThreadId, config),
+        )
+      : await connection.client.request(method, config);
     const handle = threadFromResponse(result, method);
     const threadId = handle.threadId;
     if (resumeThreadId && threadId !== resumeThreadId) {
@@ -241,8 +279,8 @@ export class CodexAppServerManager {
     if (!binding.resumePromise) {
       binding.resumePromise = (async () => {
         const startedAt = Date.now();
-        const result = await connection.client.request(
-          Method.threadResume,
+        const result = await requestThreadResume(
+          connection.client,
           buildThreadResumeParams(threadId, binding.config),
         );
         const resumed = threadFromResponse(result, Method.threadResume);
@@ -285,7 +323,8 @@ export class CodexAppServerManager {
     let client!: CodexAppServerConnection;
     client = this.createClient({
       cwd: this.cwd,
-      env: this.env,
+      env: this.env ?? defaultCodexEnvironment(),
+      configArgs: this.configArgs ?? codexAppServerConfigArgs(getRomeCloudOrigin()),
       onNotification: (method, params) => this.routeNotification(method, params),
       onServerRequest: async (method, params) => await this.routeServerRequest(method, params),
       onExit: (code) => {

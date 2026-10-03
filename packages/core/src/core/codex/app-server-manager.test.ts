@@ -6,6 +6,7 @@ import {
   type CodexThreadBinding,
 } from "./app-server-manager.js";
 import type { ThreadStartParams } from "./app-server-protocol.js";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 
 interface FakeRequest {
   method: string;
@@ -311,5 +312,127 @@ describe("CodexAppServerManager", () => {
     });
     expect(result).toMatchObject({ success: false });
     manager.close();
+  });
+});
+
+describe("CodexAppServerManager Rome credits wiring", () => {
+  const capture = () => {
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-credits");
+        clients.push(client);
+        return client;
+      },
+    });
+    return { clients, manager };
+  };
+
+  it("passes the instance credential and the credits provider to the app-server", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    setInstanceTokenInMemory("romeinst_wiring_test");
+    const { clients, manager } = capture();
+    try {
+      await manager.warmup();
+      expect(clients[0].options.env.ROME_CREDITS_TOKEN).toBe("romeinst_wiring_test");
+      const args = clients[0].options.configArgs ?? [];
+      expect(args).toContain("thread_unload_delay_secs=0");
+      expect(args.some((arg) => arg.includes('base_url="https://cloud.example/v1"'))).toBe(true);
+      expect(args.join(" ")).not.toContain("romeinst_wiring_test");
+    } finally {
+      manager.close();
+      setInstanceTokenInMemory(null);
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("leaves the credential out and the provider undefined for an unenrolled instance", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
+    rs.stubEnv("PANTHEON_DOMAIN", "");
+    setInstanceTokenInMemory(null);
+    const { clients, manager } = capture();
+    try {
+      await manager.warmup();
+      expect(clients[0].options.env).not.toHaveProperty("ROME_CREDITS_TOKEN");
+      expect(clients[0].options.configArgs).toEqual([
+        "-c",
+        "thread_unload_delay_secs=0",
+        "-c",
+        'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]',
+      ]);
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("keeps retrying while a thread's shutdown outlasts two seconds", async () => {
+    // Codex waits up to 10 s for a thread to shut down, so "is closing" can
+    // last well past a short retry budget.
+    let closingUntil = 0;
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-slow-close");
+        const request = client.request.bind(client);
+        client.request = async (method, params) => {
+          if (method === "thread/resume") {
+            closingUntil ||= Date.now() + 3_000;
+            if (Date.now() < closingUntil) {
+              throw new Error(
+                "thread thread-slow-close is closing; retry thread/resume after the thread is closed",
+              );
+            }
+          }
+          return await request(method, params);
+        };
+        return client;
+      },
+    });
+    try {
+      const handle = await manager.openThread(
+        config("rome_slow_close"),
+        binding("slow-close"),
+        "thread-slow-close",
+      );
+      expect(handle.threadId).toBe("thread-slow-close");
+    } finally {
+      manager.close();
+    }
+  }, 10_000);
+
+  it("retries a resume while the thread is still closing", async () => {
+    const clients: FakeConnection[] = [];
+    let closingReplies = 2;
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-closing");
+        const request = client.request.bind(client);
+        client.request = async (method, params) => {
+          if (method === "thread/resume" && closingReplies > 0) {
+            closingReplies -= 1;
+            client.requests.push({ method, params });
+            throw new Error(
+              "thread thread-closing is closing; retry thread/resume after the thread is closed",
+            );
+          }
+          return await request(method, params);
+        };
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const handle = await manager.openThread(
+        config("rome_resume"),
+        binding("resume"),
+        "thread-closing",
+      );
+      expect(handle.threadId).toBe("thread-closing");
+      expect(
+        clients[0].requests.filter((request) => request.method === "thread/resume"),
+      ).toHaveLength(3);
+    } finally {
+      manager.close();
+    }
   });
 });
