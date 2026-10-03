@@ -96,7 +96,7 @@ describe("streaming-sessions state", () => {
     expect(state.get("A")?.assistantText).toBe("Hello");
     expect(state.get("A")?.assistantBlockIx).toBe(0);
     // Higher blockIx: the completed block is now its own message; the live tail
-    // moves to the new block (the server clears it with an empty text first).
+    // moves to the new block (the server clears its own buffer on commit).
     state = updateAssistantText(state, "A", "turn-1", 1, "");
     expect(state.get("A")?.assistantText).toBe("");
     expect(state.get("A")?.assistantBlockIx).toBe(1);
@@ -110,6 +110,20 @@ describe("streaming-sessions state", () => {
     const after = updateAssistantText(state, "A", "turn-1", 0, "stale block");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("current block");
+  });
+
+  it("keeps a longer same-block preview while a reattached stream replays older text", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world");
+    expect(updateAssistantText(state, "A", "turn-1", 0, "Hello")).toBe(state);
+    expect(state.get("A")?.assistantText).toBe("Hello world");
+  });
+
+  it("accepts a shorter finalized correction to the current text block", () => {
+    let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world ");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello world", true);
+    expect(state.get("A")?.assistantText).toBe("Hello world");
   });
 
   it("updateAssistantText ignores writes from a stale turn", () => {

@@ -129,6 +129,29 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 // (and the Stop button's turnId) stuck on a stale turn. Three missed
 // keepalives + margin.
 const STREAM_STALL_TIMEOUT_MS = 50_000;
+const FOREGROUND_STALE_STREAM_MS = 30_000;
+const RECONNECT_REQUEST_TIMEOUT_MS = 10_000;
+const RECONNECT_BASE_DELAY_MS = 2_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const RECOVERY_NOTICE_FAILURES = 3;
+const RECONNECT_STABLE_STREAM_MS = 5_000;
+
+async function withRequestTimeout<T>(request: Promise<T>, onTimeout: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          onTimeout();
+          reject(new Error("reconnect request timed out"));
+        }, RECONNECT_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -309,6 +332,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
+  const reconnectErrorRef = useRef<string | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState<{
+    sessionId: string;
+    turnId: string;
+  } | null>(null);
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
@@ -342,7 +370,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
+  // A lost SSE connection is not proof that its server turn ended. Keep its
+  // live UI while the reattach poll checks server truth and opens a new stream.
+  const recoveringSessionIdsRef = useRef<Set<string>>(new Set());
+  const pendingMessageReconciliationsRef = useRef<Map<string, string>>(new Map());
+  const offFloorReconcileTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const offFloorReconcileControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const offFloorReconcileWakeRef = useRef<Map<string, () => void>>(new Map());
+  const releasedTurnIdsRef = useRef<Map<string, string>>(new Map());
+  const acceptedSendRevisionsRef = useRef<Map<string, number>>(new Map());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const lastStreamActivityAtRef = useRef<Map<string, number>>(new Map());
+  const stopReconciliationsRef = useRef<
+    Map<string, { timer: ReturnType<typeof setTimeout> | null; confirmedFinished: boolean }>
+  >(new Map());
+  const isChatMountedRef = useRef(true);
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
@@ -512,6 +554,38 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   useEffect(() => {
     floorSessionIdRef.current = floorSessionId;
   }, [floorSessionId]);
+  useEffect(() => {
+    const retryRecoveringFloor = () => {
+      const sid = floorSessionIdRef.current;
+      // Browser timers may have been throttled while hidden. Wake dormant
+      // off-floor answer checks too, without duplicating an in-flight lookup.
+      for (const [id, wake] of offFloorReconcileWakeRef.current) {
+        if (id !== sid && offFloorReconcileTimersRef.current.has(id)) wake();
+      }
+      if (!sid) return;
+      const activeTurnId = streamingSessionsRef.current.get(sid)?.turnId;
+      if (activeTurnId && !recoveringSessionIdsRef.current.has(sid)) {
+        const lastActivity = lastStreamActivityAtRef.current.get(activeTurnId);
+        if (lastActivity === undefined || Date.now() - lastActivity < FOREGROUND_STALE_STREAM_MS) {
+          return;
+        }
+        // A mobile browser can resume with reader.read() still pending. Its
+        // controller belongs to this turn; abort it before revalidating.
+        recoveringSessionIdsRef.current.add(sid);
+        turnStreamControllersRef.current.get(activeTurnId)?.abort();
+      }
+      setStreamReconnectRevision((revision) => revision + 1);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") retryRecoveringFloor();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", retryRecoveringFloor);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", retryRecoveringFloor);
+    };
+  }, []);
   const isReadVisibleSession = useCallback(
     (id: string) => id === mainSessionIdRef.current || id === floorSessionIdRef.current,
     [],
@@ -570,11 +644,23 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const releaseTurnStreamController = useCallback((turnId: string, controller: AbortController) => {
     if (turnStreamControllersRef.current.get(turnId) === controller) {
       turnStreamControllersRef.current.delete(turnId);
+      lastStreamActivityAtRef.current.delete(turnId);
     }
   }, []);
 
   useEffect(() => {
+    isChatMountedRef.current = true;
     return () => {
+      isChatMountedRef.current = false;
+      for (const { timer } of stopReconciliationsRef.current.values()) {
+        if (timer) clearTimeout(timer);
+      }
+      stopReconciliationsRef.current.clear();
+      for (const timer of offFloorReconcileTimersRef.current.values()) clearTimeout(timer);
+      offFloorReconcileTimersRef.current.clear();
+      offFloorReconcileWakeRef.current.clear();
+      for (const controller of offFloorReconcileControllersRef.current.values()) controller.abort();
+      offFloorReconcileControllersRef.current.clear();
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -649,24 +735,41 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
   // Fetch messages for a session
   const loadMessages = useCallback(
-    async (id: string, options: { force?: boolean; dropLocalOptimistic?: boolean } = {}) => {
-      if (!options.force && loadedSessionsRef.current.has(id)) return;
+    async (
+      id: string,
+      options: {
+        force?: boolean;
+        dropLocalOptimistic?: boolean;
+        shouldApply?: () => boolean;
+        bounded?: boolean;
+      } = {},
+    ): Promise<boolean | null> => {
+      if (!options.force && loadedSessionsRef.current.has(id)) return true;
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      // Snapshot optimistic IDs before the request. A follow-up accepted while
+      // this fetch is pending must not be dropped by an older response.
+      const dropMessageIds = options.dropLocalOptimistic
+        ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
+        : undefined;
       try {
-        const data = await listSessionMessages(id);
+        const controller = options.bounded ? new AbortController() : null;
+        const request = listSessionMessages(id, controller?.signal);
+        const data = controller
+          ? await withRequestTimeout(request, () => controller.abort())
+          : await request;
         if (data === null) {
+          if (options.shouldApply && !options.shouldApply()) return false;
           // Server says this session doesn't exist (HTTP 404). Hand it back
           // to the host so they can redirect to the draft surface instead of
-          // leaving the user staring at an empty active-chat shell.
-          onSessionNotFoundRef.current?.(id);
-          return;
+          // leaving the user staring at an empty active-chat shell. A missing
+          // handoff child must not redirect its still-valid parent chat.
+          if (id === mainSessionIdRef.current) onSessionNotFoundRef.current?.(id);
+          return null;
         }
+        if (options.shouldApply && !options.shouldApply()) return false;
         const fetchedMessages = orderChatMessages(data);
-        const dropMessageIds = options.dropLocalOptimistic
-          ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
-          : undefined;
         setMessages((prev) => {
           const next = new Map(prev);
           next.set(
@@ -675,19 +778,128 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           );
           return next;
         });
-        if (options.dropLocalOptimistic) {
-          localOptimisticMessageIdsRef.current.delete(id);
+        if (dropMessageIds) {
+          const remaining = localOptimisticMessageIdsRef.current.get(id);
+          if (remaining) {
+            for (const messageId of dropMessageIds) remaining.delete(messageId);
+            if (!remaining.size) localOptimisticMessageIdsRef.current.delete(id);
+          }
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
         }
+        return true;
       } catch {
         // Leave the session unmarked so callers (auto-load + post-stream
         // refresh) can retry on the next trigger.
+        return false;
       }
     },
     [isReadVisibleSession, markSessionRead],
+  );
+  const queueOffFloorReconciliation = useCallback(
+    (id: string, turnId: string) => {
+      // A later off-floor turn can drop while an older turn's message reload
+      // is still in flight. Promote the marker so that older response cannot
+      // clear the only poller before the later answer is persisted.
+      if (pendingMessageReconciliationsRef.current.get(id) === turnId) return;
+      pendingMessageReconciliationsRef.current.set(id, turnId);
+      // An off-floor handoff child receives no message_insert subscription.
+      // Check its turn until it ends, then fetch its durable answer; otherwise
+      // a one-shot reload can miss an answer produced after the floor changed.
+      const schedule = (delayMs: number) => {
+        if (
+          !isChatMountedRef.current ||
+          pendingMessageReconciliationsRef.current.get(id) !== turnId
+        )
+          return;
+        const previousTimer = offFloorReconcileTimersRef.current.get(id);
+        if (previousTimer) clearTimeout(previousTimer);
+        const timer = setTimeout(() => {
+          if (offFloorReconcileTimersRef.current.get(id) === timer)
+            offFloorReconcileTimersRef.current.delete(id);
+          void check(delayMs);
+        }, delayMs);
+        offFloorReconcileTimersRef.current.set(id, timer);
+      };
+      const check = async (delayMs: number) => {
+        const nextDelayMs = Math.min(
+          Math.max(RECONNECT_BASE_DELAY_MS, delayMs * 2),
+          RECONNECT_MAX_DELAY_MS,
+        );
+        const stillPending = () =>
+          isChatMountedRef.current && pendingMessageReconciliationsRef.current.get(id) === turnId;
+        if (!stillPending()) return;
+        if (floorSessionIdRef.current === id) {
+          schedule(nextDelayMs);
+          return;
+        }
+        const controller = new AbortController();
+        offFloorReconcileControllersRef.current.set(id, controller);
+        const turns = await withRequestTimeout(listSessionTurns(id, controller.signal), () =>
+          controller.abort(),
+        ).catch(() => null);
+        if (offFloorReconcileControllersRef.current.get(id) === controller)
+          offFloorReconcileControllersRef.current.delete(id);
+        if (!stillPending()) return;
+        if (floorSessionIdRef.current === id) {
+          schedule(nextDelayMs);
+          return;
+        }
+        // Reconcile this turn as soon as it disappears, even if another turn
+        // in the same child is still running. A later dropped turn gets its
+        // own marker; its poller must not be cleared by this older reload.
+        if (turns && !turns.some((turn) => turn.turnId === turnId)) {
+          const loaded = await loadMessages(id, {
+            force: true,
+            dropLocalOptimistic: true,
+            bounded: true,
+            shouldApply: () => isChatMountedRef.current && floorSessionIdRef.current !== id,
+          });
+          if (!stillPending()) return;
+          if (floorSessionIdRef.current === id) {
+            schedule(nextDelayMs);
+            return;
+          }
+          if (loaded) {
+            pendingMessageReconciliationsRef.current.delete(id);
+            if (offFloorReconcileWakeRef.current.get(id) === wake)
+              offFloorReconcileWakeRef.current.delete(id);
+            return;
+          }
+          if (loaded === null) {
+            // /turns is intentionally session-agnostic (200 [] for deleted
+            // sessions). The subsequent /messages 404 is authoritative: this
+            // child is gone, so no answer can arrive through this poller.
+            pendingMessageReconciliationsRef.current.delete(id);
+            if (offFloorReconcileWakeRef.current.get(id) === wake)
+              offFloorReconcileWakeRef.current.delete(id);
+            return;
+          }
+        }
+        schedule(nextDelayMs);
+      };
+      const wake = () => schedule(0);
+      offFloorReconcileWakeRef.current.set(id, wake);
+      schedule(RECONNECT_BASE_DELAY_MS);
+    },
+    [loadMessages],
+  );
+
+  // Call only after confirming this turn still owns the session's live entry.
+  const settleLostTurn = useCallback(
+    (sessionId: string, turnId: string, finished: boolean) => {
+      recoveringSessionIdsRef.current.delete(sessionId);
+      endSessionStream(sessionId, turnId);
+      if (finished) return;
+      if (sessionId !== floorSessionIdRef.current) {
+        queueOffFloorReconciliation(sessionId, turnId);
+      } else {
+        void loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      }
+    },
+    [endSessionStream, loadMessages, queueOffFloorReconciliation],
   );
 
   // Load messages when the main session changes (also covers initial mount).
@@ -745,22 +957,30 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string) => {
+    async (
+      res: Response,
+      sessionId: string,
+      turnId: string,
+      onFirstActivity?: () => void,
+    ): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
-        return;
+        return false;
       }
 
       const reader = res.body.getReader();
+      lastStreamActivityAtRef.current.set(turnId, Date.now());
       const decoder = new TextDecoder();
       let buffer = "";
       // Live snapshot mirror: server emits segment_upsert + summary_update;
       // we upsert by id and replace the summary. Insertion order in segArr
       // matches the server's segment ordinals because the server emits each
       // segment's first upsert in ordinal order.
-      const segArr: TraceSegment[] = [];
-      const segIdx = new Map<string, number>();
-      let summary: TraceSnapshot["summary"] = {
+      const retained = streamingSessionsRef.current.get(sessionId);
+      const retainedSnapshot = retained?.turnId === turnId ? retained.snapshot : null;
+      const segArr: TraceSegment[] = [...(retainedSnapshot?.segments ?? [])];
+      const segIdx = new Map(segArr.map((segment, index) => [segment.id, index]));
+      let summary: TraceSnapshot["summary"] = retainedSnapshot?.summary ?? {
         distinctApps: [],
         totalSteps: 0,
         invocationCounts: {},
@@ -784,15 +1004,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }),
         ]).finally(() => clearTimeout(stallTimer));
         if (result === "stalled") {
-          // Dead connection. Release the reader and fall through to the
-          // final reload; the caller's finally block tears the streaming
-          // entry down and the floor reattach poll re-attaches from
-          // GET /turns if the turn is in fact still running server-side.
+          // A stalled reader cannot confirm the turn ended. The caller keeps
+          // its live projection while the floor reattach poll checks /turns.
           void reader.cancel().catch(() => {});
           break;
         }
         const { done, value } = result;
         if (done) break;
+        if (value.byteLength && onFirstActivity) {
+          onFirstActivity();
+          onFirstActivity = undefined;
+        }
+        lastStreamActivityAtRef.current.set(turnId, Date.now());
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -881,11 +1104,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             // block's index within the turn; each event replaces the
             // previous one, and a higher blockIx replaces the block.
             try {
-              const { blockIx, text } = JSON.parse(evt.data) as {
+              const { blockIx, text, finalized } = JSON.parse(evt.data) as {
                 blockIx?: number;
                 text?: string;
+                finalized?: boolean;
               };
-              updateSessionAssistantText(sessionId, turnId, blockIx ?? 0, text ?? "");
+              updateSessionAssistantText(sessionId, turnId, blockIx ?? 0, text ?? "", finalized);
             } catch {
               // ignore parse errors
             }
@@ -940,13 +1164,45 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
       }
 
-      // After stream ends, reload messages from DB (gets both trace + assistant)
-      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      // A disconnected reader may still own a live preview. Reloading now can
+      // render its persisted copy beside that preview until recovery settles.
+      if (shouldStop) {
+        const loaded = await loadMessages(sessionId, {
+          force: true,
+          dropLocalOptimistic: true,
+          bounded: true,
+        });
+        // An off-floor child may already have another running turn. Its
+        // background reconciliation must continue until the turn list empties.
+        if (loaded && floorSessionIdRef.current === sessionId) {
+          pendingMessageReconciliationsRef.current.delete(sessionId);
+          offFloorReconcileWakeRef.current.delete(sessionId);
+        }
+        return loaded === true;
+      }
+      return false;
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
+    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText, streamingSessionsRef],
   );
 
   useEffect(() => {
+    // A pending turn lookup can outlive a floor change. Release retained
+    // off-floor entries here: the cancelled lookup may never resolve, and no
+    // reattach poll runs for that session while it is off-floor.
+    for (const recoveringSessionId of recoveringSessionIdsRef.current) {
+      if (
+        recoveringSessionId === floorSessionId ||
+        locallyStreamingSessionIdsRef.current.has(recoveringSessionId)
+      ) {
+        continue;
+      }
+      setRecoveryNotice((current) => (current?.sessionId === recoveringSessionId ? null : current));
+      setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
+      const turnId = streamingSessionsRef.current.get(recoveringSessionId)?.turnId;
+      if (turnId) settleLostTurn(recoveringSessionId, turnId, false);
+      else recoveringSessionIdsRef.current.delete(recoveringSessionId);
+    }
+
     // Reattach to whichever session holds the floor — during a handoff that's
     // the specialist's child session, not the main one (only the floor can have
     // an in-flight turn, since shallower callers are suspended). On reload this
@@ -957,7 +1213,41 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let lookupController: AbortController | null = null;
     let streamController: AbortController | null = null;
+    let retryDelayMs = RECONNECT_BASE_DELAY_MS;
+    let failedChecks = 0;
+
+    const noteRecoveryFailure = () => {
+      if (!recoveringSessionIdsRef.current.has(reattachSessionId)) {
+        // An idle floor must keep discovering backend-initiated turns at the
+        // usual cadence; no local live turn needs exponential recovery.
+        retryDelayMs = RECONNECT_BASE_DELAY_MS;
+        failedChecks = 0;
+        return;
+      }
+      retryDelayMs = Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS);
+      failedChecks += 1;
+      if (failedChecks < RECOVERY_NOTICE_FAILURES) return;
+      const turnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+      if (turnId) {
+        setRecoveryNotice((current) =>
+          current?.sessionId === reattachSessionId && current.turnId === turnId
+            ? current
+            : { sessionId: reattachSessionId, turnId },
+        );
+      }
+    };
+
+    const noteRecoverySuccess = () => {
+      retryDelayMs = RECONNECT_BASE_DELAY_MS;
+      failedChecks = 0;
+      setRecoveryNotice((current) => (current?.sessionId === reattachSessionId ? null : current));
+    };
+
+    const noteRecoveryConnected = () => {
+      recoveringSessionIdsRef.current.delete(reattachSessionId);
+    };
 
     const schedule = (delayMs: number) => {
       if (cancelled) return;
@@ -971,53 +1261,210 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Skip if the foreground send is mid-flight (locallyStreaming was added
       // before its POST, so it catches the window before its per-session
       // entry exists) or a prior reattach hasn't drained yet.
+      const activeTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+      const activeReader = activeTurnId
+        ? turnStreamControllersRef.current.get(activeTurnId)
+        : undefined;
       if (
         locallyStreamingSessionIdsRef.current.has(reattachSessionId) ||
-        streamingSessionsRef.current.has(reattachSessionId)
+        (activeReader && !activeReader.signal.aborted) ||
+        (streamingSessionsRef.current.has(reattachSessionId) &&
+          !recoveringSessionIdsRef.current.has(reattachSessionId))
       ) {
-        schedule(2000);
+        schedule(RECONNECT_BASE_DELAY_MS);
         return;
       }
+      const observedTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null;
+      const observedSendRevision = acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0;
+      const wasRecovering = recoveringSessionIdsRef.current.has(reattachSessionId);
+      const stillObserving = () =>
+        !cancelled &&
+        !locallyStreamingSessionIdsRef.current.has(reattachSessionId) &&
+        (acceptedSendRevisionsRef.current.get(reattachSessionId) ?? 0) === observedSendRevision &&
+        (streamingSessionsRef.current.get(reattachSessionId)?.turnId ?? null) === observedTurnId;
+      const reloadWhileObserving = async () => {
+        const loaded = await loadMessages(reattachSessionId, {
+          force: true,
+          dropLocalOptimistic: true,
+          shouldApply: stillObserving,
+          bounded: true,
+        });
+        if (loaded === null) return null;
+        if (!loaded && stillObserving()) noteRecoveryFailure();
+        return loaded && stillObserving();
+      };
       let attachedTurnId: string | null = null;
+      let finished = false;
+      let streamOpened = false;
+      let streamMissing = false;
+      let streamOpenedAt = 0;
       try {
         // List in-flight turns by turnId. Reattach to the running
         // one (or the first queued one) — its events stream is keyed by
         // turnId, so reattach is unambiguous even if more turns arrive
         // while we're polling.
-        const turns = await listSessionTurns(reattachSessionId);
-        if (!turns || turns.length === 0 || cancelled) return;
+        lookupController = new AbortController();
+        const turns = await withRequestTimeout(
+          listSessionTurns(reattachSessionId, lookupController.signal),
+          () => lookupController?.abort(),
+        );
+        lookupController = null;
+        if (cancelled) return;
+        if (!turns) {
+          noteRecoveryFailure();
+          return;
+        }
+        if (!turns.length) {
+          const needsReload =
+            pendingMessageReconciliationsRef.current.has(reattachSessionId) ||
+            (wasRecovering && recoveringSessionIdsRef.current.has(reattachSessionId));
+          if (needsReload) {
+            const reloaded = await reloadWhileObserving();
+            if (reloaded === null && stillObserving()) {
+              // /turns is session-agnostic, but /messages 404 confirms this
+              // floor child was deleted. Do not strand a phantom Stop state.
+              recoveringSessionIdsRef.current.delete(reattachSessionId);
+              if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
+              setRecoveryNotice((current) =>
+                current?.sessionId === reattachSessionId ? null : current,
+              );
+              return;
+            }
+            if (!reloaded) return;
+          }
+          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
+          offFloorReconcileWakeRef.current.delete(reattachSessionId);
+          releasedTurnIdsRef.current.delete(reattachSessionId);
+          if (!wasRecovering) noteRecoverySuccess();
+          // The lookup may have started before a foreground send replaced the
+          // recovering turn. Never settle a turn we did not query for.
+          if (
+            wasRecovering &&
+            recoveringSessionIdsRef.current.has(reattachSessionId) &&
+            stillObserving()
+          ) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+            if (observedTurnId) endSessionStream(reattachSessionId, observedTurnId);
+            noteRecoverySuccess();
+            setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
+          }
+          return;
+        }
+        if (!stillObserving()) {
+          return;
+        }
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
+        if (releasedTurnIdsRef.current.get(reattachSessionId) !== target.turnId) {
+          releasedTurnIdsRef.current.delete(reattachSessionId);
+        }
+        const pendingTurnId = pendingMessageReconciliationsRef.current.get(reattachSessionId);
+        if (
+          (pendingTurnId && target.turnId !== pendingTurnId) ||
+          (observedTurnId && target.turnId !== observedTurnId)
+        ) {
+          // Preserve the prior turn's durable answer before switching to a
+          // different active turn. One fetch reconciles all pending markers.
+          if (!(await reloadWhileObserving())) return;
+        }
+        if (pendingTurnId && target.turnId !== pendingTurnId) {
+          pendingMessageReconciliationsRef.current.delete(reattachSessionId);
+          offFloorReconcileWakeRef.current.delete(reattachSessionId);
+        }
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
-        setStreamError(null);
 
         streamController = createTurnStreamController(attachedTurnId);
-        const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
-        if (!streamRes.ok) {
-          if (streamRes.status !== 404 && !cancelled) {
-            setStreamError(t("stream.errors.reconnectStatus", { status: streamRes.status }));
+        const streamRes = await withRequestTimeout(
+          openTurnStream(attachedTurnId, streamController.signal),
+          () => streamController?.abort(),
+        );
+        if (!streamRes.ok || !streamRes.body) {
+          if (!cancelled) {
+            noteRecoveryFailure();
+            if (streamRes.status === 404 && !wasRecovering) {
+              // /turns and stream-open can race. A 404 alone does not prove
+              // the turn finished; verify it left the active-turn list before
+              // discarding a freshly created live placeholder.
+              const confirmController = new AbortController();
+              const latestTurns = await withRequestTimeout(
+                listSessionTurns(reattachSessionId, confirmController.signal),
+                () => confirmController.abort(),
+              ).catch(() => null);
+              streamMissing = Boolean(
+                latestTurns && !latestTurns.some((turn) => turn.turnId === attachedTurnId),
+              );
+            }
+            if (streamRes.status !== 404) {
+              const reconnectError = t("stream.errors.reconnectStatus", {
+                status: streamRes.status,
+              });
+              reconnectErrorRef.current = reconnectError;
+              setStreamError(reconnectError);
+            }
           }
           return;
         }
 
-        await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        streamOpened = true;
+        streamOpenedAt = Date.now();
+        finished = await consumeStream(streamRes, reattachSessionId, attachedTurnId, () => {
+          if (
+            cancelled ||
+            !attachedTurnId ||
+            !streamController ||
+            streamController.signal.aborted ||
+            turnStreamControllersRef.current.get(attachedTurnId) !== streamController ||
+            streamingSessionsRef.current.get(reattachSessionId)?.turnId !== attachedTurnId
+          )
+            return;
+          noteRecoveryConnected();
+          setStreamError(null);
+          setRecoveryNotice((current) =>
+            current?.sessionId === reattachSessionId ? null : current,
+          );
+        });
+        if (finished) noteRecoverySuccess();
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
+        if (!cancelled && !streamOpened) noteRecoveryFailure();
       } finally {
         if (attachedTurnId) {
           if (streamController) {
             releaseTurnStreamController(attachedTurnId, streamController);
             streamController = null;
           }
-          // Turn-guarded: this reattach finalizer must only clear the entry
-          // it installed. If a newer turn (foreground send or fresh reattach)
-          // has replaced it in the meantime, endSessionStream is a no-op.
-          endSessionStream(reattachSessionId, attachedTurnId);
+          const currentTurnId = streamingSessionsRef.current.get(reattachSessionId)?.turnId;
+          if (
+            (!currentTurnId || currentTurnId === attachedTurnId) &&
+            releasedTurnIdsRef.current.get(reattachSessionId) === attachedTurnId
+          ) {
+            recoveringSessionIdsRef.current.delete(reattachSessionId);
+          } else if (!currentTurnId || currentTurnId === attachedTurnId) {
+            if (
+              finished ||
+              reattachSessionId !== floorSessionIdRef.current ||
+              (streamMissing && !wasRecovering && !streamOpened)
+            ) {
+              settleLostTurn(reattachSessionId, attachedTurnId, finished);
+              noteRecoverySuccess();
+            } else {
+              // Cleanup aborts the reader too. The next effect must reattach
+              // rather than skip this retained entry forever.
+              recoveringSessionIdsRef.current.add(reattachSessionId);
+              if (!finished && !cancelled && wasRecovering && streamOpened) {
+                if (Date.now() - streamOpenedAt >= RECONNECT_STABLE_STREAM_MS) {
+                  failedChecks = 0;
+                  retryDelayMs = RECONNECT_BASE_DELAY_MS;
+                }
+                noteRecoveryFailure();
+              }
+            }
+          }
         }
         if (!cancelled) {
-          schedule(2000);
+          schedule(retryDelayMs);
         }
       }
     };
@@ -1026,6 +1473,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     return () => {
       cancelled = true;
+      lookupController?.abort();
       streamController?.abort();
       if (pollTimer) clearTimeout(pollTimer);
     };
@@ -1035,6 +1483,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     streamReconnectRevision,
     startSessionStream,
     endSessionStream,
+    loadMessages,
+    settleLostTurn,
     createTurnStreamController,
     releaseTurnStreamController,
     t,
@@ -1056,7 +1506,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
     ): Promise<void> => {
-      setStreamError(null);
+      setStreamError((current) =>
+        recoveringSessionIdsRef.current.has(sendingSessionId) &&
+        current === reconnectErrorRef.current
+          ? current
+          : null,
+      );
       // Sending re-engages stickiness so the user follows their own message and
       // the reply, even if they'd scrolled up to read history.
       scrollToBottom("auto");
@@ -1098,6 +1553,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       }
 
       const createResp: CreateTurnResponse = result.data;
+      acceptedSendRevisionsRef.current.set(
+        sendingSessionId,
+        (acceptedSendRevisionsRef.current.get(sendingSessionId) ?? 0) + 1,
+      );
       const pendingTurnId = createResp.turnId;
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 
@@ -1125,6 +1584,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // Late follow-up turns are discovered by the existing reattach loop.
       if (turnsForSession.size || streamingSessionsRef.current.has(sendingSessionId)) {
         if (!turnsForSession.size) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+        if (recoveringSessionIdsRef.current.has(sendingSessionId)) {
+          setStreamReconnectRevision((revision) => revision + 1);
+        }
         return;
       }
       if (!pendingTurnId) {
@@ -1143,8 +1605,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // turn keeps running server-side.
       void (async () => {
         const streamController = createTurnStreamController(pendingTurnId);
+        let finished = false;
         try {
-          const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
+          const streamRes = await withRequestTimeout(
+            openTurnStream(pendingTurnId, streamController.signal),
+            () => streamController.abort(),
+          );
           if (!streamRes.ok || !streamRes.body) {
             setStreamError(
               t("stream.errors.attachStreamStatus", {
@@ -1154,7 +1620,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             );
             return;
           }
-          await consumeStream(streamRes, sendingSessionId, pendingTurnId);
+          finished = await consumeStream(streamRes, sendingSessionId, pendingTurnId);
         } catch {
           // Mid-stream drop (reader rejected, network blip). Silent like the
           // reattach poll: bumping the reconnect revision below re-triggers it.
@@ -1174,8 +1640,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           if (!turns || turns.size === 0) {
             inflightTurnsRef.current.delete(sendingSessionId);
             locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
+            if (!currentEntry || currentEntry.turnId === pendingTurnId) {
+              const canRecover =
+                !finished &&
+                sendingSessionId === floorSessionIdRef.current &&
+                releasedTurnIdsRef.current.get(sendingSessionId) !== pendingTurnId;
+              if (canRecover) recoveringSessionIdsRef.current.add(sendingSessionId);
+              else settleLostTurn(sendingSessionId, pendingTurnId, finished);
+            }
             setStreamReconnectRevision((revision) => revision + 1);
-            endSessionStream(sendingSessionId, pendingTurnId);
           }
           releaseTurnStreamController(pendingTurnId, streamController);
         }
@@ -1183,13 +1656,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [
       consumeStream,
-      endSessionStream,
       startSessionStream,
       streamingSessionsRef,
       t,
       scrollToBottom,
       createTurnStreamController,
       releaseTurnStreamController,
+      settleLostTurn,
     ],
   );
 
@@ -1337,21 +1810,103 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     // A dead SSE connection can miss `done`. Release it only after the server
     // confirms this turn ended; accepting Stop is not confirmation of exit.
-    const forceReleaseIfStuck = (delayMs: number, confirmedFinished = false) => {
+    const forceReleaseIfStuck = (
+      delayMs: number,
+      confirmedFinished = false,
+      retryDelayMs = RECONNECT_BASE_DELAY_MS,
+      continuation = false,
+    ): void => {
+      let chain = stopReconciliationsRef.current.get(turnId);
+      if (!continuation) {
+        if (chain) {
+          if (confirmedFinished) chain.confirmedFinished = true;
+          return;
+        }
+        chain = { timer: null, confirmedFinished };
+        stopReconciliationsRef.current.set(turnId, chain);
+      }
+      if (!chain) return;
+      if (confirmedFinished) chain.confirmedFinished = true;
+      const clearChain = () => {
+        if (stopReconciliationsRef.current.get(turnId) === chain)
+          stopReconciliationsRef.current.delete(turnId);
+      };
       const stillOwnsStream = () =>
+        isChatMountedRef.current &&
         streamingSessionsRef.current.get(sid)?.turnId === turnId &&
         turnStreamControllersRef.current.get(turnId) === targetController;
-      setTimeout(async () => {
-        if (!stillOwnsStream()) return;
-        if (!confirmedFinished) {
-          const turns = await listSessionTurns(sid).catch(() => null);
-          if (!turns || turns.some((turn) => turn.turnId === turnId)) return;
-          if (!stillOwnsStream()) return;
+      const timer = setTimeout(async () => {
+        if (stopReconciliationsRef.current.get(turnId) !== chain) return;
+        chain.timer = null;
+        if (!stillOwnsStream()) {
+          clearChain();
+          return;
+        }
+        if (!chain.confirmedFinished) {
+          const lookupController = new AbortController();
+          const turns = await withRequestTimeout(
+            listSessionTurns(sid, lookupController.signal),
+            () => lookupController.abort(),
+          ).catch(() => null);
+          if (!turns && !chain.confirmedFinished) {
+            if (stillOwnsStream()) {
+              forceReleaseIfStuck(
+                retryDelayMs,
+                false,
+                Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+                true,
+              );
+            } else {
+              clearChain();
+            }
+            return;
+          }
+          if (turns?.some((turn) => turn.turnId === turnId) && !chain.confirmedFinished) {
+            clearChain();
+            return;
+          }
+          if (!stillOwnsStream()) {
+            clearChain();
+            return;
+          }
+        }
+        const observedSendRevision = acceptedSendRevisionsRef.current.get(sid) ?? 0;
+        const loaded = await loadMessages(sid, {
+          force: true,
+          dropLocalOptimistic: true,
+          bounded: true,
+          shouldApply: () =>
+            stillOwnsStream() &&
+            (acceptedSendRevisionsRef.current.get(sid) ?? 0) === observedSendRevision,
+        });
+        if (loaded === false) {
+          if (stillOwnsStream()) {
+            forceReleaseIfStuck(
+              retryDelayMs,
+              true,
+              Math.min(retryDelayMs * 2, RECONNECT_MAX_DELAY_MS),
+              true,
+            );
+          } else {
+            clearChain();
+          }
+          return;
+        }
+        if (!stillOwnsStream()) {
+          clearChain();
+          return;
         }
         targetController?.abort();
+        releasedTurnIdsRef.current.set(sid, turnId);
+        recoveringSessionIdsRef.current.delete(sid);
+        setRecoveryNotice((current) =>
+          current?.sessionId === sid && current.turnId === turnId ? null : current,
+        );
+        setStreamError((current) => (current === reconnectErrorRef.current ? null : current));
         endSessionStream(sid, turnId);
-        void loadMessages(sid, { force: true, dropLocalOptimistic: true });
+        clearChain();
       }, delayMs);
+      chain.timer = timer;
     };
 
     try {
@@ -1372,6 +1927,18 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       setStreamError(t("stream.errors.stopFallback"));
     }
   }, [streamingSessionsRef, endSessionStream, loadMessages, t]);
+
+  const retryRecoveryView = useCallback(() => {
+    if (!recoveryNotice) return;
+    const { sessionId, turnId } = recoveryNotice;
+    if (streamingSessionsRef.current.get(sessionId)?.turnId !== turnId) return;
+    // A successful HTTP 200 can still have a reader that has yielded no data.
+    // Re-enter recovery before restarting the effect, or its active-stream
+    // guard will skip the lookup until the stale-reader watchdog fires.
+    recoveringSessionIdsRef.current.add(sessionId);
+    turnStreamControllersRef.current.get(turnId)?.abort();
+    setStreamReconnectRevision((revision) => revision + 1);
+  }, [recoveryNotice, streamingSessionsRef]);
 
   const displayedStreaming = isActiveSessionStreaming;
 
@@ -1815,6 +2382,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                       isStreaming={displayedStreaming}
                       onStop={() => void stopMessage()}
                       streamError={streamError}
+                      recoveryNotice={
+                        recoveryNotice?.sessionId === floorSessionId &&
+                        recoveryNotice.turnId === floorSessionStream?.turnId
+                          ? {
+                              message: t("stream.recoveryUnavailable"),
+                              onRetry: retryRecoveryView,
+                            }
+                          : null
+                      }
                       // The chip names the floor agent — the specialist during a
                       // handoff, the main agent otherwise.
                       pinnedAgentMention={floorAgentMention}

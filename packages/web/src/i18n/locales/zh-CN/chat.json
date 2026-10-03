@@ -350,6 +350,8 @@
     }
   },
   "stream": {
+    "recoveryUnavailable": "连接已中断，回复状态暂时无法确认。正在自动重连。",
+    "retryConnection": "重试连接",
     "errors": {
       "createChatFallback": "创建对话失败。",
       "createChatStatus": "创建对话失败({{status}})。",

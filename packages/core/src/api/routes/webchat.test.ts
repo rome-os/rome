@@ -2001,6 +2001,11 @@ describe("Webchat API", () => {
         },
       );
       expect(assistantTexts(events)).toContainEqual({ blockIx: 0, text: "Whole block" });
+      expect(
+        events
+          .filter((event) => event.event === "assistant_text")
+          .some((event) => (JSON.parse(event.data) as { finalized?: boolean }).finalized === true),
+      ).toBe(true);
       expect(sendMessageRun).toHaveBeenCalledWith(
         "send_message",
         expect.objectContaining({

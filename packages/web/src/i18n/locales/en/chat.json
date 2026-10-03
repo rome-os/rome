@@ -350,6 +350,8 @@
     }
   },
   "stream": {
+    "recoveryUnavailable": "Connection lost. The reply status cannot be confirmed. Reconnecting automatically.",
+    "retryConnection": "Retry connection",
     "errors": {
       "createChatFallback": "Failed to create chat.",
       "createChatStatus": "Failed to create chat ({{status}}).",

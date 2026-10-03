@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { postSessionTurn } from "./chat-api";
+import { listSessionTurns, postSessionTurn } from "./chat-api";
 
 afterEach(() => {
   rs.unstubAllGlobals();
+});
+
+describe("listSessionTurns", () => {
+  it("treats a non-OK HTTP status as an inconclusive lookup", async () => {
+    rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 404 })));
+    await expect(listSessionTurns("session-1")).resolves.toBeNull();
+  });
 });
 
 describe("postSessionTurn", () => {

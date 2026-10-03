@@ -137,6 +137,10 @@ export interface ChatComposerProps {
   onStop?: () => void;
   // Error banner above the input.
   streamError?: string | ChatErrorNotice | null;
+  recoveryNotice?: {
+    message: string;
+    onRetry: () => void;
+  } | null;
   // When a suspendable action has handed off to a sub-agent, the composer shows
   // a banner naming who the guardian is now collaborating with. Turns route to
   // that sub-agent server-side. When that sub-agent has a pending submission
@@ -199,6 +203,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     isStreaming = false,
     onStop,
     streamError,
+    recoveryNotice,
     designingInteraction = null,
     disabledHint = null,
     boxClassName,
@@ -970,6 +975,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           provider={typeof streamError === "string" ? undefined : streamError.provider}
           reason={typeof streamError === "string" ? undefined : streamError.reason}
         />
+      )}
+      {recoveryNotice && (
+        <div
+          role="status"
+          className="mb-2 flex flex-wrap items-center gap-2 rounded-12 border border-border bg-surface px-3 py-2 text-ui text-muted-foreground"
+        >
+          <span className="min-w-0 flex-1">{recoveryNotice.message}</span>
+          <Button type="button" size="sm" variant="outline" onClick={recoveryNotice.onRetry}>
+            {t("stream.retryConnection")}
+          </Button>
+        </div>
       )}
       {/* Pre-send chip tray: tucked *behind* the box, peeking out the TOP (z-0
           under the box's z-10). Bottom corners are square and the overlap (-mb-8)
