@@ -265,6 +265,9 @@ describe("CodexAppServerProvider", () => {
     expect((startCall![1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",
     );
+    expect((startCall![1] as { config: Record<string, unknown> }).config).toMatchObject({
+      "tools.update_plan.enabled": true,
+    });
     expect(startCall![1]).toMatchObject({
       dynamicTools: expect.arrayContaining([
         expect.objectContaining({ name: "list_actions" }),
