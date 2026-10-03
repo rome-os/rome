@@ -1,8 +1,17 @@
 #!/usr/bin/env node
-// Boot-lifecycle smoke test for docker-entrypoint.sh, run against a built image.
+// Boot-lifecycle smoke test for docker-entrypoint.sh, run by hand against a
+// built image. No CI job runs it.
 //
 // Usage:
 //   node scripts/docker/entrypoint-smoke.mts <image>
+//
+// To test an entrypoint change without rebuilding the image, copy the working
+// tree's entrypoint into a published one:
+//   docker build -t rome-entrypoint-smoke -f - . <<'EOF'
+//   FROM zoolsher/rome:main
+//   COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+//   EOF
+//   node scripts/docker/entrypoint-smoke.mts rome-entrypoint-smoke
 //
 // Each check boots a fresh container with the same privileges docker-compose.yml
 // grants the rome service, and removes it afterwards. ROME_SMOKE_RUN_ARGS adds
