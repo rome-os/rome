@@ -84,7 +84,9 @@ for (const { width, height, hasTouch } of [
 for (const hasTouch of [false, true]) {
   test.describe(`explicit scale with ${hasTouch ? "touch" : "mouse"}`, () => {
     test.use({ viewport: { width: 390, height: 844 }, hasTouch });
-    test("overrides automatic selection and keeps that scale in a portal", async ({ page }) => {
+    test("resizes the whole gallery and its portals through the header selector", async ({
+      page,
+    }) => {
       await page.goto("/dev/gallery#platform-scale");
       const choices = page.getByRole("radiogroup", { name: "Preview scale" });
       const preview = page.locator("[data-scale-preview]");
@@ -99,6 +101,11 @@ for (const hasTouch of [false, true]) {
         const field = preview.getByRole("textbox", { name: "Scale field" });
         await expect(field).toHaveCSS("height", scale === "Large" ? "44px" : "32px");
         await expect(field).toHaveCSS("padding-left", scale === "Large" ? "16px" : "12px");
+        await expect(page.locator("html")).toHaveAttribute("data-ui-scale", scale.toLowerCase());
+        const calendarDay = page.locator('[data-slot="calendar"] button[data-day]').first();
+        await expect(calendarDay).toHaveCSS("width", scale === "Large" ? "44px" : "28px");
+        const switchControl = page.locator('[data-slot="switch"]').first();
+        await expect(switchControl).toHaveCSS("width", scale === "Large" ? "48px" : "32px");
         await preview.getByRole("button", { name: "Scale menu", exact: true }).click();
         const option = page.getByRole("menuitem", { name: "Scale option", exact: true });
         await expect(option).toBeVisible();
@@ -107,6 +114,18 @@ for (const hasTouch of [false, true]) {
         else expect(size).toBeLessThan(44);
         await page.keyboard.press("Escape");
       }
+      await choices.getByRole("radio", { name: "Auto", exact: true }).click();
+      await expect(button).toHaveCSS("height", hasTouch ? "44px" : "24px");
+      await choices.getByRole("radio", { name: "Large", exact: true }).click();
+      await page.evaluate(() => {
+        window.history.pushState({}, "", "/activity");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-ui-scale",
+        hasTouch ? "large" : "medium",
+      );
     });
   });
 }

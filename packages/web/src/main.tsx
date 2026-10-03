@@ -1,4 +1,4 @@
-import { UiScaleProvider } from "@rome-os/ui/ui-scale";
+import { DashboardScaleProvider } from "./hooks/use-preview-scale";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -32,15 +32,15 @@ export function renderApp() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <UiScaleProvider>
-          <ThemeProvider>
-            <GuardianTimestampProvider>
-              <BrowserRouter>
+        <BrowserRouter>
+          <DashboardScaleProvider>
+            <ThemeProvider>
+              <GuardianTimestampProvider>
                 <App />
-              </BrowserRouter>
-            </GuardianTimestampProvider>
-          </ThemeProvider>
-        </UiScaleProvider>
+              </GuardianTimestampProvider>
+            </ThemeProvider>
+          </DashboardScaleProvider>
+        </BrowserRouter>
       </QueryClientProvider>
     </StrictMode>,
   );
