@@ -1,0 +1,19 @@
+#!/bin/sh
+# The container stops whenever the daemon exits on its own, with the daemon's
+# exit code, so a crash reads as a failure to the restart policy and to whoever
+# inspects the stopped container. When s6 stopped the daemon, a shutdown is
+# already under way and has set its own exit code.
+if [ "$(s6-svstat -o wantedup .)" = "false" ]; then
+  exit 0
+fi
+
+# s6 passes 256 and the signal number when a signal killed the daemon, which
+# becomes the shell convention 128 + signal.
+if [ "$1" -eq 256 ]; then
+  code=$((128 + $2))
+else
+  code="$1"
+fi
+echo "Health-check daemon exited with status ${code}, stopping the container ..."
+echo "$code" >/run/s6-linux-init-container-results/exitcode
+exec /run/s6/basedir/bin/halt

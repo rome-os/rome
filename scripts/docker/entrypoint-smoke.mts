@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// Boot-lifecycle smoke test for docker-entrypoint.sh, run by hand against a
-// built image. No CI job runs it.
+// Boot-lifecycle smoke test for the container's s6 services and the one-time
+// setup in rome-init.sh, run by hand against a built image. No CI job runs it.
 //
 // Usage:
 //   node scripts/docker/entrypoint-smoke.mts <image>
 //
-// To test an entrypoint change without rebuilding the image, copy the working
-// tree's entrypoint into a published one:
+// To test a change to the services or setup scripts without rebuilding the
+// image, copy them into a published one. A service deleted from the working tree
+// stays in the copy, so rebuild the image to test a removal.
 //   docker build -t rome-entrypoint-smoke -f - . <<'EOF'
 //   FROM zoolsher/rome:main
-//   COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+//   COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+//   COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
+//   COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
+//   COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
 //   EOF
 //   node scripts/docker/entrypoint-smoke.mts rome-entrypoint-smoke
 //
@@ -20,8 +24,9 @@
 //
 // Covered: every long-running service listens after boot, `docker stop` finishes
 // inside the grace period with exit code 0, a restart reaches "Rome started"
-// again without re-syncing /app, and a crashed daemon stops the container with a
-// non-zero exit code so a restart policy sees a failure.
+// again without re-syncing /app, a killed service comes back without restarting
+// the daemon, and a crashed daemon stops the container with a non-zero exit code
+// so a restart policy sees a failure.
 
 import { execFileSync, spawnSync } from "node:child_process";
 
@@ -33,6 +38,7 @@ if (!image) {
 
 const BOOT_TIMEOUT_MS = Number(process.env.ROME_SMOKE_BOOT_TIMEOUT_S ?? "600") * 1000;
 const STOP_GRACE_S = 30;
+const RECOVERY_TIMEOUT_MS = 60_000;
 const EXTRA_RUN_ARGS = (process.env.ROME_SMOKE_RUN_ARGS ?? "").split(/\s+/).filter(Boolean);
 const STARTED_MARKER = '"message":"Rome started"';
 
@@ -113,11 +119,15 @@ async function waitForStarted(name: string, count: number): Promise<void> {
   fail(name, `no "Rome started" within ${BOOT_TIMEOUT_MS / 1000}s (boot ${count})`);
 }
 
-function assertServicesListening(name: string): void {
-  const closed = Object.entries(SERVICE_PORTS).filter(
+function closedServicePorts(name: string): [string, number][] {
+  return Object.entries(SERVICE_PORTS).filter(
     ([, port]) =>
       dockerStatus(["exec", name, "bash", "-c", `exec 3<>/dev/tcp/127.0.0.1/${port}`]) !== 0,
   );
+}
+
+function assertServicesListening(name: string): void {
+  const closed = closedServicePorts(name);
   if (closed.length > 0) {
     fail(
       name,
@@ -162,6 +172,27 @@ async function checkBootStopRestart(name: string): Promise<void> {
   console.log("  restart: every service listening, /app sync skipped");
 }
 
+async function checkKilledServicesRestart(name: string): Promise<void> {
+  startContainer(name);
+  await waitForStarted(name, 1);
+  // Killing the X server also takes down openbox and Chrome, which need it.
+  const processNames = ["sshd", "websockify", "caddy", "Xtigervnc"];
+  for (const processName of processNames) {
+    docker(["exec", name, "pkill", "-KILL", "-x", processName]);
+  }
+
+  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  while (closedServicePorts(name).length > 0 && Date.now() < deadline) {
+    await sleep(2000);
+  }
+  assertServicesListening(name);
+  if (!state(name).running) fail(name, "container stopped after its services were killed");
+  if (logs(name).split(STARTED_MARKER).length - 1 !== 1) {
+    fail(name, "the daemon restarted although only other services were killed");
+  }
+  console.log(`  killed ${processNames.join(", ")}: every service listening again`);
+}
+
 async function checkDaemonCrashFailsContainer(name: string): Promise<void> {
   startContainer(name);
   await waitForStarted(name, 1);
@@ -180,6 +211,7 @@ async function checkDaemonCrashFailsContainer(name: string): Promise<void> {
 
 const checks: [string, (name: string) => Promise<void>][] = [
   ["boot, stop, and restart", checkBootStopRestart],
+  ["killed services restart", checkKilledServicesRestart],
   ["daemon crash fails the container", checkDaemonCrashFailsContainer],
 ];
 
