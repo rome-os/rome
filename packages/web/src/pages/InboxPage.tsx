@@ -406,7 +406,7 @@ function BondLevelToggle({
   return (
     <FieldLabel
       className={cn(
-        "flex items-center gap-3 text-left",
+        "flex items-center gap-3 text-left min-h-[var(--control-min-h)]",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >

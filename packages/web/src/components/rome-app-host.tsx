@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { trackAppOpen } from "@/lib/analytics";
@@ -156,6 +157,7 @@ export function RomeAppHost({
   styleUrls: string[];
   bootstrap: RomeAppBootstrap;
 }) {
+  const scale = useUiScale();
   const rootRef = useRef<HTMLDivElement>(null);
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
@@ -217,5 +219,5 @@ export function RomeAppHost({
     );
   }
 
-  return <div ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
+  return <div data-ui-scale={scale} ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
 }

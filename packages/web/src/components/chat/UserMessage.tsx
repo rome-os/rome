@@ -78,7 +78,7 @@ export const UserMessage = memo(
         {/* Timestamp + copy under the bubble. Hover-revealed on pointer
             devices, always visible on touch. Precision tracks recency: time
             of day today, month + day this year, full date for older years. */}
-        <div className="mt-1 -mr-1 flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+        <div className="mt-1 -mr-[var(--control-action-offset-sm)] flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100">
           {timestamp ? <span className="text-aux text-muted-foreground">{timestamp}</span> : null}
           <CopyMessageButton text={text} />
         </div>
