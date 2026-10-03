@@ -122,6 +122,9 @@ function buildThreadConfigurationOverrides(
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
+    // Rome turns update_plan calls into plan updates. Codex 0.153.4 made the
+    // tool opt-in (openai/codex#41744).
+    "tools.update_plan.enabled": true,
   };
   if (params.externalMcpServers && Object.keys(params.externalMcpServers).length > 0) {
     config.mcp_servers = params.externalMcpServers;
