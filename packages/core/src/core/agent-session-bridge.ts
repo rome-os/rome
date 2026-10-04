@@ -180,6 +180,10 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           romeSessionId,
           romeSessionType,
           replyTo: req.replyTo,
+          // Bridge callers are action-worker agent runs (not an ordinary
+          // guardian message). Wait for an active SDK turn to settle before
+          // sending so a summon/API reply is not folded into it by accident.
+          initiatedBy: "system",
         });
         if (this.webchatRepo && boundRomeSessionId && req.platformMessageId) {
           await this.webchatRepo.assignConversationMessageTurn(
