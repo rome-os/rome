@@ -176,19 +176,27 @@ test.describe("on a landscape phone, past the md breakpoint", () => {
   });
 });
 
-test("the viewport tag forbids zoom and asks Android to resize the page for the keyboard", async ({
-  page,
-}) => {
+async function expectFocusKeepsScale(page: Page, field: ReturnType<Page["locator"]>) {
+  await field.tap();
+  await expect.poll(() => page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+}
+
+test("phone fields prevent focus zoom without disabling pinch zoom", async ({ page }) => {
   await openChat(page);
+  const composer = page.locator(`${COMPOSER} textarea`);
+  await expect(composer).toHaveCSS("font-size", "17px");
+  await expectFocusKeepsScale(page, composer);
+
+  // The dashboard scale applies the same 16px floor to standard fields, not
+  // just the chat composer. Use a production route rather than a dev specimen.
+  await page.goto("/people/latest");
+  const search = page.locator('input[data-slot="input"]').first();
+  await expect(search).toHaveCSS("font-size", "17px");
+  await expectFocusKeepsScale(page, search);
+
   const content = await page.locator('meta[name="viewport"]').getAttribute("content");
-  const keys = Object.fromEntries(
-    (content ?? "").split(",").map((pair) => pair.trim().split("=") as [string, string]),
-  );
-  // iOS zooms into a focused field whose text is under 16px unless the page
-  // caps its scale at 1, and this cap is also what forbids pinch-zoom.
-  expect(keys["maximum-scale"]).toBe("1.0");
-  expect(keys["user-scalable"]).toBe("no");
-  // Without it Chrome on Android slides the keyboard over the page, as iOS
-  // does, instead of resizing the page as the Android spec above reproduces.
-  expect(keys["interactive-widget"]).toBe("resizes-content");
+  // Keep browser and assistive-technology zoom available everywhere, including
+  // public pages. `interactive-widget` is independent of the zoom policy.
+  expect(content).not.toMatch(/user-scalable=no|maximum-scale=1/);
+  expect(content).toMatch(/interactive-widget=resizes-content/);
 });

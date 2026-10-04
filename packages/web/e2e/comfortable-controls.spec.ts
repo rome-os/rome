@@ -74,6 +74,9 @@ for (const { width, height, hasTouch } of [
           expect(box.height).toBe(28);
         }
       }
+      expect(await page.locator('meta[name="viewport"]').getAttribute("content")).not.toMatch(
+        /user-scalable=no|maximum-scale=1/,
+      );
     });
   });
 }
