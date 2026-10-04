@@ -1,64 +1,12 @@
-#!/bin/bash
+#!/command/with-contenv bash
+# shellcheck shell=bash
 set -e
 
-retry_command() {
-  local attempts="$1"
-  local delay_seconds="$2"
-  local description="$3"
-  shift 3
-
-  local attempt=1
-  while true; do
-    if "$@"; then
-      if [ "$attempt" -gt 1 ]; then
-        echo "${description} succeeded on attempt ${attempt}."
-      fi
-      return 0
-    fi
-
-    if [ "$attempt" -ge "$attempts" ]; then
-      echo "Warning: ${description} failed after ${attempts} attempts."
-      return 1
-    fi
-
-    echo "${description} failed (attempt ${attempt}/${attempts}), retrying in ${delay_seconds}s ..."
-    attempt=$((attempt + 1))
-    sleep "$delay_seconds"
-  done
-}
-
-tailscale_backend_state() {
-  local status_json
-  status_json="$(tailscale status --json 2>/dev/null)" || return 1
-  printf '%s' "$status_json" | node -e "
-    let data = '';
-    process.stdin.on('data', chunk => data += chunk);
-    process.stdin.on('end', () => {
-      try {
-        const parsed = JSON.parse(data);
-        if (typeof parsed.BackendState !== 'string') process.exit(1);
-        process.stdout.write(parsed.BackendState);
-      } catch {
-        process.exit(1);
-      }
-    });
-  " 2>/dev/null
-}
-
-tailscale_status_ready() {
-  tailscale_backend_state >/dev/null 2>&1
-}
-
-tailscale_backend_running() {
-  [ "$(tailscale_backend_state 2>/dev/null)" = "Running" ]
-}
-
-enable_tailscale_https_serve() {
-  tailscale serve --bg --https=443 "http://localhost:${INTERNAL_API_PORT:-4141}"
-}
-
 # =============================================================================
-# Rome — Docker entrypoint (usually runs as root, drops privileges via gosu)
+# Rome — one-time container setup, run as root by the s6 oneshot "init" before
+# any long-running service starts. Drops privileges via gosu where it acts for
+# the rome and user accounts. The services themselves are defined under
+# /etc/s6-overlay/s6-rc.d (scripts/docker/s6-rc.d in the repo).
 # =============================================================================
 
 ROME_DOCKER_USER_MODE="${ROME_DOCKER_USER_MODE:-multi}"
@@ -114,7 +62,7 @@ run_as_rome mkdir -p /home/rome/.rome
 chmod 750 /home/rome /home/rome/.rome
 
 # WeChat writes only into the runtime user's home and private session directory.
-# Prepare its canonical link while the entrypoint still owns /opt.
+# Prepare its canonical link while this script still runs as root.
 if [ "${WECHAT_USER_ENABLED:-false}" = "true" ]; then
   WECHAT_RUNTIME_UID="$(run_as_rome id -u)"
   WECHAT_RUNTIME_DIR="/run/user/$WECHAT_RUNTIME_UID"
@@ -153,168 +101,10 @@ fi
 if [ -n "$SSH_USER_PASSWORD" ]; then
   echo "user:$SSH_USER_PASSWORD" | chpasswd
   unset SSH_USER_PASSWORD
+  # Services read their environment from this directory, so removing the entry
+  # keeps the password out of the daemon and every other service.
+  rm -f /run/s6/container_environment/SSH_USER_PASSWORD
 fi
-
-cleanup_stale_x11_state() {
-  local display_num="$1"
-  local lock_file="/tmp/.X${display_num}-lock"
-  local socket_file="/tmp/.X11-unix/X${display_num}"
-  local owner_pid=""
-
-  if [ -f "$lock_file" ]; then
-    owner_pid="$(tr -cd '0-9' <"$lock_file" 2>/dev/null || true)"
-    if [ -n "$owner_pid" ] && kill -0 "$owner_pid" 2>/dev/null; then
-      REUSED_X_SERVER="1"
-      echo "Reusing existing X server on :${display_num} (pid ${owner_pid})."
-      return 0
-    fi
-
-    echo "Removing stale X lock ${lock_file}."
-    rm -f "$lock_file"
-  fi
-
-  if [ -S "$socket_file" ]; then
-    echo "Removing stale X socket ${socket_file}."
-    rm -f "$socket_file"
-  fi
-}
-
-tcp_port_listening() {
-  local port="$1"
-  (
-    exec 3<>"/dev/tcp/127.0.0.1/${port}"
-  ) >/dev/null 2>&1
-}
-
-strip_ipv6_brackets() {
-  local host="$1"
-  host="${host#[}"
-  host="${host%]}"
-  printf '%s' "$host"
-}
-
-format_url_host() {
-  local host
-  host="$(strip_ipv6_brackets "$1")"
-  if [[ "$host" == *:* ]]; then
-    printf '[%s]' "$host"
-    return
-  fi
-  printf '%s' "$host"
-}
-
-chrome_cdp_probe_host() {
-  local bind_address
-  bind_address="$(strip_ipv6_brackets "$1")"
-  case "$bind_address" in
-    "" | "0.0.0.0")
-      printf '127.0.0.1'
-      ;;
-    "::")
-      printf '::1'
-      ;;
-    *)
-      printf '%s' "$bind_address"
-      ;;
-  esac
-}
-
-chrome_cdp_ready() {
-  local bind_address="$1"
-  local port="$2"
-  local probe_host=""
-
-  probe_host="$(chrome_cdp_probe_host "$bind_address")"
-  curl -sf --max-time 1 "http://$(format_url_host "$probe_host"):${port}/json/version" >/dev/null 2>&1
-}
-
-process_env_contains() {
-  local process_name="$1"
-  local env_entry="$2"
-  local pid=""
-
-  for pid in $(pgrep -x "$process_name" 2>/dev/null || true); do
-    if tr '\0' '\n' <"/proc/${pid}/environ" 2>/dev/null | grep -Fxq "$env_entry"; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-process_cmdline_contains_all() {
-  local search_pattern="$1"
-  shift
-
-  local pid=""
-  local cmdline=""
-  local needle=""
-  local missing_match=""
-
-  for pid in $(pgrep -f "$search_pattern" 2>/dev/null || true); do
-    cmdline="$(tr '\0' '\n' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
-    [ -n "$cmdline" ] || continue
-
-    missing_match=""
-    for needle in "$@"; do
-      if ! printf '%s\n' "$cmdline" | grep -Fxq "$needle"; then
-        missing_match="1"
-        break
-      fi
-    done
-
-    if [ -z "$missing_match" ]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-wait_for_background_process() {
-  local pid="$1"
-  local name="$2"
-  local log_file="$3"
-  local retries=0
-
-  while [ "$retries" -lt 5 ]; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "Error: ${name} exited during startup."
-      tail -n 50 "$log_file" || true
-      exit 1
-    fi
-
-    retries=$((retries + 1))
-    sleep 1
-  done
-}
-
-wait_for_tcp_port() {
-  local port="$1"
-  local name="$2"
-  local pid="$3"
-  local log_file="$4"
-  local retries=0
-
-  while [ "$retries" -lt 30 ]; do
-    if tcp_port_listening "$port"; then
-      return 0
-    fi
-
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-      echo "Error: ${name} exited before listening on :${port}."
-      tail -n 50 "$log_file" || true
-      exit 1
-    fi
-
-    retries=$((retries + 1))
-    sleep 1
-  done
-
-  echo "Error: ${name} did not start listening on :${port} within 30 seconds."
-  tail -n 50 "$log_file" || true
-  exit 1
-}
 
 write_chrome_clipboard_policy() {
   local policy_file_name="rome-clipboard-policy.json"
@@ -367,146 +157,12 @@ PY
   done
 }
 
-# ─── Start virtual desktop stack ────────────────────────────────────────────
-DISPLAY_NUM="${DISPLAY#:}"
-SCREEN_SIZE="${ROME_SCREEN_SIZE:-1280x800x24}"
-if [[ "$SCREEN_SIZE" =~ ^([0-9]+x[0-9]+)(x([0-9]+))?$ ]]; then
-  SCREEN_GEOMETRY="${BASH_REMATCH[1]}"
-  SCREEN_DEPTH="${BASH_REMATCH[3]:-24}"
-else
-  echo "Error: ROME_SCREEN_SIZE must use WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH."
-  exit 1
-fi
-NOVNC_PORT="${ROME_NOVNC_PORT:-6080}"
-VNC_PORT="${ROME_VNC_PORT:-5900}"
-
-mkdir -p /tmp/.X11-unix
-chmod 1777 /tmp/.X11-unix
-
-REUSED_X_SERVER="0"
-cleanup_stale_x11_state "$DISPLAY_NUM"
-
-TIGERVNC_PID=""
-if [ "$REUSED_X_SERVER" = "1" ]; then
-  if ! process_cmdline_contains_all Xtigervnc "$DISPLAY" -rfbport "$VNC_PORT"; then
-    echo "Error: the existing X server on ${DISPLAY} is not Rome's TigerVNC process."
-    exit 1
-  fi
-  echo "Reusing TigerVNC on ${DISPLAY}, RFB :${VNC_PORT}."
-else
-  if tcp_port_listening "$VNC_PORT"; then
-    echo "Error: TCP port ${VNC_PORT} is already in use by another process."
-    exit 1
-  fi
-
-  echo "Starting TigerVNC on ${DISPLAY}, RFB :${VNC_PORT} ..."
-  run_as_rome Xtigervnc "$DISPLAY" \
-    -geometry "$SCREEN_GEOMETRY" \
-    -depth "$SCREEN_DEPTH" \
-    -SecurityTypes None \
-    -localhost yes \
-    -rfbport "$VNC_PORT" \
-    -AlwaysShared \
-    -AcceptCutText \
-    -SendCutText \
-    -ac >/tmp/xtigervnc.log 2>&1 &
-  TIGERVNC_PID=$!
-fi
-
-RETRIES=0
-while [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ] && [ "$RETRIES" -lt 30 ]; do
-  if [ -n "$TIGERVNC_PID" ] && ! kill -0 "$TIGERVNC_PID" 2>/dev/null; then
-    echo "Error: TigerVNC exited before creating display ${DISPLAY}."
-    tail -n 50 /tmp/xtigervnc.log || true
-    exit 1
-  fi
-  RETRIES=$((RETRIES + 1))
-  sleep 1
-done
-if [ ! -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]; then
-  echo "Error: TigerVNC did not start within 30 seconds."
-  tail -n 50 /tmp/xtigervnc.log || true
-  exit 1
-fi
-wait_for_tcp_port "$VNC_PORT" "TigerVNC" "$TIGERVNC_PID" /tmp/xtigervnc.log
-
-OPENBOX_PID=""
-if [ "$REUSED_X_SERVER" = "1" ] && process_env_contains openbox "DISPLAY=${DISPLAY}"; then
-  echo "Reusing existing Openbox on ${DISPLAY}."
-else
-  echo "Starting Openbox ..."
-  run_as_rome env DISPLAY="$DISPLAY" openbox >/tmp/openbox.log 2>&1 &
-  OPENBOX_PID=$!
-  wait_for_background_process "$OPENBOX_PID" "Openbox" /tmp/openbox.log
-fi
-
-NOVNC_PID=""
-if process_cmdline_contains_all websockify --web=/usr/share/novnc/ "127.0.0.1:${NOVNC_PORT}" "localhost:${VNC_PORT}"; then
-  echo "Reusing noVNC on :${NOVNC_PORT}."
-else
-  if tcp_port_listening "$NOVNC_PORT"; then
-    echo "Error: TCP port ${NOVNC_PORT} is already in use by another process."
-    exit 1
-  fi
-
-  echo "Starting noVNC on :${NOVNC_PORT} ..."
-  run_as_rome websockify --web=/usr/share/novnc/ "127.0.0.1:${NOVNC_PORT}" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
-  NOVNC_PID=$!
-fi
-wait_for_tcp_port "$NOVNC_PORT" "noVNC" "$NOVNC_PID" /tmp/novnc.log
-
-CHROME_WRAPPER_PID=""
+# ─── Prepare the browser ────────────────────────────────────────────────────
 if ! run_as_rome bash /opt/rome/scripts/docker/rome-start-opencli.sh; then
   echo "Warning: OpenCLI could not start. Browser connections are unavailable."
 fi
 if [ "${ROME_ENABLE_CHROME:-1}" != "0" ]; then
   write_chrome_clipboard_policy
-  CHROME_CDP_PORT="${ROME_CHROME_CDP_PORT:-9222}"
-  CHROME_INTERNAL_CDP_PORT="${ROME_CHROME_INTERNAL_CDP_PORT:-9223}"
-  CHROME_BIND_ADDRESS="${ROME_CHROME_BIND_ADDRESS:-0.0.0.0}"
-
-  if chrome_cdp_ready "$CHROME_BIND_ADDRESS" "$CHROME_CDP_PORT"; then
-    echo "Reusing existing Chrome CDP on ${CHROME_BIND_ADDRESS}:${CHROME_CDP_PORT}."
-  else
-    if tcp_port_listening "$CHROME_CDP_PORT"; then
-      echo "Error: Chrome CDP port ${CHROME_CDP_PORT} is already in use but no healthy CDP endpoint responded."
-      exit 1
-    fi
-    if tcp_port_listening "$CHROME_INTERNAL_CDP_PORT"; then
-      echo "Error: internal Chrome CDP port ${CHROME_INTERNAL_CDP_PORT} is already in use."
-      exit 1
-    fi
-
-    echo "Starting Chrome with CDP on :${CHROME_CDP_PORT} ..."
-    BROWSER_BINARY="${ROME_CHROME_BINARY:-}"
-    if [ -z "$BROWSER_BINARY" ] && [ -f /etc/rome-browser-binary ]; then
-      BROWSER_BINARY="$(cat /etc/rome-browser-binary)"
-    fi
-    run_as_rome env \
-      DISPLAY="$DISPLAY" \
-      ROME_CHROME_BINARY="${BROWSER_BINARY:-/usr/bin/google-chrome-stable}" \
-      ROME_CHROME_NAME="${ROME_CHROME_NAME:-Chrome}" \
-      ROME_CHROME_CDP_PORT="$CHROME_CDP_PORT" \
-      ROME_CHROME_INTERNAL_CDP_PORT="$CHROME_INTERNAL_CDP_PORT" \
-      ROME_CHROME_BIND_ADDRESS="$CHROME_BIND_ADDRESS" \
-      ROME_CHROME_STARTUP_WAIT="${ROME_CHROME_STARTUP_WAIT:-20}" \
-      ROME_CHROME_WINDOW_SIZE="${ROME_CHROME_WINDOW_SIZE:-1280,800}" \
-      ROME_CHROME_URL="${ROME_CHROME_URL:-about:blank}" \
-      ROME_CHROME_USER_DATA_DIR="${ROME_CHROME_USER_DATA_DIR:-/home/rome/.rome/chrome-profile}" \
-      ROME_CHROME_FULLSCREEN="${ROME_CHROME_FULLSCREEN:-0}" \
-      ROME_CHROME_DISABLE_SANDBOX="${ROME_CHROME_DISABLE_SANDBOX:-0}" \
-      ROME_ENABLE_CDP_AUTOMATION="${ROME_ENABLE_CDP_AUTOMATION:-false}" \
-      ROME_CHROME_ENABLE_STEALTH="${ROME_CHROME_ENABLE_STEALTH:-1}" \
-      ROME_CHROME_TIMEZONE="${ROME_CHROME_TIMEZONE:-America/Los_Angeles}" \
-      ROME_CHROME_LANG="${ROME_CHROME_LANG:-en-US}" \
-      ROME_CHROME_CLIPBOARD_DEFAULT_SETTING="${ROME_CHROME_CLIPBOARD_DEFAULT_SETTING:-}" \
-      ROME_CHROME_USER_AGENT="${ROME_CHROME_USER_AGENT:-}" \
-      ROME_CHROME_PROXY_URL="${ROME_CHROME_PROXY_URL:-}" \
-      /opt/rome/scripts/docker/rome-start-chrome-cdp.sh >/tmp/chrome-cdp.log 2>&1 &
-    CHROME_WRAPPER_PID=$!
-  fi
-else
-  echo "ROME_ENABLE_CHROME=0, skipping Chrome startup."
 fi
 
 # ─── Fix authorized_keys permissions if mounted ────────────────────────────
@@ -515,63 +171,6 @@ if [ -f /home/user/.ssh/authorized_keys ]; then
   chmod g-s,u=rwx,go= /home/user/.ssh
   chmod 600 /home/user/.ssh/authorized_keys
 fi
-
-# ─── Start SSH daemon ──────────────────────────────────────────────────────
-echo "Starting sshd ..."
-/usr/sbin/sshd -D -e &
-SSHD_PID=$!
-
-# ─── Start Tailscale daemon ─────────────────────────────────────────────
-echo "Starting tailscaled ..."
-tailscaled \
-  --state=/var/lib/tailscale/tailscaled.state \
-  --socket=/var/run/tailscale/tailscaled.sock \
-  --tun=userspace-networking &
-TAILSCALED_PID=$!
-
-# Tailscale is best-effort: the /api/tailnet endpoint retries HTTPS serve when
-# the user reaches the Security step. Its waits run in the background so a slow
-# or broken tailscaled never delays the daemon and the dashboard.
-configure_tailscale() {
-  local retries=0
-  local backend_state=""
-
-  echo "Waiting for tailscaled ..."
-  while [ ! -S /var/run/tailscale/tailscaled.sock ] && [ "$retries" -lt 30 ]; do
-    retries=$((retries + 1))
-    sleep 1
-  done
-  if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
-    echo "Warning: tailscaled did not start within 30 seconds."
-    return 0
-  fi
-  if ! retry_command 30 1 "tailscaled CLI readiness" tailscale_status_ready; then
-    echo "Warning: tailscaled socket exists, but the CLI never became ready."
-    return 0
-  fi
-  echo "tailscaled is ready."
-  # Allow the rome user to run tailscale commands without sudo once the daemon responds.
-  if retry_command 10 2 "tailscale operator setup" tailscale set --operator=rome; then
-    echo "tailscale operator set to rome."
-  fi
-
-  # If Tailscale is already authenticated, enable HTTPS serve now.
-  backend_state="$(tailscale_backend_state 2>/dev/null || true)"
-  if [ "$backend_state" = "Starting" ]; then
-    retry_command 10 2 "tailscale backend reaching Running state" tailscale_backend_running || true
-    backend_state="$(tailscale_backend_state 2>/dev/null || true)"
-  fi
-
-  if [ "$backend_state" = "Running" ]; then
-    if retry_command 10 3 "tailscale HTTPS serve setup" enable_tailscale_https_serve; then
-      echo "tailscale HTTPS serve enabled."
-    else
-      echo "Warning: tailscale serve failed (will be retried via /api/tailnet)"
-    fi
-  fi
-}
-configure_tailscale &
-TAILSCALE_SETUP_PID=$!
 
 # Clean up legacy app layout from older images before rsync tries to delete it.
 # Previous versions stored the web app at /app/web; current images use /app/packages/web.
@@ -702,12 +301,10 @@ case "$ROME_DOCKER_APP_CODE_MODE" in
   source)
     APP_RUNTIME_SENTINEL="/app/packages/core/src"
     CADDYFILE_GENERATOR_CMD='node --import tsx /app/scripts/generate-caddyfile.ts'
-    DAEMON_START_CMD='cd /app && node --import tsx /app/packages/core/src/daemon/index.ts'
     ;;
   compiled)
     APP_RUNTIME_SENTINEL="/app/packages/core/dist"
     CADDYFILE_GENERATOR_CMD='node /app/dist/scripts/generate-caddyfile.js'
-    DAEMON_START_CMD='cd /app && node /app/packages/core/dist/daemon/index.js'
     ;;
   *)
     echo "Unsupported ROME_DOCKER_APP_CODE_MODE: $ROME_DOCKER_APP_CODE_MODE" >&2
@@ -825,38 +422,3 @@ configure_shell_user user user /home/user
 # ─── Generate Caddyfile from DB settings ──────────────────────────────────
 echo "Generating Caddyfile from saved settings ..."
 run_as_rome sh -c "$CADDYFILE_GENERATOR_CMD"
-
-# ─── Start Caddy (public reverse proxy on port 8080) ─────────────────────
-# Public internet only reaches port 8080 (mapped from VM host).
-# Caddy whitelists specific paths and proxies them to Rome on port 4141.
-# Tailnet users reach Rome directly via tailscale serve (runs in-container).
-echo "Starting Caddy (public proxy on :8080) ..."
-caddy start --config /etc/caddy/Caddyfile
-
-# ─── Start health-check + capability daemon (owns backend + web lifecycle) ─
-echo "Starting health-check + capability daemon ..."
-run_as_rome sh -c "$DAEMON_START_CMD" &
-DAEMON_PID=$!
-
-# ─── Signal handling ──────────────────────────────────────────────────────
-cleanup() {
-  local exit_code="${1:-0}"
-  echo "Shutting down ..."
-  caddy stop 2>/dev/null || true
-  if [ -n "${CHROME_WRAPPER_PID:-}" ]; then
-    kill "$CHROME_WRAPPER_PID" 2>/dev/null || true
-    wait "$CHROME_WRAPPER_PID" 2>/dev/null || true
-  fi
-  kill "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" "$TAILSCALE_SETUP_PID" 2>/dev/null || true
-  wait "$NOVNC_PID" "$OPENBOX_PID" "$TIGERVNC_PID" "$DAEMON_PID" "$SSHD_PID" "$TAILSCALED_PID" "$TAILSCALE_SETUP_PID" 2>/dev/null || true
-  exit "$exit_code"
-}
-trap cleanup SIGTERM SIGINT
-
-# ─── Wait for the daemon to exit ──────────────────────────────────────────
-# The container exits with the daemon's status, so a crash reads as a failure
-# to the restart policy and to whoever inspects the stopped container.
-DAEMON_STATUS=0
-wait "$DAEMON_PID" 2>/dev/null || DAEMON_STATUS=$?
-echo "Health-check daemon exited with status ${DAEMON_STATUS}, shutting down ..."
-cleanup "$DAEMON_STATUS"

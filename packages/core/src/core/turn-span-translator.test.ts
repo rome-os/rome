@@ -5,7 +5,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { translateTurnSpans } from "./turn-span-translator.js";
 
 describe("translateTurnSpans tool failure", () => {
@@ -26,7 +26,7 @@ describe("translateTurnSpans tool failure", () => {
     exporter.reset();
   });
 
-  function toolSpanIsError(result: AgentMessage): unknown {
+  function toolSpanIsError(result: AgentEvent): unknown {
     const modelSpan = trace.getTracer("test").startSpan("model.turn");
     translateTurnSpans({
       blocks: [

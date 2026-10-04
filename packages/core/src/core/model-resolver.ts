@@ -13,6 +13,8 @@ import { createLogger } from "../logger.js";
 const log = createLogger("model-resolver");
 
 export const ENABLE_FABLE_SETTING_KEY = "enableFable";
+/** Per-provider overrides for the concrete model a capability tier resolves to. */
+export const TIER_MODEL_MAPPINGS_SETTING_KEY = "tierModelMappings";
 
 export type ModelResolutionErrorCode =
   | "model_provider_unavailable"
@@ -157,6 +159,31 @@ function claudeModel(tier: ModelTier, enableFable: boolean): string {
   return tier === "large" && enableFable ? FABLE_MODEL : CLAUDE_TIER_TO_MODEL[tier];
 }
 
+/**
+ * Settings can also be written outside the dashboard, so treat malformed or
+ * blank values as absent rather than letting an invalid setting break model
+ * resolution. Values are trimmed here as well as in the dashboard.
+ */
+function configuredTierModel(
+  value: unknown,
+  providerId: ProviderId,
+  tier: ModelTier,
+): string | null {
+  if (providerId === "mock" || !value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const providerMappings = (value as Record<string, unknown>)[providerId];
+  if (
+    !providerMappings ||
+    typeof providerMappings !== "object" ||
+    Array.isArray(providerMappings)
+  ) {
+    return null;
+  }
+  const model = (providerMappings as Record<string, unknown>)[tier];
+  return typeof model === "string" && model.trim() ? model.trim() : null;
+}
+
 function providerState(state: AIToolStateValue, providerId: ProviderId): ProviderState | null {
   if (providerId === "openai") return state.codex;
   if (providerId === "anthropic") return state.claude;
@@ -241,37 +268,50 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         request.tier === "large" &&
         state.claude.authMethod !== "stored-compatible" &&
         (await options.settingsRepo?.get<unknown>(ENABLE_FABLE_SETTING_KEY)) === true;
+      const tierModelMappings = await options.settingsRepo?.get<unknown>(
+        TIER_MODEL_MAPPINGS_SETTING_KEY,
+      );
+
+      const resolveTierModel = (provider: ModelProvider): string => {
+        const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
+        const model =
+          configured ??
+          (provider.id === "openai"
+            ? codexModel(request.tier, state.codex)
+            : provider.id === "anthropic"
+              ? claudeModel(request.tier, useFable)
+              : TEST_TIER_TO_MODEL[request.tier]);
+        // A configured model is intentional, but known Codex entitlement
+        // restrictions still fail with the same recoverable error as an exact
+        // model selection instead of reaching the provider with a bad request.
+        requireModelAccess(provider.id, model, state.codex);
+        return model;
+      };
 
       if (request.providerId) {
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
         requireUsableProvider(provider, state);
-        if (provider.id === "openai") {
-          return { modelProvider: provider, model: codexModel(request.tier, state.codex) };
-        }
-        if (provider.id === "anthropic") {
-          return { modelProvider: provider, model: claudeModel(request.tier, useFable) };
-        }
-        return { modelProvider: provider, model: TEST_TIER_TO_MODEL[request.tier] };
+        return { modelProvider: provider, model: resolveTierModel(provider) };
       }
 
       const claude = providers.get("anthropic");
       if (useFable && claude && providerUsable("anthropic", state.claude)) {
-        return { modelProvider: claude, model: FABLE_MODEL };
+        return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       const codex = providers.get("openai");
       if (codex && providerUsable("openai", state.codex)) {
-        return { modelProvider: codex, model: codexModel(request.tier, state.codex) };
+        return { modelProvider: codex, model: resolveTierModel(codex) };
       }
       if (claude && providerUsable("anthropic", state.claude)) {
-        return { modelProvider: claude, model: claudeModel(request.tier, useFable) };
+        return { modelProvider: claude, model: resolveTierModel(claude) };
       }
 
       // Test providers have no login/quota concept. Production only registers
       // Codex and Claude, but accepting a lone mock keeps the provider contract
       // easy to exercise without adding test-only branches to AgentSession.
       const mock = providers.get("mock");
-      if (mock) return { modelProvider: mock, model: TEST_TIER_TO_MODEL[request.tier] };
+      if (mock) return { modelProvider: mock, model: resolveTierModel(mock) };
 
       const connectedProviders: Array<{ id: AIToolProviderId; state: ProviderState }> = [];
       if (codex && state.codex.loggedIn !== false) {

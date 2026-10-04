@@ -1,4 +1,5 @@
 import { useCallback, useState, type ComponentType, type ReactNode } from "react";
+import { UiScaleScope, useOptionalUiScale } from "./ui-scale.js";
 import { resolvePortalContainer } from "./portal-container.js";
 
 // Internal to the kit, like `portal-container.ts` — deliberately absent from
@@ -44,6 +45,7 @@ export function AutoPortal({
   portal: PortalPrimitive;
   children: ReactNode;
 }) {
+  const scale = useOptionalUiScale();
   // Stays undefined outside a shadow root — the value Radix reads as "use
   // document.body", and no state update means no re-render there.
   const [container, setContainer] = useState<HTMLElement | undefined>(undefined);
@@ -56,7 +58,9 @@ export function AutoPortal({
   return (
     <>
       <span hidden ref={resolveFromMarker} />
-      <Portal container={container}>{children}</Portal>
+      <Portal container={container}>
+        {scale ? <UiScaleScope scale={scale}>{children}</UiScaleScope> : children}
+      </Portal>
     </>
   );
 }

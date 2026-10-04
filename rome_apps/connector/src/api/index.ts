@@ -1,5 +1,9 @@
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
-import { ComposioClient, isComposioNotFoundError } from "./composio-client.js";
+import {
+  ComposioClient,
+  isComposioAuthenticationError,
+  isComposioNotFoundError,
+} from "./composio-client.js";
 import {
   ensureComposioWebhookRegistered,
   RelayWebhookUnavailableError,
@@ -76,6 +80,14 @@ function rawHeader(headers: Record<string, string>, key: string): string | undef
 
 function jsonError(status: number, code: string, message: string): Response {
   return Response.json({ error: code, message }, { status });
+}
+
+function authenticationError(): Response {
+  return jsonError(
+    401,
+    "composio_unauthenticated",
+    "Composio authorization is no longer valid. Sign in again.",
+  );
 }
 
 function trimToUndef(value: unknown): string | undefined {
@@ -161,6 +173,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
       return jsonError(404, "not_found", `Unknown route: ${method} /${path}`);
     } catch (err) {
+      // The relay drops terminal 4xx responses. Webhook processing failures must
+      // stay retryable even when an upstream lookup rejects Rome's credential.
+      if (path !== "webhook" && isComposioAuthenticationError(err)) return authenticationError();
       this.ctx.log.error("composio api error", {
         method,
         path,
@@ -286,11 +301,8 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const client = new ComposioClient({ apiKey });
     const ping = await client.ping();
     if (!ping.ok) {
-      return jsonError(
-        ping.status === 401 || ping.status === 403 ? 401 : 502,
-        "composio_unauthenticated",
-        ping.message,
-      );
+      if (ping.status === 401) return authenticationError();
+      return jsonError(502, "composio_unavailable", ping.message);
     }
 
     // A new Composio project cannot use signing material from the previous one.
@@ -314,12 +326,12 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Re-register on every successful login rather than only when local state
     // is absent. The upsert repairs a new Composio project, an endpoint deleted
     // upstream, a changed relay mailbox address, or a rotated signing secret.
-    // A completed CLI login cannot be rolled back, so surface registration
-    // failure through status + the manual recovery button instead of reporting
-    // the whole sign-in as failed.
+    // Only credential rejection makes login fail. Other webhook failures leave
+    // tool access usable and can be retried through the registration button.
     try {
       await this.ensureWebhookRegistered(client);
     } catch (err) {
+      if (isComposioAuthenticationError(err)) return authenticationError();
       this.ctx.log.warn("login: webhook registration failed", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -389,6 +401,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   private webhookRegistrationError(err: unknown): Response {
+    if (isComposioAuthenticationError(err)) return authenticationError();
     const message = err instanceof Error ? err.message : String(err);
     return jsonError(
       err instanceof RelayWebhookUnavailableError ? 409 : 502,
@@ -434,6 +447,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     try {
       await this.ensureWebhookRegistered(client);
     } catch (err) {
+      if (isComposioAuthenticationError(err)) throw err;
       // A webhook is required to receive trigger events, but not to complete an
       // OAuth connection or use Composio tools. Keep the recovery attempt here
       // while allowing the connection flow to proceed; feed creation remains

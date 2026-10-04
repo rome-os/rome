@@ -61,7 +61,7 @@ so disconnection detection includes its heartbeat timeout and the next Rome chec
 An unreachable daemon makes browser status unknown and preserves the last seen time.
 Remote browsers can reach the daemon through a private SSH tunnel.
 
-- **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
+- **Production image**: `scripts/docker/rome-init.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
 - **Dev stack**: `scripts/dev-up.sh` (step 4c) installs every `/workspace/opencli-plugins/*/`

@@ -157,6 +157,20 @@ describe("SharedCodexAccountService", () => {
     service.close();
   });
 
+  it("uses auth.json when the credits default hides the guardian's OpenAI account", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
+    const service = createService(rpc);
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      loggedIn: true,
+      authMode: "chatgpt",
+      planType: "plus",
+      email: "file@example.com",
+    });
+    service.close();
+  });
+
   it("owns browser and device login attempts on the same RPC connection", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/login/start", {

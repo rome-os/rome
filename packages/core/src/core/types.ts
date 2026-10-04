@@ -1,5 +1,5 @@
 import type { MessageReplyReference, ThreadContext } from "@rome-os/app-runtime";
-import type { AgentConfig, AgentMessage } from "../types.js";
+import type { AgentConfig, AgentEvent } from "../types.js";
 
 export type { ThreadContext } from "@rome-os/app-runtime";
 
@@ -104,6 +104,6 @@ export const MODEL_MAP: Record<NonNullable<AgentConfig["tier"]>, string> = {
 };
 
 export interface AgentRunnerInterface {
-  run(params: RunParams): AsyncIterable<AgentMessage>;
-  runForked?(params: ForkRunParams): AsyncIterable<AgentMessage>;
+  run(params: RunParams): AsyncIterable<AgentEvent>;
+  runForked?(params: ForkRunParams): AsyncIterable<AgentEvent>;
 }

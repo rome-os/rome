@@ -1540,7 +1540,7 @@ export class WebChatRepository {
 
   async updateUserInput(
     sessionId: string,
-    status: import("@rome-os/app-runtime").InputStatusMessage,
+    status: import("@rome-os/app-runtime").InputStatusEvent,
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)

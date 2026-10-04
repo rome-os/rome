@@ -28,4 +28,4 @@ An app bundle in a Shadow DOM needs that import in its own stylesheet. The host 
 
 ## The kit ships style vocabulary, not values
 
-Tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).
+The platform sizing scales, tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).

@@ -2,15 +2,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
 
-const stylesheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
-);
+import { splitLargeScale } from "./test/scale-block.js";
+
+/** The sheet without its comments and without the large scale, which
+ * re-declares some of these tokens and is pinned in `phone-scale.test.ts`.
+ * This file checks the medium defaults. */
+const stylesheet = splitLargeScale(
+  readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
+).rest;
 
 function readRootHostDeclarations(): Map<string, string> {
   const declarations = new Map<string, string>();
 
-  for (const match of stylesheet.matchAll(/:root\s*,\s*:host\s*\{([^}]+)\}/g)) {
+  for (const match of stylesheet.matchAll(
+    /:root\s*,\s*:host\s*(?:,\s*\[data-ui-scale="medium"\])?\s*\{([^}]+)\}/g,
+  )) {
     for (const declaration of match[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
       declarations.set(declaration[1], declaration[2].trim().replace(/\s+/g, " "));
     }
@@ -116,6 +122,10 @@ describe("kit-owned constant tokens", () => {
           "--radius-md",
           "--radius-lg",
           "--radius-xl",
+          "--control-h-xs",
+          "--control-min-h",
+          "--control-filter-px",
+          "--control-px-center-xs",
           "--control-h-sm",
           "--control-h-md",
           "--control-h-lg",
@@ -159,6 +169,10 @@ describe("kit-owned constant tokens", () => {
       "--radius-md": "calc(var(--radius) - 2px)",
       "--radius-lg": "var(--radius)",
       "--radius-xl": "calc(var(--radius) + 4px)",
+      "--control-h-xs": "var(--rome-size-24)",
+      "--control-min-h": "0px",
+      "--control-filter-px": "var(--rome-space-3)",
+      "--control-px-center-xs": "var(--rome-space-2)",
       "--control-h-sm": "var(--rome-size-28)",
       "--control-h-md": "var(--rome-size-32)",
       "--control-h-lg": "var(--rome-size-44)",

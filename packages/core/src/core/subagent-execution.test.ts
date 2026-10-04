@@ -1,5 +1,6 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type {
@@ -7,7 +8,6 @@ import type {
   AgentSessionManager,
   AgentTurnInput,
   SendTurnOptions,
-  StreamAgentMessage,
 } from "./agent-session.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -36,7 +36,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
       const index = turnIndex++;
       const turnId = turnIds[index];
       calls.push({ input, options });
-      const events: AsyncIterable<StreamAgentMessage> = {
+      const events: AsyncIterable<StreamAgentEvent> = {
         async *[Symbol.asyncIterator]() {
           yield {
             type: "turn_start",

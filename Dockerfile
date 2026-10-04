@@ -179,6 +179,9 @@ ARG NPM_REGISTRY=""
 # google-chrome from dl.google.com. Lets amd64 builds on networks that cannot
 # reach Google use the same browser path as arm64 (which already ships chromium).
 ARG ROME_FORCE_CHROMIUM=""
+# s6-overlay is PID 1 and supervises the long-running services. See
+# scripts/docker/s6-rc.d.
+ARG S6_OVERLAY_VERSION=3.2.1.0
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -203,7 +206,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       BROWSER_PACKAGE="chromium"; \
       BROWSER_BINARY="/usr/bin/chromium"; \
     fi && \
-    apt-get install -y --no-install-recommends tini git git-lfs gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 tigervnc-standalone-server novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
+    apt-get install -y --no-install-recommends xz-utils git git-lfs gh jq ripgrep openssh-server gosu rsync iptables iproute2 sudo caddy sshfs fuse3 tigervnc-standalone-server novnc websockify openbox xterm socat python3 python3-websocket xclip unzip fonts-noto fonts-noto-cjk fonts-noto-color-emoji fonts-liberation "$BROWSER_PACKAGE" && \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
@@ -295,8 +298,26 @@ RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
     echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
     chmod 0440 /etc/sudoers.d/rome-tailscale /etc/sudoers.d/rome-hostfs
 
+# s6-overlay, with its published sha256 verified like the Notion CLI above.
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) s6_arch="x86_64" ;; \
+      arm64) s6_arch="aarch64" ;; \
+      *) echo "unsupported arch for s6-overlay" >&2; exit 1 ;; \
+    esac; \
+    tmp="$(mktemp -d)"; \
+    for archive in s6-overlay-noarch.tar.xz "s6-overlay-${s6_arch}.tar.xz"; do \
+      curl -fsSL --retry 5 --retry-delay 2 -o "$tmp/$archive" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/$archive"; \
+      curl -fsSL --retry 5 --retry-delay 2 -o "$tmp/$archive.sha256" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/$archive.sha256"; \
+      ( cd "$tmp" && sha256sum -c "$archive.sha256" ); \
+      tar -C / -Jxpf "$tmp/$archive"; \
+    done; \
+    rm -rf "$tmp"
+
 # Build into /opt/rome — the bind-mounted /app volume hides image contents at
-# runtime, so the entrypoint copies from /opt/rome to /app on first run.
+# runtime, so rome-init.sh copies from /opt/rome to /app on first run.
 WORKDIR /opt/rome
 
 # Copy entire built application with correct ownership (avoids expensive chown -R layer)
@@ -340,12 +361,15 @@ COPY Caddyfile /etc/caddy/Caddyfile
 COPY infra/chrome/opencli-policy.json /etc/opt/chrome/policies/managed/rome-opencli.json
 COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencli.json
 
-# Copy entrypoint
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Service definitions and the root-run scripts they call. They live outside
+# /opt/rome, which the rome user owns, so rome cannot change what root runs.
+COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
+COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
+COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
+COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
 
-# Agent-facing Discord REST CLI. /app is populated from /opt/rome by the
-# entrypoint; the package launcher always loads its compiled dist entrypoint.
+# Agent-facing Discord REST CLI. /app is populated from /opt/rome by
+# rome-init.sh; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
 RUN ln -sf /app/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node
 
@@ -426,4 +450,9 @@ ENV ROME_CHROME_CLIPBOARD_DEFAULT_SETTING=
 
 EXPOSE 8080 4141 9368 22 5900 6080 9222
 
-ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
+# Wait for the one-time setup however long it takes, and stop the container if
+# it or a service with a readiness check fails to come up.
+ENV S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
+ENV S6_BEHAVIOUR_IF_STAGE2_FAILS=2
+
+ENTRYPOINT ["/init"]

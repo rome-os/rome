@@ -17,7 +17,7 @@
 import type { CodexTurnError } from "./codex-usage-limit.js";
 
 /**
- * Machine-readable classification stamped onto the terminal `ErrorMessage.code`
+ * Machine-readable classification stamped onto the terminal `TurnErrorEvent.code`
  * when a codex turn fails because its credentials were revoked. Consumers can
  * use this instead of re-matching the human-readable text.
  */

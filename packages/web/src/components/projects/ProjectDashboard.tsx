@@ -41,6 +41,7 @@ const panelHeaderClassName = "flex shrink-0 items-end justify-between gap-3";
 const sectionTitleClassName = "m-0 text-section whitespace-nowrap text-foreground";
 const sectionSubtitleClassName = "mt-1 text-aux whitespace-nowrap text-subtle-foreground";
 const panelClassName = "flex h-[280px] flex-col rounded-12 border border-border bg-surface p-4";
+const CHAT_PAGE_SIZE = 20;
 
 const fmtTokens = (n: number): string => {
   if (n >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
@@ -147,11 +148,13 @@ function DashboardBody({
   const location = useLocation();
   const [usageMode, setUsageMode] = useState<"tokens" | "cost">("tokens");
   const [query, setQuery] = useState("");
+  const [visibleChatLimit, setVisibleChatLimit] = useState(CHAT_PAGE_SIZE);
   const [chats, setChats] = useState<ProjectDashboardChat[]>(dashboard.chats);
   const [chatPage, setChatPage] = useState<ProjectDashboardChatPage>(dashboard.chatPage);
   const [loadingMoreChats, setLoadingMoreChats] = useState(false);
   const [chatLoadError, setChatLoadError] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
   const chatSentinelRef = useRef<HTMLDivElement | null>(null);
   const dashboardPageKey = `${dashboard.logicalPath}:${dashboard.chatPage.nextCursor ?? ""}:${dashboard.chatPage.total}:${dashboard.chats.map((chat) => chat.id).join(",")}`;
   const currentProjectRef = useRef(dashboard.logicalPath);
@@ -165,9 +168,17 @@ function DashboardBody({
   currentDashboardPageKeyRef.current = dashboardPageKey;
   const stats = dashboard.stats;
 
+  const handleQueryChange = (nextQuery: string) => {
+    // Reset before shrinking the list so scroll clamping cannot expose the sentinel.
+    if (chatListRef.current) chatListRef.current.scrollTop = 0;
+    setQuery(nextQuery);
+    setVisibleChatLimit(CHAT_PAGE_SIZE);
+  };
+
   useEffect(() => {
     setChats(dashboard.chats);
     setChatPage(dashboard.chatPage);
+    setVisibleChatLimit(CHAT_PAGE_SIZE);
     setChatLoadError(false);
     setLoadingMoreChats(false);
   }, [dashboard]);
@@ -201,7 +212,7 @@ function DashboardBody({
     setChatLoadError(false);
     try {
       const params = new URLSearchParams({
-        limit: String(chatPage.limit),
+        limit: String(CHAT_PAGE_SIZE),
         path: projectPath,
       });
       if (chatPage.nextCursor) {
@@ -243,26 +254,6 @@ function DashboardBody({
     loadMoreChatsRef.current = loadMoreChats;
   }, [loadMoreChats]);
 
-  useEffect(() => {
-    const sentinel = chatSentinelRef.current;
-    if (!sentinel || !chatPage.hasMore || chatLoadError) return;
-
-    const root = findScrollableYAncestor(sentinel, {
-      boundary: bodyRef.current,
-      fallback: bodyRef.current,
-    });
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          void loadMoreChatsRef.current?.();
-        }
-      },
-      { root, rootMargin: "160px 0px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [chatLoadError, chatPage.hasMore]);
-
   const filteredChats = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return chats;
@@ -273,6 +264,53 @@ function DashboardBody({
         c.searchText.toLowerCase().includes(q),
     );
   }, [chats, query]);
+  const visibleChats = filteredChats.slice(0, visibleChatLimit);
+  const hasMoreCachedChats = filteredChats.length > visibleChatLimit;
+  const hasMoreChats = chatPage.hasMore || hasMoreCachedChats;
+  const fillingChatBatch = chatPage.hasMore && filteredChats.length < visibleChatLimit;
+
+  // A search batch may span several API pages. Fill it even if the first matches hide the sentinel.
+  useEffect(() => {
+    if (fillingChatBatch && !chatLoadError && !loadingMoreChats) {
+      void loadMoreChatsRef.current?.();
+    }
+  }, [fillingChatBatch, chatLoadError, loadingMoreChats]);
+
+  // Filtering can leave the sentinel visible after loading. Reobserve when the batch is ready.
+  useEffect(() => {
+    const sentinel = chatSentinelRef.current;
+    if (
+      !sentinel ||
+      !hasMoreChats ||
+      (chatLoadError && !hasMoreCachedChats) ||
+      loadingMoreChats ||
+      fillingChatBatch
+    ) {
+      return;
+    }
+
+    const root = findScrollableYAncestor(sentinel, {
+      boundary: bodyRef.current,
+      fallback: bodyRef.current,
+    });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleChatLimit(visibleChatLimit + CHAT_PAGE_SIZE);
+        }
+      },
+      { root, rootMargin: "160px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    chatLoadError,
+    hasMoreChats,
+    hasMoreCachedChats,
+    loadingMoreChats,
+    fillingChatBatch,
+    visibleChatLimit,
+  ]);
 
   return (
     <section className="@container/project-dashboard flex h-full min-h-0 flex-col bg-surface font-sans text-ui text-foreground antialiased [text-rendering:optimizeLegibility]">
@@ -379,7 +417,7 @@ function DashboardBody({
             <div>
               <h2 className={sectionTitleClassName}>Recent chats</h2>
               <div className={sectionSubtitleClassName}>
-                {filteredChats.length} of {chatPage.total} {chatPage.total === 1 ? "chat" : "chats"}
+                {visibleChats.length} of {chatPage.total} {chatPage.total === 1 ? "chat" : "chats"}
               </div>
             </div>
             <div className="flex h-[var(--control-h-md)] min-w-56 max-w-80 items-center gap-[var(--control-gap-sm)] rounded-8 border border-border bg-surface px-[var(--field-px-sm)] text-muted-foreground transition-[border-color,box-shadow] duration-150 ease-in-out motion-reduce:transition-none @max-[480px]/project-dashboard:min-w-40 focus-within:border-border-strong focus-within:ring-1 focus-within:ring-ring">
@@ -387,15 +425,15 @@ function DashboardBody({
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => handleQueryChange(e.target.value)}
                 placeholder="Search chats…"
-                className="min-w-0 flex-1 border-0 bg-transparent font-[inherit] text-aux text-foreground outline-none placeholder:text-muted-foreground"
+                className="min-w-0 flex-1 border-0 bg-transparent font-[inherit] text-ui text-foreground outline-none placeholder:text-muted-foreground"
               />
               {query && (
                 <button
                   type="button"
                   className="inline-flex size-5 items-center justify-center rounded-full border-0 bg-surface-muted p-0 text-muted-foreground transition-colors duration-150 ease-in-out motion-reduce:transition-none hover:bg-surface-hover hover:text-foreground"
-                  onClick={() => setQuery("")}
+                  onClick={() => handleQueryChange("")}
                   aria-label="Clear search"
                 >
                   <X size={12} strokeWidth={1.8} />
@@ -404,7 +442,7 @@ function DashboardBody({
             </div>
           </header>
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <div ref={chatListRef} className="flex min-h-0 flex-1 flex-col overflow-auto">
             {chats.length === 0 && !query && (
               <div className="mt-2 rounded-8 border border-dashed border-border px-4 py-6 text-center text-aux text-subtle-foreground">
                 <div className="mb-1 text-muted-foreground">No chats yet</div>
@@ -420,10 +458,10 @@ function DashboardBody({
                 No chats match &ldquo;{query}&rdquo;.
               </div>
             )}
-            {filteredChats.map((c) => (
+            {visibleChats.map((c) => (
               <ChatRow key={c.id} chat={c} q={query} search={chatSearch} />
             ))}
-            {chatPage.hasMore && (
+            {hasMoreChats && (
               <div
                 ref={chatSentinelRef}
                 className="flex min-h-11 items-center justify-center gap-2 border-t border-border text-aux text-subtle-foreground"
@@ -433,7 +471,7 @@ function DashboardBody({
                     <Spinner size="sm" label="Loading more chats" />
                     <span aria-hidden>Loading more chats</span>
                   </>
-                ) : chatLoadError ? (
+                ) : chatLoadError && !hasMoreCachedChats ? (
                   <button
                     type="button"
                     className="border-0 bg-transparent font-[inherit] text-brand hover:underline"

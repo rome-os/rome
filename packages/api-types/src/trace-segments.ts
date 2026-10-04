@@ -10,7 +10,7 @@ import type {
 } from "@rome-os/app-runtime";
 export type {
   AgentInputState,
-  InputStatusMessage,
+  InputStatusEvent,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,
@@ -33,7 +33,7 @@ interface TraceEventBase {
 
 export type RomeSessionRefDto = RomeSessionRef;
 
-export interface SessionInitEvent extends TraceEventBase {
+export interface TraceSessionInitEvent extends TraceEventBase {
   type: "session_init";
   sessionId: string;
   romeSession?: RomeSessionRefDto;
@@ -42,7 +42,7 @@ export interface SessionInitEvent extends TraceEventBase {
   projectPath?: string;
 }
 
-export interface TurnStartEvent extends TraceEventBase {
+export interface TraceTurnStartEvent extends TraceEventBase {
   type: "turn_start";
   turnId: string;
   sessionId: string;
@@ -50,7 +50,7 @@ export interface TurnStartEvent extends TraceEventBase {
 }
 
 /** Follows the terminal result or error and closes its turn. */
-export interface TurnEndEvent extends TraceEventBase {
+export interface TraceTurnEndEvent extends TraceEventBase {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
@@ -101,7 +101,7 @@ export interface ToolResultBlock extends TraceEventBase {
   isError?: boolean;
 }
 
-export interface SubagentStartEvent extends TraceEventBase {
+export interface TraceSubagentStartEvent extends TraceEventBase {
   type: "subagent_start";
   toolUseId: string;
   agentName: string;
@@ -111,7 +111,7 @@ export interface SubagentStartEvent extends TraceEventBase {
   startedAt?: string;
 }
 
-export type SubagentResultEvent =
+export type TraceSubagentResultEvent =
   | (TraceEventBase & {
       type: "subagent_result";
       toolUseId: string;
@@ -177,7 +177,7 @@ export interface TraceAccounting {
   usageByModel?: TraceModelUsage[];
 }
 
-export interface ResultEvent extends TraceEventBase {
+export interface TraceResultEvent extends TraceEventBase {
   type: "result";
   content: string;
   structuredOutput?: unknown;
@@ -194,30 +194,30 @@ export interface TraceErrorEvent extends TraceEventBase {
   reason?: AgentErrorReason;
 }
 
-export interface StructuredOutputEvent extends TraceEventBase {
+export interface TraceStructuredOutputEvent extends TraceEventBase {
   type: "structured_output";
   payload: unknown;
 }
 
-export interface PlanUpdateEvent extends TraceEventBase {
+export interface TracePlanUpdateEvent extends TraceEventBase {
   type: "plan_update";
   plan: AgentPlan;
 }
 
 export type TraceEventDto =
-  | SessionInitEvent
-  | TurnStartEvent
-  | TurnEndEvent
+  | TraceSessionInitEvent
+  | TraceTurnStartEvent
+  | TraceTurnEndEvent
   | TextBlock
   | ThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
-  | SubagentStartEvent
-  | SubagentResultEvent
-  | ResultEvent
+  | TraceSubagentStartEvent
+  | TraceSubagentResultEvent
+  | TraceResultEvent
   | TraceErrorEvent
-  | StructuredOutputEvent
-  | PlanUpdateEvent;
+  | TraceStructuredOutputEvent
+  | TracePlanUpdateEvent;
 
 export interface TraceRunSegment {
   kind: "run";
@@ -269,7 +269,7 @@ export interface TraceSummary {
   totalDurationMs?: number;
   /** Authoritative outcome from the latest `turn_end` block. Absent while the
    *  turn is still running and on legacy traces without lifecycle brackets. */
-  turnStatus?: TurnEndEvent["status"];
+  turnStatus?: TraceTurnEndEvent["status"];
   /** Per-app invocation totals for the icon-strip tooltip. Keyed by app.id. */
   invocationCounts: Record<string, number>;
   /** True when the turn was interrupted by the user via Stop. */

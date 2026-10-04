@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { getThemeDefinitions } from "./theme";
+import { splitLargeScale } from "../../../ui/src/test/scale-block.js";
 import type { ThemeDefinition } from "./themes";
 
 const repoRoot = new URL("../../../../", import.meta.url);
@@ -102,9 +103,13 @@ function designFrontmatter(): Frontmatter {
   return parseFrontmatterBlock(match[1]) as unknown as Frontmatter;
 }
 
-/** `--name: value;` declarations from `styles.css`, last one wins. */
+/**
+ * `--name: value;` declarations from `styles.css`, last one wins, without the
+ * large scale: the frontmatter records the medium defaults, and the large
+ * scale is a table in the prose.
+ */
 function cssCustomProperties(): Map<string, string> {
-  const css = read("packages/ui/src/styles.css");
+  const css = splitLargeScale(read("packages/ui/src/styles.css")).rest;
   const out = new Map<string, string>();
   for (const m of css.matchAll(/(--[a-z0-9-]+):\s*([^;}]+);/gi)) {
     out.set(m[1], m[2].replace(/\s+/g, " ").trim());

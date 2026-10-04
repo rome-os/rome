@@ -5,7 +5,7 @@ import type {
   ModelSessionForkOpenParams,
   ModelSessionParams,
 } from "./agent-runner.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 
 // Capture the transport so tests can drive server→client notifications and
 // assert the requests the provider issues.
@@ -134,13 +134,13 @@ function usage(
 }
 
 // Drain session.events until a terminal `result`/`error` arrives.
-async function collectUntilTerminal(session: ModelSession): Promise<AgentMessage[]> {
-  const out: AgentMessage[] = [];
+async function collectUntilTerminal(session: ModelSession): Promise<AgentEvent[]> {
+  const out: AgentEvent[] = [];
   for await (const msg of session.events) {
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
-    out.push(stripped as unknown as AgentMessage);
+    out.push(stripped as unknown as AgentEvent);
     if (msg.type === "result" || msg.type === "error") break;
   }
   return out;
