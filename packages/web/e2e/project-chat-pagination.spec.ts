@@ -155,6 +155,34 @@ test("a failed page waits for retry before filling the search batch", async ({ c
 });
 
 for (const action of ["clear", "change"] as const) {
+  test(`${action} search resets a scrolled list to its first batch`, async ({ context, page }) => {
+    const requests = await mockDashboard(context, buildChats(80));
+
+    await page.goto("/projects");
+    await expect(page.getByText("20 of 80 chats")).toBeVisible();
+    await page.getByPlaceholder("Search chats…").fill("chat");
+    const sentinel = page.getByText("Scroll for more chats");
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("40 of 80 chats")).toBeVisible();
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("60 of 80 chats")).toBeVisible();
+    const firstChat = page.getByRole("link", { name: /^Chat 0 / });
+    await expect(firstChat).not.toBeInViewport();
+
+    if (action === "clear") {
+      await page.getByRole("button", { name: "Clear search" }).click();
+    } else {
+      await page.getByPlaceholder("Search chats…").fill("conversation");
+    }
+
+    await expect(firstChat).toBeInViewport();
+    await expect(page.getByText("20 of 80 chats")).toBeVisible();
+    expect(requests.map((url) => url.searchParams.get("cursor"))).toEqual(["20", "40"]);
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("40 of 80 chats")).toBeVisible();
+    expect(requests).toHaveLength(2);
+  });
+
   test(`${action} search keeps cached chats pageable after a later page fails`, async ({
     context,
     page,
@@ -181,12 +209,12 @@ for (const action of ["clear", "change"] as const) {
     const retry = page.getByRole("button", { name: "Retry loading chats" });
     await expect(retry).toBeVisible();
 
-    await page.getByRole("link", { name: /^Chat 0 / }).scrollIntoViewIfNeeded();
     if (action === "clear") {
       await page.getByRole("button", { name: "Clear search" }).click();
     } else {
       await page.getByPlaceholder("Search chats…").fill("conversation");
     }
+    await expect(page.getByRole("link", { name: /^Chat 0 / })).toBeInViewport();
     await expect(page.getByText("20 of 80 chats")).toBeVisible();
     await expect(retry).toHaveCount(0);
     await sentinel.scrollIntoViewIfNeeded();

@@ -154,6 +154,7 @@ function DashboardBody({
   const [loadingMoreChats, setLoadingMoreChats] = useState(false);
   const [chatLoadError, setChatLoadError] = useState(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
   const chatSentinelRef = useRef<HTMLDivElement | null>(null);
   const dashboardPageKey = `${dashboard.logicalPath}:${dashboard.chatPage.nextCursor ?? ""}:${dashboard.chatPage.total}:${dashboard.chats.map((chat) => chat.id).join(",")}`;
   const currentProjectRef = useRef(dashboard.logicalPath);
@@ -166,6 +167,13 @@ function DashboardBody({
   currentProjectRef.current = dashboard.logicalPath;
   currentDashboardPageKeyRef.current = dashboardPageKey;
   const stats = dashboard.stats;
+
+  const handleQueryChange = (nextQuery: string) => {
+    // Reset before shrinking the list so scroll clamping cannot expose the sentinel.
+    if (chatListRef.current) chatListRef.current.scrollTop = 0;
+    setQuery(nextQuery);
+    setVisibleChatLimit(CHAT_PAGE_SIZE);
+  };
 
   useEffect(() => {
     setChats(dashboard.chats);
@@ -417,10 +425,7 @@ function DashboardBody({
               <input
                 type="text"
                 value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setVisibleChatLimit(CHAT_PAGE_SIZE);
-                }}
+                onChange={(e) => handleQueryChange(e.target.value)}
                 placeholder="Search chats…"
                 className="min-w-0 flex-1 border-0 bg-transparent font-[inherit] text-ui text-foreground outline-none placeholder:text-muted-foreground"
               />
@@ -428,10 +433,7 @@ function DashboardBody({
                 <button
                   type="button"
                   className="inline-flex size-5 items-center justify-center rounded-full border-0 bg-surface-muted p-0 text-muted-foreground transition-colors duration-150 ease-in-out motion-reduce:transition-none hover:bg-surface-hover hover:text-foreground"
-                  onClick={() => {
-                    setQuery("");
-                    setVisibleChatLimit(CHAT_PAGE_SIZE);
-                  }}
+                  onClick={() => handleQueryChange("")}
                   aria-label="Clear search"
                 >
                   <X size={12} strokeWidth={1.8} />
@@ -440,7 +442,7 @@ function DashboardBody({
             </div>
           </header>
 
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <div ref={chatListRef} className="flex min-h-0 flex-1 flex-col overflow-auto">
             {chats.length === 0 && !query && (
               <div className="mt-2 rounded-8 border border-dashed border-border px-4 py-6 text-center text-aux text-subtle-foreground">
                 <div className="mb-1 text-muted-foreground">No chats yet</div>
