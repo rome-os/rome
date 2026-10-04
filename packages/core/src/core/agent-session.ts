@@ -1059,7 +1059,7 @@ async function openSession(
   const sessionExecRefs: TurnExecRefs = {
     sessionId,
     getRomeSessionId: () => impl.currentTurnRomeSessionIdRef,
-    getTurnId: () => impl.currentTurnId,
+    getTurnId: () => impl.currentExecutionTurnIdRef,
     getThreadContext: () => impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
     // Action results that hand back UI (pending_interaction, handoff,
@@ -2033,7 +2033,23 @@ class AgentSessionImpl implements AgentSession {
   /** Current per-turn OTel context, exposed for closures that need to bind
    * SDK-async callbacks back into the agent span. */
   get currentTurnCtxRef(): Context | null {
-    return this.currentSink?.turnCtx ?? null;
+    return this.currentExecutionSink?.turnCtx ?? null;
+  }
+
+  /**
+   * SDK turn boundaries, not the most recently accepted input, own callbacks
+   * that the provider invokes while it is generating. `currentSink` remains a
+   * fallback for providers without model-turn events.
+   */
+  private get currentExecutionSink(): TurnSink | null {
+    const sdkSink = this.activeSdkTurnId
+      ? this.sdkTurns.get(this.activeSdkTurnId)?.sink
+      : undefined;
+    return sdkSink ?? this.currentSink;
+  }
+
+  get currentExecutionTurnIdRef(): string | undefined {
+    return this.currentExecutionSink?.turnId;
   }
 
   get providerId(): ProviderId {
@@ -2041,15 +2057,15 @@ class AgentSessionImpl implements AgentSession {
   }
 
   get currentTurnThreadContextRef(): ThreadContext | undefined {
-    return this.currentSink?.threadContext ?? this.threadContext;
+    return this.currentExecutionSink?.threadContext ?? this.threadContext;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
-    return this.currentSink?.sharedContext ?? this.sharedContext;
+    return this.currentExecutionSink?.sharedContext ?? this.sharedContext;
   }
 
   get currentTurnRomeSessionIdRef(): string {
-    return this.currentSink?.romeSessionId ?? this.sessionId;
+    return this.currentExecutionSink?.romeSessionId ?? this.sessionId;
   }
 
   /**
@@ -2158,22 +2174,32 @@ class AgentSessionImpl implements AgentSession {
         const activeTurn = this.activeSdkTurnId
           ? this.sdkTurns.get(this.activeSdkTurnId)
           : undefined;
+        // Input acknowledgement is keyed by its SDK message id. It can arrive
+        // after model_turn_start([]) but before model_turn_answers(), so it
+        // must not depend on a visible stream sink having been opened yet.
+        if (msg.type === "input_status") {
+          const sink = this.waitingCallers.get(msg.inputId) ?? activeTurn?.sink ?? this.currentSink;
+          if (!sink) {
+            log.warn("agent session received input status with no caller", {
+              inputId: msg.inputId,
+              sessionId: this.sessionId,
+            });
+            continue;
+          }
+          await this.inputs.observe(msg, sink.turnId);
+          this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
+          continue;
+        }
         // A turn the SDK starts itself has no waiting caller. It still owns a
         // visible session turn, rather than being dropped into the last caller.
         const sink = activeTurn
-          ? (activeTurn.sink ??
-            (msg.type !== "input_status" ? this.openSdkTurnSink(this.activeSdkTurnId!) : undefined))
+          ? (activeTurn.sink ?? this.openSdkTurnSink(this.activeSdkTurnId!))
           : this.currentSink;
         if (!sink) {
           log.warn("agent session received event with no active turn", {
             type: msg.type,
             sessionId: this.sessionId,
           });
-          continue;
-        }
-        if (msg.type === "input_status") {
-          await this.inputs.observe(msg, sink.turnId);
-          this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
           continue;
         }
         // Time-to-first-token: the first *text* event of the turn (a text_delta
@@ -2300,6 +2326,15 @@ class AgentSessionImpl implements AgentSession {
       // does not expose isClosed. Fail those callers rather than hanging them.
       if (session.isClosed || waiting.size > 0) {
         this.modelSessionAvailable = false;
+        // A dead provider cannot produce model_turn_end. Drop its SDK state
+        // before failing sinks so closeSink can make this session idle and a
+        // later caller can reopen the backend rather than waiting forever.
+        const deadSinks = new Set<TurnSink>(waiting);
+        for (const turn of this.sdkTurns.values()) {
+          if (turn.sink) deadSinks.add(turn.sink);
+        }
+        this.sdkTurns.clear();
+        this.activeSdkTurnId = undefined;
         if (waiting.size > 0) {
           const error =
             streamError === undefined
@@ -2310,7 +2345,7 @@ class AgentSessionImpl implements AgentSession {
             provider: session.providerId,
             waitingCallers: waiting.size,
           });
-          for (const sink of waiting) {
+          for (const sink of deadSinks) {
             if (!sink.done) this.failTurn(sink, error);
           }
         } else if (this.currentSink && !this.currentSink.done) {
@@ -2388,9 +2423,11 @@ class AgentSessionImpl implements AgentSession {
           const sink = this.waitingCallers.get(id);
           if (sink) sinks.add(sink);
         }
-        // An SDK-started background turn answers []. It gets its own visible
-        // Rome turn, but never completes a waiting caller (#510).
-        if (sinks.size === 0 && turn.sink) sinks.add(turn.sink);
+        // The SDK owns one stable visible stream. A later added caller gets
+        // the terminal, but never replaces or suppresses that owner — in
+        // particular a background turn must finish its lifecycle and surface
+        // its captured submit_output even after it names a caller.
+        if (turn.sink) sinks.add(turn.sink);
         for (const sink of sinks) {
           if (!sink.done) await this.finishSinkFromTerminal(session, sink, turn.terminal);
         }
@@ -2401,9 +2438,10 @@ class AgentSessionImpl implements AgentSession {
 
   private bindSdkTurnSink(turnId: string, sink: TurnSink): void {
     const turn = this.sdkTurns.get(turnId);
-    if (turn) turn.sink = sink;
-    this.currentSink = sink;
-    this.currentTurnId = sink.turnId;
+    if (!turn) return;
+    if (!turn.sink) turn.sink = sink;
+    this.currentSink = turn.sink;
+    this.currentTurnId = turn.sink.turnId;
   }
 
   private openSdkTurnSink(turnId: string, existing?: SdkTurnState): TurnSink {
@@ -3205,7 +3243,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   addSubagentExecution(toolUseId: string, execution: SubagentExecution): void {
-    const sink = this.currentSink;
+    const sink = this.currentExecutionSink;
     if (!sink) throw new Error("Cannot attach a subagent without an active Parent turn");
     sink.subagentExecutions.set(toolUseId, {
       parent: { sessionId: this.sessionId, turnId: sink.turnId, toolUseId },
@@ -3348,15 +3386,16 @@ class AgentSessionImpl implements AgentSession {
     // until then. Caller can already read `turnId` synchronously. The callback
     // swallows its own failures, so `runExclusive` never rejects here — the
     // fire-and-forget promise is intentionally discarded.
-    void (async () => {
-      // Guardian follow-ups may join a live SDK turn. System/API/summon callers
-      // instead wait for idle so their ordinary reply remains their own.
-      if (options?.initiatedBy === "system" || options?.lifecycleParent) {
-        await this.waitForIdleBeforeSending();
-      }
-      await this.turnMutex.runExclusive(
+    void this.turnMutex
+      .runExclusive(
         async () => {
           try {
+            // Guardian follow-ups may join a live SDK turn. System/API/summon
+            // callers claim their idle boundary while serialized: a second
+            // caller queued behind the first must recheck after acceptance.
+            if (options?.initiatedBy === "system" || options?.lifecycleParent) {
+              await this.waitForIdleBeforeSending();
+            }
             await context.with(turnCtx, () => this.runOneTurn(turnId, turnInput, sink, turnCtx));
           } catch (err) {
             // Safety net: if runOneTurn threw before reaching its own finally
@@ -3379,8 +3418,7 @@ class AgentSessionImpl implements AgentSession {
           }
         },
         input.inputId ? 1 : 0,
-      );
-    })()
+      )
       .catch((err) => {
         if (!sink.done) {
           this.failTurn(
@@ -3398,7 +3436,7 @@ class AgentSessionImpl implements AgentSession {
       interrupt: async (reason) => {
         if (sink.done) return;
         sink.lifecycleInterrupted = true;
-        if (this.currentSink === sink) await this.interrupt(reason);
+        await this.interrupt(reason, sink.turnId);
       },
       turnContext: turnCtx,
     };
@@ -3743,7 +3781,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   async interrupt(reason?: string, expectedTurnId?: string): Promise<void> {
-    const sink = this.currentSink;
+    const sink = this.currentExecutionSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
     // Cancel the provider before awaiting child cleanup. A slow child must
@@ -3766,7 +3804,7 @@ class AgentSessionImpl implements AgentSession {
         agentName: this.key.agentName,
         reason,
       });
-      const currentSink = this.currentSink;
+      const currentSink = this.currentExecutionSink;
       if (currentSink) {
         await Promise.allSettled(
           [...currentSink.subagentExecutions.values()].map(({ execution }) =>
