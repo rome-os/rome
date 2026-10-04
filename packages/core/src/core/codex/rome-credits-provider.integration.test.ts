@@ -24,11 +24,11 @@ async function filesContaining(dir: string, needle: string): Promise<string[]> {
 }
 
 /**
- * Smoke the bundled Codex binary: one shared app-server uses Rome credits as
- * its default and a resumed thread keeps following that process default.
+ * Smoke the bundled Codex binary: after a payer replacement, a resumed thread
+ * follows the replacement process default.
  */
 describe("Rome credits provider on the bundled Codex app-server", () => {
-  it("routes a thread to the gateway after an idle payer restart", async () => {
+  it("routes a thread to the gateway after a payer replacement", async () => {
     const home = await mkdtemp(join(tmpdir(), "rome-codex-credits-"));
     const authorizations: string[] = [];
     const gateway = createServer((request, response) => {

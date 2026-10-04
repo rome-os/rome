@@ -20,7 +20,6 @@ import type {
   CodexAppServerExitListener,
   CodexAppServerManager,
   CodexAppServerNotificationListener,
-  CodexAppServerReplacementListener,
 } from "./app-server-manager.js";
 
 const log = createLogger("codex-account-service");
@@ -99,7 +98,6 @@ interface CodexAccountRpc {
   request<T>(method: string, params?: unknown): Promise<T>;
   onNotification(method: string, listener: CodexAppServerNotificationListener): () => void;
   onExit(listener: CodexAppServerExitListener): () => void;
-  onReplacement?(listener: CodexAppServerReplacementListener): () => void;
 }
 
 export interface SharedCodexAccountServiceOptions {
@@ -170,13 +168,6 @@ export class SharedCodexAccountService implements CodexAccountService {
         this.handleManagerExit(error);
       }),
     ];
-    if (manager.onReplacement) {
-      this.unsubscribers.push(
-        manager.onReplacement((error) => {
-          this.handleManagerExit(error);
-        }),
-      );
-    }
   }
 
   async getStatus(): Promise<AIToolStatusProbeResult> {
@@ -203,10 +194,8 @@ export class SharedCodexAccountService implements CodexAccountService {
       response.account && typeof response.account === "object"
         ? (response.account as Record<string, unknown>)
         : null;
-    // A custom default provider (Rome credits) has no OpenAI account of its
-    // own, so Codex intentionally hides the guardian's saved login here. The
-    // auth file remains the source of truth for that login and lets the payer
-    // resolver switch back to it later.
+    // A custom default provider has no OpenAI account of its own. Preserve the
+    // saved guardian login so the payer resolver can select it again later.
     if (!account && !response.requiresOpenaiAuth) return statusFromFile(fileStatus);
     if (!account) return { loggedIn: false, authMode: fileStatus.authMode ?? null };
     if (account.type === "apiKey") {

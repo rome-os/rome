@@ -3,8 +3,8 @@
 // Rome credits are an account-wide allowance Rome Cloud serves through its
 // Responses-compatible inference gateway at `<Rome Cloud origin>/v1`. The one
 // shared app-server knows two providers: its default (the guardian's own
-// OpenAI login) and `rome_credits`. Rome changes the default only by restarting
-// the app-server while no turn is running, so each Codex process has one payer.
+// OpenAI login) and `rome_credits`. Rome restarts the app-server immediately
+// when the payer changes, so each Codex process has one payer.
 
 /** Codex provider id for Rome credits. */
 export const ROME_CREDITS_MODEL_PROVIDER_ID = "rome_credits";

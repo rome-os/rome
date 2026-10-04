@@ -1,12 +1,13 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
+import { SharedCodexAccountService } from "./account-service.js";
 import {
   CodexAppServerManager,
   type CodexAppServerConnection,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
 import { Method, type ThreadStartParams } from "./app-server-protocol.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 
 interface FakeRequest {
   method: string;
@@ -22,7 +23,6 @@ class FakeConnection implements CodexAppServerConnection {
   constructor(
     readonly options: AppServerClientOptions,
     private readonly nextThreadId: () => string,
-    private readonly beforeRequest?: (method: string, params: unknown) => void | Promise<void>,
   ) {}
 
   start(): void {
@@ -31,7 +31,6 @@ class FakeConnection implements CodexAppServerConnection {
 
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
-    await this.beforeRequest?.(method, params);
     if (method === "thread/start") {
       return {
         thread: {
@@ -46,6 +45,13 @@ class FakeConnection implements CodexAppServerConnection {
       };
     }
     if (method === "thread/unsubscribe") return { status: "unsubscribed" };
+    if (method === "account/login/start") {
+      return {
+        loginId: "device-credits",
+        userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.openai.com/codex/device",
+      };
+    }
     return {};
   }
 
@@ -347,379 +353,56 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("leaves the credential out and the provider undefined for an unenrolled instance", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
-    rs.stubEnv("PANTHEON_DOMAIN", "");
-    setInstanceTokenInMemory(null);
+  it("treats a payer change like an exit and lazily resumes idle threads", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     const { clients, manager } = capture();
+    const callbacks = binding("credits");
+    const exited = rs.fn();
+    manager.onExit(exited);
     try {
-      await manager.warmup();
-      expect(clients[0].options.env).not.toHaveProperty("ROME_CREDITS_TOKEN");
-      expect(clients[0].options.configArgs).toEqual([
-        "-c",
-        'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]',
-      ]);
-    } finally {
-      manager.close();
-      rs.unstubAllEnvs();
-    }
-  });
+      const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
 
-  it("keeps thread opens, sign-ins, and turn starts ahead of a payer restart", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    try {
-      for (const operation of [
-        { label: "thread open", method: Method.threadStart },
-        { label: "sign-in", method: Method.accountLoginStart },
-        { label: "turn start", method: Method.turnStart },
-      ]) {
-        const clients: FakeConnection[] = [];
-        let gateMethod: string | null = null;
-        let gateStarted!: () => void;
-        const gateStartedPromise = new Promise<void>((resolve) => {
-          gateStarted = resolve;
-        });
-        let releaseGate!: () => void;
-        const gate = new Promise<void>((resolve) => {
-          releaseGate = resolve;
-        });
-        const manager = new CodexAppServerManager({
-          createClient: (options) => {
-            const client = new FakeConnection(
-              options,
-              () => `thread-${operation.method}`,
-              async (method) => {
-                if (method !== gateMethod) return;
-                gateStarted();
-                await gate;
-              },
-            );
-            clients.push(client);
-            return client;
-          },
-        });
+      manager.setDefaultProvider("rome_credits");
 
-        try {
-          await manager.warmup();
-          let threadId: string | undefined;
-          if (operation.method === Method.turnStart) {
-            threadId = (await manager.openThread(config("rome_turn"), binding("turn"))).threadId;
-          }
-          gateMethod = operation.method;
-          const inFlight =
-            operation.method === Method.threadStart
-              ? manager.openThread(config("rome_open"), binding("open"))
-              : operation.method === Method.accountLoginStart
-                ? manager.request(Method.accountLoginStart, { type: "chatgpt" })
-                : manager.requestForThread(threadId!, Method.turnStart, { threadId });
-          await gateStartedPromise;
-
-          const switched = manager.setDefaultProvider("rome_credits");
-          const admittedAfterSwitch = manager.request("account/read", { refreshToken: true });
-          await Promise.resolve();
-          expect(clients, `${operation.label} client remains open`).toHaveLength(1);
-          expect(clients[0].closed).toBe(0);
-
-          releaseGate();
-          await inFlight;
-          if (threadId) {
-            clients[0].options.onNotification("turn/completed", { threadId });
-          }
-          await switched;
-          await admittedAfterSwitch;
-          expect(clients[0].closed).toBe(1);
-          expect(clients).toHaveLength(2);
-          expect(clients[1].requests.some((request) => request.method === "account/read")).toBe(
-            true,
-          );
-        } finally {
-          manager.close();
-        }
-      }
-    } finally {
-      rs.unstubAllEnvs();
-    }
-  });
-
-  it("keeps fixed config overrides while applying the selected payer", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    const clients: FakeConnection[] = [];
-    const manager = new CodexAppServerManager({
-      configArgs: ["-c", "features.example=true"],
-      createClient: (options) => {
-        const client = new FakeConnection(options, () => "thread-config");
-        clients.push(client);
-        return client;
-      },
-    });
-    try {
-      await manager.warmup();
-      await manager.setDefaultProvider("rome_credits");
-
-      expect(clients[1].options.configArgs).toEqual(
-        expect.arrayContaining(["-c", "features.example=true", 'model_provider="rome_credits"']),
-      );
-    } finally {
-      manager.close();
-      rs.unstubAllEnvs();
-    }
-  });
-
-  it("forwards a successful final turn before restarting the shared process", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    const clients: FakeConnection[] = [];
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const client = new FakeConnection(options, () => "thread-restart");
-        clients.push(client);
-        return client;
-      },
-    });
-    try {
-      const callbacks = binding("restart");
-      const replaced = rs.fn();
-      manager.onReplacement(replaced);
-      const handle = await manager.openThread(config("rome_restart"), callbacks);
-      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
-
-      const switched = manager.setDefaultProvider("rome_credits");
-      await Promise.resolve();
       expect(clients).toHaveLength(1);
-
-      clients[0].options.onNotification("turn/completed", { threadId: handle.threadId });
-      await switched;
-      expect(clients).toHaveLength(2);
       expect(clients[0].closed).toBe(1);
-      expect(replaced).toHaveBeenCalledWith(
-        expect.objectContaining({ message: "codex app-server replaced for payer switch" }),
+      expect(callbacks.exits).toEqual([
+        expect.objectContaining({ message: "codex app-server exited (code null)" }),
+      ]);
+      expect(exited).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "codex app-server exited (code null)" }),
       );
-      expect(callbacks.exits).toHaveLength(0);
-      expect(callbacks.notifications).toEqual([
-        { method: "turn/completed", params: { threadId: handle.threadId } },
-      ]);
-      expect(clients[1].options.configArgs).toContain('model_provider="rome_credits"');
 
-      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
-      const resume = clients[1].requests.find((request) => request.method === "thread/resume");
-      expect(resume?.params).not.toHaveProperty("modelProvider");
-    } finally {
-      manager.close();
-      rs.unstubAllEnvs();
-    }
-  });
+      await manager.requestForThread(threadId, Method.turnStart, { threadId });
 
-  it("keeps a starting lazy-resume turn ahead of a payer switch", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    const clients: FakeConnection[] = [];
-    let resumeStarted!: () => void;
-    const resumeStartedPromise = new Promise<void>((resolve) => {
-      resumeStarted = resolve;
-    });
-    let releaseResume!: () => void;
-    const resumeGate = new Promise<void>((resolve) => {
-      releaseResume = resolve;
-    });
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const beforeRequest =
-          clients.length === 1
-            ? async (method: string) => {
-                if (method !== "thread/resume") return;
-                resumeStarted();
-                await resumeGate;
-              }
-            : undefined;
-        const client = new FakeConnection(options, () => "thread-resume", beforeRequest);
-        clients.push(client);
-        return client;
-      },
-    });
-    try {
-      const handle = await manager.openThread(config("rome_resume"), binding("resume"));
-      await manager.setDefaultProvider("rome_credits");
-
-      const starting = manager.requestForThread(handle.threadId, "turn/start", {
-        threadId: handle.threadId,
-      });
-      await resumeStartedPromise;
-      const switched = manager.setDefaultProvider(null);
-      await Promise.resolve();
       expect(clients).toHaveLength(2);
-      expect(clients[1].closed).toBe(0);
-
-      releaseResume();
-      await starting;
-      clients[1].options.onNotification("turn/completed", { threadId: handle.threadId });
-      await switched;
-      expect(clients).toHaveLength(3);
-      expect(clients[1].closed).toBe(1);
-    } finally {
-      manager.close();
-      rs.unstubAllEnvs();
-    }
-  });
-
-  it("settles a cancelled pending switch while forwarding the terminal notification", async () => {
-    const clients: FakeConnection[] = [];
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const client = new FakeConnection(options, () => "thread-cancel");
-        clients.push(client);
-        return client;
-      },
-    });
-    try {
-      const callbacks = binding("cancel");
-      const handle = await manager.openThread(config("rome_cancel"), callbacks);
-      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
-
-      const switchingToCredits = manager.setDefaultProvider("rome_credits");
-      const revertingToLogin = manager.setDefaultProvider(null);
-      clients[0].options.onNotification("turn/completed", { threadId: handle.threadId });
-      await Promise.all([switchingToCredits, revertingToLogin]);
-
-      expect(clients).toHaveLength(1);
-      expect(callbacks.notifications).toEqual([
-        { method: "turn/completed", params: { threadId: handle.threadId } },
+      expect(clients[1].options.configArgs).toContain('model_provider="rome_credits"');
+      expect(clients[1].requests.map((request) => request.method)).toEqual([
+        "initialize",
+        "thread/resume",
+        "turn/start",
       ]);
     } finally {
       manager.close();
-    }
-  });
-
-  it("waits for the final payer when a replacement initializes during another switch", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    const clients: FakeConnection[] = [];
-    let firstInitializeStarted!: () => void;
-    const firstInitializeStartedPromise = new Promise<void>((resolve) => {
-      firstInitializeStarted = resolve;
-    });
-    let releaseFirstInitialize!: () => void;
-    const firstInitializeGate = new Promise<void>((resolve) => {
-      releaseFirstInitialize = resolve;
-    });
-    let secondInitializeStarted!: () => void;
-    const secondInitializeStartedPromise = new Promise<void>((resolve) => {
-      secondInitializeStarted = resolve;
-    });
-    let releaseSecondInitialize!: () => void;
-    const secondInitializeGate = new Promise<void>((resolve) => {
-      releaseSecondInitialize = resolve;
-    });
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const index = clients.length;
-        const beforeRequest =
-          index === 1
-            ? async (method: string) => {
-                if (method !== "initialize") return;
-                firstInitializeStarted();
-                await firstInitializeGate;
-              }
-            : index === 2
-              ? async (method: string) => {
-                  if (method !== "initialize") return;
-                  secondInitializeStarted();
-                  await secondInitializeGate;
-                }
-              : undefined;
-        const client = new FakeConnection(options, () => "thread-retarget", beforeRequest);
-        clients.push(client);
-        return client;
-      },
-    });
-    try {
-      await manager.warmup();
-
-      let firstSettled = false;
-      const firstSwitch = manager.setDefaultProvider("rome_credits").then(() => {
-        firstSettled = true;
-      });
-      await firstInitializeStartedPromise;
-      let secondSettled = false;
-      const secondSwitch = manager.setDefaultProvider("other").then(() => {
-        secondSettled = true;
-      });
-
-      releaseFirstInitialize();
-      await secondInitializeStartedPromise;
-      await Promise.resolve();
-      expect(firstSettled).toBe(false);
-      expect(secondSettled).toBe(false);
-
-      releaseSecondInitialize();
-      await Promise.all([firstSwitch, secondSwitch]);
-      expect(clients).toHaveLength(3);
-      expect(clients[2].options.configArgs).toContain('model_provider="other"');
-    } finally {
-      manager.close();
       rs.unstubAllEnvs();
     }
   });
 
-  it("waits for an ongoing replacement when the requested payer already matches", async () => {
-    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
-    const clients: FakeConnection[] = [];
-    let initializeStarted!: () => void;
-    const initializeStartedPromise = new Promise<void>((resolve) => {
-      initializeStarted = resolve;
-    });
-    let releaseInitialize!: () => void;
-    const initializeGate = new Promise<void>((resolve) => {
-      releaseInitialize = resolve;
-    });
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const shouldGate = clients.length === 1;
-        const client = new FakeConnection(
-          options,
-          () => "thread-same-provider",
-          async (method) => {
-            if (!shouldGate || method !== Method.initialize) return;
-            initializeStarted();
-            await initializeGate;
-          },
-        );
-        clients.push(client);
-        return client;
-      },
-    });
+  it("cancels an active sign-in when the payer replaces Codex", async () => {
+    const { manager } = capture();
+    const accountService = new SharedCodexAccountService(manager);
     try {
-      await manager.warmup();
-      const firstSwitch = manager.setDefaultProvider("rome_credits");
-      await initializeStartedPromise;
-      let sameProviderSettled = false;
-      const sameProviderSwitch = manager.setDefaultProvider("rome_credits").then(() => {
-        sameProviderSettled = true;
+      await accountService.startDeviceLogin();
+
+      manager.setDefaultProvider("rome_credits");
+
+      expect(accountService.getLoginState()).toMatchObject({
+        running: false,
+        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
       });
-
-      await Promise.resolve();
-      expect(sameProviderSettled).toBe(false);
-      releaseInitialize();
-      await Promise.all([firstSwitch, sameProviderSwitch]);
-      expect(sameProviderSettled).toBe(true);
     } finally {
+      accountService.close();
       manager.close();
-      rs.unstubAllEnvs();
     }
-  });
-
-  it("rejects a payer switch that is waiting for an active turn when closing", async () => {
-    const clients: FakeConnection[] = [];
-    const manager = new CodexAppServerManager({
-      createClient: (options) => {
-        const client = new FakeConnection(options, () => "thread-close");
-        clients.push(client);
-        return client;
-      },
-    });
-    const handle = await manager.openThread(config("rome_close"), binding("close"));
-    await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
-
-    const switching = manager.setDefaultProvider("rome_credits");
-    manager.close();
-
-    await expect(switching).rejects.toThrow("codex app-server manager closed");
-    expect(clients[0].closed).toBe(1);
   });
 });
