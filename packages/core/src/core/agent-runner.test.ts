@@ -2436,6 +2436,78 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("attributes folded SDK accounting to its stream owner once", async () => {
+      const harness = installTestSpanHarness();
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK folded accounting",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      try {
+        const session = await manager.acquire({
+          agentName: "test-main",
+          channelThreadKey: "webchat:sdk-folded-accounting",
+        });
+        const a = session.sendTurn({ inputId: "A", prompt: "first" });
+        const b = session.sendTurn({ inputId: "B", prompt: "follow up" });
+        const messages = Promise.all([collectMessages(a.events), collectMessages(b.events)]);
+        await rs.waitFor(() =>
+          expect(runtime.sent).toEqual([
+            { inputId: "A", text: "first" },
+            { inputId: "B", text: "follow up" },
+          ]),
+        );
+
+        runtime.emit({ type: "model_turn_start", turnId: "sdk-AB", answers: ["A"] });
+        runtime.emit({ type: "model_turn_answers", turnId: "sdk-AB", added: ["B"] });
+        runtime.emit({
+          type: "result",
+          content: "combined reply",
+          accounting: {
+            provider: "anthropic",
+            model: "test",
+            usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 5 },
+            costUsd: 1,
+          },
+        });
+        runtime.emit({ type: "model_turn_end", turnId: "sdk-AB", answers: ["A", "B"] });
+        const [, bMessages] = await messages;
+        expect(bMessages).toContainEqual(
+          expect.objectContaining({
+            type: "result",
+            content: "combined reply",
+            accounting: undefined,
+          }),
+        );
+
+        const modelSpans = (await harness.finishedSpans()).filter(
+          (span) => span.name === "model.turn",
+        );
+        const owner = modelSpans.find((span) => span.attributes["turn.id"] === a.turnId);
+        const folded = modelSpans.find((span) => span.attributes["turn.id"] === b.turnId);
+        expect(owner?.attributes.estimated_cost_usd).toBe(1);
+        expect(folded?.attributes.estimated_cost_usd).toBeUndefined();
+        expect(
+          modelSpans.reduce(
+            (total, span) => total + Number(span.attributes.estimated_cost_usd ?? 0),
+            0,
+          ),
+        ).toBe(1);
+      } finally {
+        await manager.shutdown();
+        await harness.shutdown();
+      }
+    });
+
     it("observes input status before the SDK binds its stream sink", async () => {
       let runtime!: ReturnType<typeof createSdkEventSession>;
       const statuses: string[] = [];
@@ -2659,6 +2731,79 @@ describe("AgentRunner", () => {
         expect.arrayContaining([expect.objectContaining({ type: "result", content: "A reply" })]),
       );
       expect(await systemMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "result", content: "system reply" }),
+        ]),
+      );
+      await manager.shutdown();
+    });
+
+    it("lets guardian inputs join a live SDK turn while a system caller waits for idle", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK guardian priority over idle wait",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-guardian-priority",
+      });
+      const a = session.sendTurn({ inputId: "A", prompt: "first" });
+      const system = session.sendTurn(
+        { inputId: "S", prompt: "system" },
+        { initiatedBy: "system" },
+      );
+      const b = session.sendTurn({ inputId: "B", prompt: "follow up" });
+      const messages = [
+        collectMessages(a.events),
+        collectMessages(system.events),
+        collectMessages(b.events),
+      ];
+      // S is waiting for an idle boundary, but it cannot retain the
+      // acceptance mutex and prevent the guardian follow-up from folding in.
+      await rs.waitFor(() =>
+        expect(runtime.sent).toEqual([
+          { inputId: "A", text: "first" },
+          { inputId: "B", text: "follow up" },
+        ]),
+      );
+
+      runtime.emit({ type: "model_turn_start", turnId: "sdk-AB", answers: ["A"] });
+      runtime.emit({ type: "model_turn_answers", turnId: "sdk-AB", added: ["B"] });
+      runtime.emit({ type: "result", content: "combined reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "sdk-AB", answers: ["A", "B"] });
+      await rs.waitFor(() =>
+        expect(runtime.sent).toEqual([
+          { inputId: "A", text: "first" },
+          { inputId: "B", text: "follow up" },
+          { inputId: "S", text: "system" },
+        ]),
+      );
+      runtime.emit({ type: "model_turn_start", turnId: "sdk-S", answers: ["S"] });
+      runtime.emit({ type: "result", content: "system reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "sdk-S", answers: ["S"] });
+
+      const [aMessages, systemMessages, bMessages] = await Promise.all(messages);
+      expect(aMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "result", content: "combined reply" }),
+        ]),
+      );
+      expect(bMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "result", content: "combined reply" }),
+        ]),
+      );
+      expect(systemMessages).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ type: "result", content: "system reply" }),
         ]),

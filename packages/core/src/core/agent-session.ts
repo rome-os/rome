@@ -2441,7 +2441,9 @@ class AgentSessionImpl implements AgentSession {
         // its captured submit_output even after it names a caller.
         if (turn.sink) sinks.add(turn.sink);
         for (const sink of sinks) {
-          if (!sink.done) await this.finishSinkFromTerminal(session, sink, turn.terminal);
+          if (!sink.done) {
+            await this.finishSinkFromTerminal(session, sink, turn.terminal, sink === turn.sink);
+          }
         }
         return;
       }
@@ -2506,10 +2508,14 @@ class AgentSessionImpl implements AgentSession {
     session: ModelSession,
     sink: TurnSink,
     terminal: ResultMessage | ErrorMessage,
+    includeExecutionAccounting = true,
   ): Promise<void> {
     await this.inputs.seal(sink.turnId);
     if (terminal.type === "result") {
       const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(terminal.accounting);
+      // A named caller shares the SDK outcome, including an interrupt, even
+      // when it does not own the execution accounting below.
+      if (interrupted) sink.lifecycleInterrupted = true;
       if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
       await this.maybePersistProviderInfo();
       await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
@@ -2524,8 +2530,14 @@ class AgentSessionImpl implements AgentSession {
       sink.hasSubmittedOutput = false;
       sink.submittedOutput = undefined;
     }
-    this.publishOutbound(sink, terminal);
-    this.finalizeTurn(sink, terminal);
+    // A folded caller receives the SDK's answer but not its execution-level
+    // usage/cost. Otherwise its result and lifecycle trace would attribute
+    // the same model run once per echoed input.
+    const terminalForSink = includeExecutionAccounting
+      ? terminal
+      : { ...terminal, accounting: undefined };
+    this.publishOutbound(sink, terminalForSink);
+    this.finalizeTurn(sink, terminalForSink, includeExecutionAccounting);
   }
 
   /**
@@ -2573,10 +2585,14 @@ class AgentSessionImpl implements AgentSession {
    * synthetic-error exits (failTurn), so a failed turn's spans carry ERROR
    * status instead of being closed as OK by runOneTurn's safety net.
    */
-  private finalizeTurnSpans(sink: TurnSink, outbound: ResultMessage | ErrorMessage): void {
+  private finalizeTurnSpans(
+    sink: TurnSink,
+    outbound: ResultMessage | ErrorMessage,
+    includeExecutionAccounting = true,
+  ): void {
     const modelSpan = sink.modelSpan;
     if (modelSpan) {
-      const accounting = outbound.accounting;
+      const accounting = includeExecutionAccounting ? outbound.accounting : undefined;
       if (accounting) {
         const u = accounting.usage;
         modelSpan.setAttributes({
@@ -2619,7 +2635,7 @@ class AgentSessionImpl implements AgentSession {
       // close while `modelSpan` is still recording. Pure-function;
       // any unexpected shape in `blocks` produces no spans rather
       // than blowing up the turn.
-      const turnCtx = sink.turnCtx;
+      const turnCtx = includeExecutionAccounting ? sink.turnCtx : undefined;
       if (turnCtx) {
         try {
           translateTurnSpans({
@@ -2658,15 +2674,21 @@ class AgentSessionImpl implements AgentSession {
       }
       agentSpan.end();
       sink.agentSpan = undefined;
-      sessionDurationMetric().record(Date.now() - sink.startedAtMs, {
-        "agent.name": this.key.agentName,
-      });
+      if (includeExecutionAccounting) {
+        sessionDurationMetric().record(Date.now() - sink.startedAtMs, {
+          "agent.name": this.key.agentName,
+        });
+      }
     }
     sink.turnCtx = undefined;
   }
 
-  private finalizeTurn(sink: TurnSink, terminal: ResultMessage | ErrorMessage): void {
-    this.finalizeTurnSpans(sink, terminal);
+  private finalizeTurn(
+    sink: TurnSink,
+    terminal: ResultMessage | ErrorMessage,
+    includeExecutionAccounting = true,
+  ): void {
+    this.finalizeTurnSpans(sink, terminal, includeExecutionAccounting);
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
     this.closeSink(sink);
@@ -3290,14 +3312,15 @@ class AgentSessionImpl implements AgentSession {
   // sendTurn — FIFO-serialized only through provider acceptance. Callers wait
   // for their SDK-named result in waitingCallers; they do not own the session.
 
+  private hasActiveSdkWork(): boolean {
+    return this.waitingCallers.size > 0 || this.activeSdkTurnId !== undefined;
+  }
+
   private async waitForIdleBeforeSending(): Promise<void> {
     // Let already-submitted guardian work reach its provider-acceptance
     // boundary before deciding the session is idle.
     await new Promise<void>((resolve) => setImmediate(resolve));
-    while (
-      this.status !== "closed" &&
-      (this.waitingCallers.size > 0 || this.activeSdkTurnId !== undefined)
-    ) {
+    while (this.status !== "closed" && this.hasActiveSdkWork()) {
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
     }
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
@@ -3400,42 +3423,54 @@ class AgentSessionImpl implements AgentSession {
     // Hand the turn off to the per-session FIFO turn mutex. Real work
     // (publishing session_init, sending user input, awaiting result) runs
     // asynchronously in `runOneTurn`; the events iterable above stays empty
-    // until then. Caller can already read `turnId` synchronously. The callback
-    // swallows its own failures, so `runExclusive` never rejects here — the
-    // fire-and-forget promise is intentionally discarded.
-    void this.turnMutex
-      .runExclusive(
-        async () => {
-          try {
-            // Guardian follow-ups may join a live SDK turn. System/API/summon
-            // callers claim their idle boundary while serialized: a second
-            // caller queued behind the first must recheck after acceptance.
-            if (options?.initiatedBy === "system" || options?.lifecycleParent) {
-              await this.waitForIdleBeforeSending();
-            }
-            await context.with(turnCtx, () => this.runOneTurn(turnId, turnInput, sink, turnCtx));
-          } catch (err) {
-            // Safety net: if runOneTurn threw before reaching its own finally
-            // (e.g. synchronous failure before the modelSession call), the
-            // agent span may still be open. End it so the trace closes.
-            if (!span.isRecording || span.isRecording()) {
-              span.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: err instanceof Error ? err.message : String(err),
-              });
-              if (err instanceof Error) span.recordException(err);
-              span.end();
-            }
-            // Surface failure on the sink so consumers' for-await ends cleanly.
-            this.failTurn(
-              sink,
-              toModelResolutionErrorPayload(err) ??
-                (err instanceof Error ? err.message : String(err)),
-            );
+    // until then. Caller can already read `turnId` synchronously.
+    const dispatch = async (): Promise<void> => {
+      try {
+        await context.with(turnCtx, () => this.runOneTurn(turnId, turnInput, sink, turnCtx));
+      } catch (err) {
+        // Safety net: if runOneTurn threw before reaching its own finally
+        // (e.g. synchronous failure before the modelSession call), the
+        // agent span may still be open. End it so the trace closes.
+        if (!span.isRecording || span.isRecording()) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          if (err instanceof Error) span.recordException(err);
+          span.end();
+        }
+        // Surface failure on the sink so consumers' for-await ends cleanly.
+        this.failTurn(
+          sink,
+          toModelResolutionErrorPayload(err) ?? (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    };
+    const requiresIdle = options?.initiatedBy === "system" || options?.lifecycleParent;
+    const dispatchWhenEligible = async (): Promise<void> => {
+      if (!requiresIdle) {
+        await this.turnMutex.runExclusive(dispatch);
+        return;
+      }
+      // Do not hold the acceptance mutex while waiting for an existing SDK
+      // turn: guardian inputs must remain able to send through and fold into
+      // it. Once idle, claim the boundary under the mutex and recheck because
+      // another caller may have reached provider acceptance in the meantime.
+      while (true) {
+        await this.waitForIdleBeforeSending();
+        let claimedIdleBoundary = false;
+        await this.turnMutex.runExclusive(async () => {
+          if (this.status === "closed") {
+            throw new Error(`AgentSession ${this.sessionId} is closed`);
           }
-        },
-        input.inputId ? 1 : 0,
-      )
+          if (this.hasActiveSdkWork()) return;
+          claimedIdleBoundary = true;
+          await dispatch();
+        });
+        if (claimedIdleBoundary) return;
+      }
+    };
+    void dispatchWhenEligible()
       .catch((err) => {
         if (!sink.done) {
           this.failTurn(
