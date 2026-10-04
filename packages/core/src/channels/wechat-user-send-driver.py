@@ -201,17 +201,23 @@ class Store:
                 for m in page["messages"]]
 
     def names(self, limit, timeout):
-        """The `limit` most recently active chats' names. The bridge lists
-        pinned chats first however old, so the whole list is ordered by last
-        message before the limit applies, as the Rome reader does."""
+        """The `limit` most recently active chats' names, or every chat's with
+        no limit. The bridge lists pinned chats first however old, so the whole
+        list is ordered by last message before the limit applies, as the Rome
+        reader does."""
         chats = [s for s in self.call("sessions", timeout=timeout) if s.get("type") != "folded"]
         chats.sort(key=lambda s: (s.get("lastMessage") or {}).get("createdAt") or "", reverse=True)
-        return {s["username"]: s["displayName"] for s in chats[:limit]}
+        return {s["username"]: s["displayName"] for s in (chats if limit is None else chats[:limit])}
 
     def chat(self, chat_id, timeout):
         deadline = time.monotonic() + timeout
-        name = self.names(500, timeout).get(chat_id)
-        return self.lines(chat_id, name, "-n", "200", timeout=max(deadline - time.monotonic(), 1))
+        name = self.names(None, timeout).get(chat_id)
+        lines = self.lines(chat_id, name, "-n", "200", timeout=max(deadline - time.monotonic(), 1))
+        # The name is what proves --name belongs to --chat; a chat with history
+        # but no name to check against is not sent to.
+        if lines and not name:
+            raise Failure("not-found", f"the store has history for {chat_id!r} but no name for it")
+        return lines
 
     def recent(self, since, timeout):
         """Messages since `since` across the most recently active chats."""
@@ -219,8 +225,10 @@ class Store:
         start = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since))
         out = []
         for chat_id, name in self.names(20, timeout).items():
-            out += self.lines(chat_id, name, "--since", start, "-n", "500",
-                              timeout=max(deadline - time.monotonic(), 1))
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise Failure("not-ready", "reading the recent chats ran out of time")
+            out += self.lines(chat_id, name, "--since", start, "-n", "500", timeout=max(left, 1))
         return out
 
 

@@ -715,6 +715,45 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(list(store.names(5, timeout=5)), ["active", "pinned", "quiet"])
         self.assertEqual(calls[0], ("sessions",))
 
+    def test_the_store_names_a_chat_however_long_ago_it_was_active(self):
+        store = d.Store()
+        sessions = [{"username": f"wxid_{i}", "displayName": f"Chat {i}", "type": "private",
+                     "lastMessage": {"content": "", "createdAt": f"2026-09-01T00:{i // 60:02d}:{i % 60:02d}.000Z"}}
+                    for i in range(600)]
+        line = {"id": "x", "session": "wxid_0", "isSelf": False, "type": "text", "content": "hi"}
+
+        def call(*args, timeout):
+            if args[0] == "sessions":
+                return sessions
+            return {"messages": [dict(line, session=args[1])], "cursor": None}
+        store.call = call
+        # The least recently active of 600 chats still carries its name.
+        self.assertEqual(store.chat("wxid_0", timeout=5)[0]["conversationName"], "Chat 0")
+        with self.assertRaises(d.Failure) as caught:
+            store.chat("wxid_unlisted", timeout=5)
+        self.assertEqual(caught.exception.code, "not-found")
+
+    def test_the_store_stops_reading_recent_chats_at_its_deadline(self):
+        store = d.Store()
+        sessions = [{"username": f"wxid_{i}", "displayName": f"Chat {i}", "type": "private",
+                     "lastMessage": {"content": "", "createdAt": "2026-09-01T00:00:00.000Z"}}
+                    for i in range(20)]
+        now = [0.0]
+        queries = []
+
+        def call(*args, timeout):
+            if args[0] == "sessions":
+                return sessions
+            queries.append(args[1])
+            now[0] += 1
+            return {"messages": [], "cursor": None}
+        store.call = call
+        with patch.object(d.time, "monotonic", lambda: now[0]):
+            with self.assertRaises(d.Failure) as caught:
+                store.recent(0, timeout=5)
+        self.assertEqual(caught.exception.code, "not-ready")
+        self.assertEqual(len(queries), 5)
+
     def test_no_active_window_is_not_active(self):
         desk = d.Desktop()
         out = {"xprop": "_NET_ACTIVE_WINDOW:  not found.\n",
