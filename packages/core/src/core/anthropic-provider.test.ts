@@ -6,6 +6,7 @@ import * as anthropicLoginModule from "../lib/anthropic-login.js" with { rstest:
 import { AnthropicProvider } from "./anthropic-provider.js";
 import type { AgentMessage } from "../types.js";
 import { isModelTurnEvent } from "./agent-runner.js";
+import { expectModelSessionTurnContract } from "../test/model-session-contract.js";
 import type {
   ModelSession,
   ModelSessionEvent,
@@ -194,7 +195,7 @@ describe("AnthropicProvider", () => {
         case "model_turn_start":
           return `start [${event.answers.map(label)}]`;
         case "model_turn_answers":
-          return `answers +[${event.added.map(label)}]`;
+          return event.added.length > 0 ? `answers +[${event.added.map(label)}]` : undefined;
         case "model_turn_end":
           return `end [${event.answers.map(label)}]`;
         case "input_status":
@@ -215,13 +216,18 @@ describe("AnthropicProvider", () => {
 
     /** Read until `count` turns have ended, or the stream ends. */
     async function read(session: ModelSession, count = Infinity): Promise<Seen[]> {
+      const events: ModelSessionEvent[] = [];
       const seen: Seen[] = [];
       let ended = 0;
       for await (const event of session.events) {
+        events.push(event);
         const line = view(event);
         if (line) seen.push(line);
         if (event.type === "model_turn_end" && ++ended >= count) break;
       }
+      expectModelSessionTurnContract(events, {
+        allowUnfinished: events.at(-1)?.type !== "model_turn_end",
+      });
       return seen;
     }
 

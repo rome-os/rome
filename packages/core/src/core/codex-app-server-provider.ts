@@ -937,6 +937,9 @@ export class CodexAppServerProvider implements ModelProvider {
       const current = { turnId: randomUUID(), answers: new Set(answers), sink: runtime.sink };
       modelTurn = current;
       runtime.sink.push({ type: "model_turn_start", turnId: current.turnId, answers });
+      // The input can be known at turn start, but the shared contract still
+      // publishes an answers event so consumers have one uniform shape.
+      runtime.sink.push({ type: "model_turn_answers", turnId: current.turnId, added: [] });
       try {
         await runModelTurn(inputs, runtime, text);
       } finally {
