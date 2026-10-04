@@ -153,3 +153,53 @@ test("a failed page waits for retry before filling the search batch", async ({ c
   await expect(retry).toHaveCount(0);
   expect(requests.map((url) => url.searchParams.get("cursor"))).toEqual(["20", "40"]);
 });
+
+for (const action of ["clear", "change"] as const) {
+  test(`${action} search keeps cached chats pageable after a later page fails`, async ({
+    context,
+    page,
+  }) => {
+    const requests = await mockDashboard(context, buildChats(80));
+    let failedRequests = 0;
+    await context.route("**/api/projects/dashboard/chats?*", (route) => {
+      if (new URL(route.request().url()).searchParams.get("cursor") !== "60") {
+        return route.fallback();
+      }
+      failedRequests += 1;
+      return route.fulfill({ status: 500 });
+    });
+
+    await page.goto("/projects");
+    await expect(page.getByText("20 of 80 chats")).toBeVisible();
+    await page.getByPlaceholder("Search chats…").fill("chat");
+    const sentinel = page.getByText("Scroll for more chats");
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("40 of 80 chats")).toBeVisible();
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("60 of 80 chats")).toBeVisible();
+    await sentinel.scrollIntoViewIfNeeded();
+    const retry = page.getByRole("button", { name: "Retry loading chats" });
+    await expect(retry).toBeVisible();
+
+    await page.getByRole("link", { name: /^Chat 0 / }).scrollIntoViewIfNeeded();
+    if (action === "clear") {
+      await page.getByRole("button", { name: "Clear search" }).click();
+    } else {
+      await page.getByPlaceholder("Search chats…").fill("conversation");
+    }
+    await expect(page.getByText("20 of 80 chats")).toBeVisible();
+    await expect(retry).toHaveCount(0);
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("40 of 80 chats")).toBeVisible();
+    await sentinel.scrollIntoViewIfNeeded();
+    await expect(page.getByText("60 of 80 chats")).toBeVisible();
+    await expect(retry).toBeVisible();
+    expect(requests.map((url) => url.searchParams.get("cursor"))).toEqual(["20", "40"]);
+    expect(failedRequests).toBe(1);
+
+    await retry.click();
+    await expect(retry).toBeVisible();
+    expect(failedRequests).toBe(2);
+    await expect(page.getByText("60 of 80 chats")).toBeVisible();
+  });
+}

@@ -257,7 +257,8 @@ function DashboardBody({
     );
   }, [chats, query]);
   const visibleChats = filteredChats.slice(0, visibleChatLimit);
-  const hasMoreChats = chatPage.hasMore || filteredChats.length > visibleChatLimit;
+  const hasMoreCachedChats = filteredChats.length > visibleChatLimit;
+  const hasMoreChats = chatPage.hasMore || hasMoreCachedChats;
   const fillingChatBatch = chatPage.hasMore && filteredChats.length < visibleChatLimit;
 
   // A search batch may span several API pages. Fill it even if the first matches hide the sentinel.
@@ -270,7 +271,15 @@ function DashboardBody({
   // Filtering can leave the sentinel visible after loading. Reobserve when the batch is ready.
   useEffect(() => {
     const sentinel = chatSentinelRef.current;
-    if (!sentinel || !hasMoreChats || chatLoadError || loadingMoreChats || fillingChatBatch) return;
+    if (
+      !sentinel ||
+      !hasMoreChats ||
+      (chatLoadError && !hasMoreCachedChats) ||
+      loadingMoreChats ||
+      fillingChatBatch
+    ) {
+      return;
+    }
 
     const root = findScrollableYAncestor(sentinel, {
       boundary: bodyRef.current,
@@ -286,7 +295,14 @@ function DashboardBody({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [chatLoadError, hasMoreChats, loadingMoreChats, fillingChatBatch, visibleChatLimit]);
+  }, [
+    chatLoadError,
+    hasMoreChats,
+    hasMoreCachedChats,
+    loadingMoreChats,
+    fillingChatBatch,
+    visibleChatLimit,
+  ]);
 
   return (
     <section className="@container/project-dashboard flex h-full min-h-0 flex-col bg-surface font-sans text-ui text-foreground antialiased [text-rendering:optimizeLegibility]">
@@ -453,7 +469,7 @@ function DashboardBody({
                     <Spinner size="sm" label="Loading more chats" />
                     <span aria-hidden>Loading more chats</span>
                   </>
-                ) : chatLoadError ? (
+                ) : chatLoadError && !hasMoreCachedChats ? (
                   <button
                     type="button"
                     className="border-0 bg-transparent font-[inherit] text-brand hover:underline"
