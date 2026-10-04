@@ -55,6 +55,24 @@ describe("createCodexImageGenerationProvider", () => {
       });
     });
 
+    it("runs every call in its own image_gen session", async () => {
+      const runner = makeRunner([
+        imageResult({ type: "image", status: "completed", data: PNG_BASE64 }),
+        { type: "result", content: "Done." },
+      ]);
+      const provider = createCodexImageGenerationProvider({ agentRunner: runner });
+
+      await Promise.all([
+        provider.generate({ prompt: "one" }),
+        provider.generate({ prompt: "two" }),
+      ]);
+
+      const keys = runner.run.mock.calls.map(([params]) => params.channelThreadKey);
+      expect(keys).toHaveLength(2);
+      for (const key of keys) expect(key).toMatch(/^image_gen:/);
+      expect(keys[0]).not.toBe(keys[1]);
+    });
+
     it("returns the provider-saved path when no inline data is present", async () => {
       const runner = makeRunner([
         imageResult({ type: "image", status: "completed", saved_path: "/tmp/codex-original.webp" }),
