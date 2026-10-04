@@ -81,6 +81,7 @@ import {
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -370,6 +371,7 @@ interface CodexAppServerProviderOptions {
 
 interface CodexFailureClassification {
   code: AgentErrorCode | null;
+  error?: string;
   httpStatus?: number;
   pending?: Promise<void>;
 }
@@ -416,6 +418,9 @@ function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
 ): CodexFailureClassification {
+  if (isRomeCreditsExhaustedError(turnError)) {
+    return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
+  }
   if (isCodexUsageLimitError(turnError)) {
     options.onQuotaExhausted?.();
     return { code: "usage_limit" };
@@ -798,8 +803,9 @@ export class CodexAppServerProvider implements ModelProvider {
               // not a string — extract the human message and classify quota
               // exhaustion / revoked credentials off it.
               activeTurn.failed = true;
-              activeTurn.errorMessage = codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               const classification = classifyCodexFailure(p.turn?.error, this.options);
+              activeTurn.errorMessage =
+                classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
               activeTurn.errorHttpStatus = classification.httpStatus;
               if (classification.pending) activeTurn.pending.push(classification.pending);
@@ -820,8 +826,9 @@ export class CodexAppServerProvider implements ModelProvider {
           // v2 wraps the structured TurnError under `error`; tolerate older
           // shapes that put `message` at the top level.
           const payload = p.error ?? (params2 as { message?: unknown });
-          const message = codexTurnErrorMessage(payload, "codex app-server error");
           const classification = classifyCodexFailure(payload, this.options);
+          const message =
+            classification.error ?? codexTurnErrorMessage(payload, "codex app-server error");
           const code = classification.code;
           if (activeTurn) {
             // Route the terminal through runOne (see turn/completed).
@@ -1062,7 +1069,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(codexErrorEvent(message, classification));
+          runtime.sink.push(codexErrorEvent(classification.error ?? message, classification));
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();

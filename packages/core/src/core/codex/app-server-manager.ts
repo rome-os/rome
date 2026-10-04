@@ -146,6 +146,12 @@ export class CodexAppServerManager {
     if (this.closed) throw new Error("codex app-server manager is closed");
     if (this.defaultProvider === provider) return;
     this.defaultProvider = provider;
+    this.restart();
+  }
+
+  /** Immediately replace Codex while retaining the current process-wide payer. */
+  restart(): void {
+    if (this.closed) throw new Error("codex app-server manager is closed");
     this.connectionEpoch += 1;
 
     const connection = this.connection;

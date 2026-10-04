@@ -30,6 +30,7 @@ export function isValidInstanceToken(token: string | null | undefined): token is
 // the same way. `getInstanceToken` only ever reads the in-memory cache that
 // `hydrateInstanceToken` fills from the DB — it never touches the env.
 let cachedInstanceToken: string | null = null;
+const instanceTokenListeners = new Set<() => void>();
 
 export function getInstanceToken(): string | null {
   return isValidInstanceToken(cachedInstanceToken) ? cachedInstanceToken : null;
@@ -38,7 +39,16 @@ export function getInstanceToken(): string | null {
 // Update the in-process cache without touching the DB. Call after persisting a
 // freshly-minted token so synchronous `getInstanceToken` callers see it at once.
 export function setInstanceTokenInMemory(token: string | null): void {
-  cachedInstanceToken = isValidInstanceToken(token) ? token : null;
+  const nextToken = isValidInstanceToken(token) ? token : null;
+  if (cachedInstanceToken === nextToken) return;
+  cachedInstanceToken = nextToken;
+  for (const listener of instanceTokenListeners) listener();
+}
+
+/** Subscribe to minted and revoked instance credentials in this process. */
+export function onInstanceTokenChanged(listener: () => void): () => void {
+  instanceTokenListeners.add(listener);
+  return () => instanceTokenListeners.delete(listener);
 }
 
 // Load the persisted token from the DB into the cache. Run once at boot, before

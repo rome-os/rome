@@ -13,6 +13,7 @@ const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
   settings: { enableFable?: unknown; tierModelMappings?: unknown } = {},
+  usingRomeCredits = false,
 ) {
   const value: AIToolStateValue = {
     codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
@@ -30,6 +31,10 @@ function resolver(
             ? (settings.tierModelMappings ?? null)
             : null) as T | null,
     },
+    romeCreditsPayer: {
+      sync: () => {},
+      isUsingRomeCredits: () => usingRomeCredits,
+    },
   });
 }
 
@@ -43,6 +48,29 @@ describe("ModelResolver", () => {
       model: "gpt-5.6-terra",
     });
     await expect(resolver().getModelProvider({ tier: "small" })).resolves.toMatchObject({
+      model: "gpt-6-luna",
+    });
+  });
+
+  it("uses Rome credit tier models when ChatGPT cannot run", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      },
+      { tierModelMappings: { openai: { large: "custom-model" } } },
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6-sol",
+    });
+    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+      model: "gpt-5.6-terra",
+    });
+    await expect(
+      r.getModelProvider({ tier: "small", providerId: "openai" }),
+    ).resolves.toMatchObject({
       model: "gpt-6-luna",
     });
   });

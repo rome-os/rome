@@ -904,6 +904,7 @@ export interface TurnResultEvent {
 /** Machine-readable classification of a failed turn, carried as `TurnErrorEvent.code`. */
 export type AgentErrorCode =
   | "usage_limit"
+  | "credits_used_up"
   | "auth_revoked"
   | "model_provider_unavailable"
   | "model_unavailable"

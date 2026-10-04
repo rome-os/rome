@@ -11,6 +11,7 @@ import {
   hydrateInstanceToken,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
+  onInstanceTokenChanged,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { NotifyClient } from "./lib/notify-client.js";
@@ -98,6 +99,7 @@ import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
 import { SharedCodexAccountService } from "./core/codex/account-service.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
+import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
@@ -520,13 +522,22 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  let syncRomeCreditsPayer = (): void => {};
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
       codexStatus: () => codexAccountService.getStatus(),
       codexUsage: () => codexAccountService.getUsage(),
     },
+    onChange: () => syncRomeCreditsPayer(),
   });
+  const romeCreditsPayer = createRomeCreditsPayer({
+    aiToolState,
+    appServerManager: codexAppServerManager,
+  });
+  syncRomeCreditsPayer = () => romeCreditsPayer.sync();
+  const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
+  romeCreditsPayer.sync();
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
     void aiToolState.refresh("openai").catch((err) => {
       log.warn("Codex account change refresh failed", {
@@ -548,6 +559,7 @@ async function main() {
     aiToolState,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
+    romeCreditsPayer,
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
   const lifecycleAppRuntimeServices: RomeAppRuntimeServices = {
@@ -1562,6 +1574,8 @@ async function main() {
     shutdownLog.info("capability discovery stopped");
 
     unsubscribeCodexAccountChanged();
+    unsubscribeInstanceTokenChanged();
+    romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");
 

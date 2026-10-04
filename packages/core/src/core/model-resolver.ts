@@ -9,6 +9,7 @@ import {
 } from "./ai-tool-state.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 import { createLogger } from "../logger.js";
+import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
 const log = createLogger("model-resolver");
 
@@ -107,6 +108,7 @@ export interface CreateModelResolverOptions {
   aiToolState: Pick<AIToolState, "get" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
+  romeCreditsPayer?: Pick<RomeCreditsPayer, "sync" | "isUsingRomeCredits">;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -119,6 +121,12 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
   small: "claude-haiku-4-5-20251001",
+};
+
+export const ROME_CREDITS_TIER_TO_MODEL: Record<ModelTier, string> = {
+  large: "gpt-6-sol",
+  medium: "gpt-5.6-terra",
+  small: "gpt-6-luna",
 };
 
 const FABLE_MODEL = "claude-fable-5-1[1m]";
@@ -246,7 +254,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   return {
     async getModelProvider(request) {
+      options.romeCreditsPayer?.sync();
       const state = options.aiToolState.get();
+      const usingRomeCredits = options.romeCreditsPayer?.isUsingRomeCredits() === true;
       if (request.exact) {
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
@@ -273,6 +283,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       );
 
       const resolveTierModel = (provider: ModelProvider): string => {
+        if (provider.id === "openai" && usingRomeCredits) {
+          return ROME_CREDITS_TIER_TO_MODEL[request.tier];
+        }
         const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
         const model =
           configured ??
@@ -291,7 +304,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       if (request.providerId) {
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
-        requireUsableProvider(provider, state);
+        if (!(provider.id === "openai" && usingRomeCredits)) requireUsableProvider(provider, state);
         return { modelProvider: provider, model: resolveTierModel(provider) };
       }
 
@@ -305,6 +318,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       }
       if (claude && providerUsable("anthropic", state.claude)) {
         return { modelProvider: claude, model: resolveTierModel(claude) };
+      }
+      if (codex && usingRomeCredits) {
+        return { modelProvider: codex, model: resolveTierModel(codex) };
       }
 
       // Test providers have no login/quota concept. Production only registers

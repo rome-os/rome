@@ -52,6 +52,8 @@ export interface CreateAIToolStateOptions {
   /** Null disables the hourly timer (used by deterministic unit tests). */
   refreshIntervalMs?: number | null;
   startRefresh?: boolean;
+  /** Called after provider availability may have changed. */
+  onChange?: () => void;
 }
 
 function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
@@ -110,6 +112,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
+  const notifyChange = (): void => options.onChange?.();
 
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
@@ -168,6 +171,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       } else {
         await Promise.all([refreshProviderLocked("openai"), refreshProviderLocked("anthropic")]);
       }
+      notifyChange();
       return state.get();
     },
     async markAuthRevoked(provider) {
@@ -182,6 +186,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         value.codex.solAccess = false;
         value.codex.lunaAccess = false;
       }
+      notifyChange();
     },
     markQuotaExhausted(provider) {
       const applyRuntimeSignal = (): boolean => {
@@ -191,10 +196,19 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         return true;
       };
       if (!applyRuntimeSignal()) return;
+      notifyChange();
 
       // Keep this newer runtime signal after any older probe settles.
       const olderRefresh = refreshesInFlight.get(provider);
-      if (olderRefresh) void olderRefresh.then(applyRuntimeSignal, applyRuntimeSignal);
+      if (olderRefresh)
+        void olderRefresh.then(
+          () => {
+            if (applyRuntimeSignal()) notifyChange();
+          },
+          () => {
+            if (applyRuntimeSignal()) notifyChange();
+          },
+        );
     },
     close() {
       if (timer) clearInterval(timer);
