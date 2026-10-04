@@ -686,7 +686,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // One subscription per live AgentSession turns provider-owned model starts
   // into webchat streams. It intentionally outlives an individual POST so a
   // background SDK turn is visible even when no caller is awaiting it.
-  const modelTurnSubscriptions = new WeakMap<AgentSession, () => void>();
+  type ModelTurnSubscription = {
+    deferCaller(handle: AgentTurnHandle): void;
+    unsubscribe(): void;
+  };
+  const modelTurnSubscriptions = new WeakMap<AgentSession, ModelTurnSubscription>();
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -3669,6 +3673,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ended: boolean;
       };
       const turns = new Map<string, BufferedModelTurn>();
+      const callerFallbacks = new Map<string, BufferedModelTurn>();
       const next = (turn: BufferedModelTurn): Promise<IteratorResult<StreamAgentMessage>> => {
         const value = turn.values.shift();
         if (value) return Promise.resolve({ value, done: false });
@@ -3685,6 +3690,41 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             turn.resolvers.shift()!({ value: undefined as never, done: true });
         }
       };
+      const bufferedHandle = (
+        turnId: string,
+        turn: BufferedModelTurn,
+        source: AgentTurnHandle,
+      ): AgentTurnHandle => ({
+        turnId,
+        turnContext: source.turnContext,
+        events: { [Symbol.asyncIterator]: () => ({ next: () => next(turn) }) },
+        interrupt: source.interrupt,
+      });
+      const deferCaller = (handle: AgentTurnHandle): void => {
+        const turn = { values: [], resolvers: [], ended: false } satisfies BufferedModelTurn;
+        callerFallbacks.set(handle.turnId, turn);
+        void (async () => {
+          for await (const message of handle.events) {
+            push(turn, message);
+            if (message.type === "turn_end") {
+              if (callerFallbacks.get(handle.turnId) === turn) {
+                callerFallbacks.delete(handle.turnId);
+                void attachTurn(bufferedHandle(handle.turnId, turn, handle)).catch((error) =>
+                  log.error("failed to attach pre-model turn", {
+                    turnId: handle.turnId,
+                    error: error instanceof Error ? error.message : String(error),
+                  }),
+                );
+              }
+            }
+          }
+        })().catch((error) =>
+          log.error("failed to buffer pre-model turn", {
+            turnId: handle.turnId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      };
       const unsubscribeMessages = agentSess.subscribe((message, turnId) => {
         const turn = turns.get(turnId);
         if (!turn) return;
@@ -3696,6 +3736,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (message.type === "turn_end") turns.delete(turnId);
       });
       const unsubscribeTurns = agentSess.onModelTurnStart((turnId) => {
+        // A provider-owned boundary wins over the provisional caller handle.
+        // If the caller later ends, its buffer must not open a duplicate stream.
+        callerFallbacks.delete(turnId);
         if (turns.has(turnId) || streamsByTurnId.has(turnId)) return;
         const turn: BufferedModelTurn = { values: [], resolvers: [], ended: false };
         turns.set(turnId, turn);
@@ -3726,9 +3769,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           agent: agentName,
         });
       });
-      modelTurnSubscriptions.set(agentSess, () => {
-        unsubscribeMessages();
-        unsubscribeTurns();
+      modelTurnSubscriptions.set(agentSess, {
+        deferCaller,
+        unsubscribe: () => {
+          unsubscribeMessages();
+          unsubscribeTurns();
+        },
       });
     }
 
@@ -3741,15 +3787,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // a provider model-turn boundary; retain the direct-handle fallback for
       // legacy adapters while they migrate to that contract.
       onTurn: (handle: AgentTurnHandle) => {
-        if (!agentSess.onModelTurnStart) {
-          started = attachTurn(handle);
-          void started.catch((error) =>
-            log.error("failed to attach legacy input turn", {
-              turnId: handle.turnId,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        const modelBridge = agentSess.onModelTurnStart
+          ? modelTurnSubscriptions.get(agentSess)
+          : undefined;
+        if (modelBridge) {
+          // A caller can fail or short-circuit before the ModelSession exposes
+          // ownership. Buffer that existing handle and attach it only if no
+          // model-turn boundary arrives; ordinary SDK turns still get exactly
+          // one stream at their model boundary.
+          modelBridge.deferCaller(handle);
+          return;
         }
+        started = attachTurn(handle);
+        void started.catch((error) =>
+          log.error("failed to attach legacy input turn", {
+            turnId: handle.turnId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       },
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusMessage) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);

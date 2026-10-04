@@ -333,6 +333,13 @@ export interface ModelSession {
   /** Append without interrupting. Only `deferred` is safe to submit again. */
   steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
 
+  /**
+   * Complete a code-backed turn through the same model-turn event stream as a
+   * provider reply. The supplied terminal must answer `input.inputId`; callers
+   * settle only from the resulting model_turn_end echo.
+   */
+  completeTurn?(input: ModelUserInput, events: readonly AgentMessage[]): Promise<void>;
+
   /** Create an isolated provider-owned branch from this live session. */
   fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
 
@@ -457,6 +464,14 @@ export function createSessionFromRun(
         if (completed) emit({ type: "model_turn_end", turnId, answers });
       }
     },
+    async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
+      const turnId = uuidv4();
+      const answers = input.inputId ? [input.inputId] : [];
+      emit({ type: "model_turn_start", turnId, answers });
+      emit({ type: "model_turn_answers", turnId, added: [] });
+      for (const message of messages) emit(message);
+      emit({ type: "model_turn_end", turnId, answers });
+    },
     async fork(): Promise<ModelSessionFork> {
       throw new Error("ModelSession fork is not supported by this provider");
     },
@@ -518,12 +533,17 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     model: params.model,
     events,
     async sendUserInput(input: ModelUserInput): Promise<void> {
+      await this.completeTurn!(input, [
+        { type: "text", content: FALLBACK },
+        { type: "result", content: FALLBACK },
+      ]);
+    },
+    async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
       const turnId = uuidv4();
       const answers = input.inputId ? [input.inputId] : [];
       emit({ type: "model_turn_start", turnId, answers });
       emit({ type: "model_turn_answers", turnId, added: [] });
-      emit({ type: "text", content: FALLBACK });
-      emit({ type: "result", content: FALLBACK });
+      for (const message of messages) emit(message);
       emit({ type: "model_turn_end", turnId, answers });
     },
     async fork(): Promise<ModelSessionFork> {

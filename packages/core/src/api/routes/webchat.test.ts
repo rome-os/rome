@@ -182,6 +182,68 @@ describe("Webchat API", () => {
     expect(inputs.map((message) => message.inputState)).toEqual(["sent", "sent"]);
   });
 
+  it("delivers a caller turn that ends before ModelSession ownership", async () => {
+    const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
+    deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
+    const agent: AgentSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:middleware" },
+      sessionId: "agent-session",
+      status: "running",
+      sendTurn: () => ({
+        turnId: "middleware-caller",
+        turnContext: otelContext.active(),
+        events: (async function* () {
+          yield {
+            type: "turn_start" as const,
+            turnId: "middleware-caller",
+            sessionId: "agent-session",
+            userPrompt: "welcome",
+          };
+          yield { type: "text" as const, content: "Welcome to Rome", turnPhase: "final" };
+          yield { type: "result" as const, content: "Welcome to Rome" };
+          yield {
+            type: "turn_end" as const,
+            turnId: "middleware-caller",
+            status: "completed",
+            durationMs: 1,
+          };
+        })(),
+      }),
+      subscribe: () => () => {},
+      // AgentSession has the model-boundary API even though this caller fails
+      // before a ModelSession turn starts. Webchat must retain delivery.
+      onModelTurnStart: () => () => {},
+      onStatusChange: () => () => {},
+      interrupt: async () => {},
+      close: async () => {},
+    };
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => agent),
+      peek: () => agent,
+      shutdown: async () => {},
+    };
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Middleware" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    const response = await app.request(`/chat/sessions/${id}/turns`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello" }),
+    });
+    expect(response.status).toBe(200);
+    await rs.waitFor(() =>
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({ text: "Welcome to Rome", turnId: "middleware-caller" }),
+        expect.anything(),
+      ),
+    );
+  });
+
   it("refuses a queued turn's Stop without interrupting the active turn", async () => {
     const finishers: (() => void)[] = [];
     let sequence = 0;

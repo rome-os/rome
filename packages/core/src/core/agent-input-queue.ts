@@ -70,14 +70,22 @@ export class AgentInputQueue {
   finish(_turnId: string): void {}
 
   async observe(event: InputStatusMessage, turnId: string): Promise<void> {
+    if (event.state === "answered") {
+      await this.answer(event.inputId, turnId);
+      return;
+    }
     const entry = this.entries.get(event.inputId);
     if (!entry || entry.state === "answered") return;
     await this.update(entry, "read", turnId);
   }
 
-  async answer(inputId: string, turnId: string): Promise<void> {
+  /**
+   * Returns an untracked completion for AgentSession to persist and publish
+   * after a restart. In-memory entries retain their original caller callback.
+   */
+  async answer(inputId: string, turnId: string): Promise<InputStatusMessage | undefined> {
     const entry = this.entries.get(inputId);
-    if (!entry) return;
+    if (!entry) return { type: "input_status", inputId, turnId, state: "answered" };
     await this.update(entry, "answered", turnId);
     // Retain a bounded retry/deduplication window; durable identities live in
     // the repository.
@@ -87,6 +95,7 @@ export class AgentInputQueue {
         if (this.entries.size <= 256) break;
       }
     }
+    return undefined;
   }
 
   close(): void {

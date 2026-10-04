@@ -60,6 +60,29 @@ describe("conversational input lane", () => {
     ]);
   });
 
+  it("returns an echoed completion when the submission belongs to a prior process", async () => {
+    const s = setup();
+    await expect(s.queue.answer("restored", "sdk-restored")).resolves.toEqual({
+      type: "input_status",
+      inputId: "restored",
+      turnId: "sdk-restored",
+      state: "answered",
+    });
+    expect(s.statuses).toEqual([]);
+  });
+
+  it("preserves an answered middleware completion instead of downgrading it to read", async () => {
+    const s = setup();
+    s.submit("a");
+    await s.queue.observe({ type: "input_status", inputId: "a", state: "answered" }, "scripted");
+    expect(s.statuses.at(-1)).toEqual({
+      type: "input_status",
+      inputId: "a",
+      turnId: "scripted",
+      state: "answered",
+    });
+  });
+
   it("deduplicates input identities and rejects new input after close", () => {
     const s = setup();
     s.submit("a");

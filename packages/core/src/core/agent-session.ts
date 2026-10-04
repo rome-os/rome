@@ -2416,6 +2416,7 @@ class AgentSessionImpl implements AgentSession {
           .map((id) => this.waitingCallers.get(id))
           .find((sink): sink is TurnSink => !!sink);
         if (streamSink) this.bindSdkTurnSink(event.turnId, streamSink);
+        else this.openSdkTurnSink(event.turnId);
         return;
       }
       case "model_turn_answers": {
@@ -2469,7 +2470,17 @@ class AgentSessionImpl implements AgentSession {
         // A model-turn answer is the only authoritative completion signal for
         // an input: an input can be read while folding into a later SDK turn.
         for (const id of turn.answers) {
-          await this.inputs.answer(id, turn.sink?.turnId ?? event.turnId);
+          const turnId = turn.sink?.turnId ?? event.turnId;
+          const untracked = await this.inputs.answer(id, turnId);
+          if (untracked && turn.sink) {
+            // A resumed provider can echo an input that was submitted before
+            // this process created its in-memory queue entry. Keep its durable
+            // progress and live subscribers in sync without resending it.
+            if (this.romeSessionId) {
+              await this.deps.webchatRepo?.updateUserInput(this.romeSessionId, untracked);
+            }
+            this.publishOutbound(turn.sink, untracked);
+          }
         }
         for (const sink of sinks) {
           if (!sink.done) {
@@ -3663,6 +3674,7 @@ class AgentSessionImpl implements AgentSession {
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: ResultMessage | ErrorMessage | undefined;
       let modelRan = false;
+      const middlewareEvents: AgentMessage[] = [];
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
         session: {
@@ -3687,7 +3699,10 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result" || outbound.type === "error") {
             emittedTerminal = outbound;
           }
-          this.publishOutbound(sink, outbound);
+          // Middleware-only output is replayed by the code-backed
+          // ModelSession as a correlated model turn below. Do not bypass the
+          // model-turn contract by publishing it directly to a caller sink.
+          middlewareEvents.push(outbound);
         },
         meta: {},
       };
@@ -3752,19 +3767,11 @@ class AgentSessionImpl implements AgentSession {
         await runModelTerminal();
       }
 
-      // Middleware-only turns still terminate here. A dispatched model turn
-      // stays open until the SDK names this input at model_turn_end.
+      // Middleware-only output is still a real ModelSession turn: the
+      // code-backed session brackets its buffered reply with model-turn events
+      // that echo this input id. This keeps delivery, input completion, and
+      // webchat's visible-stream boundary identical to provider-backed turns.
       if (!sink.done && !modelRan) {
-        if (input.inputId) {
-          await this.inputs.observe(
-            {
-              type: "input_status",
-              inputId: input.inputId,
-              state: "answered",
-            },
-            turnId,
-          );
-        }
         let terminal: ResultMessage | ErrorMessage = emittedTerminal ?? {
           type: "result",
           content: "",
@@ -3775,13 +3782,30 @@ class AgentSessionImpl implements AgentSession {
             this.structuredOutputValidator,
             sink.outputSchemaSuspended,
           ) as ResultMessage | ErrorMessage;
-          this.publishOutbound(sink, terminal);
         }
-        this.finalizeTurn(sink, terminal);
+        if (!emittedTerminal) middlewareEvents.push(terminal);
+        if (input.inputId) this.waitingCallers.set(input.inputId, sink);
+        const completeTurn = this.modelSession.completeTurn;
+        if (!completeTurn) {
+          throw new Error("ModelSession cannot complete a middleware-only turn");
+        }
+        modelRan = true;
+        await completeTurn.call(
+          this.modelSession,
+          {
+            inputId: input.inputId,
+            text: mwInput.prompt,
+            images: input.images,
+            reasoningEffort: mwInput.reasoningEffort,
+            injectedToolResult: input.injectedToolResult,
+          },
+          middlewareEvents,
+        );
       }
 
       // The agent + model spans stay on this sink until its SDK result. Only
-      // middleware-only paths have no SDK terminal to close them.
+      // middleware-only paths that fail before a ModelSession completion need
+      // local span cleanup.
       if (!modelRan && sink.agentSpan === span) {
         span.setAttributes({
           "session.is_new": this.isNewSession,
