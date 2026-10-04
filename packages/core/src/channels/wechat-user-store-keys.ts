@@ -218,6 +218,7 @@ async function writePrivateJson(path: string, value: unknown): Promise<void> {
 export async function deriveStoreKeys(
   passphraseHex: string,
   paths: WechatStoreKeysPaths,
+  signal?: AbortSignal,
 ): Promise<{ derived: number; databases: number; wxid: string }> {
   const dbDir = storeDir(paths.accountDir);
   if (!/^[0-9a-fA-F]{64}$/.test(passphraseHex.trim())) {
@@ -236,6 +237,7 @@ export async function deriveStoreKeys(
   for (const db of databases) bySalt.set(db.salt, [...(bySalt.get(db.salt) ?? []), db]);
   const keys: Record<string, StoredKey> = {};
   for (const [salt, group] of bySalt) {
+    signal?.throwIfAborted();
     const encKey = pbkdf2Sync(
       passphrase,
       Buffer.from(salt, "hex"),
@@ -266,6 +268,8 @@ export async function deriveStoreKeys(
 
   const wxid = basename(paths.accountDir!);
   const stored: StoredKeys = { dbDir, wxid, keys, capturedAt: new Date().toISOString() };
+  // A cancelled setup writes nothing durable.
+  signal?.throwIfAborted();
   await writePrivateJson(paths.keysFile, stored);
   return { derived: Object.keys(keys).length, databases: databases.length, wxid };
 }

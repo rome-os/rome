@@ -892,12 +892,13 @@ export class WechatUserRuntime {
    * required database, so the caller retries with the same passphrase, and
    * {@link WechatUserSessionRejected} when only a fresh capture can help.
    */
-  async deriveKeys(passphrase: string): Promise<void> {
+  async deriveKeys(passphrase: string, signal?: AbortSignal): Promise<void> {
     try {
-      await deriveStoreKeys(passphrase, {
-        accountDir: await this.accountDir(),
-        keysFile: this.keysFile,
-      });
+      await deriveStoreKeys(
+        passphrase,
+        { accountDir: await this.accountDir(), keysFile: this.keysFile },
+        signal,
+      );
     } catch (error) {
       if (error instanceof WechatStoreKeysError) {
         throw error.kind === "pending"

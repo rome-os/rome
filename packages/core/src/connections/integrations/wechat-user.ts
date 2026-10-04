@@ -351,7 +351,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             const deadline = Date.now() + loginTimeoutMs;
             for (;;) {
               try {
-                await runtime.deriveKeys(passphrase);
+                await runtime.deriveKeys(passphrase, signal);
                 break;
               } catch (error) {
                 if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline)

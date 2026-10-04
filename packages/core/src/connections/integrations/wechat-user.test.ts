@@ -241,7 +241,7 @@ describe("makeWechatUserSetup", () => {
     // Recovery launches on the display ensureDesktop prepared, not whatever
     // `display` reads by the time recovery gets to it.
     expect(recoverPassphrase).toHaveBeenCalledWith(expect.anything(), ":100");
-    expect(runtime.deriveKeys).toHaveBeenCalledWith("a".repeat(64));
+    expect(runtime.deriveKeys).toHaveBeenCalledWith("a".repeat(64), expect.any(AbortSignal));
     expect(commit).toHaveBeenCalledTimes(1);
   });
 

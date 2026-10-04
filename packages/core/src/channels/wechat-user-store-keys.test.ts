@@ -82,6 +82,16 @@ describe("deriveStoreKeys", () => {
     );
   });
 
+  it("writes nothing once the setup is cancelled", async () => {
+    await writeStore(dbDir, ENC_KEY, SALT);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      deriveStoreKeys(PASSPHRASE.toString("hex"), { accountDir, keysFile }, controller.signal),
+    ).rejects.toThrow();
+    await expect(stat(keysFile)).rejects.toThrow();
+  });
+
   it("rejects a passphrase that opens nothing, and a signed-out account", async () => {
     await writeStore(dbDir, ENC_KEY, SALT);
     await expectKind(
