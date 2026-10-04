@@ -20,25 +20,35 @@ for (const { width, height, hasTouch } of [
       await expect(heading).toHaveCSS("font-size", width < 768 ? "28px" : "18px");
       await expect(page.locator("main .text-title:not(h1)").first()).toHaveCSS("font-size", "18px");
 
-      const filters = page.getByRole("radiogroup", { name: "Activity status" });
-      const pending = filters.getByRole("radio", { name: "Pending", exact: true });
-      if (hasTouch) {
-        for (const radio of await filters.getByRole("radio").all()) {
-          expect((await radio.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      if (width < 768) {
+        // Phone layouts trade the horizontally scrolling radio pills for one
+        // native picker, whose own sheet or wheel keeps all choices reachable.
+        const picker = page.getByRole("combobox", { name: "Show" });
+        await expect(picker).toBeVisible();
+        expect((await picker.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await picker.selectOption("pending");
+        await expect(picker).toHaveValue("pending");
+      } else {
+        const filters = page.getByRole("radiogroup", { name: "Activity status" });
+        const pending = filters.getByRole("radio", { name: "Pending", exact: true });
+        if (hasTouch) {
+          for (const radio of await filters.getByRole("radio").all()) {
+            expect((await radio.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+          }
+          expect(
+            (await page.getByRole("button", { name: "Refresh", exact: true }).boundingBox())!.height,
+          ).toBeGreaterThanOrEqual(44);
         }
-        expect(
-          (await page.getByRole("button", { name: "Refresh", exact: true }).boundingBox())!.height,
-        ).toBeGreaterThanOrEqual(44);
+        await pending.click();
+        await expect(pending).toHaveAttribute("aria-checked", "true");
+        await pending.focus();
+        await page.keyboard.down("ArrowRight");
+        await expect(filters.getByRole("radio", { name: "Running", exact: true })).toHaveAttribute(
+          "aria-checked",
+          "true",
+        );
+        await page.keyboard.up("ArrowRight");
       }
-      await pending.click();
-      await expect(pending).toHaveAttribute("aria-checked", "true");
-      await pending.focus();
-      await page.keyboard.down("ArrowRight");
-      await expect(filters.getByRole("radio", { name: "Running", exact: true })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-      await page.keyboard.up("ArrowRight");
 
       if (width < 768)
         await page.getByRole("button", { name: "Open sidebar", exact: true }).click();

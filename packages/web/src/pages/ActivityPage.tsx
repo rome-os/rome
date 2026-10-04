@@ -13,6 +13,7 @@ import {
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
@@ -916,24 +917,13 @@ export default function ActivityPage() {
             ))}
           </select>
         </label>
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 max-md:hidden">
-          {FILTER_VALUES.map((value) => {
-            const active = statusFilter === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
-                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
-                }`}
-              >
-                {t(`page.filters.${value}`)}
-              </button>
-            );
-          })}
-        </div>
+        <FilterChipGroup
+          aria-label={t("page.filterStatus")}
+          className="max-md:hidden"
+          options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+        />
 
         <ApprovalHistoryButton />
 
