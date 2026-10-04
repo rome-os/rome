@@ -32,7 +32,7 @@ export function ToolUseBlock({
       {open && (
         <div className="border-t border-info-border px-3 py-2 text-aux text-info-fg">
           {liveOutput ? (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-aux">
               {liveOutput}
             </pre>
           ) : (

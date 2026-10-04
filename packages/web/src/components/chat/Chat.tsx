@@ -929,7 +929,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 blockIx?: number;
                 text?: string;
               };
-              updateSessionAssistantText(sessionId, turnId, blockId, blockIx, text ?? "");
+              updateSessionAssistantText(sessionId, turnId, blockIx, text ?? "", blockId);
             } catch {
               // ignore parse errors
             }

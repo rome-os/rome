@@ -66,9 +66,9 @@ export function updateAssistantText(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
-  blockId: string | undefined,
   blockIx: number | undefined,
   assistantText: string,
+  blockId?: string,
 ): StreamingSessionMap {
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
@@ -166,12 +166,12 @@ export function useStreamingSessions() {
     (
       sessionId: string,
       turnId: string,
-      blockId: string | undefined,
       blockIx: number | undefined,
       assistantText: string,
+      blockId?: string,
     ) => {
       setStreams((prev) =>
-        updateAssistantText(prev, sessionId, turnId, blockId, blockIx, assistantText),
+        updateAssistantText(prev, sessionId, turnId, blockIx, assistantText, blockId),
       );
     },
     [],

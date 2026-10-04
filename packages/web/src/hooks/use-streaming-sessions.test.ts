@@ -24,7 +24,7 @@ describe("streaming-sessions state", () => {
   it("preserves the live tail and trace when another input joins the same turn", () => {
     let state = startStream(new Map(), "session", "turn");
     state = updateSnapshot(state, "session", "turn", snapshotFor("trace"));
-    state = updateAssistantText(state, "session", "turn", undefined, 0, "Still working");
+    state = updateAssistantText(state, "session", "turn", 0, "Still working");
     expect(startStream(state, "session", "turn")).toBe(state);
     expect(state.get("session")?.assistantText).toBe("Still working");
   });
@@ -93,24 +93,24 @@ describe("streaming-sessions state", () => {
 
   it("updateAssistantText accumulates within a block and replaces on a higher blockIx", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
-    state = updateAssistantText(state, "A", "turn-1", "block-0", 0, "Hel");
-    state = updateAssistantText(state, "A", "turn-1", "block-0", 0, "Hello");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hel", "block-0");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello", "block-0");
     expect(state.get("A")?.assistantText).toBe("Hello");
     expect(state.get("A")?.assistantBlockId).toBe("block-0");
     expect(state.get("A")?.assistantBlockIx).toBe(0);
     // Higher blockIx: the completed block is now its own message; the live tail
     // moves to the new block (the server clears it with an empty text first).
-    state = updateAssistantText(state, "A", "turn-1", "block-1", 1, "");
+    state = updateAssistantText(state, "A", "turn-1", 1, "", "block-1");
     expect(state.get("A")?.assistantText).toBe("");
     expect(state.get("A")?.assistantBlockIx).toBe(1);
-    state = updateAssistantText(state, "A", "turn-1", "block-1", 1, "Final answer");
+    state = updateAssistantText(state, "A", "turn-1", 1, "Final answer", "block-1");
     expect(state.get("A")?.assistantText).toBe("Final answer");
   });
 
   it("updateAssistantText never regresses to an earlier block", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
-    state = updateAssistantText(state, "A", "turn-1", undefined, 1, "current block");
-    const after = updateAssistantText(state, "A", "turn-1", undefined, 0, "stale block");
+    state = updateAssistantText(state, "A", "turn-1", 1, "current block");
+    const after = updateAssistantText(state, "A", "turn-1", 0, "stale block");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("current block");
   });
@@ -118,7 +118,7 @@ describe("streaming-sessions state", () => {
   it("updateAssistantText ignores writes from a stale turn", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
     state = startStream(state, "A", "turn-2");
-    const after = updateAssistantText(state, "A", "turn-1", undefined, 0, "stale");
+    const after = updateAssistantText(state, "A", "turn-1", 0, "stale");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("");
   });
