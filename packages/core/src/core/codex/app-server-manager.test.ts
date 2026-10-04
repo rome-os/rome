@@ -5,7 +5,7 @@ import {
   type CodexAppServerConnection,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
-import type { ThreadStartParams } from "./app-server-protocol.js";
+import { Method, type ThreadStartParams } from "./app-server-protocol.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 
 interface FakeRequest {
@@ -365,6 +365,106 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
+  it("keeps thread opens, sign-ins, and turn starts ahead of a payer restart", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    try {
+      for (const operation of [
+        { label: "thread open", method: Method.threadStart },
+        { label: "sign-in", method: Method.accountLoginStart },
+        { label: "turn start", method: Method.turnStart },
+      ]) {
+        const clients: FakeConnection[] = [];
+        let gateMethod: string | null = null;
+        let gateStarted!: () => void;
+        const gateStartedPromise = new Promise<void>((resolve) => {
+          gateStarted = resolve;
+        });
+        let releaseGate!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          releaseGate = resolve;
+        });
+        const manager = new CodexAppServerManager({
+          createClient: (options) => {
+            const client = new FakeConnection(
+              options,
+              () => `thread-${operation.method}`,
+              async (method) => {
+                if (method !== gateMethod) return;
+                gateStarted();
+                await gate;
+              },
+            );
+            clients.push(client);
+            return client;
+          },
+        });
+
+        try {
+          await manager.warmup();
+          let threadId: string | undefined;
+          if (operation.method === Method.turnStart) {
+            threadId = (await manager.openThread(config("rome_turn"), binding("turn"))).threadId;
+          }
+          gateMethod = operation.method;
+          const inFlight =
+            operation.method === Method.threadStart
+              ? manager.openThread(config("rome_open"), binding("open"))
+              : operation.method === Method.accountLoginStart
+                ? manager.request(Method.accountLoginStart, { type: "chatgpt" })
+                : manager.requestForThread(threadId!, Method.turnStart, { threadId });
+          await gateStartedPromise;
+
+          const switched = manager.setDefaultProvider("rome_credits");
+          const admittedAfterSwitch = manager.request("account/read", { refreshToken: true });
+          await Promise.resolve();
+          expect(clients, `${operation.label} client remains open`).toHaveLength(1);
+          expect(clients[0].closed).toBe(0);
+
+          releaseGate();
+          await inFlight;
+          if (threadId) {
+            clients[0].options.onNotification("turn/completed", { threadId });
+          }
+          await switched;
+          await admittedAfterSwitch;
+          expect(clients[0].closed).toBe(1);
+          expect(clients).toHaveLength(2);
+          expect(clients[1].requests.some((request) => request.method === "account/read")).toBe(
+            true,
+          );
+        } finally {
+          manager.close();
+        }
+      }
+    } finally {
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("keeps fixed config overrides while applying the selected payer", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      configArgs: ["-c", "features.example=true"],
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-config");
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      await manager.warmup();
+      await manager.setDefaultProvider("rome_credits");
+
+      expect(clients[1].options.configArgs).toEqual(
+        expect.arrayContaining(["-c", "features.example=true", 'model_provider="rome_credits"']),
+      );
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
   it("forwards a successful final turn before restarting the shared process", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     const clients: FakeConnection[] = [];
@@ -377,6 +477,8 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     });
     try {
       const callbacks = binding("restart");
+      const replaced = rs.fn();
+      manager.onReplacement(replaced);
       const handle = await manager.openThread(config("rome_restart"), callbacks);
       await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
 
@@ -388,6 +490,9 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       await switched;
       expect(clients).toHaveLength(2);
       expect(clients[0].closed).toBe(1);
+      expect(replaced).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "codex app-server replaced for payer switch" }),
+      );
       expect(callbacks.exits).toHaveLength(0);
       expect(callbacks.notifications).toEqual([
         { method: "turn/completed", params: { threadId: handle.threadId } },
@@ -546,6 +651,53 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       await Promise.all([firstSwitch, secondSwitch]);
       expect(clients).toHaveLength(3);
       expect(clients[2].options.configArgs).toContain('model_provider="other"');
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("waits for an ongoing replacement when the requested payer already matches", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    const clients: FakeConnection[] = [];
+    let initializeStarted!: () => void;
+    const initializeStartedPromise = new Promise<void>((resolve) => {
+      initializeStarted = resolve;
+    });
+    let releaseInitialize!: () => void;
+    const initializeGate = new Promise<void>((resolve) => {
+      releaseInitialize = resolve;
+    });
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const shouldGate = clients.length === 1;
+        const client = new FakeConnection(
+          options,
+          () => "thread-same-provider",
+          async (method) => {
+            if (!shouldGate || method !== Method.initialize) return;
+            initializeStarted();
+            await initializeGate;
+          },
+        );
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      await manager.warmup();
+      const firstSwitch = manager.setDefaultProvider("rome_credits");
+      await initializeStartedPromise;
+      let sameProviderSettled = false;
+      const sameProviderSwitch = manager.setDefaultProvider("rome_credits").then(() => {
+        sameProviderSettled = true;
+      });
+
+      await Promise.resolve();
+      expect(sameProviderSettled).toBe(false);
+      releaseInitialize();
+      await Promise.all([firstSwitch, sameProviderSwitch]);
+      expect(sameProviderSettled).toBe(true);
     } finally {
       manager.close();
       rs.unstubAllEnvs();

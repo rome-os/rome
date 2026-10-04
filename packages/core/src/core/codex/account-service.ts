@@ -20,6 +20,7 @@ import type {
   CodexAppServerExitListener,
   CodexAppServerManager,
   CodexAppServerNotificationListener,
+  CodexAppServerReplacementListener,
 } from "./app-server-manager.js";
 
 const log = createLogger("codex-account-service");
@@ -98,6 +99,7 @@ interface CodexAccountRpc {
   request<T>(method: string, params?: unknown): Promise<T>;
   onNotification(method: string, listener: CodexAppServerNotificationListener): () => void;
   onExit(listener: CodexAppServerExitListener): () => void;
+  onReplacement?(listener: CodexAppServerReplacementListener): () => void;
 }
 
 export interface SharedCodexAccountServiceOptions {
@@ -168,6 +170,13 @@ export class SharedCodexAccountService implements CodexAccountService {
         this.handleManagerExit(error);
       }),
     ];
+    if (manager.onReplacement) {
+      this.unsubscribers.push(
+        manager.onReplacement((error) => {
+          this.handleManagerExit(error);
+        }),
+      );
+    }
   }
 
   async getStatus(): Promise<AIToolStatusProbeResult> {

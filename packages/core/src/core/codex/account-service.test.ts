@@ -14,6 +14,7 @@ class FakeAccountRpc {
   readonly responses = new Map<string, unknown[]>();
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
   private readonly exitListeners = new Set<(error: Error) => void>();
+  private readonly replacementListeners = new Set<(error: Error) => void>();
 
   queue(method: string, ...responses: unknown[]): void {
     this.responses.set(method, [...(this.responses.get(method) ?? []), ...responses]);
@@ -42,12 +43,21 @@ class FakeAccountRpc {
     return () => this.exitListeners.delete(listener);
   }
 
+  onReplacement(listener: (error: Error) => void): () => void {
+    this.replacementListeners.add(listener);
+    return () => this.replacementListeners.delete(listener);
+  }
+
   notify(method: string, params: unknown): void {
     for (const listener of this.listeners.get(method) ?? []) listener(params);
   }
 
   exit(error: Error): void {
     for (const listener of this.exitListeners) listener(error);
+  }
+
+  replace(error: Error): void {
+    for (const listener of this.replacementListeners) listener(error);
   }
 }
 
@@ -374,6 +384,28 @@ describe("SharedCodexAccountService", () => {
     expect(service.getLoginState()).toMatchObject({
       running: false,
       lastError: "Codex sign-in stopped: codex app-server exited (code 137)",
+    });
+    expect(changed).toHaveBeenCalledTimes(1);
+    service.close();
+  });
+
+  it("clears an active login when a payer switch replaces the shared app-server", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/login/start", {
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    const service = createService(rpc);
+    const changed = rs.fn();
+    service.onAccountChanged(changed);
+    await service.startDeviceLogin();
+
+    rpc.replace(new Error("codex app-server replaced for payer switch"));
+
+    expect(service.getLoginState()).toMatchObject({
+      running: false,
+      lastError: "Codex sign-in stopped: codex app-server replaced for payer switch",
     });
     expect(changed).toHaveBeenCalledTimes(1);
     service.close();

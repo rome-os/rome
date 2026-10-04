@@ -25,6 +25,8 @@ export interface CodexThreadBinding {
 
 export type CodexAppServerNotificationListener = (params: unknown) => void;
 export type CodexAppServerExitListener = (error: Error) => void;
+/** A graceful payer replacement stopped process-global work without failing thread bindings. */
+export type CodexAppServerReplacementListener = (error: Error) => void;
 
 interface StoredThreadBinding {
   callbacks: CodexThreadBinding;
@@ -57,7 +59,7 @@ export interface CodexAppServerManagerOptions {
   cwd?: string;
   /** Fixed child env. Defaults to the allowlist plus the instance credential, read at each spawn. */
   env?: Record<string, string>;
-  /** Fixed root `-c` overrides. Defaults to {@link codexAppServerConfigArgs} for this instance. */
+  /** Additional fixed root `-c` overrides, applied before Rome's provider configuration. */
   configArgs?: readonly string[];
   /** Codex's process-wide model provider. Null uses the guardian's OpenAI login. */
   defaultProvider?: string | null;
@@ -115,7 +117,9 @@ export class CodexAppServerManager {
     Set<CodexAppServerNotificationListener>
   >();
   private readonly exitListeners = new Set<CodexAppServerExitListener>();
+  private readonly replacementListeners = new Set<CodexAppServerReplacementListener>();
   private readonly activeTurnThreads = new Set<string>();
+  private activeRpcCount = 0;
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
   private connectionPromiseProvider: string | null = null;
@@ -138,17 +142,22 @@ export class CodexAppServerManager {
   }
 
   async warmup(): Promise<void> {
-    await this.ensureConnection();
+    await this.withRpcAdmission(() => this.ensureConnection());
   }
 
   /**
    * Change the payer for the one shared Codex process. A running turn keeps
-   * its process; once every turn is terminal, the manager restarts Codex and
-   * idle threads lazily resume against the new default on their next turn.
+   * its process; once turns and every other in-flight RPC have settled, the
+   * manager restarts Codex and idle threads lazily resume against the new
+   * default on their next turn.
    */
   async setDefaultProvider(provider: string | null): Promise<void> {
     if (this.closed) throw new Error("codex app-server manager is closed");
-    if (this.defaultProvider === provider && !this.restartPending) return;
+    if (this.defaultProvider === provider) {
+      if (this.restartPromise) await this.restartPromise;
+      else if (this.restartPending) await this.restartWhenIdle();
+      return;
+    }
     this.defaultProvider = provider;
     this.restartPending = true;
     do {
@@ -158,8 +167,10 @@ export class CodexAppServerManager {
 
   /** Issue a process-global app-server request on the shared connection. */
   async request<T>(method: string, params?: unknown): Promise<T> {
-    const connection = await this.ensureConnection();
-    return (await connection.client.request(method, params)) as T;
+    return await this.withRpcAdmission(async () => {
+      const connection = await this.ensureConnection();
+      return (await connection.client.request(method, params)) as T;
+    });
   }
 
   /**
@@ -186,76 +197,89 @@ export class CodexAppServerManager {
     return () => this.exitListeners.delete(listener);
   }
 
+  /** Subscribe to a deliberate process replacement, such as a payer change. */
+  onReplacement(listener: CodexAppServerReplacementListener): () => void {
+    this.replacementListeners.add(listener);
+    return () => this.replacementListeners.delete(listener);
+  }
+
   async openThread(
     config: ThreadStartParams,
     callbacks: CodexThreadBinding,
     resumeThreadId?: string,
   ): Promise<CodexThreadHandle> {
     if (this.closed) throw new Error("codex app-server manager is closed");
-    const connection = await this.ensureConnection();
-    const method = resumeThreadId ? Method.threadResume : Method.threadStart;
-    const startedAt = Date.now();
-    const result = await connection.client.request(
-      method,
-      resumeThreadId ? buildThreadResumeParams(resumeThreadId, config) : config,
-    );
-    const handle = threadFromResponse(result, method);
-    const threadId = handle.threadId;
-    if (resumeThreadId && threadId !== resumeThreadId) {
-      throw new Error(
-        `codex thread/resume returned unexpected thread id ${threadId} (wanted ${resumeThreadId})`,
+    return await this.withRpcAdmission(async () => {
+      const connection = await this.ensureConnection();
+      const method = resumeThreadId ? Method.threadResume : Method.threadStart;
+      const startedAt = Date.now();
+      const result = await connection.client.request(
+        method,
+        resumeThreadId ? buildThreadResumeParams(resumeThreadId, config) : config,
       );
-    }
-    if (this.bindings.has(threadId)) {
-      throw new Error(`codex thread is already bound: ${threadId}`);
-    }
-    this.bindings.set(threadId, {
-      callbacks,
-      config,
-      handle,
-      generation: connection.generation,
-      resumePromise: null,
+      const handle = threadFromResponse(result, method);
+      const threadId = handle.threadId;
+      if (resumeThreadId && threadId !== resumeThreadId) {
+        throw new Error(
+          `codex thread/resume returned unexpected thread id ${threadId} (wanted ${resumeThreadId})`,
+        );
+      }
+      if (this.bindings.has(threadId)) {
+        throw new Error(`codex thread is already bound: ${threadId}`);
+      }
+      this.bindings.set(threadId, {
+        callbacks,
+        config,
+        handle,
+        generation: connection.generation,
+        resumePromise: null,
+      });
+      log.info("codex thread opened on shared app-server", {
+        method,
+        threadId,
+        generation: connection.generation,
+        durationMs: Date.now() - startedAt,
+      });
+      return handle;
     });
-    log.info("codex thread opened on shared app-server", {
-      method,
-      threadId,
-      generation: connection.generation,
-      durationMs: Date.now() - startedAt,
-    });
-    return handle;
   }
 
   async requestForThread<T>(threadId: string, method: string, params: unknown): Promise<T> {
     const isTurnStart = method === Method.turnStart;
-    if (isTurnStart) this.activeTurnThreads.add(threadId);
-    try {
-      const connection = await this.ensureThreadSubscribed(threadId);
-      return (await connection.client.request(method, params)) as T;
-    } catch (err) {
-      if (isTurnStart) {
-        this.activeTurnThreads.delete(threadId);
-        void this.restartWhenIdle();
-      }
-      throw err;
-    }
+    return await this.withRpcAdmission(
+      async () => {
+        try {
+          const connection = await this.ensureThreadSubscribed(threadId);
+          return (await connection.client.request(method, params)) as T;
+        } catch (err) {
+          if (isTurnStart) this.activeTurnThreads.delete(threadId);
+          throw err;
+        }
+      },
+      () => {
+        if (isTurnStart) this.activeTurnThreads.add(threadId);
+      },
+    );
   }
 
   async unsubscribe(threadId: string): Promise<void> {
     const binding = this.bindings.get(threadId);
     if (!binding) return;
-    try {
-      const connection = this.connection;
-      if (connection && binding.generation === connection.generation) {
-        await connection.client.request(Method.threadUnsubscribe, { threadId });
+    await this.withRpcAdmission(async () => {
+      try {
+        const connection = this.connection;
+        if (connection && binding.generation === connection.generation) {
+          await connection.client.request(Method.threadUnsubscribe, { threadId });
+        }
+      } catch (err) {
+        log.warn("codex thread unsubscribe failed", {
+          threadId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        this.bindings.delete(threadId);
       }
-    } catch (err) {
-      log.warn("codex thread unsubscribe failed", {
-        threadId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      this.bindings.delete(threadId);
-    }
+    });
   }
 
   close(): void {
@@ -281,6 +305,7 @@ export class CodexAppServerManager {
     this.activeTurnThreads.clear();
     this.notificationListeners.clear();
     this.exitListeners.clear();
+    this.replacementListeners.clear();
     this.startingClient?.close();
     this.startingClient = null;
     this.connection?.client.close();
@@ -337,7 +362,14 @@ export class CodexAppServerManager {
   }
 
   private maybeRestartWhenIdle(): void {
-    if (!this.restartPending || this.closed || this.activeTurnThreads.size > 0) return;
+    if (
+      !this.restartPending ||
+      this.closed ||
+      this.activeTurnThreads.size > 0 ||
+      this.activeRpcCount > 0
+    ) {
+      return;
+    }
     if (this.connectionPromise) {
       const connectionPromise = this.connectionPromise;
       const provider = this.connectionPromiseProvider;
@@ -361,6 +393,7 @@ export class CodexAppServerManager {
       if (binding.generation !== connection.generation) continue;
       binding.generation = 0;
     }
+    this.notifyReplacement(new Error("codex app-server replaced for payer switch"));
     connection.client.close();
     const provider = this.defaultProvider;
     void this.ensureConnection().then(
@@ -406,6 +439,33 @@ export class CodexAppServerManager {
     return await this.connectionPromise;
   }
 
+  /**
+   * Keep every client RPC on one side of a payer replacement. Admissions that
+   * arrive after a switch wait for its replacement process; admitted work keeps
+   * the old process alive until its request settles.
+   */
+  private async withRpcAdmission<T>(
+    operation: () => Promise<T>,
+    onAdmitted?: () => void,
+  ): Promise<T> {
+    while (this.restartPromise) await this.restartPromise;
+    if (this.closed) throw new Error("codex app-server manager is closed");
+    this.activeRpcCount += 1;
+    onAdmitted?.();
+    try {
+      return await operation();
+    } finally {
+      this.activeRpcCount -= 1;
+      if (this.restartPending && !this.closed) {
+        void this.restartWhenIdle().catch((err) => {
+          log.warn("codex app-server restart failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
+    }
+  }
+
   private async createConnection(
     generation: number,
     defaultProvider: string | null,
@@ -416,8 +476,10 @@ export class CodexAppServerManager {
     client = this.createClient({
       cwd: this.cwd,
       env: this.env ?? defaultCodexEnvironment(),
-      configArgs:
-        this.configArgs ?? codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
+      configArgs: [
+        ...(this.configArgs ?? []),
+        ...codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
+      ],
       onNotification: (method, params) => this.routeNotification(method, params),
       onServerRequest: async (method, params) => await this.routeServerRequest(method, params),
       onExit: (code) => {
@@ -536,5 +598,17 @@ export class CodexAppServerManager {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+  }
+
+  private notifyReplacement(error: Error): void {
+    for (const listener of this.replacementListeners) {
+      try {
+        listener(error);
+      } catch (err) {
+        log.warn("codex replacement handler failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 }
