@@ -140,6 +140,7 @@ export class SharedCodexAccountService implements CodexAccountService {
   private readonly unsubscribers: Array<() => void>;
   private activeLogin: ActiveLogin | null = null;
   private loginStartPending = false;
+  private loginStartEpoch = 0;
   private cancelPendingLoginStart = false;
   private earlyLoginCompletion: LoginCompletedNotification | null = null;
   private lastLoginError: string | null = null;
@@ -267,6 +268,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     await this.cancelLogin();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
+    const loginStartEpoch = ++this.loginStartEpoch;
     this.lastLoginError = null;
     this.loginStartPending = true;
     this.cancelPendingLoginStart = false;
@@ -280,16 +282,18 @@ export class SharedCodexAccountService implements CodexAccountService {
       if (typeof result.loginId !== "string" || typeof result.authUrl !== "string") {
         throw new Error("Codex login response did not include an auth URL");
       }
-      if (await this.cancelStartedLoginIfRequested(result.loginId)) {
+      if (
+        !this.isCurrentLoginStart(loginStartEpoch) ||
+        (await this.cancelStartedLoginIfRequested(result.loginId)) ||
+        !this.isCurrentLoginStart(loginStartEpoch)
+      ) {
         throw new Error("Codex login was canceled");
       }
       this.setActiveLogin(result.loginId, "browser", null, null);
       this.finishPendingLoginStart();
       return { loginId: result.loginId, authUrl: result.authUrl };
     } catch (err) {
-      this.loginStartPending = false;
-      this.cancelPendingLoginStart = false;
-      this.earlyLoginCompletion = null;
+      this.clearPendingLoginStart(loginStartEpoch);
       throw err;
     }
   }
@@ -298,6 +302,7 @@ export class SharedCodexAccountService implements CodexAccountService {
     await this.cancelLogin();
     this.assertOpen();
     if (this.loginStartPending) throw new Error("Codex login is already starting");
+    const loginStartEpoch = ++this.loginStartEpoch;
     this.lastLoginError = null;
     this.loginStartPending = true;
     this.cancelPendingLoginStart = false;
@@ -313,7 +318,11 @@ export class SharedCodexAccountService implements CodexAccountService {
       ) {
         throw new Error("Codex device login response did not include a device code");
       }
-      if (await this.cancelStartedLoginIfRequested(result.loginId)) {
+      if (
+        !this.isCurrentLoginStart(loginStartEpoch) ||
+        (await this.cancelStartedLoginIfRequested(result.loginId)) ||
+        !this.isCurrentLoginStart(loginStartEpoch)
+      ) {
         throw new Error("Codex login was canceled");
       }
       this.setActiveLogin(result.loginId, "device", result.userCode, result.verificationUrl);
@@ -324,9 +333,7 @@ export class SharedCodexAccountService implements CodexAccountService {
         verificationUrl: result.verificationUrl,
       };
     } catch (err) {
-      this.loginStartPending = false;
-      this.cancelPendingLoginStart = false;
-      this.earlyLoginCompletion = null;
+      this.clearPendingLoginStart(loginStartEpoch);
       throw err;
     }
   }
@@ -366,6 +373,7 @@ export class SharedCodexAccountService implements CodexAccountService {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.loginStartEpoch += 1;
     this.loginStartPending = false;
     this.cancelPendingLoginStart = false;
     this.earlyLoginCompletion = null;
@@ -434,6 +442,17 @@ export class SharedCodexAccountService implements CodexAccountService {
     if (completion) this.handleLoginCompleted(completion);
   }
 
+  private isCurrentLoginStart(loginStartEpoch: number): boolean {
+    return !this.closed && this.loginStartEpoch === loginStartEpoch && this.loginStartPending;
+  }
+
+  private clearPendingLoginStart(loginStartEpoch: number): void {
+    if (this.loginStartEpoch !== loginStartEpoch) return;
+    this.loginStartPending = false;
+    this.cancelPendingLoginStart = false;
+    this.earlyLoginCompletion = null;
+  }
+
   private async cancelStartedLoginIfRequested(loginId: string): Promise<boolean> {
     if (!this.cancelPendingLoginStart) return false;
     this.loginStartPending = false;
@@ -462,6 +481,7 @@ export class SharedCodexAccountService implements CodexAccountService {
 
   private handleManagerExit(error: Error): void {
     if (!this.activeLogin && !this.loginStartPending) return;
+    this.loginStartEpoch += 1;
     this.takeActiveLogin();
     this.loginStartPending = false;
     this.cancelPendingLoginStart = false;

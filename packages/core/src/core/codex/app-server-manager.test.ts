@@ -17,6 +17,10 @@ interface FakeRequest {
 class FakeConnection implements CodexAppServerConnection {
   readonly requests: FakeRequest[] = [];
   readonly notifications: FakeRequest[] = [];
+  private readonly deferredResponses = new Map<
+    string,
+    { promise: Promise<unknown>; resolve: (value: unknown) => void }
+  >();
   started = 0;
   closed = 0;
 
@@ -29,8 +33,22 @@ class FakeConnection implements CodexAppServerConnection {
     this.started += 1;
   }
 
+  defer(method: string): (value: unknown) => void {
+    let resolve!: (value: unknown) => void;
+    const promise = new Promise<unknown>((resolvePromise) => {
+      resolve = resolvePromise;
+    });
+    this.deferredResponses.set(method, { promise, resolve });
+    return (value) => {
+      this.deferredResponses.delete(method);
+      resolve(value);
+    };
+  }
+
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
+    const deferred = this.deferredResponses.get(method);
+    if (deferred) return await deferred.promise;
     if (method === "thread/start") {
       return {
         thread: {
@@ -353,6 +371,35 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
+  it("does not publish a client invalidated by successive payer switches during initialize", async () => {
+    const clients: FakeConnection[] = [];
+    let resolveInitialize!: (value: unknown) => void;
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-credits");
+        if (clients.length === 0) resolveInitialize = client.defer(Method.initialize);
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const initializing = manager.warmup();
+      resolveInitialize({});
+      manager.setDefaultProvider("rome_credits");
+      manager.setDefaultProvider(null);
+
+      await expect(initializing).rejects.toThrow(
+        "codex app-server was replaced during initialization",
+      );
+      await manager.warmup();
+
+      expect(clients).toHaveLength(2);
+      expect(clients[0].closed).toBeGreaterThan(0);
+    } finally {
+      manager.close();
+    }
+  });
+
   it("treats a payer change like an exit and lazily resumes idle threads", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     const { clients, manager } = capture();
@@ -396,6 +443,37 @@ describe("CodexAppServerManager Rome credits wiring", () => {
 
       manager.setDefaultProvider("rome_credits");
 
+      expect(accountService.getLoginState()).toMatchObject({
+        running: false,
+        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
+      });
+    } finally {
+      accountService.close();
+      manager.close();
+    }
+  });
+
+  it("does not restore a sign-in whose start response raced with a payer switch", async () => {
+    const { clients, manager } = capture();
+    const accountService = new SharedCodexAccountService(manager);
+    try {
+      await manager.warmup();
+      const resolveLoginStart = clients[0].defer(Method.accountLoginStart);
+      const starting = accountService.startDeviceLogin();
+      await rs.waitFor(() => {
+        expect(
+          clients[0].requests.some((request) => request.method === Method.accountLoginStart),
+        ).toBe(true);
+      });
+
+      resolveLoginStart({
+        loginId: "device-credits",
+        userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.openai.com/codex/device",
+      });
+      manager.setDefaultProvider("rome_credits");
+
+      await expect(starting).rejects.toThrow("Codex login was canceled");
       expect(accountService.getLoginState()).toMatchObject({
         running: false,
         lastError: "Codex sign-in stopped: codex app-server exited (code null)",

@@ -117,6 +117,9 @@ export class CodexAppServerManager {
   private connectionPromise: Promise<Connection> | null = null;
   private startingClient: CodexAppServerConnection | null = null;
   private defaultProvider: string | null;
+  // A→B→A restores defaultProvider, so this distinguishes the first, closed
+  // client from a current one while it is still initializing.
+  private connectionEpoch = 0;
   private nextGeneration = 1;
   private closed = false;
 
@@ -142,6 +145,7 @@ export class CodexAppServerManager {
     if (this.closed) throw new Error("codex app-server manager is closed");
     if (this.defaultProvider === provider) return;
     this.defaultProvider = provider;
+    this.connectionEpoch += 1;
 
     const connection = this.connection;
     const startingClient = this.startingClient;
@@ -310,8 +314,13 @@ export class CodexAppServerManager {
     if (this.connectionPromise) return await this.connectionPromise;
 
     const generation = this.nextGeneration++;
+    const connectionEpoch = this.connectionEpoch;
     let connectionPromise!: Promise<Connection>;
-    connectionPromise = this.createConnection(generation, this.defaultProvider).finally(() => {
+    connectionPromise = this.createConnection(
+      generation,
+      this.defaultProvider,
+      connectionEpoch,
+    ).finally(() => {
       if (this.connectionPromise !== connectionPromise) return;
       this.connectionPromise = null;
     });
@@ -322,6 +331,7 @@ export class CodexAppServerManager {
   private async createConnection(
     generation: number,
     defaultProvider: string | null,
+    connectionEpoch: number,
   ): Promise<Connection> {
     const startedAt = Date.now();
     let exited = false;
@@ -350,7 +360,7 @@ export class CodexAppServerManager {
       client.notify(Method.initialized, {});
       if (exited) throw new Error("codex app-server exited during initialization");
       if (this.closed) throw new Error("codex app-server manager closed during initialization");
-      if (defaultProvider !== this.defaultProvider) {
+      if (connectionEpoch !== this.connectionEpoch) {
         throw new Error("codex app-server was replaced during initialization");
       }
       const connection = { client, generation, defaultProvider };
