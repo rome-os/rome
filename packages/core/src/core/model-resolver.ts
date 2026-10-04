@@ -257,9 +257,8 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
   return {
     async getModelProvider(request) {
       options.romeCreditsPayer?.sync();
-      const state = options.aiToolState.get();
-      const usingRomeCredits = options.romeCreditsPayer?.isUsingRomeCredits() === true;
       if (request.exact) {
+        const state = options.aiToolState.get();
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
@@ -268,6 +267,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
+        const state = options.aiToolState.get();
         const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
@@ -276,13 +276,19 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model: selection.model };
       }
 
-      const useFable =
+      const fableEnabled =
         request.tier === "large" &&
-        state.claude.authMethod !== "stored-compatible" &&
         (await options.settingsRepo?.get<unknown>(ENABLE_FABLE_SETTING_KEY)) === true;
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
+      // Settings reads can yield while account state changes. Re-sync and read
+      // the live snapshots after the final await so model and process payer
+      // always describe the same Codex generation.
+      options.romeCreditsPayer?.sync();
+      const state = options.aiToolState.get();
+      const usingRomeCredits = options.romeCreditsPayer?.isUsingRomeCredits() === true;
+      const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
       const resolveTierModel = (provider: ModelProvider): string => {
         if (provider.id === "openai" && usingRomeCredits) {

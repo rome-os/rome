@@ -2089,7 +2089,9 @@ class AgentSessionImpl implements AgentSession {
         this.creditProviderAffinity,
       ),
     );
-    this.usesRomeCredits = resolution.payer === "rome_credits";
+    const usesRomeCredits = resolution.payer === "rome_credits";
+    if (this.usesRomeCredits !== usesRomeCredits) this.providerInfoStored = false;
+    this.usesRomeCredits = usesRomeCredits;
     if (this.usesRomeCredits) this.creditProviderAffinity = resolution.modelProvider.id;
     if (
       this.modelSessionAvailable &&

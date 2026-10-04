@@ -89,7 +89,10 @@ describe("agent model pins through AgentSessionManager", () => {
     await loader.loadAll(directory);
   }
 
-  function createManager(isSubagent = false, useRomeCredits = false): AgentSessionManager {
+  function createManager(
+    isSubagent = false,
+    useRomeCredits: boolean | (() => boolean) = false,
+  ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
@@ -105,7 +108,8 @@ describe("agent model pins through AgentSessionManager", () => {
           aiToolState: { get: () => state, refresh: async () => state },
           romeCreditsPayer: {
             sync: () => {},
-            isUsingRomeCredits: () => useRomeCredits,
+            isUsingRomeCredits: () =>
+              typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
           },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
@@ -176,6 +180,34 @@ describe("agent model pins through AgentSessionManager", () => {
     await collect(resumed.sendTurn({ prompt: "third" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol", "gpt-6-sol"]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
+  });
+
+  it("persists the own-provider pin after same-model credit recovery", async () => {
+    await writeConfig({ provider: undefined, modelId: undefined, tier: "medium" });
+    state.codex.loggedIn = false;
+    state.claude.loggedIn = false;
+    let usingRomeCredits = true;
+    const session = await createManager(false, () => usingRomeCredits).acquire(key, {
+      workingDir: directory,
+    });
+    await collect(session.sendTurn({ prompt: "credits" }).events);
+    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+      provider: "openai",
+      model: null,
+    });
+
+    // Both payers use Terra for medium, so reusing this ModelSession must still
+    // reset persistence when the payer switches back to the guardian.
+    state.codex.loggedIn = true;
+    state.codex.quotaExhausted = false;
+    usingRomeCredits = false;
+    await collect(session.sendTurn({ prompt: "guardian" }).events);
+
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-5.6-terra", "gpt-5.6-terra"]);
+    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    });
   });
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {

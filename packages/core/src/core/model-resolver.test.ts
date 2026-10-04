@@ -75,6 +75,49 @@ describe("ModelResolver", () => {
     });
   });
 
+  it("uses the payer and provider state that are current after settings reads", async () => {
+    let releaseSettings!: () => void;
+    const settingsReady = new Promise<void>((resolve) => {
+      releaseSettings = resolve;
+    });
+    let settingsRead!: () => void;
+    const settingsStarted = new Promise<void>((resolve) => {
+      settingsRead = resolve;
+    });
+    let usingRomeCredits = false;
+    const state: AIToolStateValue = {
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      aiToolState: { get: () => state, refresh: async () => state },
+      providers: [claude, codex],
+      settingsRepo: {
+        get: async () => {
+          settingsRead();
+          await settingsReady;
+          return null;
+        },
+      },
+      romeCreditsPayer: {
+        sync: () => {},
+        isUsingRomeCredits: () => usingRomeCredits,
+      },
+    });
+
+    const resolution = r.getModelProvider({ tier: "large" });
+    await settingsStarted;
+    state.codex.quotaExhausted = true;
+    usingRomeCredits = true;
+    releaseSettings();
+
+    await expect(resolution).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6-sol",
+      payer: "rome_credits",
+    });
+  });
+
   it("falls back from unavailable Sol/Luna to Terra", async () => {
     const r = resolver({
       codex: {
