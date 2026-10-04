@@ -3,18 +3,18 @@
 // model/env/auth/accounting helpers live in codex/common.ts.
 //
 // The app-server exposes `agentMessage.phase` (commentary | final_answer) and
-// `item/agentMessage/delta` streaming. Mapping `phase` → AgentMessage
+// `item/agentMessage/delta` streaming. Mapping `phase` → AgentEvent
 // `turnPhase` promotes Codex in-turn commentary into the answer flow,
 // consumed by the same UI that serves Anthropic. See
 // KEEP-INTURN-TEXT-RESEARCH.md §6/§7.
 //
 // The JSON-RPC transport lives in app-server-client.ts; the
-// notification→AgentMessage translation is below. Headless config:
+// notification→AgentEvent translation is below. Headless config:
 // sandbox=danger-full-access + approvalPolicy=never, so Rome's per-action
 // approval gate (inside the Rome tool facade) is the only gate and no server→client
 // approval round-trips are needed.
 
-import type { AgentErrorCode, ErrorMessage } from "@rome-os/app-runtime";
+import type { AgentErrorCode, TurnErrorEvent } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
   ModelProvider,
@@ -78,7 +78,7 @@ import {
   stripLegacyReasoningSuffix,
   type Usage,
 } from "./codex/common.js";
-import type { AgentMessage, AgentPlan, AgentPlanStepStatus } from "../types.js";
+import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
@@ -378,7 +378,7 @@ interface CodexFailureClassification {
 function codexErrorEvent(
   error: string,
   classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
-): ErrorMessage {
+): TurnErrorEvent {
   return {
     type: "error",
     error,
@@ -407,7 +407,7 @@ async function persistCodexAuthRevoked(
 }
 
 /**
- * Classify a failed codex turn's error into the terminal `ErrorMessage.code`.
+ * Classify a failed codex turn's error into the terminal `TurnErrorEvent.code`.
  * Usage-limit takes precedence — an exhausted quota is not an auth problem. A
  * revoked credential also persists the marker that downgrades the
  * settings badge to "needs re-login" (best-effort; see `markCodexAuthRevoked`).
@@ -588,7 +588,7 @@ export class CodexAppServerProvider implements ModelProvider {
           if (activeTurn) activeTurn.finalText = item.text;
         }
         if (params.outputSchema) return;
-        const msg: AgentMessage = {
+        const msg: AgentEvent = {
           type: "text",
           content: item.text,
           ...(turnPhase ? { turnPhase } : {}),

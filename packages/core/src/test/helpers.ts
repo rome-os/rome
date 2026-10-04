@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { NormalizedMessage, AgentMessage, AgentConfig, OutgoingMessage } from "../types.js";
+import type { NormalizedMessage, AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -150,13 +150,13 @@ export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number
   return { db: counted as DrizzleDb, passes: () => passes };
 }
 
-// MockModelProvider — returns predetermined AgentMessage sequences
+// MockModelProvider — returns predetermined AgentEvent sequences
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
   readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
-  private responses: AgentMessage[][];
+  private responses: AgentEvent[][];
   private callIndex = 0;
 
   /** Track all calls made to run() for assertions */
@@ -164,11 +164,11 @@ export class MockModelProvider implements ModelProvider {
   /** Track all openSession calls for assertions */
   sessions: ModelSessionParams[] = [];
 
-  constructor(responses: AgentMessage[][] = []) {
+  constructor(responses: AgentEvent[][] = []) {
     this.responses = responses;
   }
 
-  async *run(params: ModelRunParams): AsyncIterable<AgentMessage> {
+  async *run(params: ModelRunParams): AsyncIterable<AgentEvent> {
     this.calls.push(params);
     const messages = this.responses[this.callIndex++] ?? [];
     for (const msg of messages) {
@@ -331,14 +331,14 @@ const emptyConversationSettings: ConversationSettingsControl = {
 // createMockAgentRunner — mock returning predetermined responses
 
 export function createMockAgentRunner(
-  responses: AgentMessage[][] = [],
+  responses: AgentEvent[][] = [],
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
 
   return {
     calls,
-    async *run(params: RunParams): AsyncIterable<AgentMessage> {
+    async *run(params: RunParams): AsyncIterable<AgentEvent> {
       calls.push(params);
       const messages = responses[callIndex++] ?? [];
       for (const msg of messages) {

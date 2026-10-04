@@ -48,9 +48,9 @@ import {
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
-import type { AgentMessage, MessagePart } from "../../types.js";
+import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
-import type { RomeSessionType, StreamAgentMessage } from "@rome-os/app-runtime";
+import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
@@ -373,7 +373,7 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
  * turns and system-initiated backend continuations so a deferred turn cannot
  * claim the card was shown while leaving it only in the trace. */
 function buildBuiltinCard(
-  msg: Extract<AgentMessage, { type: "tool_result" }>,
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
   suspension: Extract<Suspension, { kind: "inline" }>,
   sessionId: string,
 ): PendingInteractionPart | null {
@@ -657,7 +657,7 @@ export interface WebchatRuntime {
    */
   enqueueSessionTask(
     sessionId: string,
-    task: (helpers: { emit: (msg: AgentMessage & { agent?: string }) => void }) => Promise<void>,
+    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
   ): Promise<void>;
 }
 
@@ -1329,7 +1329,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       })
       [Symbol.asyncIterator]();
 
-    let first: IteratorResult<AgentMessage>;
+    let first: IteratorResult<AgentEvent>;
     try {
       first = await iterator.next();
     } catch (err) {
@@ -1661,7 +1661,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
-  // Push an AgentMessage through the segment builder and emit segment_upsert
+  // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
   const emitTraceEvent = (
     stream: ActiveWebchatStream,
@@ -2728,12 +2728,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         let queue = Promise.resolve();
         let assistantText = "";
         let assistantBlockIx = 0;
-        let terminalError: Extract<StreamAgentMessage, { type: "error" }> | undefined;
+        let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
         const write = (event: WebchatEventName, data: unknown) => {
           queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
         };
-        const project = (message: StreamAgentMessage) => {
+        const project = (message: StreamAgentEvent) => {
           if (message.type === "input_status") {
             write("input_status", message);
             return;
@@ -3281,7 +3281,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let finalTextBlockId: string | undefined;
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
-            let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
+            let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
               // Deltas other than text have no webchat consumer yet.
@@ -3696,7 +3696,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }),
         );
       },
-      onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusMessage) => {
+      onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
         if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
@@ -3733,7 +3733,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   const runEnqueuedTask = async (
     sessionId: string,
-    task: (helpers: { emit: (msg: AgentMessage & { agent?: string }) => void }) => Promise<void>,
+    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
   ): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
@@ -3792,7 +3792,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
     const builtinQuestionCards: PendingInteractionPart[] = [];
-    const emit = (msg: AgentMessage & { agent?: string }) => {
+    const emit = (msg: AgentEvent & { agent?: string }) => {
       if (msg.type === "turn_start" && stream.channelThreadKey) {
         const owner = deps.agentSessionManager.peek({
           agentName: msg.agent ?? stream.agentName,

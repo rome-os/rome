@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, StreamAgentMessage } from "@rome-os/app-runtime";
+import type { ConversationId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -35,7 +35,7 @@ describe("AgentSessionBridge turn routing", () => {
       finishTurn = resolve;
     });
     const interrupt = rs.fn(async () => undefined);
-    const events = (async function* (): AsyncIterable<StreamAgentMessage> {
+    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
       await start;
       yield {
         type: "turn_start",
@@ -121,7 +121,7 @@ describe("AgentSessionBridge working dir", () => {
       sendTurn: () =>
         ({
           turnId: "turn-1",
-          events: (async function* (): AsyncIterable<StreamAgentMessage> {})(),
+          events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
           interrupt: async () => undefined,
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;

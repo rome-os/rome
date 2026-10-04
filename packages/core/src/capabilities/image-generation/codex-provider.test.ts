@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { AgentMessage, AgentRunnerInterface } from "@rome-os/app-runtime";
+import type { AgentEvent, AgentRunnerInterface } from "@rome-os/app-runtime";
 import {
   createCodexImageGenerationProvider,
   parseImageGenerationOutput,
@@ -10,7 +10,7 @@ const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 function makeRunner(
-  messages: AgentMessage[],
+  messages: AgentEvent[],
 ): AgentRunnerInterface & { run: ReturnType<typeof rs.fn> } {
   const run = rs.fn(async function* () {
     for (const message of messages) yield message;
@@ -18,7 +18,7 @@ function makeRunner(
   return { run } as unknown as AgentRunnerInterface & { run: ReturnType<typeof rs.fn> };
 }
 
-function imageResult(output: unknown): AgentMessage {
+function imageResult(output: unknown): AgentEvent {
   return { type: "tool_result", toolUseId: "tu-1", tool: "ImageGeneration", output };
 }
 
@@ -212,7 +212,7 @@ describe("createCodexImageGenerationProvider", () => {
     });
 
     it("maps a thrown resolution failure to an unavailable result", async () => {
-      const run = rs.fn(async function* (): AsyncGenerator<AgentMessage> {
+      const run = rs.fn(async function* (): AsyncGenerator<AgentEvent> {
         throw new Error("Selected model provider is unavailable: Codex (ChatGPT)");
       });
       const provider = createCodexImageGenerationProvider({
@@ -226,7 +226,7 @@ describe("createCodexImageGenerationProvider", () => {
     });
 
     it("maps an unrelated thrown error to a failed result", async () => {
-      const run = rs.fn(async function* (): AsyncGenerator<AgentMessage> {
+      const run = rs.fn(async function* (): AsyncGenerator<AgentEvent> {
         throw new Error("worker crashed");
       });
       const provider = createCodexImageGenerationProvider({

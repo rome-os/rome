@@ -28,7 +28,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
 import type { AgentRunnerInterface } from "../core/types.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("backend-turn");
@@ -41,14 +41,14 @@ const log = createLogger("backend-turn");
 export interface WebchatSessionStreamHost {
   enqueueSessionTask(
     sessionId: string,
-    task: (helpers: { emit: (msg: AgentMessage & { agent?: string }) => void }) => Promise<void>,
+    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
   ): Promise<void>;
 }
 
 /** A backend session task: code that runs inside a session's stream context and
  * may emit agent messages (rendered as live trace + captured for delivery). */
 export type BackendSessionTask = (helpers: {
-  emit: (msg: AgentMessage & { agent?: string }) => void;
+  emit: (msg: AgentEvent & { agent?: string }) => void;
 }) => Promise<void>;
 
 /** The main-process runner. Beyond the worker-facing `runAndDeliver`, it owns
@@ -86,7 +86,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
-  ): AsyncIterable<AgentMessage> => {
+  ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
       agentName: params.agentName,
       prompt: params.prompt,

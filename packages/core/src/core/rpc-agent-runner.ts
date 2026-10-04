@@ -7,8 +7,8 @@
 
 import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";
 import { getWorkerRpc } from "../actions/worker-rpc-client.js";
-import { getCurrentActionContext, type StreamAgentMessage } from "@rome-os/app-runtime";
-import type { AgentMessage } from "../types.js";
+import { getCurrentActionContext, type StreamAgentEvent } from "@rome-os/app-runtime";
+import type { AgentEvent } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "./types.js";
 import {
   AGENT_SESSION_RUN_TURN_TIMEOUT_MS,
@@ -57,7 +57,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     return res.hasAction;
   }
 
-  async *run(params: RunParams): AsyncIterable<AgentMessage> {
+  async *run(params: RunParams): AsyncIterable<AgentEvent> {
     const ipc = this.getIpc();
     const router = agentTurnStreamRouterFor(ipc);
     const channelThreadKey =
@@ -101,8 +101,8 @@ export class RpcAgentRunner implements AgentRunnerInterface {
     });
 
     const streamName = `agent.turn:${response.turnId}`;
-    const values: StreamAgentMessage[] = [];
-    const resolvers: Array<(item: IteratorResult<StreamAgentMessage>) => void> = [];
+    const values: StreamAgentEvent[] = [];
+    const resolvers: Array<(item: IteratorResult<StreamAgentEvent>) => void> = [];
     let done = false;
     let error: Error | undefined;
 
@@ -133,7 +133,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
           if (error) throw error;
           return;
         }
-        const next = await new Promise<IteratorResult<StreamAgentMessage>>((resolve) => {
+        const next = await new Promise<IteratorResult<StreamAgentEvent>>((resolve) => {
           resolvers.push(resolve);
         });
         if (next.done) {
@@ -149,8 +149,8 @@ export class RpcAgentRunner implements AgentRunnerInterface {
 }
 
 function attachRomeSession(
-  message: StreamAgentMessage,
+  message: StreamAgentEvent,
   romeSession: RunTurnResponse["romeSession"],
-): StreamAgentMessage {
+): StreamAgentEvent {
   return message.type === "session_init" ? { ...message, romeSession } : message;
 }

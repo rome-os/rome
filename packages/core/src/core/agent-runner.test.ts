@@ -20,7 +20,7 @@ import { MODEL_MAP, type ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { actionExecutionContext } from "../actions/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -87,7 +87,7 @@ function createTestModelResolver({ providers }: { providers: ModelProvider[] }) 
 
 function makeOpenSessionFromRun(
   providerId: ProviderId,
-  run: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentMessage>,
+  run: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentEvent>,
 ): (params: ModelSessionParams) => Promise<import("./agent-runner.js").ModelSession> {
   return async (params) => createSessionFromRun(providerId, run, params);
 }
@@ -95,8 +95,8 @@ function makeOpenSessionFromRun(
 const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
 
 /** Collect all messages from an async iterable into an array. */
-async function collectMessages(iterable: AsyncIterable<AgentMessage>): Promise<AgentMessage[]> {
-  const messages: AgentMessage[] = [];
+async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
+  const messages: AgentEvent[] = [];
   for await (const msg of iterable) {
     messages.push(msg);
   }
@@ -195,7 +195,7 @@ describe("AgentRunner", () => {
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
-    const drained: AgentMessage[] = [];
+    const drained: AgentEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();
@@ -501,7 +501,7 @@ describe("AgentRunner", () => {
     return {
       providerId: "mock",
       model: "mock-model",
-      events: (async function* (): AsyncIterable<AgentMessage> {})(),
+      events: (async function* (): AsyncIterable<AgentEvent> {})(),
       async sendUserInput() {},
       async fork() {
         throw new Error("nested fork unsupported");
@@ -523,7 +523,7 @@ describe("AgentRunner", () => {
       onFork?: (params: ModelSessionForkParams) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
-  ): Promise<AgentMessage[]> {
+  ): Promise<AgentEvent[]> {
     const agentName = opts.agentName ?? "test-main";
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
@@ -555,7 +555,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_input_delta",
                 toolUseId: "tu-explore-1",
@@ -594,7 +594,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork complete" };
             })(),
           }),
@@ -649,7 +649,7 @@ describe("AgentRunner", () => {
         new MockModelProvider([[{ type: "result", content: "Source ready" }]]),
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork complete" };
             })(),
           }),
@@ -660,9 +660,9 @@ describe("AgentRunner", () => {
       );
       const runner = new AgentRunner(manager);
       const key = { agentName: "test-main", channelThreadKey: "webchat:fork-idle-lease" };
-      let firstFork: AsyncIterator<AgentMessage> | undefined;
-      let secondFork: AsyncIterator<AgentMessage> | undefined;
-      let resumedFork: AsyncIterator<AgentMessage> | undefined;
+      let firstFork: AsyncIterator<AgentEvent> | undefined;
+      let secondFork: AsyncIterator<AgentEvent> | undefined;
+      let resumedFork: AsyncIterator<AgentEvent> | undefined;
 
       try {
         const sourceMessages = await collectMessages(
@@ -741,7 +741,7 @@ describe("AgentRunner", () => {
         (params) => {
           openParams.push(params);
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork summary" };
             })(),
           });
@@ -764,7 +764,7 @@ describe("AgentRunner", () => {
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
             appliedReasoningEffort: "max",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -810,7 +810,7 @@ describe("AgentRunner", () => {
             openParams.push(params);
             return forkSessionStub({
               providerThreadId: "fork-provider-thread",
-              events: (async function* (): AsyncIterable<AgentMessage> {
+              events: (async function* (): AsyncIterable<AgentEvent> {
                 yield { type: "result", content: "Fork answer" };
               })(),
             });
@@ -834,7 +834,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "shared-source-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -858,7 +858,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -871,7 +871,7 @@ describe("AgentRunner", () => {
       const noThread = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -881,7 +881,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "error", error: "the branch blew up" };
             })(),
           }),
@@ -903,7 +903,7 @@ describe("AgentRunner", () => {
     it("synthesizes error + turn_end when the fork stream ends without a terminal", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "text", content: "partial fork output" };
           })(),
         }),
@@ -952,7 +952,7 @@ describe("AgentRunner", () => {
     it("a close-time fork error does not escape after turn_end", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "result", content: "Fork summary" };
           })(),
           async close() {
@@ -968,7 +968,7 @@ describe("AgentRunner", () => {
     it("brackets a user-stopped forked turn with status=interrupted", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield {
               type: "result",
               content: "",
@@ -995,7 +995,7 @@ describe("AgentRunner", () => {
     it("brackets a successful forked turn with status=completed", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "text", content: "fork output" };
             yield { type: "result", content: "Fork summary" };
           })(),
@@ -1034,7 +1034,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession((openParams) => {
         forkOpen = openParams;
         return forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "result", content: "Fork summary" };
           })(),
         });
@@ -1082,7 +1082,7 @@ describe("AgentRunner", () => {
           (openParams) => {
             forkOpen = openParams;
             return forkSessionStub({
-              events: (async function* (): AsyncIterable<AgentMessage> {
+              events: (async function* (): AsyncIterable<AgentEvent> {
                 yield { type: "result", content: "Fork summary" };
               })(),
             });
@@ -1119,7 +1119,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork summary" };
             })(),
           });
@@ -1170,7 +1170,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               await openParams.executeAction("demo_action", {});
               yield { type: "result", content: "acted" };
             })(),
@@ -1207,7 +1207,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-1",
@@ -1245,7 +1245,7 @@ describe("AgentRunner", () => {
       expect(
         messages.some(
           (m) =>
-            m.type === "text" && (m as AgentMessage & { agent?: string }).agent === "test-explore",
+            m.type === "text" && (m as AgentEvent & { agent?: string }).agent === "test-explore",
         ),
       ).toBe(false);
       const terminal = messages.find((m) => m.type === "result");
@@ -1262,7 +1262,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "result",
                 content: JSON.stringify(payload),
@@ -1288,7 +1288,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "forgot to submit" };
             })(),
           }),
@@ -1308,7 +1308,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_result",
                 toolUseId: "tu-fork-park",
@@ -1354,7 +1354,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               actionResult = await openParams.executeAction("demo_action", {});
               yield { type: "result", content: "done" };
             })(),
@@ -1388,7 +1388,7 @@ describe("AgentRunner", () => {
       let actionResult: unknown;
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         actionResult = await params.executeAction("demo_action", {});
         yield { type: "result", content: "done" };
       };
@@ -1423,7 +1423,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               submitResponse = await openParams.executeSubmitOutput!({ answer: "candidate" });
               yield { type: "result", content: "tried to submit" };
             })(),
@@ -1487,7 +1487,7 @@ describe("AgentRunner", () => {
         ]),
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-2",
@@ -1623,8 +1623,8 @@ describe("AgentRunner", () => {
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
     let closed = false;
-    const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
-    const finish = (): IteratorResult<AgentMessage> => ({ value: undefined as never, done: true });
+    const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+    const finish = (): IteratorResult<AgentEvent> => ({ value: undefined as never, done: true });
 
     return {
       providerId: "mock",
@@ -1632,7 +1632,7 @@ describe("AgentRunner", () => {
       events: {
         [Symbol.asyncIterator]() {
           return {
-            async next(): Promise<IteratorResult<AgentMessage>> {
+            async next(): Promise<IteratorResult<AgentEvent>> {
               if (closed) return finish();
               return await new Promise((resolve) => {
                 resolvers.push(resolve);
@@ -1891,7 +1891,7 @@ describe("AgentRunner", () => {
                   forkSessionStub({
                     providerId: "anthropic",
                     model: "claude-fork",
-                    events: (async function* (): AsyncIterable<AgentMessage> {
+                    events: (async function* (): AsyncIterable<AgentEvent> {
                       yield { type: "result", content: "Fork complete" };
                     })(),
                   }),
@@ -2774,7 +2774,7 @@ describe("AgentRunner", () => {
 
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield {
           type: "tool_use",
           id: `tu-${params.prompt}`,
@@ -2885,7 +2885,7 @@ describe("AgentRunner", () => {
       const nestedCalls: import("./agent-runner.js").ModelRunParams[] = [];
       const runImplNested = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         nestedCalls.push(params);
 
         if (nestedCalls.length === 1 || nestedCalls.length === 3) {
@@ -3107,7 +3107,7 @@ describe("AgentRunner", () => {
 
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield {
           type: "tool_use",
           id: "tu-shared-1",
@@ -3314,7 +3314,7 @@ describe("AgentRunner", () => {
       };
     }
 
-    function initUserPrompt(messages: AgentMessage[]): string {
+    function initUserPrompt(messages: AgentEvent[]): string {
       const init = messages.find((m) => m.type === "session_init") as {
         type: "session_init";
         userPrompt?: string;
@@ -4633,7 +4633,7 @@ describe("AgentRunner", () => {
 
       const runImplAction = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield { type: "tool_use", id: "tu-send-1", tool: "send_message", input: { text: "hello" } };
         await params.executeAction("send_message", { text: "hello" });
         yield { type: "result", content: "Done" };
@@ -5051,7 +5051,7 @@ describe("AgentRunner", () => {
       let calls = 0;
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         calls += 1;
         if (calls > 1) {
           yield { type: "result", content: "Explore complete" };
@@ -5112,7 +5112,7 @@ describe("AgentRunner", () => {
       const nestedCalls: import("./agent-runner.js").ModelRunParams[] = [];
       const runImplNested = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         nestedCalls.push(params);
 
         if (nestedCalls.length === 1) {
@@ -5240,7 +5240,7 @@ describe("AgentRunner", () => {
         }),
       );
       const firstChild = messages.find(
-        (message): message is Extract<AgentMessage, { type: "subagent_start" }> =>
+        (message): message is Extract<AgentEvent, { type: "subagent_start" }> =>
           message.type === "subagent_start" && message.toolUseId === "tu-explore-1",
       );
       expect(firstChild).toBeDefined();
@@ -5258,7 +5258,7 @@ describe("AgentRunner", () => {
 
   describe("outputSchema", () => {
     function structuredProvider(
-      runImpl: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentMessage>,
+      runImpl: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentEvent>,
     ): ModelProvider & { sessions: import("./agent-runner.js").ModelSessionParams[] } {
       const provider: ModelProvider & {
         sessions: import("./agent-runner.js").ModelSessionParams[];
@@ -5290,7 +5290,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-native",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(provider.sessions[0].outputSchema).toEqual(
@@ -5326,7 +5326,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-invalid",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();
@@ -5348,7 +5348,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-missing",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "error")).toMatchObject({
@@ -5376,7 +5376,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-suspended",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();

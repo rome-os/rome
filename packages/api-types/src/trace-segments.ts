@@ -10,7 +10,7 @@ import type {
 } from "@rome-os/app-runtime";
 export type {
   AgentInputState,
-  InputStatusMessage,
+  InputStatusEvent,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,

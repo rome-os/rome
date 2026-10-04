@@ -895,7 +895,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             try {
               const status = JSON.parse(
                 evt.data,
-              ) as import("@rome/api-types/trace-segments").InputStatusMessage;
+              ) as import("@rome/api-types/trace-segments").InputStatusEvent;
               setMessages((prev) => {
                 const next = new Map(prev);
                 next.set(

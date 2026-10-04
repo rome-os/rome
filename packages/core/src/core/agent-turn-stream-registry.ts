@@ -1,5 +1,5 @@
 import type { ConversationRef } from "@rome-os/app-runtime";
-import type { StreamAgentMessage } from "./agent-session.js";
+import type { StreamAgentEvent } from "./agent-session.js";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;
@@ -9,15 +9,15 @@ export interface ActiveAgentTurnStream {
   initiatorId?: string;
   startedAt: string;
   finished: boolean;
-  messages(): readonly StreamAgentMessage[];
-  subscribe(listener: (message: StreamAgentMessage) => void): () => void;
+  messages(): readonly StreamAgentEvent[];
+  subscribe(listener: (message: StreamAgentEvent) => void): () => void;
   waitForFinish(): Promise<void>;
   /** Present only when the owner can safely interrupt this turn in isolation. */
   interrupt?(reason?: string): Promise<void>;
 }
 
 interface MutableAgentTurnStream extends ActiveAgentTurnStream {
-  publish(message: StreamAgentMessage): void;
+  publish(message: StreamAgentEvent): void;
   finish(): void;
 }
 
@@ -50,8 +50,8 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       if (streams.has(input.turnId)) {
         throw new Error(`Turn stream "${input.turnId}" is already registered`);
       }
-      const values: StreamAgentMessage[] = [];
-      const listeners = new Set<(message: StreamAgentMessage) => void>();
+      const values: StreamAgentEvent[] = [];
+      const listeners = new Set<(message: StreamAgentEvent) => void>();
       let resolveFinished!: () => void;
       const finishedPromise = new Promise<void>((resolve) => {
         resolveFinished = resolve;

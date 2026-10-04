@@ -8,7 +8,7 @@ import type {
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import type { AgentMessage, MessagePart } from "../types.js";
+import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
@@ -85,12 +85,12 @@ export class AgentTraceRecorder {
 
   constructor(private input: AgentTraceRecorderInput) {}
 
-  async record(msg: AgentMessage & { agent?: string }): Promise<void> {
+  async record(msg: AgentEvent & { agent?: string }): Promise<void> {
     await this.recordBatch([msg], this.seq);
   }
 
   async recordBatch(
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
     startSeq = this.seq,
   ): Promise<void> {
     const blocks = messages.flatMap((msg) =>
@@ -185,7 +185,7 @@ export class AgentTraceRecorder {
 
   private transcriptMessages(
     sessionId: string,
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
   ): RomeAgentTranscriptMessageInput[] {
     if (!this.shouldPersistTranscript()) return [];
     const rows: RomeAgentTranscriptMessageInput[] = [];
@@ -249,7 +249,7 @@ function transcriptMessageId(
 
 export async function recordAgentTraceBestEffort(
   recorder: AgentTraceRecorder | null,
-  msg: AgentMessage & { agent?: string },
+  msg: AgentEvent & { agent?: string },
   log: Pick<Logger, "warn">,
   context: { turnId: string; source: string },
 ): Promise<void> {
