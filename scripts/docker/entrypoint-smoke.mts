@@ -177,6 +177,7 @@ async function checkKilledServicesRestart(name: string): Promise<void> {
   await waitForStarted(name, 1);
   // Killing the X server also takes down openbox and Chrome, which need it.
   const processNames = ["sshd", "websockify", "caddy", "Xtigervnc"];
+  docker(["exec", name, "pkill", "-KILL", "-f", "^bash .*/rome-start-chrome-cdp\\.sh"]);
   for (const processName of processNames) {
     docker(["exec", name, "pkill", "-KILL", "-x", processName]);
   }
@@ -190,7 +191,9 @@ async function checkKilledServicesRestart(name: string): Promise<void> {
   if (logs(name).split(STARTED_MARKER).length - 1 !== 1) {
     fail(name, "the daemon restarted although only other services were killed");
   }
-  console.log(`  killed ${processNames.join(", ")}: every service listening again`);
+  console.log(
+    `  killed ${processNames.join(", ")} and the Chrome wrapper: every service listening again`,
+  );
 }
 
 async function checkDaemonCrashFailsContainer(name: string): Promise<void> {

@@ -1,7 +1,7 @@
 #!/command/with-contenv bash
 # shellcheck shell=bash
 # Gives the rome user control of tailscaled and enables HTTPS serve when the
-# node is already logged in. Runs once per boot as the s6 oneshot
+# node is already logged in. Runs once per boot under the s6 longrun
 # tailscale-setup, after tailscaled starts and init finishes.
 #
 # Tailscale is best-effort: the /api/tailnet endpoint retries HTTPS serve when

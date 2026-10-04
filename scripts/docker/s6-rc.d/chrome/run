@@ -2,6 +2,7 @@
 # shellcheck shell=bash
 # rome-start-chrome-cdp.sh restarts Chrome itself when it crashes, and s6
 # restarts the wrapper when the wrapper exits.
+echo "$$" >process-group
 if [ "${ROME_ENABLE_CHROME:-1}" = "0" ]; then
   echo "ROME_ENABLE_CHROME=0, skipping Chrome startup."
   exec sleep infinity
