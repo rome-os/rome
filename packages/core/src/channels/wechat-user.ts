@@ -1125,20 +1125,28 @@ export class WechatUserReader {
 
   constructor(private readonly runtime: WechatUserRuntime) {}
 
-  private async sessions(limit: number, signal?: AbortSignal): Promise<BridgeSession[]> {
-    const data = await this.runtime.bridgeCommand(["sessions", "-n", String(limit)], signal);
-    return z.array(bridgeSessionSchema).parse(data).filter(isChat);
+  /**
+   * Every chat, most recently active first. The bridge orders by the client's
+   * sort key, which puts pinned chats first however old, so the whole list is
+   * read and ordered by last message before any limit applies.
+   */
+  private async sessions(signal?: AbortSignal): Promise<BridgeSession[]> {
+    const data = await this.runtime.bridgeCommand(["sessions"], signal);
+    const lastAt = (session: BridgeSession) =>
+      session.lastMessage?.createdAt ? Date.parse(session.lastMessage.createdAt) : 0;
+    return z
+      .array(bridgeSessionSchema)
+      .parse(data)
+      .filter(isChat)
+      .sort((a, b) => lastAt(b) - lastAt(a));
   }
 
   async conversations(
     input: { query?: string; limit: number },
     signal?: AbortSignal,
   ): Promise<WechatUserConversation[]> {
-    // Over-fetch when filtering: the bridge lists sessions but does not search
-    // them.
-    const fetch = input.query ? Math.min(input.limit * 10, 500) : input.limit;
     const needle = input.query?.toLowerCase();
-    return (await this.sessions(fetch, signal))
+    return (await this.sessions(signal))
       .filter((session) => session.lastMessage?.createdAt)
       .filter(
         (session) =>
@@ -1153,7 +1161,7 @@ export class WechatUserReader {
   /** Chat display names, which the bridge's messages do not carry. */
   private conversationNames(signal?: AbortSignal): Promise<Map<string, string>> {
     if (!this.names || Date.now() - this.names.at > NAMES_TTL_MS) {
-      const byId = this.sessions(500, signal).then(
+      const byId = this.sessions(signal).then(
         (sessions) => new Map(sessions.map((session) => [session.username, session.displayName])),
       );
       byId.catch(() => {
@@ -1298,7 +1306,7 @@ export class WechatUserReader {
       return messages.map((message) => toMessage(message, names.get(message.session)));
     }
     // No chat named: read across the most recently active ones.
-    const recent = await this.sessions(RECENT_CONVERSATIONS, signal);
+    const recent = (await this.sessions(signal)).slice(0, RECENT_CONVERSATIONS);
     const window = {
       ...(input.since ? { since: input.since } : {}),
       ...(input.before ? { before: input.before } : {}),

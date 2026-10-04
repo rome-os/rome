@@ -923,7 +923,7 @@ describe("WechatUserReader", () => {
   it("lists chats from the session list, without folded entries or empty chats", async () => {
     const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ limit: 20 });
-    expect(calls).toEqual([["sessions", "-n", "20"]]);
+    expect(calls).toEqual([["sessions"]]);
     expect(conversations).toEqual([
       {
         id: "45357963768@chatroom",
@@ -962,7 +962,7 @@ describe("WechatUserReader", () => {
       ]),
     );
     const conversations = await reader.conversations({ limit: 5 });
-    expect(conversations.map((c) => c.lastMessagePreview)).toEqual(["plain bytes", "squeezed"]);
+    expect(conversations.map((c) => c.lastMessagePreview)).toEqual(["squeezed", "plain bytes"]);
   });
 
   it("runs one bridge process at a time", async () => {
@@ -982,10 +982,23 @@ describe("WechatUserReader", () => {
     expect(most).toBe(1);
   });
 
-  it("filters chats by name or id over a wider fetch", async () => {
+  it("picks the most recently active chats, not the pinned ones the bridge lists first", async () => {
+    const pinned = {
+      username: "wxid_pinned",
+      displayName: "Pinned",
+      type: "private",
+      unread: 0,
+      lastMessage: { content: "old news", createdAt: "2026-01-01T00:00:00.000Z" },
+    };
+    const { reader } = await readerWith(() => envelope([pinned, ...SESSIONS]));
+    const conversations = await reader.conversations({ limit: 1 });
+    expect(conversations.map((c) => c.id)).toEqual(["45357963768@chatroom"]);
+  });
+
+  it("filters chats by name or id", async () => {
     const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ query: "friend", limit: 5 });
-    expect(calls).toEqual([["sessions", "-n", "50"]]);
+    expect(calls).toEqual([["sessions"]]);
     expect(conversations.map((c) => c.id)).toEqual(["wxid_friend"]);
   });
 
@@ -1108,7 +1121,7 @@ describe("WechatUserReader", () => {
       });
     });
     const messages = await reader.messages({ limit: 1 });
-    expect(calls).toContainEqual(["sessions", "-n", "20"]);
+    expect(calls).toContainEqual(["sessions"]);
     expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[1])).toEqual([
       "45357963768@chatroom",
       "wxid_friend",
