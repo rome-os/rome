@@ -38,6 +38,7 @@ interface Connection {
   client: CodexAppServerConnection;
   generation: number;
   defaultProvider: string | null;
+  invalidate(): void;
 }
 
 export interface CodexAppServerConnection {
@@ -115,7 +116,7 @@ export class CodexAppServerManager {
   private readonly exitListeners = new Set<CodexAppServerExitListener>();
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
-  private startingClient: CodexAppServerConnection | null = null;
+  private startingConnection: Connection | null = null;
   private defaultProvider: string | null;
   // A→B→A restores defaultProvider, so this distinguishes the first, closed
   // client from a current one while it is still initializing.
@@ -148,7 +149,9 @@ export class CodexAppServerManager {
     this.connectionEpoch += 1;
 
     const connection = this.connection;
-    const startingClient = this.startingClient;
+    const startingConnection = this.startingConnection;
+    connection?.invalidate();
+    startingConnection?.invalidate();
     this.connection = null;
     // Do not make a later request join an initialization that has the old
     // process default. Closing that client rejects its own in-flight callers.
@@ -156,7 +159,7 @@ export class CodexAppServerManager {
     const error = new Error("codex app-server exited (code null)");
     this.failCurrentGeneration(connection?.generation, error);
     connection?.client.close();
-    if (!connection && startingClient) startingClient.close();
+    if (!connection && startingConnection) startingConnection.client.close();
   }
 
   /** Issue a process-global app-server request on the shared connection. */
@@ -267,8 +270,10 @@ export class CodexAppServerManager {
     this.bindings.clear();
     this.notificationListeners.clear();
     this.exitListeners.clear();
-    this.startingClient?.close();
-    this.startingClient = null;
+    this.startingConnection?.invalidate();
+    this.startingConnection?.client.close();
+    this.startingConnection = null;
+    this.connection?.invalidate();
     this.connection?.client.close();
     this.connection = null;
     this.connectionPromise = null;
@@ -335,6 +340,7 @@ export class CodexAppServerManager {
   ): Promise<Connection> {
     const startedAt = Date.now();
     let exited = false;
+    let invalidated = false;
     let client!: CodexAppServerConnection;
     client = this.createClient({
       cwd: this.cwd,
@@ -343,14 +349,28 @@ export class CodexAppServerManager {
         ...(this.configArgs ?? []),
         ...codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
       ],
-      onNotification: (method, params) => this.routeNotification(method, params),
-      onServerRequest: async (method, params) => await this.routeServerRequest(method, params),
+      onNotification: (method, params) => {
+        // close() can leave stdout callbacks buffered; do not route them after replacement.
+        if (!invalidated) this.routeNotification(method, params);
+      },
+      onServerRequest: async (method, params) => {
+        if (invalidated) return {};
+        return await this.routeServerRequest(method, params);
+      },
       onExit: (code) => {
         exited = true;
         this.handleExit(client, generation, code);
       },
     });
-    this.startingClient = client;
+    const connection = {
+      client,
+      generation,
+      defaultProvider,
+      invalidate: () => {
+        invalidated = true;
+      },
+    };
+    this.startingConnection = connection;
     client.start();
     try {
       await client.request(Method.initialize, {
@@ -363,7 +383,6 @@ export class CodexAppServerManager {
       if (connectionEpoch !== this.connectionEpoch) {
         throw new Error("codex app-server was replaced during initialization");
       }
-      const connection = { client, generation, defaultProvider };
       this.connection = connection;
       log.info("codex shared app-server initialized", {
         generation,
@@ -371,10 +390,11 @@ export class CodexAppServerManager {
       });
       return connection;
     } catch (err) {
+      connection.invalidate();
       client.close();
       throw err;
     } finally {
-      if (this.startingClient === client) this.startingClient = null;
+      if (this.startingConnection === connection) this.startingConnection = null;
     }
   }
 
@@ -429,6 +449,7 @@ export class CodexAppServerManager {
   ): void {
     if (this.closed || this.connection?.client !== client) return;
     const error = new Error(`codex app-server exited (code ${code ?? "null"})`);
+    this.connection.invalidate();
     this.connection = null;
     this.failCurrentGeneration(generation, error);
   }

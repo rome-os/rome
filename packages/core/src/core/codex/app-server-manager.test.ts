@@ -7,7 +7,7 @@ import {
   type CodexAppServerConnection,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
-import { Method, type ThreadStartParams } from "./app-server-protocol.js";
+import { Method, ServerRequestMethod, type ThreadStartParams } from "./app-server-protocol.js";
 
 interface FakeRequest {
   method: string;
@@ -368,6 +368,37 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       manager.close();
       setInstanceTokenInMemory(null);
       rs.unstubAllEnvs();
+    }
+  });
+
+  it("does not route buffered callbacks after replacing the payer", async () => {
+    const { clients, manager } = capture();
+    const callbacks = binding("credits");
+    const dynamicToolCall = rs.fn(callbacks.onDynamicToolCall);
+    callbacks.onDynamicToolCall = dynamicToolCall;
+    try {
+      const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
+
+      manager.setDefaultProvider("rome_credits");
+      const result = await clients[0].options.onServerRequest(ServerRequestMethod.dynamicToolCall, {
+        threadId,
+        turnId: "turn-credits",
+        callId: "call-credits",
+        namespace: null,
+        tool: "rome_credits",
+        arguments: {},
+      });
+      clients[0].options.onNotification("item/agentMessage/delta", {
+        threadId,
+        turnId: "turn-credits",
+        delta: "late",
+      });
+
+      expect(result).toEqual({});
+      expect(dynamicToolCall).not.toHaveBeenCalled();
+      expect(callbacks.notifications).toEqual([]);
+    } finally {
+      manager.close();
     }
   });
 
