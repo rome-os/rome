@@ -661,6 +661,22 @@
       "description": "仅在 Claude 可用时生效。",
       "toggleLabel": "将 large 模型路由到 Fable"
     },
+    "tierModelMappings": {
+      "title": "模型 ID 映射",
+      "description": "设置每个提供商中各层级使用的模型 ID。将 ID 留空可保留默认值。",
+      "openai": {
+        "large": "Codex large 模型 ID",
+        "medium": "Codex medium 模型 ID",
+        "small": "Codex small 模型 ID"
+      },
+      "anthropic": {
+        "large": "Claude large 模型 ID",
+        "medium": "Claude medium 模型 ID",
+        "small": "Claude small 模型 ID"
+      },
+      "fableNote": "Claude large 映射会替换 Fable 的模型 ID，但 Fable 仍会优先为 large 层级选择 Claude。",
+      "save": "保存映射"
+    },
     "modelSelector": {
       "title": "模型选择器",
       "toggleLabel": "在聊天中启用模型选择器"
