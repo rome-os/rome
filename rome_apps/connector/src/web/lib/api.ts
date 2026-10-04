@@ -1,4 +1,4 @@
-export class ConnectorApiError extends Error {
+class ConnectorApiError extends Error {
   constructor(
     message: string,
     readonly code?: string,

@@ -173,7 +173,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
       return jsonError(404, "not_found", `Unknown route: ${method} /${path}`);
     } catch (err) {
-      if (isComposioAuthenticationError(err)) return authenticationError();
+      // The relay drops terminal 4xx responses. Webhook processing failures must
+      // stay retryable even when an upstream lookup rejects Rome's credential.
+      if (path !== "webhook" && isComposioAuthenticationError(err)) return authenticationError();
       this.ctx.log.error("composio api error", {
         method,
         path,
