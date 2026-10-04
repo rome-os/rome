@@ -11,7 +11,6 @@ import {
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
-import { AgentInputQueue } from "../../core/agent-input-queue.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
@@ -54,37 +53,45 @@ describe("Webchat API", () => {
     }
   });
 
-  it("persists appended inputs once and keeps one stream owner", async () => {
-    let finish!: () => void;
-    const terminal = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const steerUserInput = rs.fn().mockResolvedValue("accepted" as const);
-    const start = rs.fn(
-      (): AgentTurnHandle => ({
-        turnId: "input-turn",
-        turnContext: otelContext.active(),
-        events: (async function* () {
-          await terminal;
-          yield { type: "result" as const, content: "" };
-        })(),
-      }),
-    );
-    const queue = new AgentInputQueue(
-      start,
-      () => ({ steerUserInput }),
-      (error) => {
-        throw error;
-      },
-    );
+  it("sends inputs through and opens one stream for the SDK-owned turn", async () => {
+    const started: string[] = [];
+    const subscribers = new Set<
+      (message: import("@rome-os/app-runtime").StreamAgentMessage, turnId: string) => void
+    >();
+    let onModelTurnStart: ((turnId: string) => void) | undefined;
     const agent: AgentSession = {
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
-      currentTurnId: "input-turn",
-      sendTurn: start,
-      submitInput: (input, options) => queue.submit(input, options),
-      subscribe: () => () => {},
+      currentTurnId: "sdk-turn",
+      sendTurn: (input) => {
+        started.push(input.inputId ?? "");
+        return {
+          turnId: `caller-${started.length}`,
+          turnContext: otelContext.active(),
+          events: { async *[Symbol.asyncIterator]() {} },
+        };
+      },
+      submitInput(input, options) {
+        const handle = this.sendTurn(input, options);
+        options.onTurn(handle);
+        void options.onInputStatus?.({
+          type: "input_status",
+          inputId: input.inputId,
+          state: "sent",
+        });
+        return { inputId: input.inputId, turnId: null, disposition: "sent" };
+      },
+      subscribe(handler) {
+        subscribers.add(handler);
+        return () => subscribers.delete(handler);
+      },
+      onModelTurnStart(listener) {
+        onModelTurnStart = listener;
+        return () => {
+          onModelTurnStart = undefined;
+        };
+      },
       onStatusChange: () => () => {},
       interrupt: async () => {},
       close: async () => {},
@@ -109,33 +116,70 @@ describe("Webchat API", () => {
       });
     const a = "00000000-0000-4000-8000-000000000001";
     const b = "00000000-0000-4000-8000-000000000002";
-    try {
-      const firstSubmissions = await Promise.all([post(a, "first"), post(a, "first")]);
-      expect(firstSubmissions.map((response) => response.status)).toEqual([200, 200]);
-      expect(start).toHaveBeenCalledOnce();
-      queue.ready("input-turn");
-      expect(await (await post(b, "second")).json()).toMatchObject({
-        inputId: b,
-        turnId: "input-turn",
-        disposition: "steering",
-      });
-      await rs.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
-      await queue.observe({ type: "input_status", inputId: b, state: "consumed" }, "input-turn");
-      expect((await post(b, "second")).status).toBe(200);
-      expect(steerUserInput).toHaveBeenCalledOnce();
-      expect(start).toHaveBeenCalledOnce();
-      const inputs = (await deps.webchatRepo.getMessages(id)).filter(
-        (message) => message.role === "user",
+    expect(await (await post(a, "first")).json()).toMatchObject({
+      inputId: a,
+      turnId: null,
+      disposition: "sent",
+      inputState: "sent",
+    });
+    expect(await (await post(b, "second")).json()).toMatchObject({
+      inputId: b,
+      turnId: null,
+      disposition: "sent",
+      inputState: "sent",
+    });
+    expect(started).toEqual([a, b]);
+
+    // The SDK opens exactly one model turn for both messages. A background
+    // turn uses this same path with no input rows at all.
+    onModelTurnStart!("sdk-turn");
+    for (const subscriber of subscribers) {
+      subscriber({ type: "result", content: "combined reply", agent: "main" }, "sdk-turn");
+      subscriber(
+        { type: "turn_end", turnId: "sdk-turn", status: "completed", durationMs: 1, agent: "main" },
+        "sdk-turn",
       );
-      expect(inputs).toHaveLength(2);
-      expect(inputs.find((message) => message.id === b)).toMatchObject({
-        inputState: "consumed",
-        turnId: "input-turn",
-      });
-      expect(await (await app.request(`/chat/sessions/${id}/turns`)).json()).toHaveLength(1);
-    } finally {
-      finish();
     }
+    await rs.waitFor(async () => {
+      const messages = await deps.webchatRepo.getMessages(id);
+      expect(messages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ turnId: "sdk-turn", role: "trace" })]),
+      );
+    });
+
+    // A detached SDK task has no input and no reply, but its trace is still a
+    // transcript row. Reload can therefore render its completed turn rather
+    // than silently dropping the background work from the chat.
+    onModelTurnStart!("sdk-background");
+    for (const subscriber of subscribers) {
+      subscriber(
+        {
+          type: "turn_end",
+          turnId: "sdk-background",
+          status: "completed",
+          durationMs: 1,
+          agent: "main",
+        },
+        "sdk-background",
+      );
+    }
+    await rs.waitFor(async () => {
+      const messages = await deps.webchatRepo.getMessages(id);
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ turnId: "sdk-background", role: "trace" }),
+        ]),
+      );
+    });
+    const messages = await deps.webchatRepo.getMessages(id);
+    expect(
+      messages.some(
+        (message) => message.turnId === "sdk-background" && message.role === "assistant",
+      ),
+    ).toBe(false);
+    const inputs = messages.filter((message) => message.role === "user");
+    expect(inputs).toHaveLength(2);
+    expect(inputs.map((message) => message.inputState)).toEqual(["sent", "sent"]);
   });
 
   it("refuses a queued turn's Stop without interrupting the active turn", async () => {

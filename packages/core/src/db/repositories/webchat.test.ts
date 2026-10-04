@@ -44,44 +44,31 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
-  it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
+  it("persists send-through input progress without replaying it on restart", async () => {
     await repo.createSession("input-session", "Inputs");
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(false);
-    await repo.recordUserInput("second", "input-session", "[]");
     await repo.updateUserInput("input-session", {
       type: "input_status",
       inputId: "first",
       turnId: "turn-a",
-      state: "consumed",
-    });
-    await repo.updateUserInput("input-session", {
-      type: "input_status",
-      inputId: "second",
-      turnId: "turn-a",
-      state: "accepted",
+      state: "read",
     });
     await repo.recoverInterruptedInputs();
     expect(await repo.getUserInput("input-session", "first")).toEqual({
       turnId: "turn-a",
-      inputState: "consumed",
-    });
-    expect(await repo.getUserInput("input-session", "second")).toEqual({
-      turnId: "turn-a",
-      inputState: "unknown",
+      inputState: "read",
     });
     await repo.updateUserInput("input-session", {
       type: "input_status",
-      inputId: "second",
-      turnId: "turn-b",
-      state: "consumed",
+      inputId: "first",
+      turnId: "turn-a",
+      state: "answered",
     });
-    expect(
-      (await repo.getMessages("input-session")).map(({ id, turnId }) => ({ id, turnId })),
-    ).toEqual([
-      { id: "first", turnId: "turn-a" },
-      { id: "second", turnId: "turn-b" },
-    ]);
+    expect(await repo.getUserInput("input-session", "first")).toEqual({
+      turnId: "turn-a",
+      inputState: "answered",
+    });
   });
 
   it("lists sessions with message counts and project names", async () => {

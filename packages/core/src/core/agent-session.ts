@@ -348,6 +348,8 @@ export interface AgentSessionStatusEvent {
 
 export type AgentSessionSubscriber = (msg: StreamAgentMessage, turnId: string) => void;
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
+/** Fires only when the provider has opened an SDK model turn. */
+export type AgentSessionModelTurnListener = (turnId: string) => void;
 
 export interface AgentSession {
   readonly key: AgentSessionKey;
@@ -367,6 +369,8 @@ export interface AgentSession {
   ): AgentInputReceipt;
   runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage>;
   subscribe(handler: AgentSessionSubscriber): () => void;
+  /** Model-turn boundary for consumers that render one stream per SDK turn. */
+  onModelTurnStart?(listener: AgentSessionModelTurnListener): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
@@ -1751,6 +1755,7 @@ interface SdkTurnState {
   /** The visible Rome turn for this SDK-owned model turn. */
   sink?: TurnSink;
   terminal?: ResultMessage | ErrorMessage;
+  streamAnnounced?: boolean;
 }
 
 interface TurnSink {
@@ -1958,6 +1963,7 @@ class AgentSessionImpl implements AgentSession {
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
+  private modelTurnListeners = new Map<string, AgentSessionModelTurnListener>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
   /** Callers waiting for the SDK turn whose result names their message id. */
@@ -1994,7 +2000,6 @@ class AgentSessionImpl implements AgentSession {
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
     (input, options) => this.sendTurn(input, options),
-    () => this.modelSession,
     (error) =>
       log.warn("conversational input dispatch failed", {
         sessionId: this.sessionId,
@@ -2203,8 +2208,8 @@ class AgentSessionImpl implements AgentSession {
             });
             continue;
           }
-          await this.inputs.observe(msg, sink.turnId);
-          this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
+          await this.inputs.observe({ ...msg, state: "read" }, sink.turnId);
+          this.publishOutbound(sink, { ...msg, state: "read", turnId: sink.turnId });
           continue;
         }
         // A turn the SDK starts itself has no waiting caller. It still owns a
@@ -2342,7 +2347,12 @@ class AgentSessionImpl implements AgentSession {
       // A provider stream ending while callers are still bound has no
       // trustworthy result correlation, even if a lightweight test/provider
       // does not expose isClosed. Fail those callers rather than hanging them.
-      if (session.isClosed || waiting.size > 0) {
+      if (
+        session.isClosed ||
+        streamError !== undefined ||
+        waiting.size > 0 ||
+        this.sdkTurns.size > 0
+      ) {
         this.modelSessionAvailable = false;
         // A dead provider cannot produce model_turn_end. Drop its SDK state
         // before failing sinks so closeSink can make this session idle and a
@@ -2353,16 +2363,20 @@ class AgentSessionImpl implements AgentSession {
         }
         this.sdkTurns.clear();
         this.activeSdkTurnId = undefined;
-        if (waiting.size > 0) {
-          const error =
-            streamError === undefined
-              ? "session closed without a terminal"
-              : streamFailurePayload(streamError);
+        const error =
+          streamError === undefined
+            ? "session closed without a terminal"
+            : streamFailurePayload(streamError);
+        if (deadSinks.size > 0) {
           log.warn("model session closed without a terminal", {
             sessionId: this.sessionId,
             provider: session.providerId,
             waitingCallers: waiting.size,
+            unfinishedTurns: deadSinks.size,
           });
+          // An SDK-started turn can have no caller at all. It still owns
+          // lifecycle work and subscriber delivery, so a dead provider must
+          // settle it just as it settles a caller-bound turn.
           for (const sink of deadSinks) {
             if (!sink.done) this.failTurn(sink, error);
           }
@@ -2452,6 +2466,11 @@ class AgentSessionImpl implements AgentSession {
         // particular a background turn must finish its lifecycle and surface
         // its captured submit_output even after it names a caller.
         if (turn.sink) sinks.add(turn.sink);
+        // A model-turn answer is the only authoritative completion signal for
+        // an input: an input can be read while folding into a later SDK turn.
+        for (const id of turn.answers) {
+          await this.inputs.answer(id, turn.sink?.turnId ?? event.turnId);
+        }
         for (const sink of sinks) {
           if (!sink.done) {
             await this.finishSinkFromTerminal(session, sink, turn.terminal, sink === turn.sink);
@@ -2468,6 +2487,7 @@ class AgentSessionImpl implements AgentSession {
     const acquiredOwner = !turn.sink;
     const owner = turn.sink ?? sink;
     turn.sink = owner;
+    this.announceModelTurn(turn, owner.turnId);
     this.currentSink = owner;
     // Provider acceptance can precede its first turn frame. Tell existing
     // status subscribers as soon as that SDK frame gives the session a visible
@@ -2511,7 +2531,10 @@ class AgentSessionImpl implements AgentSession {
       skillWritten: false,
       startedAtMs: Date.now(),
     };
-    if (turn) turn.sink = sink;
+    if (turn) {
+      turn.sink = sink;
+      this.announceModelTurn(turn, sink.turnId);
+    }
     this.currentSink = sink;
     this.status = "running";
     this.ensureTurnStart(sink);
@@ -3737,7 +3760,7 @@ class AgentSessionImpl implements AgentSession {
             {
               type: "input_status",
               inputId: input.inputId,
-              state: emittedTerminal?.type === "error" ? "failed" : "consumed",
+              state: "answered",
             },
             turnId,
           );
@@ -3812,6 +3835,27 @@ class AgentSessionImpl implements AgentSession {
     return () => {
       this.subscribers.delete(id);
     };
+  }
+
+  onModelTurnStart(listener: AgentSessionModelTurnListener): () => void {
+    const id = uuidv4();
+    this.modelTurnListeners.set(id, listener);
+    return () => this.modelTurnListeners.delete(id);
+  }
+
+  private announceModelTurn(turn: SdkTurnState, turnId: string): void {
+    if (turn.streamAnnounced) return;
+    turn.streamAnnounced = true;
+    for (const listener of this.modelTurnListeners.values()) {
+      try {
+        listener(turnId);
+      } catch (err) {
+        log.warn("agent session model-turn listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: this.sessionId,
+        });
+      }
+    }
   }
 
   onStatusChange(listener: AgentSessionStatusListener): () => void {

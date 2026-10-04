@@ -1972,7 +1972,7 @@ describe("AgentRunner", () => {
       };
 
       const firstInput = submit("input-first", "first");
-      expect(firstInput.receipt.disposition).toBe("started");
+      expect(firstInput.receipt.disposition).toBe("sent");
       const first = await firstInput.turn;
       const firstMessages = collectMessages(first.events);
       await rs.waitFor(() => expect(prompts).toEqual(["first"]));
@@ -1982,7 +1982,7 @@ describe("AgentRunner", () => {
       );
 
       const secondInput = submit("input-second", "second");
-      expect(secondInput.receipt.disposition).toBe("started");
+      expect(secondInput.receipt.disposition).toBe("sent");
       const second = await secondInput.turn;
       const secondMessages = collectMessages(second.events);
       await rs.waitFor(() => expect(prompts).toEqual(["first", "second"]));
@@ -2812,14 +2812,14 @@ describe("AgentRunner", () => {
       // This is the order produced by the Anthropic SDK replay: no named
       // stream sink exists yet when the provider acknowledges A.
       runtime.emit({ type: "model_turn_start", turnId: "replay", answers: [] });
-      runtime.emit({ type: "input_status", inputId: "A", state: "consumed" });
+      runtime.emit({ type: "input_status", inputId: "A", state: "read" });
       runtime.emit({ type: "model_turn_answers", turnId: "replay", added: ["A"] });
       runtime.emit({ type: "result", content: "done" });
       runtime.emit({ type: "model_turn_end", turnId: "replay", answers: ["A"] });
 
       await messages;
-      expect(statuses).toContain("consumed");
-      expect(statuses.at(-1)).toBe("consumed");
+      expect(statuses).toContain("read");
+      expect(statuses.at(-1)).toBe("answered");
       await manager.shutdown();
     });
 
@@ -3632,6 +3632,56 @@ describe("AgentRunner", () => {
           expect.objectContaining({ type: "turn_end", status: "error" }),
         ]),
       );
+      await manager.shutdown();
+    });
+
+    it("finalizes a detached SDK turn when the provider stream dies", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK detached process death",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-detached-process-death",
+      });
+      const published: Array<{ type: string; turnId: string; status?: string }> = [];
+      const unsubscribe = session.subscribe((message, turnId) =>
+        published.push({
+          type: message.type,
+          turnId,
+          ...(message.type === "turn_end" ? { status: message.status } : {}),
+        }),
+      );
+
+      // No caller is waiting: the SDK started this background turn itself.
+      runtime.emit({ type: "model_turn_start", turnId: "background", answers: [] });
+      runtime.emit({ type: "text", content: "working" });
+      await rs.waitFor(() =>
+        expect(published).toContainEqual(
+          expect.objectContaining({ type: "turn_start", turnId: "background" }),
+        ),
+      );
+      runtime.end();
+
+      await rs.waitFor(() =>
+        expect(published).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "error", turnId: "background" }),
+            { type: "turn_end", turnId: "background", status: "error" },
+          ]),
+        ),
+      );
+      unsubscribe();
       await manager.shutdown();
     });
 

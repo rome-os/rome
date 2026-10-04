@@ -195,8 +195,8 @@ describe("CodexAppServerProvider", () => {
     });
     const messages = await collectUntilTerminal(session);
     expect(messages.filter((message) => message.type === "input_status")).toEqual([
-      { type: "input_status", inputId: "a", state: "consumed" },
-      { type: "input_status", inputId: "b", state: "consumed" },
+      { type: "input_status", inputId: "a", state: "read" },
+      { type: "input_status", inputId: "b", state: "read" },
     ]);
     expect(await session.steerUserInput!({ text: "late", inputId: "c" })).toBe("deferred");
     await session.close();

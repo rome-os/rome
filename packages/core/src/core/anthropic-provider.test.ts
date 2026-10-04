@@ -242,7 +242,7 @@ describe("AnthropicProvider", () => {
       await session.sendUserInput({ text: "Hello", inputId: a });
       expect(await read(session, 1)).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text Hi",
         "result Hi",
@@ -265,7 +265,7 @@ describe("AnthropicProvider", () => {
       await session.sendUserInput({ text: "Start it", inputId: a });
       expect(await read(session, 2)).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text DONE",
         "result DONE",
@@ -296,7 +296,7 @@ describe("AnthropicProvider", () => {
         "result ",
         "end []",
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text PONG",
         "result PONG",
@@ -324,13 +324,13 @@ describe("AnthropicProvider", () => {
       expect(await session.steerUserInput!({ text: "Then BANANA", inputId: s })).toBe("accepted");
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text 1 2 3",
         "result 1 2 3",
         "end [A]",
         "start []",
-        "consumed S",
+        "read S",
         "answers +[S]",
         "text BANANA",
         "result BANANA",
@@ -360,10 +360,10 @@ describe("AnthropicProvider", () => {
       await session.steerUserInput!({ text: "Also BANANA", inputId: s });
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         // A text block is held until the next one starts, so it follows S's replay.
-        "consumed S",
+        "read S",
         "text Running the tool.",
         "text OK BANANA",
         "result OK BANANA",
@@ -388,7 +388,7 @@ describe("AnthropicProvider", () => {
       await session.sendUserInput({ text: "Reply SUMMONED", inputId: a });
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         // Held until the next block starts, so it follows the fold.
         "text Checking the task.",
@@ -504,7 +504,7 @@ describe("AnthropicProvider", () => {
         "error notification failed",
         "end []",
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text Hi",
         "result Hi",
@@ -552,7 +552,7 @@ describe("AnthropicProvider", () => {
       expect(q.interrupt).toHaveBeenCalledOnce();
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text after Stop",
         "result after Stop",
@@ -594,7 +594,7 @@ describe("AnthropicProvider", () => {
       expect(q.interrupt).toHaveBeenCalledOnce();
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "error interrupted",
         "answers +[A]",
         "end [A]",
@@ -631,7 +631,7 @@ describe("AnthropicProvider", () => {
       await session.interrupt("user-stop");
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "error interrupted",
         "answers +[A]",
         "end [A]",
@@ -674,13 +674,13 @@ describe("AnthropicProvider", () => {
       await session.interrupt("user-stop");
       expect(await reading).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text working",
         "error interrupted",
         "end [A]",
         "start []",
-        "consumed S",
+        "read S",
         "answers +[S]",
         "text B completed",
         "result B completed",
@@ -826,13 +826,13 @@ describe("AnthropicProvider", () => {
       const seen = await reading;
       expect(seen).toEqual([
         "start []",
-        "consumed A",
+        "read A",
         "answers +[A]",
         "text partial",
         "error interrupted",
         "end [A]",
         "start []",
-        "consumed S",
+        "read S",
         "answers +[S]",
         "text next",
         "result next",
@@ -887,7 +887,7 @@ describe("AnthropicProvider", () => {
       const session = await new AnthropicProvider().openSession(buildParams());
       await session.sendUserInput({ text: "A", inputId: a });
       const seen = await read(session);
-      expect(seen).toEqual(["start []", "consumed A", "answers +[A]", "text partial"]);
+      expect(seen).toEqual(["start []", "read A", "answers +[A]", "text partial"]);
       expect(session.isClosed).toBe(true);
       await session.close();
     });

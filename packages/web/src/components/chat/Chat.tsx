@@ -1105,7 +1105,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         id: createResp.inputId ?? crypto.randomUUID(),
         sessionId: sendingSessionId,
         turnId: pendingTurnId,
-        inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
+        inputState: createResp.inputState ?? (createResp.inputId ? "sent" : undefined),
         role: "user",
         content: optimisticUserContent,
         createdAt: new Date().toISOString(),

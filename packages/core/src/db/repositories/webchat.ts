@@ -1500,7 +1500,7 @@ export class WebChatRepository {
           sessionId,
           content,
           role: "user",
-          inputState: "queued",
+          inputState: "sent",
           createdAt,
         })
         .onConflictDoNothing()
@@ -1516,12 +1516,9 @@ export class WebChatRepository {
   }
 
   async recoverInterruptedInputs(): Promise<void> {
-    // A process crash can occur between the durable dispatch marker and the
-    // provider acknowledgement. Preserve the message without replaying it.
-    await this.db
-      .update(romeAgentMessages)
-      .set({ inputState: "unknown" })
-      .where(inArray(romeAgentMessages.inputState, ["queued", "submitted", "accepted"]));
+    // Send-through input state is durable progress, not a replay queue. A
+    // restart leaves sent/read rows intact until the resumed provider echoes
+    // their model-turn answer.
   }
 
   async getUserInput(sessionId: string, inputId: string) {

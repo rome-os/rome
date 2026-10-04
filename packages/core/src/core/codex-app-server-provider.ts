@@ -576,7 +576,7 @@ export class CodexAppServerProvider implements ModelProvider {
             clientId === activeTurn.initialInputId
           )
             resolveSourceStarted?.();
-          turnSink.push({ type: "input_status", inputId: clientId, state: "consumed" });
+          turnSink.push({ type: "input_status", inputId: clientId, state: "read" });
           if (modelTurn && !modelTurn.answers.has(clientId)) {
             modelTurn.answers.add(clientId);
             modelTurn.sink.push({

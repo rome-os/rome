@@ -971,14 +971,8 @@ export interface PlanUpdateMessage {
   plan: AgentPlan;
 }
 
-export type AgentInputState =
-  | "queued"
-  | "submitted"
-  | "accepted"
-  | "consumed"
-  | "unknown"
-  | "cancelled"
-  | "failed";
+/** A conversational input is sent immediately, then acknowledged by the provider and answered. */
+export type AgentInputState = "sent" | "read" | "answered";
 
 export interface InputStatusMessage {
   type: "input_status";

@@ -5,12 +5,9 @@
   },
   "title": "Rome",
   "inputState": {
-    "queued": "Waiting to be included",
-    "submitted": "Sending to agent",
-    "accepted": "Received by agent · awaiting inclusion",
-    "unknown": "Delivery unconfirmed · not sent again",
-    "cancelled": "Cancelled",
-    "failed": "Not delivered"
+    "sent": "Sent to agent",
+    "read": "Read by agent",
+    "answered": "Answered"
   },
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {

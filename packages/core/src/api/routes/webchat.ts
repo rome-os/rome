@@ -49,7 +49,7 @@ import {
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentMessage, MessagePart } from "../../types.js";
-import type { AgentTurnHandle } from "../../core/agent-session.js";
+import type { AgentSession, AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentMessage } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -683,6 +683,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+  // One subscription per live AgentSession turns provider-owned model starts
+  // into webchat streams. It intentionally outlives an individual POST so a
+  // background SDK turn is visible even when no caller is awaiting it.
+  const modelTurnSubscriptions = new WeakMap<AgentSession, () => void>();
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -3140,7 +3144,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         type: "input_status",
         inputId,
         turnId,
-        state: "failed",
+        state: "sent",
       });
     };
 
@@ -3151,7 +3155,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         inputId,
         turnId: existing.turnId,
         sessionId,
-        disposition: "queued",
+        disposition: "sent",
         inputState: existing.inputState,
       });
     }
@@ -3279,7 +3283,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let finalTextBlockIx: number | undefined;
             let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
-              if (msg.type === "input_status") continue;
+              if (msg.type === "input_status") {
+                await deps.webchatRepo.updateUserInput(sessionId, msg);
+                emitToStream(stream, "input_status", msg, `input:${msg.inputId}`);
+                continue;
+              }
               // Previews other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
@@ -3654,19 +3662,94 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     let started: ReturnType<typeof attachTurn> | undefined;
+    if (!modelTurnSubscriptions.has(agentSess) && agentSess.onModelTurnStart) {
+      type BufferedModelTurn = {
+        values: StreamAgentMessage[];
+        resolvers: Array<(item: IteratorResult<StreamAgentMessage>) => void>;
+        ended: boolean;
+      };
+      const turns = new Map<string, BufferedModelTurn>();
+      const next = (turn: BufferedModelTurn): Promise<IteratorResult<StreamAgentMessage>> => {
+        const value = turn.values.shift();
+        if (value) return Promise.resolve({ value, done: false });
+        if (turn.ended) return Promise.resolve({ value: undefined as never, done: true });
+        return new Promise((resolve) => turn.resolvers.push(resolve));
+      };
+      const push = (turn: BufferedModelTurn, message: StreamAgentMessage): void => {
+        const resolver = turn.resolvers.shift();
+        if (resolver) resolver({ value: message, done: false });
+        else turn.values.push(message);
+        if (message.type === "turn_end") {
+          turn.ended = true;
+          while (turn.resolvers.length)
+            turn.resolvers.shift()!({ value: undefined as never, done: true });
+        }
+      };
+      const unsubscribeMessages = agentSess.subscribe((message, turnId) => {
+        const turn = turns.get(turnId);
+        if (!turn) return;
+        push(turn, message);
+        // The iterator closes over `turn`, so the active drain can consume its
+        // terminal frame after this entry is gone. Retaining it in the lookup
+        // would leak one buffer for every completed SDK turn in a long-lived
+        // webchat session.
+        if (message.type === "turn_end") turns.delete(turnId);
+      });
+      const unsubscribeTurns = agentSess.onModelTurnStart((turnId) => {
+        if (turns.has(turnId) || streamsByTurnId.has(turnId)) return;
+        const turn: BufferedModelTurn = { values: [], resolvers: [], ended: false };
+        turns.set(turnId, turn);
+        const handle: AgentTurnHandle = {
+          turnId,
+          turnContext: otelContext.active(),
+          events: {
+            [Symbol.asyncIterator]: () => ({ next: () => next(turn) }),
+          },
+          // Stop always reaches the model-session Query.interrupt path. The
+          // expected id prevents this stream from cancelling a later SDK turn.
+          interrupt: (reason) => agentSess.interrupt(reason, turnId),
+        };
+        void attachTurn(handle).catch((error) =>
+          log.error("failed to attach SDK model turn", {
+            turnId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        // Session callers emit their provisional turn_start before the SDK
+        // declares ownership. The public stream starts here instead, at the
+        // model boundary, and keeps the same real session turn id.
+        push(turn, {
+          type: "turn_start",
+          turnId,
+          sessionId: agentSess.sessionId,
+          userPrompt: "",
+          agent: agentName,
+        });
+      });
+      modelTurnSubscriptions.set(agentSess, () => {
+        unsubscribeMessages();
+        unsubscribeTurns();
+      });
+    }
+
     const options = {
       links: turnLinks,
       threadContext,
       romeSessionId: sessionId,
       romeSessionType: session.type as RomeSessionType,
+      // Caller handles settle by SDK answer echo. Current AgentSessions expose
+      // a provider model-turn boundary; retain the direct-handle fallback for
+      // legacy adapters while they migrate to that contract.
       onTurn: (handle: AgentTurnHandle) => {
-        started = attachTurn(handle);
-        void started.catch((error) =>
-          log.error("failed to attach input turn", {
-            turnId: handle.turnId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+        if (!agentSess.onModelTurnStart) {
+          started = attachTurn(handle);
+          void started.catch((error) =>
+            log.error("failed to attach legacy input turn", {
+              turnId: handle.turnId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
       },
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusMessage) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
@@ -3685,13 +3768,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         type: "input_status",
         inputId,
         turnId: handle.turnId,
-        state: "submitted",
+        state: "sent",
       });
-      receipt = { inputId, turnId: handle.turnId, disposition: "started" as const };
+      receipt = {
+        inputId,
+        turnId: agentSess.onModelTurnStart ? null : handle.turnId,
+        disposition: "sent" as const,
+      };
     }
-    const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
+    const stream = started ? await started : undefined;
     return c.json({
       ...receipt,
+      inputState: "sent" as const,
       sessionId,
       startedAt: stream?.startedAt ?? new Date().toISOString(),
     });

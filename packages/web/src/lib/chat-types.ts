@@ -269,7 +269,7 @@ export interface TurnInfo {
 export interface CreateTurnResponse {
   turnId: string | null;
   inputId?: string;
-  disposition?: "started" | "queued" | "steering";
+  disposition?: "sent";
   inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;

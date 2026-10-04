@@ -5,12 +5,9 @@
   },
   "title": "Rome",
   "inputState": {
-    "queued": "等待加入对话",
-    "submitted": "正在发送给 Agent",
-    "accepted": "Agent 已接收，等待纳入上下文",
-    "unknown": "未确认送达，未自动重发",
-    "cancelled": "已取消",
-    "failed": "未送达"
+    "sent": "已发送给 Agent",
+    "read": "Agent 已阅读",
+    "answered": "已回答"
   },
   "documentTitle": "{{guardian}} 与 {{agent}} | Rome",
   "sidebar": {

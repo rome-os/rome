@@ -1,5 +1,4 @@
 import { memo, useMemo } from "react";
-import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
@@ -28,12 +27,9 @@ export const UserMessage = memo(
         .join("\n");
     }, [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
-    const pending =
-      msg.inputState === "queued" ||
-      msg.inputState === "submitted" ||
-      msg.inputState === "accepted";
+    const pending = msg.inputState === "sent" || msg.inputState === "read";
     const statusLabel =
-      msg.inputState && msg.inputState !== "consumed"
+      msg.inputState && msg.inputState !== "answered"
         ? t(`inputState.${msg.inputState}`)
         : undefined;
     // Some user turns carry only a structured part with no text (e.g. an
@@ -51,23 +47,10 @@ export const UserMessage = memo(
           className={cn(
             "flex max-w-[70%] items-start gap-2 break-words rounded-12 border border-transparent bg-surface-muted p-4 transition-colors motion-reduce:transition-none",
             pending && "border-dashed border-border-strong bg-transparent",
-            msg.inputState === "cancelled" && "border-dashed border-border bg-transparent",
-            msg.inputState === "failed" && "border-destructive/50",
-            msg.inputState === "unknown" && "border-warning/50",
           )}
           title={statusLabel}
           aria-busy={pending || undefined}
         >
-          {msg.inputState === "failed" ? (
-            <CircleAlert className="mt-1 size-4 shrink-0 text-destructive" aria-hidden="true" />
-          ) : msg.inputState === "unknown" ? (
-            <CircleHelp className="mt-1 size-4 shrink-0 text-warning" aria-hidden="true" />
-          ) : msg.inputState === "cancelled" ? (
-            <CircleSlash
-              className="mt-1 size-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          ) : null}
           <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
             {text}
           </Markdown>
