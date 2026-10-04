@@ -767,6 +767,74 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
+    it("flushes delta-only text on Stop without leaking it into the next turn", async () => {
+      let releaseInterrupt!: () => void;
+      let streaming!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        streaming = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const first = (await inputs.next()).value;
+          yield { ...first, isReplay: true };
+          yield {
+            type: "stream_event",
+            session_id: "sdk-thread",
+            parent_tool_use_id: null,
+            user_message_uuid: first.uuid,
+            event: { type: "message_start", message: { id: "msg_A" } },
+          };
+          yield {
+            type: "stream_event",
+            session_id: "sdk-thread",
+            parent_tool_use_id: null,
+            user_message_uuid: first.uuid,
+            event: {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "text_delta", text: "partial" },
+            },
+          };
+          streaming();
+          await interrupted;
+          yield interruptResult([first.uuid]);
+          const second = (await inputs.next()).value;
+          yield { ...second, isReplay: true };
+          yield say("next", second.uuid);
+          yield result("next", [second.uuid], "human");
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 2);
+      await started;
+      await session.interrupt("user-stop");
+      await session.sendUserInput({ text: "S", inputId: s });
+      const seen = await reading;
+      expect(seen).toEqual([
+        "start []",
+        "consumed A",
+        "answers +[A]",
+        "text partial",
+        "error interrupted",
+        "end [A]",
+        "start []",
+        "consumed S",
+        "answers +[S]",
+        "text next",
+        "result next",
+        "end [S]",
+      ]);
+      await session.close();
+    });
+
     it("accepts the next message after Stop in the same SDK Query", async () => {
       let releaseInterrupt!: () => void;
       let interruptedTurnEnded!: () => void;

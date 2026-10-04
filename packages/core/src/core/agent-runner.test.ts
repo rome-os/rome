@@ -1657,6 +1657,64 @@ describe("AgentRunner", () => {
     };
   }
 
+  function createSdkEventSession(params: ModelSessionParams): {
+    session: ModelSession;
+    sent: Array<{ inputId?: string; text: string }>;
+    emit: (event: ModelSessionEvent) => void;
+    end: () => void;
+  } {
+    let closed = false;
+    const values: ModelSessionEvent[] = [];
+    const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
+    const sent: Array<{ inputId?: string; text: string }> = [];
+    const finish = (): IteratorResult<ModelSessionEvent> => ({
+      value: undefined as never,
+      done: true,
+    });
+    const emit = (event: ModelSessionEvent): void => {
+      const resolve = resolvers.shift();
+      if (resolve) resolve({ value: event, done: false });
+      else values.push(event);
+    };
+    const end = (): void => {
+      closed = true;
+      while (resolvers.length > 0) resolvers.shift()!(finish());
+    };
+    return {
+      sent,
+      emit,
+      end,
+      session: {
+        providerId: "anthropic",
+        model: params.model,
+        get isClosed() {
+          return closed;
+        },
+        events: {
+          [Symbol.asyncIterator]() {
+            return {
+              async next(): Promise<IteratorResult<ModelSessionEvent>> {
+                if (values.length > 0) return { value: values.shift()!, done: false };
+                if (closed) return finish();
+                return await new Promise((resolve) => resolvers.push(resolve));
+              },
+            };
+          },
+        },
+        async sendUserInput(input) {
+          sent.push({ inputId: input.inputId, text: input.text });
+        },
+        async fork() {
+          throw new Error("ModelSession fork is not supported by this provider");
+        },
+        async interrupt() {},
+        async close() {
+          end();
+        },
+      },
+    };
+  }
+
   describe("session management", () => {
     it("waits for cancellation before ending a turn stopped during middleware", async () => {
       let releaseMiddleware!: () => void;
@@ -2245,6 +2303,79 @@ describe("AgentRunner", () => {
         status: "completed",
         durationMs: expect.any(Number),
       });
+    });
+
+    it("waits for the SDK result that names the caller after an empty resumed turn (#510)", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK turn events",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-resume",
+      });
+      const turn = session.sendTurn({ inputId: "A", prompt: "Reply PONG" });
+      const messages = collectMessages(turn.events);
+      await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "Reply PONG" }]));
+
+      runtime.emit({ type: "model_turn_start", turnId: "background", answers: [] });
+      runtime.emit({ type: "result", content: "" });
+      runtime.emit({ type: "model_turn_end", turnId: "background", answers: [] });
+      runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+      runtime.emit({ type: "text", content: "PONG" });
+      runtime.emit({ type: "result", content: "PONG" });
+      runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+
+      const seen = await messages;
+      expect(seen.filter((message) => message.type === "result")).toEqual([
+        expect.objectContaining({ content: "PONG" }),
+      ]);
+      expect(seen).not.toContainEqual(expect.objectContaining({ type: "result", content: "" }));
+      expect(seen.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      await manager.shutdown();
+    });
+
+    it("fails the message-id-bound caller when the SDK process dies", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK process death",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-process-death",
+      });
+      const turn = session.sendTurn({ inputId: "A", prompt: "Hello" });
+      const messages = collectMessages(turn.events);
+      await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "Hello" }]));
+      runtime.end();
+
+      expect(await messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "error", error: "session closed without a terminal" }),
+          expect.objectContaining({ type: "turn_end", status: "error" }),
+        ]),
+      );
+      await manager.shutdown();
     });
 
     it("fails a waiting turn when a provider stream ends without a terminal", async () => {
