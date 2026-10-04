@@ -14,6 +14,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   loginWindowId,
@@ -866,7 +867,7 @@ describe("WechatUserReader", () => {
   /** A runtime over an unlocked store whose bridge answers per subcommand.
    *  The calls record each wechat-cli argv after `-f json`. */
   async function readerWith(
-    answer: (argv: string[]) => RunResult,
+    answer: (argv: string[]) => RunResult | Promise<RunResult>,
     store: { stale?: boolean } = {},
   ) {
     const calls: string[][] = [];
@@ -941,6 +942,44 @@ describe("WechatUserReader", () => {
         lastMessagePreview: "yo",
       },
     ]);
+  });
+
+  it("reads a preview the client stored as bytes, compressed or not", async () => {
+    const asJson = (bytes: Buffer) => JSON.parse(JSON.stringify(new Uint8Array(bytes)));
+    const { reader } = await readerWith(() =>
+      envelope([
+        {
+          ...SESSIONS[1],
+          lastMessage: { ...SESSIONS[1]!.lastMessage, content: asJson(Buffer.from("plain bytes")) },
+        },
+        {
+          ...SESSIONS[0],
+          lastMessage: {
+            ...SESSIONS[0]!.lastMessage,
+            content: asJson(zstdCompressSync(Buffer.from("wxid_friend:\nsqueezed"))),
+          },
+        },
+      ]),
+    );
+    const conversations = await reader.conversations({ limit: 5 });
+    expect(conversations.map((c) => c.lastMessagePreview)).toEqual(["plain bytes", "squeezed"]);
+  });
+
+  it("runs one bridge process at a time", async () => {
+    let running = 0;
+    let most = 0;
+    const query = queryOver([message(1, "2026-10-01T08:00:00.000Z")]);
+    const { reader, calls } = await readerWith(async (argv) => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running--;
+      return argv[0] === "sessions" ? envelope(SESSIONS) : query(argv);
+    });
+    // A read across chats asks for several chats at once.
+    await reader.messages({ limit: 5 });
+    expect(calls.filter((argv) => argv[0] === "query").length).toBeGreaterThan(1);
+    expect(most).toBe(1);
   });
 
   it("filters chats by name or id over a wider fetch", async () => {

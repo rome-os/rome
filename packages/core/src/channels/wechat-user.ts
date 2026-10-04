@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
+import { zstdDecompressSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { DESKTOP_SCRIPT, type DesktopSlot, desktopSlot, startDesktopArgs } from "../desktops.js";
@@ -246,12 +247,39 @@ const bridgeEnvelopeSchema = z.union([
   }),
 ]);
 
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+
+/**
+ * A session preview as text. The client sometimes stores the preview as a
+ * BLOB, often zstd-compressed, and the bridge passes it through as raw bytes,
+ * which JSON renders as an object of byte values. An unreadable preview
+ * reads as empty rather than failing the whole session list.
+ */
+const previewSchema = z
+  .union([z.string(), z.record(z.string(), z.number().int().min(0).max(255))])
+  .transform((value) => {
+    if (typeof value === "string") return value;
+    const bytes = Buffer.from(
+      Object.keys(value)
+        .sort((a, b) => Number(a) - Number(b))
+        .map((key) => value[key]!),
+    );
+    try {
+      const plain = bytes.subarray(0, 4).equals(ZSTD_MAGIC)
+        ? zstdDecompressSync(bytes, { maxOutputLength: 1 << 20 })
+        : bytes;
+      return plain.toString("utf8");
+    } catch {
+      return "";
+    }
+  });
+
 const bridgeSessionSchema = z.object({
   username: z.string().min(1),
   displayName: z.string(),
   type: z.enum(["private", "group", "official", "folded"]),
   unread: z.number().int().nonnegative(),
-  lastMessage: z.object({ content: z.string(), createdAt: z.string().optional() }).optional(),
+  lastMessage: z.object({ content: previewSchema, createdAt: z.string().optional() }).optional(),
 });
 type BridgeSession = z.infer<typeof bridgeSessionSchema>;
 
@@ -360,6 +388,7 @@ export class WechatUserRuntime {
   private installing: Promise<void> | null = null;
   private captures = 0;
   private keysCheckedAt = 0;
+  private bridgeQueue: Promise<unknown> = Promise.resolve();
 
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
@@ -928,6 +957,18 @@ export class WechatUserRuntime {
    * client is mid-write on is pending, and anything else is transient.
    */
   async bridgeCommand(args: string[], signal?: AbortSignal): Promise<unknown> {
+    // One bridge process at a time: the bridge's decrypt cache has no
+    // cross-process lock, so concurrent processes each decrypt the same shards
+    // and can leave an older copy marked current.
+    const turn = this.bridgeQueue.then(() => {
+      signal?.throwIfAborted();
+      return this.runBridge(args, signal);
+    });
+    this.bridgeQueue = turn.catch(() => {});
+    return turn;
+  }
+
+  private async runBridge(args: string[], signal?: AbortSignal): Promise<unknown> {
     await this.checkKeys();
     const result = await this.run(process.execPath, [bridgeEntry(), "-f", "json", ...args], {
       env: {
