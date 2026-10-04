@@ -20,7 +20,7 @@ rm -f "/tmp/.X${display_num}-lock" "/tmp/.X11-unix/X${display_num}"
 echo "Starting TigerVNC on ${DISPLAY}, RFB :${ROME_VNC_PORT:-5900} ..."
 # data/check decides readiness, which openbox, noVNC and Chrome wait for.
 exec s6-notifyoncheck -d -w 250 -n 0 \
-  rome-run-as rome Xtigervnc "$DISPLAY" \
+  rome-run-as rome --log /tmp/xtigervnc.log Xtigervnc "$DISPLAY" \
   -geometry "$geometry" \
   -depth "$depth" \
   -SecurityTypes None \
@@ -29,4 +29,4 @@ exec s6-notifyoncheck -d -w 250 -n 0 \
   -AlwaysShared \
   -AcceptCutText \
   -SendCutText \
-  -ac >>/tmp/xtigervnc.log 2>&1
+  -ac

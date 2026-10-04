@@ -2,5 +2,5 @@
 # shellcheck shell=bash
 novnc_port="${ROME_NOVNC_PORT:-6080}"
 echo "Starting noVNC on :${novnc_port} ..."
-exec rome-run-as rome websockify --web=/usr/share/novnc/ \
-  "127.0.0.1:${novnc_port}" "localhost:${ROME_VNC_PORT:-5900}" >>/tmp/novnc.log 2>&1
+exec rome-run-as rome --log /tmp/novnc.log websockify --web=/usr/share/novnc/ \
+  "127.0.0.1:${novnc_port}" "localhost:${ROME_VNC_PORT:-5900}"

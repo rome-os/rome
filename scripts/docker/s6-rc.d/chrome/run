@@ -14,7 +14,7 @@ if [ -z "$browser_binary" ] && [ -f /etc/rome-browser-binary ]; then
 fi
 
 echo "Starting Chrome with CDP on :${ROME_CHROME_CDP_PORT:-9222} ..."
-exec rome-run-as rome env \
+exec rome-run-as rome --log /tmp/chrome-cdp.log env \
   ROME_CHROME_BINARY="${browser_binary:-/usr/bin/google-chrome-stable}" \
   ROME_CHROME_NAME="${ROME_CHROME_NAME:-Chrome}" \
   ROME_CHROME_CDP_PORT="${ROME_CHROME_CDP_PORT:-9222}" \
@@ -33,4 +33,4 @@ exec rome-run-as rome env \
   ROME_CHROME_CLIPBOARD_DEFAULT_SETTING="${ROME_CHROME_CLIPBOARD_DEFAULT_SETTING:-}" \
   ROME_CHROME_USER_AGENT="${ROME_CHROME_USER_AGENT:-}" \
   ROME_CHROME_PROXY_URL="${ROME_CHROME_PROXY_URL:-}" \
-  /opt/rome/scripts/docker/rome-start-chrome-cdp.sh >>/tmp/chrome-cdp.log 2>&1
+  /opt/rome/scripts/docker/rome-start-chrome-cdp.sh

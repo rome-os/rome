@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Runs the s6 setup and finish scripts at their supervisor boundaries.
 // Usage: node scripts/docker/s6-lifecycle-smoke.mts <image>
-// The image needs Node 24, s6-overlay 3.2.1.0, and tsx installed under /app.
+// The image needs Node 24, gosu, s6-overlay 3.2.1.0, and tsx installed under /app.
 // Build one with this Dockerfile:
 //   FROM node:24
-//   RUN apt-get update && apt-get install -y --no-install-recommends s6 execline
+//   RUN apt-get update && apt-get install -y --no-install-recommends s6 execline gosu
 //   RUN npm install --prefix /app tsx
 // Also unpack the release's noarch and architecture tarballs into / and put
 // /command first on PATH to test the overlay's s6-rc and supervisor versions.
@@ -149,6 +149,37 @@ for child in "$(head -1 /tmp/browser-generations)" "$(head -1 /tmp/proxy-generat
   case "$child_state" in ''|Z*) ;; *) echo "orphan child $child survived: $child_state"; exit 1 ;; esac
 done
 echo 'PASS: killing the Chrome wrapper removes its old browser and proxy before recovery'
+
+# A rome-owned symlink must not give its service a root-opened append fd.
+# Model a deployment without sticky-directory symlink protection inside this fixture.
+chmod 0777 /tmp
+s6-svc -d /tmp/chrome
+useradd -m rome
+printf multi > /run/s6/container_environment/ROME_DOCKER_USER_MODE
+printf ':99' > /run/s6/container_environment/DISPLAY
+mkdir -p /tmp/log-services
+printf '#!/bin/sh\necho service-output\n' > /tmp/log-services/writer
+chmod +x /tmp/log-services/writer
+for binary in openbox websockify Xtigervnc; do cp /tmp/log-services/writer "/tmp/browser-bin/$binary"; done
+cp /tmp/log-services/writer /opt/rome/scripts/docker/rome-start-chrome-cdp.sh
+printf '#!/bin/sh\nshift 5\nexec "$@"\n' > /tmp/browser-bin/s6-notifyoncheck
+chmod +x /tmp/browser-bin/s6-notifyoncheck
+echo protected > /tmp/protected-log-target
+chmod 600 /tmp/protected-log-target
+for pair in chrome:chrome-cdp openbox:openbox novnc:novnc xtigervnc:xtigervnc; do
+  service="$(echo "$pair" | cut -d: -f1)"
+  log="/tmp/$(echo "$pair" | cut -d: -f2).log"
+  rm -f "$log"
+  gosu rome ln -s /tmp/protected-log-target "$log"
+  mkdir -p "/tmp/log-services/$service"
+  (cd "/tmp/log-services/$service"; /repo/s6-rc.d/"$service"/run) || true
+  test "$(cat /tmp/protected-log-target)" = protected
+  rm "$log"
+  (cd "/tmp/log-services/$service"; /repo/s6-rc.d/"$service"/run)
+  test "$(stat -c %U "$log")" = rome
+  grep -q service-output "$log"
+done
+echo 'PASS: service logs open as rome and cannot append through symlinks to root-owned files'
 `,
   },
 );

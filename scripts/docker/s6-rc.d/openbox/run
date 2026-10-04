@@ -1,4 +1,4 @@
 #!/command/with-contenv bash
 # shellcheck shell=bash
 echo "Starting Openbox ..."
-exec rome-run-as rome openbox >>/tmp/openbox.log 2>&1
+exec rome-run-as rome --log /tmp/openbox.log openbox
