@@ -351,6 +351,41 @@ function expectBefore(earlier: HTMLElement, later: HTMLElement) {
 }
 
 describe("MessageList streaming input", () => {
+  it("shows live reasoning and Bash output before their completed blocks arrive", () => {
+    const { live, actions } = renderList(true);
+    live.snapshot = {
+      segments: [
+        {
+          kind: "run",
+          id: "run-1",
+          ordinal: 0,
+          app: { id: "terminal", name: "Terminal", iconUrl: "/terminal.svg" },
+          count: 1,
+          blocks: [{ type: "tool_use", id: "bash-1", tool: "Bash", input: { command: "pwd" } }],
+        },
+      ],
+      summary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+    };
+    live.thinkingTextByBlockId = new Map([["thinking-1", "Planning the command"]]);
+    live.toolOutputTextByToolUseId = new Map([["bash-1", "/workspace\n"]]);
+
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={[]}
+          live={live}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={actions}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getAllByText("Planning the command")).toHaveLength(2);
+    expect(screen.getByText("/workspace")).toBeTruthy();
+  });
+
   it("keeps a code fence collapsed when its live block becomes persisted", () => {
     const text = "```\nlong code\n```";
     const { rerender } = render(streamingList([], text));

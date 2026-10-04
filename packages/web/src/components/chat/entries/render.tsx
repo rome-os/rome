@@ -118,8 +118,12 @@ export function renderSingleEntry(
       );
     case "text": {
       const disclosureStateKey =
-        turnId !== undefined && block.blockIx !== undefined
-          ? `${turnId}:${block.blockIx}`
+        turnId !== undefined
+          ? block.blockId
+            ? `${turnId}:id:${block.blockId}`
+            : block.blockIx !== undefined
+              ? `${turnId}:ix:${block.blockIx}`
+              : undefined
           : undefined;
       // In-turn narration: give each commentary its own gap so consecutive
       // narration reads as separate utterances under one speaker (not a run-on

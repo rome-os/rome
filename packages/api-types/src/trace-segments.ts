@@ -65,6 +65,8 @@ export interface TraceTurnEndEvent extends TraceEventBase {
 export interface TextBlock extends TraceEventBase {
   type: "text";
   content: string;
+  /** Provider-derived identity within this turn, when available. */
+  blockId?: string;
   /** Provider-agnostic role of this text within its turn. `commentary` =
    *  in-turn narration the model emitted between/before tool calls; `final` =
    *  the turn's closing answer (also carried by the terminal `result` block /
@@ -78,6 +80,8 @@ export interface TextBlock extends TraceEventBase {
 export interface ThinkingBlock extends TraceEventBase {
   type: "thinking";
   content: string;
+  /** Provider-derived identity within this turn, when available. */
+  blockId?: string;
 }
 
 export interface ToolUseBlock extends TraceEventBase {

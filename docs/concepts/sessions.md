@@ -56,6 +56,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 
 - **[Session](#sessions)** — a session accumulates many turns. A turn is one unit of work inside it.
 - **Step** — a single model call inside a turn. A turn that uses tools takes several steps, because each tool result feeds the next model call.
+- **Plan step** — one item in the agent's plan, not a step. A plan step can span several model calls while the agent carries it out.
 - **Run** — an action run is one execution of an [action](actions.md), and a routine run is one fire of a [routine](data.md#routines). Neither is a turn.
 
 ## Event

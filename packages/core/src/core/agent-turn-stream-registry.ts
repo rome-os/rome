@@ -37,6 +37,25 @@ export interface AgentTurnStreamRegistry {
 }
 
 const FINISHED_STREAM_TTL_MS = 30_000;
+/**
+ * A detached WebChat reader replays this buffer. Command output can be many
+ * megabytes, so retain enough to make a reconnect useful without keeping an
+ * unbounded copy for the turn's 30-second grace period.
+ */
+export const MAX_BUFFERED_TOOL_OUTPUT_CHARS = 256 * 1024;
+const TRUNCATED_TOOL_OUTPUT_SUFFIX = "\n… output truncated in the live replay …";
+
+export function appendBufferedToolOutput(previous: string, next: string): string {
+  if (previous.length >= MAX_BUFFERED_TOOL_OUTPUT_CHARS) return previous;
+  const available = MAX_BUFFERED_TOOL_OUTPUT_CHARS - previous.length;
+  if (next.length <= available) return previous + next;
+  const suffix = TRUNCATED_TOOL_OUTPUT_SUFFIX.slice(
+    0,
+    Math.max(0, MAX_BUFFERED_TOOL_OUTPUT_CHARS - previous.length),
+  );
+  const contentLimit = Math.max(0, available - suffix.length);
+  return previous + next.slice(0, contentLimit) + suffix;
+}
 
 function conversationKey(ref: ConversationRef): string {
   return `${ref.connectionId}\u0000${ref.conversationId}`;
@@ -56,6 +75,9 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         throw new Error(`Turn stream "${input.turnId}" is already registered`);
       }
       const values: StreamAgentEvent[] = [];
+      // The stream retains one accumulated replay delta per running command,
+      // while listeners still receive every provider chunk immediately.
+      const bufferedToolOutputIndex = new Map<string, number>();
       const listeners = new Set<(message: StreamAgentEvent) => void>();
       let resolveFinished!: () => void;
       const finishedPromise = new Promise<void>((resolve) => {
@@ -78,7 +100,24 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
         interrupt: input.interrupt,
         publish(message) {
           if (stream.finished) return;
-          values.push(message);
+          if (message.type === "tool_output_delta") {
+            const priorIndex = bufferedToolOutputIndex.get(message.toolUseId);
+            const prior = priorIndex === undefined ? undefined : values[priorIndex];
+            if (priorIndex !== undefined && prior?.type === "tool_output_delta") {
+              values[priorIndex] = {
+                ...prior,
+                content: appendBufferedToolOutput(prior.content, message.content),
+              };
+            } else {
+              bufferedToolOutputIndex.set(message.toolUseId, values.length);
+              values.push(message);
+            }
+          } else {
+            values.push(message);
+            if (message.type === "tool_result") {
+              bufferedToolOutputIndex.delete(message.toolUseId);
+            }
+          }
           for (const listener of listeners) listener(message);
         },
         finish() {

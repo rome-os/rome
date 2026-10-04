@@ -79,6 +79,7 @@ import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
+import { appendBufferedToolOutput } from "../../core/agent-turn-stream-registry.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -189,6 +190,8 @@ type WebchatEventName =
   | "summary_update"
   | "session_status"
   | "assistant_text"
+  | "thinking_text"
+  | "tool_output_text"
   | "widget_placement"
   | "done"
   | "stream_error"
@@ -618,7 +621,10 @@ interface ActiveWebchatStream {
    * the durable reply is still persisted via `send_message` on `result`.
    */
   assistantText: string;
+  assistantBlockId?: string;
   assistantBlockIx: number;
+  thinkingTextByBlockId: Map<string, string>;
+  toolOutputTextByToolUseId: Map<string, string>;
   persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
@@ -628,6 +634,8 @@ interface ActiveWebchatStream {
   resolveFinish: () => void;
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
+  /** Only Codex reasoning deltas are a new WebChat surface. */
+  showLiveReasoning: boolean;
   channelThreadKey: string | null;
 }
 
@@ -1737,6 +1745,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     turnId: string,
     channelThreadKey: string | null = null,
     agentName: string = "main",
+    showLiveReasoning = false,
   ): Promise<ActiveWebchatStream> => {
     let resolveFinish!: () => void;
     const onFinish = new Promise<void>((resolve) => {
@@ -1763,7 +1772,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         traceMessageId: randomUUID(),
       }),
       assistantText: "",
+      assistantBlockId: undefined,
       assistantBlockIx: 0,
+      thinkingTextByBlockId: new Map(),
+      toolOutputTextByToolUseId: new Map(),
       persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
@@ -1772,6 +1784,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       onFinish,
       resolveFinish,
       agentName,
+      showLiveReasoning,
       channelThreadKey,
     };
   };
@@ -2790,7 +2803,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         });
         let queue = Promise.resolve();
         let assistantText = "";
+        let assistantBlockId: string | undefined;
         let assistantBlockIx = 0;
+        const toolOutputTextByToolUseId = new Map<string, string>();
         let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
         const write = (event: WebchatEventName, data: unknown) => {
@@ -2801,11 +2816,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             write("input_status", message);
             return;
           }
+          // The detached-stream path cannot recover a provider identity. Keep
+          // Claude reasoning on its established completed-block path rather
+          // than risking a new live display here.
+          if (message.type === "thinking_delta") return;
+          if (message.type === "tool_output_delta") {
+            const text = appendBufferedToolOutput(
+              toolOutputTextByToolUseId.get(message.toolUseId) ?? "",
+              message.content,
+            );
+            toolOutputTextByToolUseId.set(message.toolUseId, text);
+            write("tool_output_text", { turnId, toolUseId: message.toolUseId, text });
+            return;
+          }
           if (isTransientDelta(message) && message.type !== "text_delta") return;
           if (message.type === "text_delta") {
             assistantText += message.content;
+            if (message.blockId) assistantBlockId = message.blockId;
             write("assistant_text", {
               turnId,
+              ...(assistantBlockId ? { blockId: assistantBlockId } : {}),
               blockIx: assistantBlockIx,
               text: assistantText,
             });
@@ -2813,7 +2843,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
           if (message.type === "text") {
             assistantText = "";
+            assistantBlockId = undefined;
             assistantBlockIx += 1;
+          }
+          if (message.type === "tool_result") {
+            toolOutputTextByToolUseId.delete(message.toolUseId);
+            write("tool_output_text", { turnId, toolUseId: message.toolUseId, text: "" });
           }
           if (message.type === "error") terminalError = message;
           if (message.type === "turn_end" && message.status === "interrupted") interrupted = true;
@@ -3306,7 +3341,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const attachTurn = async (handle: AgentTurnHandle) => {
       const turnId = handle.turnId;
 
-      const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
+      const stream = await createStream(
+        sessionId,
+        turnId,
+        channelThreadKey,
+        agentName,
+        agentSess.providerId === "openai",
+      );
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
       void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -3347,7 +3388,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              // Deltas other than text have no webchat consumer yet.
+              if (msg.type === "thinking_delta" && stream.showLiveReasoning) {
+                const text = (stream.thinkingTextByBlockId.get(msg.blockId) ?? "") + msg.content;
+                stream.thinkingTextByBlockId.set(msg.blockId, text);
+                emitToStream(
+                  stream,
+                  "thinking_text",
+                  { turnId, blockId: msg.blockId, text },
+                  `thinking:${msg.blockId}`,
+                );
+                continue;
+              }
+              if (msg.type === "tool_output_delta") {
+                const text = appendBufferedToolOutput(
+                  stream.toolOutputTextByToolUseId.get(msg.toolUseId) ?? "",
+                  msg.content,
+                );
+                stream.toolOutputTextByToolUseId.set(msg.toolUseId, text);
+                emitToStream(
+                  stream,
+                  "tool_output_text",
+                  { turnId, toolUseId: msg.toolUseId, text },
+                  `tool-output:${msg.toolUseId}`,
+                );
+                continue;
+              }
+              // Tool-input deltas are intentionally not a WebChat surface.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -3355,11 +3421,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // accumulated text.
               if (msg.type === "text_delta") {
                 stream.assistantText += msg.content;
-                if (msg.blockId) inFlightTextBlockId = msg.blockId;
+                if (msg.blockId) {
+                  inFlightTextBlockId = msg.blockId;
+                  stream.assistantBlockId = msg.blockId;
+                }
                 emitToStream(
                   stream,
                   "assistant_text",
-                  { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                  {
+                    turnId,
+                    ...(stream.assistantBlockId ? { blockId: stream.assistantBlockId } : {}),
+                    blockIx: stream.assistantBlockIx,
+                    text: stream.assistantText,
+                  },
                   "assistant_text",
                 );
                 continue;
@@ -3373,6 +3447,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // block's first delta arrives (delayed fold).
               if (msg.type === "text") {
                 const blockIx = stream.assistantBlockIx;
+                if (msg.blockId) stream.assistantBlockId = msg.blockId;
                 // Keeps the live preview and its persisted replacement on the
                 // same complete block content during their handoff.
                 if (stream.assistantText !== msg.content) {
@@ -3380,7 +3455,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   emitToStream(
                     stream,
                     "assistant_text",
-                    { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                    {
+                      turnId,
+                      ...(stream.assistantBlockId ? { blockId: stream.assistantBlockId } : {}),
+                      blockIx: stream.assistantBlockIx,
+                      text: stream.assistantText,
+                    },
                     "assistant_text",
                   );
                 }
@@ -3421,6 +3501,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                stream.assistantBlockId = undefined;
                 inFlightTextBlockId = undefined;
               }
               if (msg.type === "turn_end" && stream.assistantText) {
@@ -3445,6 +3526,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                stream.assistantBlockId = undefined;
+              }
+              if (msg.type === "thinking" && msg.blockId && stream.showLiveReasoning) {
+                stream.thinkingTextByBlockId.delete(msg.blockId);
+                emitToStream(
+                  stream,
+                  "thinking_text",
+                  { turnId, blockId: msg.blockId, text: "" },
+                  `thinking:${msg.blockId}`,
+                );
+              }
+              if (msg.type === "tool_result") {
+                stream.toolOutputTextByToolUseId.delete(msg.toolUseId);
+                emitToStream(
+                  stream,
+                  "tool_output_text",
+                  { turnId, toolUseId: msg.toolUseId, text: "" },
+                  `tool-output:${msg.toolUseId}`,
+                );
               }
               stream.traceEvents.push(msg);
               emitTraceEvent(stream, msg);

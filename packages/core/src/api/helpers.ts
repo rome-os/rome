@@ -190,10 +190,16 @@ export function toTraceEvent(msg: TraceableEvent & { agent?: string }): TraceEve
         type: "text",
         content: msg.content,
         agent: msg.agent,
+        ...(msg.blockId ? { blockId: msg.blockId } : {}),
         ...(msg.turnPhase ? { turnPhase: msg.turnPhase } : {}),
       };
     case "thinking":
-      return { type: "thinking", content: msg.content, agent: msg.agent };
+      return {
+        type: "thinking",
+        content: msg.content,
+        agent: msg.agent,
+        ...(msg.blockId ? { blockId: msg.blockId } : {}),
+      };
     case "tool_use":
       return {
         type: "tool_use",

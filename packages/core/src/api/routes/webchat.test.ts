@@ -1797,11 +1797,13 @@ describe("Webchat API", () => {
     const runScriptedStream = async (
       script: () => AsyncGenerator<never>,
       onEvent?: (evt: { event: string; data: string }) => void,
+      providerId: "openai" | "anthropic" = "openai",
     ) => {
       deps.agentSessionManager = {
         acquire: rs.fn(async (key) => ({
           key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
           sessionId: "agent-session",
+          providerId,
           status: "idle",
           sendTurn() {
             return {
@@ -1874,7 +1876,7 @@ describe("Webchat API", () => {
           return { blockIx, text };
         });
 
-    it("emits block-scoped accumulated text, survives tool_use, and keeps deltas out of the trace", async () => {
+    it("projects live reasoning and command output while keeping deltas out of the trace", async () => {
       // Gate the scripted stream so the tail runs only after the reader has
       // seen the first block — exercising live emission, not just replay.
       let releaseTail!: () => void;
@@ -1889,7 +1891,6 @@ describe("Webchat API", () => {
             // The complete block closes the preview and advances blockIx.
             yield { type: "text", content: "Hello" };
             await tailGate;
-            // Tool previews have no webchat consumer yet: they change nothing.
             yield { type: "tool_input_delta", toolUseId: "tu-1", tool: "some_tool", content: "{" };
             yield { type: "tool_use", id: "tu-1", tool: "some_tool", input: {} };
             yield { type: "tool_output_delta", toolUseId: "tu-1", content: "partial output" };
@@ -1921,6 +1922,23 @@ describe("Webchat API", () => {
       // The post-tool deltas accumulate under the next block index.
       expect(texts[texts.length - 1]).toEqual({ blockIx: 1, text: "Final answer" });
 
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "thinking_text",
+          data: JSON.stringify({ turnId: "turn-stream-1", blockId: "b0", text: "Planning" }),
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "tool_output_text",
+          data: JSON.stringify({
+            turnId: "turn-stream-1",
+            toolUseId: "tu-1",
+            text: "partial output",
+          }),
+        }),
+      );
+
       // The final reply goes through send_message with the result content.
       expect(sendMessageRun).toHaveBeenCalledWith(
         "send_message",
@@ -1937,6 +1955,21 @@ describe("Webchat API", () => {
         expect(trace!.content).not.toContain(type);
         expect(events.some((e) => e.data.includes(type))).toBe(false);
       }
+    });
+
+    it("keeps Claude reasoning on the completed-block path", async () => {
+      const { events } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "thinking_delta", blockId: "thinking-1", content: "Private thought" };
+            yield { type: "thinking", blockId: "thinking-1", content: "Private thought" };
+            yield { type: "result", content: "Done" };
+          })() as AsyncGenerator<never>,
+        undefined,
+        "anthropic",
+      );
+
+      expect(events.some((event) => event.event === "thinking_text")).toBe(false);
     });
 
     it("persists each commentary block as its own live message; send_message carries only the final", async () => {

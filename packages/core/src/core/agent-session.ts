@@ -318,6 +318,8 @@ export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => voi
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
+  /** Resolved provider for this live session, when it has a model. */
+  readonly providerId?: ProviderId;
   readonly romeSessionId?: string;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;

@@ -5,9 +5,18 @@ import { describeBashCall } from "@/lib/bash-call-label";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { TracePayloadView } from "./TracePayload";
 
-export function ToolUseBlock({ tool, input }: { tool?: string; input: unknown }) {
+export function ToolUseBlock({
+  tool,
+  input,
+  liveOutput,
+}: {
+  tool?: string;
+  input: unknown;
+  /** Accumulated output of an in-progress Bash invocation. */
+  liveOutput?: string;
+}) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!liveOutput);
   const toolLabel = artifactLocalName(tool ?? t("blocks.unknownTool"));
   const actionLabel = tool === "Bash" ? describeBashCall(input, "inProgress") : null;
   const header = actionLabel ?? t("blocks.usingTool", { tool: toolLabel });
@@ -22,7 +31,13 @@ export function ToolUseBlock({ tool, input }: { tool?: string; input: unknown })
       </button>
       {open && (
         <div className="border-t border-info-border px-3 py-2 text-aux text-info-fg">
-          <TracePayloadView value={input} />
+          {liveOutput ? (
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
+              {liveOutput}
+            </pre>
+          ) : (
+            <TracePayloadView value={input} />
+          )}
         </div>
       )}
     </div>

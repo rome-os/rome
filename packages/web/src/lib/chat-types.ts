@@ -132,7 +132,12 @@ export interface ChatEntry {
    *  `commentary` = in-turn narration (rendered muted), `final`/absent = the
    *  turn's answer. */
   turnPhase?: "commentary" | "final";
-  /** Zero-based WebChat assistant text-block identity within the agent turn. */
+  /** Provider-derived text-block identity within the turn, when available. */
+  blockId?: string;
+  /**
+   * @deprecated Prefer `blockId` when it exists. This projection-local index
+   * remains the fallback for rows written before providers exposed block ids.
+   */
   blockIx?: number;
   error?: string | { message: string; code?: string };
   code?: ChatErrorCode;
