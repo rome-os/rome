@@ -672,7 +672,7 @@ interface ActiveWebchatStream {
   resolveFinish: () => void;
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
-  /** Only Codex reasoning deltas are a new WebChat surface. */
+  /** Only Codex reasoning deltas are a new WebChat surface, resolved at turn start. */
   showLiveReasoning: boolean;
   channelThreadKey: string | null;
 }
@@ -3376,13 +3376,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const attachTurn = async (handle: AgentTurnHandle) => {
       const turnId = handle.turnId;
 
-      const stream = await createStream(
-        sessionId,
-        turnId,
-        channelThreadKey,
-        agentName,
-        agentSess.providerId === "openai",
-      );
+      const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
       void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -3423,6 +3417,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
+              // AgentSession resolves an unpinned model at its mutex boundary,
+              // immediately before emitting turn_start. Read the provider here
+              // rather than when this stream was attached: a failed prior turn
+              // may have rotated the session to another provider in between.
+              if (msg.type === "turn_start") {
+                stream.showLiveReasoning = agentSess.providerId === "openai";
+              }
               if (msg.type === "thinking_delta" && stream.showLiveReasoning) {
                 const text = (stream.thinkingTextByBlockId.get(msg.blockId) ?? "") + msg.content;
                 stream.thinkingTextByBlockId.set(msg.blockId, text);

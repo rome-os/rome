@@ -1845,17 +1845,32 @@ describe("Webchat API", () => {
       script: () => AsyncGenerator<never>,
       onEvent?: (evt: { event: string; data: string }) => void,
       providerId: "openai" | "anthropic" = "openai",
+      providerIdForTurn: "openai" | "anthropic" = providerId,
     ) => {
+      let activeProviderId = providerId;
       deps.agentSessionManager = {
         acquire: rs.fn(async (key) => ({
           key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
           sessionId: "agent-session",
-          providerId,
+          get providerId() {
+            return activeProviderId;
+          },
           status: "idle",
           sendTurn() {
             return {
               turnId: "turn-stream-1",
-              events: script(),
+              events: (async function* () {
+                // Model resolution happens after WebChat attaches the turn but
+                // before AgentSession publishes its turn boundary.
+                activeProviderId = providerIdForTurn;
+                yield {
+                  type: "turn_start" as const,
+                  turnId: "turn-stream-1",
+                  sessionId: "agent-session",
+                  userPrompt: "hi",
+                };
+                yield* script();
+              })(),
               turnContext: otelContext.active(),
             };
           },
@@ -2056,6 +2071,29 @@ describe("Webchat API", () => {
       );
 
       expect(events.some((event) => event.event === "thinking_text")).toBe(false);
+    });
+
+    it("uses the provider resolved at the turn boundary for live reasoning", async () => {
+      const thinking = () =>
+        (async function* () {
+          yield { type: "thinking_delta", blockId: "thinking-1", content: "Planning" };
+          yield { type: "result", content: "Done" };
+        })() as AsyncGenerator<never>;
+
+      const switchedToClaude = await runScriptedStream(thinking, undefined, "openai", "anthropic");
+      expect(switchedToClaude.events.some((event) => event.event === "thinking_text")).toBe(false);
+
+      const switchedToCodex = await runScriptedStream(thinking, undefined, "anthropic", "openai");
+      expect(switchedToCodex.events).toContainEqual(
+        expect.objectContaining({
+          event: "thinking_text",
+          data: JSON.stringify({
+            turnId: "turn-stream-1",
+            blockId: "thinking-1",
+            text: "Planning",
+          }),
+        }),
+      );
     });
 
     it("persists each commentary block as its own live message; send_message carries only the final", async () => {
