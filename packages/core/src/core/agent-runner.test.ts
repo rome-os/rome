@@ -2345,6 +2345,201 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("publishes an SDK-started background turn without settling its caller", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK background turn",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-background-turn",
+      });
+      const published: Array<{ type: string; turnId: string }> = [];
+      const unsubscribe = session.subscribe((message, turnId) =>
+        published.push({ type: message.type, turnId }),
+      );
+      const a = session.sendTurn({ inputId: "A", prompt: "PONG" });
+      const aMessages = collectMessages(a.events);
+      await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "PONG" }]));
+
+      runtime.emit({ type: "model_turn_start", turnId: "background", answers: [] });
+      runtime.emit({ type: "text", content: "background done" });
+      runtime.emit({ type: "result", content: "background done" });
+      runtime.emit({ type: "model_turn_end", turnId: "background", answers: [] });
+      runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+      runtime.emit({ type: "result", content: "PONG" });
+      runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+
+      expect(await aMessages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: "result", content: "PONG" })]),
+      );
+      expect(
+        published.filter((event) => event.turnId === "background").map((event) => event.type),
+      ).toEqual(["turn_start", "text", "result", "turn_end"]);
+      unsubscribe();
+      await manager.shutdown();
+    });
+
+    it("settles a carried follow-up at its own caller", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK carried follow-up",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-carried-follow-up",
+      });
+      const a = session.sendTurn({ inputId: "A", prompt: "first" });
+      const b = session.sendTurn({ inputId: "B", prompt: "follow up" });
+      const aMessages = collectMessages(a.events);
+      const bMessages = collectMessages(b.events);
+      await rs.waitFor(() =>
+        expect(runtime.sent).toEqual([
+          { inputId: "A", text: "first" },
+          { inputId: "B", text: "follow up" },
+        ]),
+      );
+
+      runtime.emit({ type: "model_turn_start", turnId: "folded", answers: ["A"] });
+      runtime.emit({ type: "model_turn_answers", turnId: "folded", added: ["B"] });
+      runtime.emit({ type: "result", content: "combined reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "folded", answers: ["A", "B"] });
+
+      for (const messages of [await aMessages, await bMessages]) {
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "result", content: "combined reply" }),
+            expect.objectContaining({ type: "turn_end", status: "completed" }),
+          ]),
+        );
+      }
+      await manager.shutdown();
+    });
+
+    it("waits for idle before dispatching a system caller", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK idle wait",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-idle-wait",
+      });
+      const a = session.sendTurn({ inputId: "A", prompt: "first" });
+      const system = session.sendTurn(
+        { inputId: "S", prompt: "system" },
+        { initiatedBy: "system" },
+      );
+      const aMessages = collectMessages(a.events);
+      const systemMessages = collectMessages(system.events);
+      await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "first" }]));
+
+      runtime.emit({ type: "model_turn_start", turnId: "a", answers: ["A"] });
+      runtime.emit({ type: "result", content: "A reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "a", answers: ["A"] });
+      await rs.waitFor(() =>
+        expect(runtime.sent).toEqual([
+          { inputId: "A", text: "first" },
+          { inputId: "S", text: "system" },
+        ]),
+      );
+      runtime.emit({ type: "model_turn_start", turnId: "s", answers: ["S"] });
+      runtime.emit({ type: "result", content: "system reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "s", answers: ["S"] });
+
+      expect(await aMessages).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: "result", content: "A reply" })]),
+      );
+      expect(await systemMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "result", content: "system reply" }),
+        ]),
+      );
+      await manager.shutdown();
+    });
+
+    it("settles only the last submit_output payload with its SDK result", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      let submitOutput: ((input: unknown) => Promise<unknown>) | undefined;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK handback",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          submitOutput = params.executeSubmitOutput;
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire(
+        { agentName: "test-main", channelThreadKey: "webchat:sdk-handback" },
+        {
+          handback: {
+            schema: {
+              type: "object",
+              properties: { answer: { type: "string" } },
+              required: ["answer"],
+            },
+          },
+        },
+      );
+      const turn = session.sendTurn({ inputId: "A", prompt: "submit it" });
+      const messages = collectMessages(turn.events);
+      await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "submit it" }]));
+
+      runtime.emit({ type: "model_turn_start", turnId: "handback", answers: ["A"] });
+      expect(await submitOutput!({ answer: "first" })).toMatchObject({ ok: true });
+      expect(await submitOutput!({ answer: "last" })).toMatchObject({ ok: true });
+      runtime.emit({ type: "result", content: "ready" });
+      runtime.emit({ type: "model_turn_end", turnId: "handback", answers: ["A"] });
+
+      const seen = await messages;
+      expect(seen.filter((message) => message.type === "structured_output")).toEqual([
+        expect.objectContaining({ payload: { answer: "last" } }),
+      ]);
+      expect(seen.map((message) => message.type)).toEqual(
+        expect.arrayContaining(["structured_output", "result", "turn_end"]),
+      );
+      expect(seen.findIndex((message) => message.type === "structured_output")).toBeLessThan(
+        seen.findIndex((message) => message.type === "result"),
+      );
+      await manager.shutdown();
+    });
+
     it("fails the message-id-bound caller when the SDK process dies", async () => {
       let runtime!: ReturnType<typeof createSdkEventSession>;
       const provider: ModelProvider = {
@@ -3076,7 +3271,7 @@ describe("AgentRunner", () => {
       ]);
     });
 
-    it("does not dispatch finished lifecycle events for turns that never started", async () => {
+    it("starts each fire-and-forget caller before the provider settles", async () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
         id: "mock",
@@ -3099,21 +3294,25 @@ describe("AgentRunner", () => {
       const second = session.sendTurn({ prompt: "second" });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.started).toHaveLength(2);
+      expect(lifecycle.started.map((event) => event.turn.turnId)).toEqual([
+        first.turnId,
+        second.turnId,
+      ]);
 
       await session.close("user");
-      await collectMessages(first.events);
+      const firstMessages = await collectMessages(first.events);
       const secondMessages = await collectMessages(second.events);
 
-      expect(secondMessages).toEqual([
-        expect.objectContaining({ type: "turn_start", turnId: second.turnId }),
-        expect.objectContaining({ type: "error", error: "AgentSession closed" }),
-        expect.objectContaining({ type: "turn_end", turnId: second.turnId, status: "error" }),
-      ]);
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0].turn.turnId).toBe(first.turnId);
+      for (const messages of [firstMessages, secondMessages]) {
+        expect(messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "error", error: "session closed without a terminal" }),
+            expect.objectContaining({ type: "turn_end", status: "error" }),
+          ]),
+        );
+      }
+      expect(lifecycle.finished).toHaveLength(2);
       await manager.shutdown();
     });
 

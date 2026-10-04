@@ -745,7 +745,7 @@ interface TurnExecRefs {
    * would contaminate the same provider thread the source resumes later.
    */
   childChannelThreadKey: string;
-  /** Exactly-once capture of a submit_output payload for the owning turn. */
+  /** Keep the last submit_output payload until the owning SDK turn resolves. */
   captureSubmittedOutput: (payload: unknown) => boolean;
   /** Attach the Child execution to this owner's provider tool call. */
   attachSubagentExecution: (toolUseId: string, execution: SubagentExecution) => void;
@@ -1274,9 +1274,9 @@ async function openSession(
             hint: "Fix the listed issues and call submit_output again.",
           };
         }
-        // App-specific semantic gate, after the schema and before the
-        // exactly-once capture (a bounced submission must not consume the
-        // once). Fail closed: a validator that errors, throws, or returns a
+        // App-specific semantic gate, after the schema and before capture. A
+        // bounced submission must not replace the last accepted candidate.
+        // Fail closed: a validator that errors, throws, or returns a
         // malformed verdict rejects the submission — never waves it through.
         if (conversationalHandback.validate) {
           let verdict: { valid: boolean; errors?: string[] };
@@ -1320,14 +1320,14 @@ async function openSession(
             };
           }
         }
-        // Exactly-once: reject a second submission within the same turn so
-        // the agent can't silently overwrite an accepted payload.
+        // A model can refine a candidate within one SDK turn. Keep the most
+        // recent valid submission and surface it only with that turn's result.
         const accepted = refs.captureSubmittedOutput(input);
         if (!accepted) {
           return {
             ok: false,
-            error: "submit_output was already called this turn",
-            hint: "Do not call submit_output again. End the turn now.",
+            error: "submit_output was called outside an active turn",
+            hint: "Resume the conversation and submit the result from an active turn.",
           };
         }
         return {
@@ -1748,6 +1748,8 @@ interface ImplArgs {
 
 interface SdkTurnState {
   answers: Set<string>;
+  /** The visible Rome turn for this SDK-owned model turn. */
+  sink?: TurnSink;
   terminal?: ResultMessage | ErrorMessage;
 }
 
@@ -1802,6 +1804,18 @@ interface TurnSink {
   subagentLinksCleared: boolean;
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
+  /** SDK-started background turns have subscribers but no direct caller stream. */
+  detached?: boolean;
+  /** Last valid submit_output payload, held until the SDK result settles it. */
+  submittedOutput?: unknown;
+  hasSubmittedOutput: boolean;
+  /** Per-SDK-turn telemetry state; concurrent callers must not share it. */
+  agentSpan?: Span;
+  modelSpan?: Span;
+  turnCtx?: Context;
+  toolCallCount: number;
+  skillWritten: boolean;
+  startedAtMs: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1952,25 +1966,9 @@ class AgentSessionImpl implements AgentSession {
   /** SDK turn state is authoritative for result-to-caller correlation. */
   private readonly sdkTurns = new Map<string, SdkTurnState>();
   private activeSdkTurnId?: string;
-  /** Exactly-once submission for the current conversational handback turn. */
-  private submittedOutputTurnId?: string;
-  // Spans for the current turn. Both are opened in runOneTurn and closed in
-  // runEventsLoop when the terminal `result`/`error` message lands, so the
-  // trace contract is complete by the time the sink closes (i.e. before
-  // consumer for-await loops drain). runOneTurn's finally is idempotent.
-  private currentAgentSpan: Span | null = null;
-  private currentModelSpan: Span | null = null;
-  // Active OTel context for the current turn, set in runOneTurn after the
-  // agent span is created. executeAction / executeSubagent re-bind into it
-  // so `action:*` and child `agent:*` spans land under the current agent
-  // span even when the model SDK invokes the MCP callback asynchronously
-  // after the original `context.with(turnCtx, sendUserInput)` call has
-  // returned.
-  private currentTurnCtx: Context | null = null;
-  // Per-turn counters stamped on the agent span at turn boundary.
-  private currentTurnToolCallCount = 0;
-  private currentTurnSkillWritten = false;
-  private currentTurnStartMs = 0;
+  // Telemetry belongs to each sink because SDK turns may overlap after their
+  // user inputs have been accepted. Tool callbacks resolve their context from
+  // the SDK-owned current sink below.
   // Captured at session open; passed through to per-turn span attrs.
   private isNewSession: boolean;
   private isSubagent: boolean;
@@ -2035,7 +2033,7 @@ class AgentSessionImpl implements AgentSession {
   /** Current per-turn OTel context, exposed for closures that need to bind
    * SDK-async callbacks back into the agent span. */
   get currentTurnCtxRef(): Context | null {
-    return this.currentTurnCtx;
+    return this.currentSink?.turnCtx ?? null;
   }
 
   get providerId(): ProviderId {
@@ -2157,16 +2155,16 @@ class AgentSessionImpl implements AgentSession {
           await this.consumeModelTurnEvent(session, msg);
           continue;
         }
-        const sink = this.currentSink;
+        const activeTurn = this.activeSdkTurnId
+          ? this.sdkTurns.get(this.activeSdkTurnId)
+          : undefined;
+        // A turn the SDK starts itself has no waiting caller. It still owns a
+        // visible session turn, rather than being dropped into the last caller.
+        const sink = activeTurn
+          ? (activeTurn.sink ??
+            (msg.type !== "input_status" ? this.openSdkTurnSink(this.activeSdkTurnId!) : undefined))
+          : this.currentSink;
         if (!sink) {
-          // SDK-started turns become visible session turns in PR 2b. PR 2a still
-          // records their terminal so an empty background result cannot invent
-          // a caller-owned completion.
-          if (isTerminalEvent(msg) && this.activeSdkTurnId) {
-            const turn = this.sdkTurns.get(this.activeSdkTurnId);
-            if (turn) turn.terminal = msg;
-            continue;
-          }
           log.warn("agent session received event with no active turn", {
             type: msg.type,
             sessionId: this.sessionId,
@@ -2194,7 +2192,7 @@ class AgentSessionImpl implements AgentSession {
             "agent.name": this.key.agentName,
             is_subagent: this.isSubagent,
           });
-          this.currentModelSpan?.setAttribute("ttft_ms", ttftMs);
+          sink.modelSpan?.setAttribute("ttft_ms", ttftMs);
         }
         // Deltas are transient increments of an in-flight block; the complete
         // block still follows. Fast-path them straight to the sink: no
@@ -2220,7 +2218,7 @@ class AgentSessionImpl implements AgentSession {
         ) {
           sink.outputSchemaSuspended = true;
         }
-        this.trackTurnMetrics(msg);
+        this.trackTurnMetrics(sink, msg);
         await this.deps.sessionManager.touchSession(this.sessionId);
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
@@ -2296,9 +2294,12 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
-      if (session.isClosed) {
+      const waiting = new Set(this.waitingCallers.values());
+      // A provider stream ending while callers are still bound has no
+      // trustworthy result correlation, even if a lightweight test/provider
+      // does not expose isClosed. Fail those callers rather than hanging them.
+      if (session.isClosed || waiting.size > 0) {
         this.modelSessionAvailable = false;
-        const waiting = new Set(this.waitingCallers.values());
         if (waiting.size > 0) {
           const error =
             streamError === undefined
@@ -2338,6 +2339,10 @@ class AgentSessionImpl implements AgentSession {
       case "model_turn_start": {
         this.sdkTurns.set(event.turnId, { answers: new Set(event.answers) });
         this.activeSdkTurnId = event.turnId;
+        const streamSink = event.answers
+          .map((id) => this.waitingCallers.get(id))
+          .find((sink): sink is TurnSink => !!sink);
+        if (streamSink) this.bindSdkTurnSink(event.turnId, streamSink);
         return;
       }
       case "model_turn_answers": {
@@ -2350,6 +2355,12 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         for (const id of event.added) turn.answers.add(id);
+        // The first named caller owns the model stream. Later names may have
+        // folded into this SDK turn; they receive the same terminal below.
+        const streamSink = event.added
+          .map((id) => this.waitingCallers.get(id))
+          .find((sink): sink is TurnSink => !!sink);
+        if (streamSink) this.bindSdkTurnSink(event.turnId, streamSink);
         return;
       }
       case "model_turn_end": {
@@ -2372,22 +2383,73 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         const sinks = new Set<TurnSink>();
+        if (!turn.sink) this.openSdkTurnSink(event.turnId, turn);
         for (const id of turn.answers) {
           const sink = this.waitingCallers.get(id);
-          if (sink) {
-            this.waitingCallers.delete(id);
-            sinks.add(sink);
-          }
+          if (sink) sinks.add(sink);
         }
-        // An SDK-started background turn answers []. It is not a Rome caller's
-        // result and must not complete the current sink (#510).
-        if (sinks.size === 0) return;
+        // An SDK-started background turn answers []. It gets its own visible
+        // Rome turn, but never completes a waiting caller (#510).
+        if (sinks.size === 0 && turn.sink) sinks.add(turn.sink);
         for (const sink of sinks) {
           if (!sink.done) await this.finishSinkFromTerminal(session, sink, turn.terminal);
         }
         return;
       }
     }
+  }
+
+  private bindSdkTurnSink(turnId: string, sink: TurnSink): void {
+    const turn = this.sdkTurns.get(turnId);
+    if (turn) turn.sink = sink;
+    this.currentSink = sink;
+    this.currentTurnId = sink.turnId;
+  }
+
+  private openSdkTurnSink(turnId: string, existing?: SdkTurnState): TurnSink {
+    const turn = existing ?? this.sdkTurns.get(turnId);
+    if (turn?.sink) return turn.sink;
+    const sink: TurnSink = {
+      turnId,
+      userPrompt: "",
+      turnStartEmitted: false,
+      values: [],
+      resolvers: [],
+      done: false,
+      blocks: [],
+      modelTurnStartMs: Date.now(),
+      ttftRecorded: false,
+      romeAttrs: {
+        "agent.name": this.key.agentName,
+        "session.id": this.sessionId,
+        "turn.id": turnId,
+      },
+      threadContext: this.threadContext,
+      sharedContext: this.sharedContext,
+      romeSessionId: this.romeSessionId ?? this.sessionId,
+      romeSessionType: this.threadContext?.channel === "webchat" ? "webchat" : "action",
+      initiatedBy: "system",
+      lifecycleFinishDispatched: false,
+      lifecycleInterrupted: false,
+      subagentExecutions: new Map(),
+      pendingSubagentToolUses: new Map(),
+      emittedSubagentStarts: new Set(),
+      subagentLinksCleared: false,
+      outputSchemaSuspended: false,
+      detached: true,
+      hasSubmittedOutput: false,
+      toolCallCount: 0,
+      skillWritten: false,
+      startedAtMs: Date.now(),
+    };
+    if (turn) turn.sink = sink;
+    this.currentSink = sink;
+    this.currentTurnId = sink.turnId;
+    this.status = "running";
+    this.ensureTurnStart(sink);
+    this.dispatchTurnStarted(sink, { prompt: "" });
+    this.emitStatus();
+    return sink;
   }
 
   private async finishSinkFromTerminal(
@@ -2401,6 +2463,14 @@ class AgentSessionImpl implements AgentSession {
       if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
       await this.maybePersistProviderInfo();
       await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
+      // Tool callbacks happen while the SDK is still streaming. Do not let a
+      // transient candidate create a card; the last valid submission settles
+      // atomically with this turn's successful result.
+      if (sink.hasSubmittedOutput) {
+        this.publishOutbound(sink, { type: "structured_output", payload: sink.submittedOutput });
+        sink.hasSubmittedOutput = false;
+        sink.submittedOutput = undefined;
+      }
     }
     this.publishOutbound(sink, terminal);
     this.finalizeTurn(sink, terminal);
@@ -2452,7 +2522,7 @@ class AgentSessionImpl implements AgentSession {
    * status instead of being closed as OK by runOneTurn's safety net.
    */
   private finalizeTurnSpans(sink: TurnSink, outbound: ResultMessage | ErrorMessage): void {
-    const modelSpan = this.currentModelSpan;
+    const modelSpan = sink.modelSpan;
     if (modelSpan) {
       const accounting = outbound.accounting;
       if (accounting) {
@@ -2497,7 +2567,7 @@ class AgentSessionImpl implements AgentSession {
       // close while `modelSpan` is still recording. Pure-function;
       // any unexpected shape in `blocks` produces no spans rather
       // than blowing up the turn.
-      const turnCtx = this.currentTurnCtx;
+      const turnCtx = sink.turnCtx;
       if (turnCtx) {
         try {
           translateTurnSpans({
@@ -2517,17 +2587,17 @@ class AgentSessionImpl implements AgentSession {
         }
       }
       modelSpan.end();
-      this.currentModelSpan = null;
+      sink.modelSpan = undefined;
     }
     // End the agent span here too so the trace contract is complete
     // before consumers' for-await loops drain. runOneTurn's finally
     // path is idempotent against this.
-    const agentSpan = this.currentAgentSpan;
+    const agentSpan = sink.agentSpan;
     if (agentSpan) {
       agentSpan.setAttributes({
         "session.is_new": this.isNewSession,
-        tool_call_count: this.currentTurnToolCallCount,
-        skill_written: this.currentTurnSkillWritten,
+        tool_call_count: sink.toolCallCount,
+        skill_written: sink.skillWritten,
       });
       if (outbound.type === "error") {
         agentSpan.setStatus({ code: SpanStatusCode.ERROR, message: outbound.error });
@@ -2535,18 +2605,16 @@ class AgentSessionImpl implements AgentSession {
         agentSpan.setStatus({ code: SpanStatusCode.OK });
       }
       agentSpan.end();
-      this.currentAgentSpan = null;
-      sessionDurationMetric().record(Date.now() - this.currentTurnStartMs, {
+      sink.agentSpan = undefined;
+      sessionDurationMetric().record(Date.now() - sink.startedAtMs, {
         "agent.name": this.key.agentName,
       });
     }
-    this.currentTurnCtx = null;
+    sink.turnCtx = undefined;
   }
 
   private finalizeTurn(sink: TurnSink, terminal: ResultMessage | ErrorMessage): void {
-    if (this.currentSink === sink) {
-      this.finalizeTurnSpans(sink, terminal);
-    }
+    this.finalizeTurnSpans(sink, terminal);
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
     this.closeSink(sink);
@@ -2706,10 +2774,13 @@ class AgentSessionImpl implements AgentSession {
 
   private publishToSink(sink: TurnSink, msg: StreamAgentMessage): void {
     if (sink.done) return;
-    if (sink.resolvers.length > 0) {
+    if (sink.detached) {
+      // SDK-started turns are broadcast to session subscribers; their own
+      // stream is introduced by the webchat migration in PR 3.
+    } else if (sink.resolvers.length > 0) {
       const r = sink.resolvers.shift()!;
       r({ value: msg, done: false });
-    } else {
+    } else if (!sink.detached) {
       sink.values.push(msg);
     }
     for (const sub of this.subscribers.values()) {
@@ -2723,14 +2794,14 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  private trackTurnMetrics(msg: AgentMessage | StreamAgentMessage): void {
+  private trackTurnMetrics(sink: TurnSink, msg: AgentMessage | StreamAgentMessage): void {
     if (msg.type !== "tool_use") return;
-    this.currentTurnToolCallCount++;
+    sink.toolCallCount++;
     if (
       (msg.tool === "Edit" || msg.tool === "Write") &&
       String((msg.input as Record<string, unknown>)?.file_path ?? "").includes("/skills/")
     ) {
-      this.currentTurnSkillWritten = true;
+      sink.skillWritten = true;
     }
   }
 
@@ -2748,10 +2819,16 @@ class AgentSessionImpl implements AgentSession {
       if (waiting === sink) this.waitingCallers.delete(inputId);
     }
     this.lastActiveAt = Date.now();
-    this.status = "idle";
-    this.currentTurnId = undefined;
-    this.emitStatus();
     this.inputs.finish(sink.turnId);
+    if (this.waitingCallers.size === 0 && this.activeSdkTurnId === undefined) {
+      this.status = "idle";
+      this.currentTurnId = undefined;
+      if (!this.keepAlive) void this.close("user");
+    } else {
+      this.status = "running";
+      this.currentTurnId = this.currentSink?.turnId;
+    }
+    this.emitStatus();
   }
 
   private clearSubagentLinks(sink: TurnSink): void {
@@ -2841,8 +2918,8 @@ class AgentSessionImpl implements AgentSession {
       }),
       output: buildLifecycleOutput(terminal, status, stop, stopReason),
       metrics: {
-        toolCallCount: this.currentTurnToolCallCount,
-        skillWritten: this.currentTurnSkillWritten,
+        toolCallCount: sink.toolCallCount,
+        skillWritten: sink.skillWritten,
       },
     });
   }
@@ -2869,21 +2946,18 @@ class AgentSessionImpl implements AgentSession {
     };
   }
 
-  /** Capture and publish one schema-valid handback submission per turn. */
+  /** Capture the last schema-valid handback submission for this SDK turn. */
   captureSubmittedOutput(payload: unknown): boolean {
-    const turnId = this.currentTurnId;
-    if (!turnId) {
+    const active = this.activeSdkTurnId ? this.sdkTurns.get(this.activeSdkTurnId) : undefined;
+    const sink = active?.sink ?? this.currentSink;
+    if (!sink) {
       log.warn("submit_output captured outside an active turn — dropping", {
         sessionId: this.sessionId,
       });
       return false;
     }
-    if (this.submittedOutputTurnId === turnId) return false;
-    this.submittedOutputTurnId = turnId;
-    const sink = this.currentSink;
-    if (sink) {
-      this.publishOutbound(sink, { type: "structured_output", payload });
-    }
+    sink.submittedOutput = payload;
+    sink.hasSubmittedOutput = true;
     return true;
   }
 
@@ -3158,7 +3232,21 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
-  // sendTurn — FIFO-serialized via turnMutex
+  // sendTurn — FIFO-serialized only through provider acceptance. Callers wait
+  // for their SDK-named result in waitingCallers; they do not own the session.
+
+  private async waitForIdleBeforeSending(): Promise<void> {
+    // Let already-submitted guardian work reach its provider-acceptance
+    // boundary before deciding the session is idle.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    while (
+      this.status !== "closed" &&
+      (this.waitingCallers.size > 0 || this.activeSdkTurnId !== undefined)
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
+  }
 
   submitInput(
     input: AgentTurnInput & { inputId: string },
@@ -3213,6 +3301,10 @@ class AgentSessionImpl implements AgentSession {
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
       outputSchemaSuspended: false,
+      hasSubmittedOutput: false,
+      toolCallCount: 0,
+      skillWritten: false,
+      startedAtMs: 0,
     };
     const events = this.buildTurnEvents(sink);
 
@@ -3256,8 +3348,13 @@ class AgentSessionImpl implements AgentSession {
     // until then. Caller can already read `turnId` synchronously. The callback
     // swallows its own failures, so `runExclusive` never rejects here — the
     // fire-and-forget promise is intentionally discarded.
-    void this.turnMutex
-      .runExclusive(
+    void (async () => {
+      // Guardian follow-ups may join a live SDK turn. System/API/summon callers
+      // instead wait for idle so their ordinary reply remains their own.
+      if (options?.initiatedBy === "system" || options?.lifecycleParent) {
+        await this.waitForIdleBeforeSending();
+      }
+      await this.turnMutex.runExclusive(
         async () => {
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, turnInput, sink, turnCtx));
@@ -3282,7 +3379,17 @@ class AgentSessionImpl implements AgentSession {
           }
         },
         input.inputId ? 1 : 0,
-      )
+      );
+    })()
+      .catch((err) => {
+        if (!sink.done) {
+          this.failTurn(
+            sink,
+            toModelResolutionErrorPayload(err) ??
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      })
       .finally(() => this.emitStatus());
 
     return {
@@ -3328,14 +3435,12 @@ class AgentSessionImpl implements AgentSession {
     this.status = "running";
     this.emitStatus();
 
-    this.currentAgentSpan = span;
-    this.currentTurnCtx = turnCtx;
-
-    // Reset per-turn counters; final values are stamped on the agent span
-    // when the events loop observes the terminal result/error message.
-    this.currentTurnToolCallCount = 0;
-    this.currentTurnSkillWritten = false;
-    this.currentTurnStartMs = Date.now();
+    // Each accepted input owns its telemetry until the SDK names its result.
+    sink.agentSpan = span;
+    sink.turnCtx = turnCtx;
+    sink.toolCallCount = 0;
+    sink.skillWritten = false;
+    sink.startedAtMs = Date.now();
     this.dispatchTurnStarted(sink, input);
 
     // `model.turn` aggregates the whole SDK query() for this turn — accounting
@@ -3355,7 +3460,7 @@ class AgentSessionImpl implements AgentSession {
         tool_count: this.toolCount,
       }),
     );
-    this.currentModelSpan = modelSpan;
+    sink.modelSpan = modelSpan;
 
     try {
       // turn_start is the first event of the turn's stream: trace builders
@@ -3505,15 +3610,9 @@ class AgentSessionImpl implements AgentSession {
           this.failTurn(sink, err instanceof Error ? err.message : String(err));
         }
 
-        // Wait for sink to close (events loop closes on `result`/`error`).
-        await new Promise<void>((resolve) => {
-          const checker = setInterval(() => {
-            if (sink.done) {
-              clearInterval(checker);
-              resolve();
-            }
-          }, 5);
-        });
+        // sendUserInput resolves at the documented acceptance boundary. The
+        // SDK's model_turn_end, not this call, settles the message-id-bound
+        // caller. Releasing the mutex here lets a later follow-up join it.
       };
 
       const chain = this.deps.turnMiddleware;
@@ -3523,8 +3622,10 @@ class AgentSessionImpl implements AgentSession {
         await runModelTerminal();
       }
 
-      if (!sink.done) {
-        if (!modelRan && input.inputId) {
+      // Middleware-only turns still terminate here. A dispatched model turn
+      // stays open until the SDK names this input at model_turn_end.
+      if (!sink.done && !modelRan) {
+        if (input.inputId) {
           await this.inputs.observe(
             {
               type: "input_status",
@@ -3549,38 +3650,33 @@ class AgentSessionImpl implements AgentSession {
         this.finalizeTurn(sink, terminal);
       }
 
-      // The agent + model spans are normally ended by runEventsLoop on the
-      // terminal `result`/`error` message. If we still hold them here, the
-      // events loop never observed a terminal — close them as a safety net.
-      if (this.currentAgentSpan === span) {
+      // The agent + model spans stay on this sink until its SDK result. Only
+      // middleware-only paths have no SDK terminal to close them.
+      if (!modelRan && sink.agentSpan === span) {
         span.setAttributes({
           "session.is_new": this.isNewSession,
-          tool_call_count: this.currentTurnToolCallCount,
-          skill_written: this.currentTurnSkillWritten,
+          tool_call_count: sink.toolCallCount,
+          skill_written: sink.skillWritten,
         });
         span.setStatus({ code: SpanStatusCode.OK });
         span.end();
-        this.currentAgentSpan = null;
-        sessionDurationMetric().record(Date.now() - this.currentTurnStartMs, {
+        sink.agentSpan = undefined;
+        sessionDurationMetric().record(Date.now() - sink.startedAtMs, {
           "agent.name": this.key.agentName,
         });
       }
-      if (this.currentModelSpan === modelSpan) {
+      if (!modelRan && sink.modelSpan === modelSpan) {
+        modelSpan.setStatus({ code: SpanStatusCode.OK });
         modelSpan.end();
-        this.currentModelSpan = null;
+        sink.modelSpan = undefined;
       }
-      this.currentTurnCtx = null;
-
-      if (!this.keepAlive) {
-        // Phase 3: close on every turn boundary; Phase 4 flips this.
-        await this.close("user");
-      }
+      if (!modelRan) sink.turnCtx = undefined;
     } catch (err) {
-      if (this.currentAgentSpan === span) {
+      if (sink.agentSpan === span) {
         span.setAttributes({
           "session.is_new": this.isNewSession,
-          tool_call_count: this.currentTurnToolCallCount,
-          skill_written: this.currentTurnSkillWritten,
+          tool_call_count: sink.toolCallCount,
+          skill_written: sink.skillWritten,
         });
         span.setStatus({
           code: SpanStatusCode.ERROR,
@@ -3588,13 +3684,17 @@ class AgentSessionImpl implements AgentSession {
         });
         if (err instanceof Error) span.recordException(err);
         span.end();
-        this.currentAgentSpan = null;
+        sink.agentSpan = undefined;
       }
-      if (this.currentModelSpan === modelSpan) {
+      if (sink.modelSpan === modelSpan) {
+        modelSpan.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: err instanceof Error ? err.message : String(err),
+        });
         modelSpan.end();
-        this.currentModelSpan = null;
+        sink.modelSpan = undefined;
       }
-      this.currentTurnCtx = null;
+      sink.turnCtx = undefined;
       throw err;
     }
   }
