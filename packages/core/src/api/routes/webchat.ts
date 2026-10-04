@@ -1693,19 +1693,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await stream.tracePersistPromise;
   };
 
-  // Append a frame to one subscriber's serialized write chain. A failed write
-  // drops the subscriber; frames already chained behind it become no-ops via
-  // the same guard.
-  const enqueueSubscriberWrite = (
-    stream: ActiveWebchatStream,
-    subscriberId: string,
-    entry: StreamSubscriber,
-    evt: WebchatSseEvent,
-    coalesceKey?: string,
-  ): void => {
-    entry.enqueue(evt, coalesceKey);
-  };
-
   const emitToStream = (
     stream: ActiveWebchatStream,
     event: WebchatEventName,
@@ -1715,8 +1702,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): void => {
     const evt: WebchatSseEvent = { event, data: JSON.stringify(data) };
     stream.events.set(replayKey, evt);
-    for (const [subscriberId, entry] of stream.subscribers.entries()) {
-      enqueueSubscriberWrite(stream, subscriberId, entry, evt, coalesceKey);
+    for (const entry of stream.subscribers.values()) {
+      entry.enqueue(evt, coalesceKey);
     }
   };
 
@@ -1920,7 +1907,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     stream.subscribers.set(subscriberId, entry);
     for (const evt of replay) {
-      enqueueSubscriberWrite(stream, subscriberId, entry, evt);
+      entry.enqueue(evt);
     }
     return { subscriberId, entry };
   };
@@ -2934,9 +2921,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const { subscriberId, entry } = attachSubscriber(stream, sse);
       // Keepalive rides each subscriber's own write chain (not emitToStream:
       // it must never enter the replay buffer). A write to a dead connection
-      // rejects and drops the subscriber via enqueueSubscriberWrite's guard.
+      // rejects and drops the subscriber in the queue's write guard.
       const keepalive = setInterval(() => {
-        enqueueSubscriberWrite(stream, subscriberId, entry, { event: "keepalive", data: "" });
+        entry.enqueue({ event: "keepalive", data: "" });
       }, TURN_STREAM_KEEPALIVE_INTERVAL_MS);
       sse.onAbort(() => {
         stream.subscribers.delete(subscriberId);
