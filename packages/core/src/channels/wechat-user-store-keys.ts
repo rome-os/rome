@@ -7,9 +7,10 @@
 // locked until another capture. Deriving here keeps the passphrase for as long
 // as the setup waits.
 
-import { createHmac, pbkdf2Sync, timingSafeEqual } from "node:crypto";
+import { createHmac, pbkdf2, pbkdf2Sync, timingSafeEqual } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
+import { promisify } from "node:util";
 
 const PAGE_SIZE = 4096;
 const SALT_SIZE = 16;
@@ -20,6 +21,8 @@ const HMAC_SIZE = 64;
 const KDF_ITERATIONS = 256_000;
 const MAC_KDF_ITERATIONS = 2;
 const MAC_SALT_XOR = 0x3a;
+
+const pbkdf2Async = promisify(pbkdf2);
 
 /** One database's key, as `wechat-bridge` stores it. */
 interface StoredKey {
@@ -238,7 +241,8 @@ export async function deriveStoreKeys(
   const keys: Record<string, StoredKey> = {};
   for (const [salt, group] of bySalt) {
     signal?.throwIfAborted();
-    const encKey = pbkdf2Sync(
+    // 256000 rounds per salt: off the event loop, so serving continues meanwhile.
+    const encKey = await pbkdf2Async(
       passphrase,
       Buffer.from(salt, "hex"),
       KDF_ITERATIONS,

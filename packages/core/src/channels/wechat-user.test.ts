@@ -863,13 +863,18 @@ describe("WechatUserReader", () => {
     };
   }
 
-  /** A runtime whose bridge answers per subcommand. The calls record each
-   *  wechat-cli argv after `-f json`. */
-  function readerWith(answer: (argv: string[]) => RunResult) {
+  /** A runtime over an unlocked store whose bridge answers per subcommand.
+   *  The calls record each wechat-cli argv after `-f json`. */
+  async function readerWith(
+    answer: (argv: string[]) => RunResult,
+    store: { stale?: boolean } = {},
+  ) {
     const calls: string[][] = [];
+    const h = await tempHome();
     const runtime = new WechatUserRuntime({
-      home: "/nonexistent-home",
+      home: h,
       run: async (file, args) => {
+        if (file === "sh") return ok("wxid_guardian\n");
         expect(file).toBe(process.execPath);
         expect(args.slice(1, 3)).toEqual(["-f", "json"]);
         const argv = args.slice(3);
@@ -877,11 +882,45 @@ describe("WechatUserReader", () => {
         return answer(argv);
       },
     });
+    await readableStore(h, runtime, store.stale);
     return { reader: new WechatUserReader(runtime), calls };
   }
 
+  /**
+   * A bridge `query` over `history`, paging as wechat-cli does: the newest
+   * `-n` messages inside the inclusive `--since`/`--until` seconds, oldest
+   * first, with a cursor while older ones remain. Pages larger than
+   * `maxPage` overflow the output limit.
+   */
+  function queryOver(history: ReturnType<typeof message>[], maxPage = Infinity) {
+    const second = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+    const flag = (argv: string[], name: string) =>
+      argv.includes(name) ? argv[argv.indexOf(name) + 1]! : undefined;
+    return (argv: string[]): RunResult => {
+      const limit = Number(flag(argv, "-n"));
+      if (limit > maxPage) {
+        throw Object.assign(new Error("stdout maxBuffer length exceeded"), {
+          code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+        });
+      }
+      const since = flag(argv, "--since");
+      const until = flag(argv, "--until");
+      const window = history.filter(
+        (m) =>
+          (!since || second(m.createdAt) >= second(since)) &&
+          (!until || second(m.createdAt) <= second(until)),
+      );
+      const end = Number(flag(argv, "--cursor") ?? window.length);
+      const start = Math.max(0, end - limit);
+      return envelope({
+        messages: window.slice(start, end),
+        cursor: start > 0 ? String(start) : null,
+      });
+    };
+  }
+
   it("lists chats from the session list, without folded entries or empty chats", async () => {
-    const { reader, calls } = readerWith(() => envelope(SESSIONS));
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ limit: 20 });
     expect(calls).toEqual([["sessions", "-n", "20"]]);
     expect(conversations).toEqual([
@@ -905,14 +944,14 @@ describe("WechatUserReader", () => {
   });
 
   it("filters chats by name or id over a wider fetch", async () => {
-    const { reader, calls } = readerWith(() => envelope(SESSIONS));
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ query: "friend", limit: 5 });
     expect(calls).toEqual([["sessions", "-n", "50"]]);
     expect(conversations.map((c) => c.id)).toEqual(["wxid_friend"]);
   });
 
   it("reads one chat's window and names it from the session list", async () => {
-    const { reader, calls } = readerWith((argv) =>
+    const { reader, calls } = await readerWith((argv) =>
       argv[0] === "sessions"
         ? envelope(SESSIONS)
         : envelope({
@@ -969,30 +1008,49 @@ describe("WechatUserReader", () => {
 
   it("follows the oldest second's ties past the page edge", async () => {
     const edge = "2026-10-01T08:00:00.000Z";
-    const { reader, calls } = readerWith((argv) => {
-      if (argv[0] === "sessions") return envelope(SESSIONS);
-      const cursor = argv[argv.indexOf("--cursor") + 1];
-      if (!argv.includes("--cursor")) {
-        return envelope({
-          messages: [message(3, edge), message(4, "2026-10-01T09:00:00.000Z")],
-          cursor: "c1",
-        });
-      }
-      if (cursor === "c1")
-        return envelope({ messages: [message(1, edge), message(2, edge)], cursor: "c2" });
-      return envelope({ messages: [message(0, "2026-10-01T07:00:00.000Z")], cursor: null });
-    });
+    const query = queryOver([
+      message(0, "2026-10-01T07:00:00.000Z"),
+      message(1, edge),
+      message(2, edge),
+      message(3, edge),
+      message(4, "2026-10-01T09:00:00.000Z"),
+    ]);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
     const messages = await reader.messages({
       conversationId: "wxid_friend",
       limit: 2,
       includeBoundaryTies: true,
     });
     expect(messages.map((m) => m.text)).toEqual(["line 1", "line 2", "line 3", "line 4"]);
-    expect(calls.filter((argv) => argv[0] === "query")).toHaveLength(3);
+  });
+
+  it("pages past a cursor second that holds more than a page", async () => {
+    const cursorSecond = "2026-10-01T08:00:00.000Z";
+    const history = [
+      message(0, "2026-10-01T07:59:00.000Z"),
+      ...Array.from({ length: 650 }, (_, i) => message(i + 1, cursorSecond)),
+      message(651, "2026-10-01T09:00:00.000Z"),
+    ];
+    const query = queryOver(history);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
+    const messages = await reader.messages({
+      conversationId: "wxid_friend",
+      before: new Date(cursorSecond),
+      limit: 50,
+      includeBoundaryTies: true,
+    });
+    // The whole cursor second, and the older history behind it.
+    expect(messages).toHaveLength(651);
+    expect(messages[0]!.text).toBe("line 0");
+    expect(messages.at(-1)!.text).toBe("line 650");
   });
 
   it("reads across the recently active chats when none is named", async () => {
-    const { reader, calls } = readerWith((argv) => {
+    const { reader, calls } = await readerWith((argv) => {
       if (argv[0] === "sessions") return envelope(SESSIONS);
       return envelope({
         messages: [
@@ -1021,25 +1079,25 @@ describe("WechatUserReader", () => {
     expect(messages[0]).toMatchObject({ conversationId: "45357963768@chatroom", isGroup: true });
   });
 
-  it("counts a chat a page at a time", async () => {
-    const { reader } = readerWith((argv) =>
-      envelope(
-        argv.includes("--cursor")
-          ? { messages: [message(1, "2026-10-01T08:00:00.000Z")], cursor: null }
-          : {
-              messages: [
-                message(2, "2026-10-01T09:00:00.000Z"),
-                message(3, "2026-10-01T10:00:00.000Z"),
-              ],
-              cursor: "c1",
-            },
-      ),
+  it("counts a chat a page at a time, in smaller pages when a page overflows", async () => {
+    const history = Array.from({ length: 2_500 }, (_, i) =>
+      message(i, new Date(Date.parse("2026-10-01T00:00:00Z") + i * 1000).toISOString()),
     );
-    expect(await reader.count("wxid_friend")).toBe(3);
+    const { reader, calls } = await readerWith(queryOver(history, 300));
+    expect(await reader.count("wxid_friend")).toBe(2_500);
+    expect(calls.map((argv) => argv[3])).toContain("250");
+  });
+
+  it("refuses to read a store whose keys no longer open every database", async () => {
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS), { stale: true });
+    await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(
+      WechatUserSessionRejected,
+    );
+    expect(calls).toEqual([]);
   });
 
   it("reads an unknown chat as empty", async () => {
-    const { reader } = readerWith((argv) =>
+    const { reader } = await readerWith((argv) =>
       argv[0] === "sessions" ? envelope([]) : failure("SESSION_NOT_FOUND"),
     );
     expect(await reader.messages({ conversationId: "wxid_gone", limit: 5 })).toEqual([]);
@@ -1047,7 +1105,7 @@ describe("WechatUserReader", () => {
   });
 
   it.each(["KEY_NOT_FOUND", "WECHAT_NOT_FOUND"])("maps %s to a rejected session", async (code) => {
-    const { reader } = readerWith(() => failure(code));
+    const { reader } = await readerWith(() => failure(code));
     await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(
       WechatUserSessionRejected,
     );
@@ -1055,15 +1113,17 @@ describe("WechatUserReader", () => {
 
   it("maps a store mid-write to pending, and anything else to a runtime error", async () => {
     await expect(
-      readerWith(() => failure("DECRYPT_FAILED")).reader.conversations({ limit: 5 }),
+      (await readerWith(() => failure("DECRYPT_FAILED"))).reader.conversations({ limit: 5 }),
     ).rejects.toBeInstanceOf(WechatUserStorePending);
-    const other = readerWith(() => failure("DATABASE_QUERY_FAILED")).reader.conversations({
+    const other = (await readerWith(() => failure("DATABASE_QUERY_FAILED"))).reader.conversations({
       limit: 5,
     });
     await expect(other).rejects.toBeInstanceOf(WechatUserRuntimeError);
     await expect(other).rejects.not.toBeInstanceOf(WechatUserSessionRejected);
     await expect(
-      readerWith(() => ({ code: 1, stdout: "", stderr: "node: bad option" })).reader.conversations({
+      (
+        await readerWith(() => ({ code: 1, stdout: "", stderr: "node: bad option" }))
+      ).reader.conversations({
         limit: 5,
       }),
     ).rejects.toThrow(/bad option/);

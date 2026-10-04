@@ -359,6 +359,7 @@ export class WechatUserRuntime {
   private starting: Promise<void> | null = null;
   private installing: Promise<void> | null = null;
   private captures = 0;
+  private keysCheckedAt = 0;
 
   constructor(config: WechatUserRuntimeConfig = {}) {
     this.home = config.home ?? process.env.HOME ?? homedir();
@@ -900,13 +901,23 @@ export class WechatUserRuntime {
         signal,
       );
     } catch (error) {
-      if (error instanceof WechatStoreKeysError) {
-        throw error.kind === "pending"
-          ? new WechatUserStorePending(error.message)
-          : new WechatUserSessionRejected(error.message);
-      }
-      throw error;
+      throw asSessionFault(error);
     }
+  }
+
+  /**
+   * Refuse reads until every required database has a key that opens it. The
+   * bridge skips a shard it holds no key for, so without this a missing shard
+   * reads as a chat with less history rather than as a locked store.
+   */
+  private async checkKeys(): Promise<void> {
+    if (Date.now() - this.keysCheckedAt < KEYS_CHECK_TTL_MS) return;
+    try {
+      await checkStoreKeys({ accountDir: await this.accountDir(), keysFile: this.keysFile });
+    } catch (error) {
+      throw asSessionFault(error);
+    }
+    this.keysCheckedAt = Date.now();
   }
 
   /**
@@ -917,6 +928,7 @@ export class WechatUserRuntime {
    * client is mid-write on is pending, and anything else is transient.
    */
   async bridgeCommand(args: string[], signal?: AbortSignal): Promise<unknown> {
+    await this.checkKeys();
     const result = await this.run(process.execPath, [bridgeEntry(), "-f", "json", ...args], {
       env: {
         HOME: this.home,
@@ -926,6 +938,11 @@ export class WechatUserRuntime {
       },
       timeoutMs: 5 * 60_000,
       ...(signal ? { signal } : {}),
+    }).catch((error: unknown) => {
+      if ((error as { code?: unknown }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+        throw new WechatBridgeError(OUTPUT_TOO_LARGE, "the answer exceeded the output limit");
+      }
+      throw error;
     });
     let envelope: z.infer<typeof bridgeEnvelopeSchema>;
     try {
@@ -949,6 +966,20 @@ export class WechatUserRuntime {
   }
 }
 
+/** How long a successful key check covers later reads. */
+const KEYS_CHECK_TTL_MS = 30_000;
+
+/** The code the reader gives an answer too large to capture, so paged reads
+ *  can retry with smaller pages. */
+const OUTPUT_TOO_LARGE = "OUTPUT_TOO_LARGE";
+
+function asSessionFault(error: unknown): unknown {
+  if (!(error instanceof WechatStoreKeysError)) return error;
+  return error.kind === "pending"
+    ? new WechatUserStorePending(error.message)
+    : new WechatUserSessionRejected(error.message);
+}
+
 /** A `wechat-cli` failure the reader does not map onto a session fault. */
 class WechatBridgeError extends WechatUserRuntimeError {
   constructor(
@@ -970,8 +1001,9 @@ const RECENT_CONVERSATIONS = 20;
  *  is reused before the session list is read again. */
 const NAMES_TTL_MS = 60_000;
 
-/** The page size for counting and for following a boundary second's ties. */
-const COUNT_PAGE = 5_000;
+/** The first page size for counting and for reading a whole second. A page
+ *  whose answer overflows the output limit is retried at half the size. */
+const COUNT_PAGE = 1_000;
 const TIES_PAGE = 200;
 
 /** A rich message's body is its whole serialized envelope, which is CDN keys
@@ -1111,35 +1143,102 @@ export class WechatUserReader {
   }
 
   /**
+   * Every page of a chat's window, newest page first, each oldest first. A page
+   * too large to capture is asked for again at half the size, so long bodies
+   * slow a sweep down instead of failing it.
+   */
+  private async *pages(
+    conversationId: string,
+    window: { since?: Date; until?: Date },
+    limit: number,
+    signal?: AbortSignal,
+  ): AsyncGenerator<BridgeMessage[]> {
+    let cursor: string | null = null;
+    for (;;) {
+      let page: z.infer<typeof bridgePageSchema>;
+      try {
+        page = await this.page(
+          conversationId,
+          { ...window, limit, ...(cursor ? { cursor } : {}) },
+          signal,
+        );
+      } catch (error) {
+        if (error instanceof WechatBridgeError && error.code === OUTPUT_TOO_LARGE && limit > 1) {
+          limit = Math.ceil(limit / 2);
+          continue;
+        }
+        throw error;
+      }
+      yield page.messages;
+      if (!page.cursor) return;
+      cursor = page.cursor;
+    }
+  }
+
+  /** Every message a chat holds in the second starting at `at`, oldest first. */
+  private async second(
+    conversationId: string,
+    at: Date,
+    signal?: AbortSignal,
+  ): Promise<BridgeMessage[]> {
+    const messages: BridgeMessage[] = [];
+    for await (const page of this.pages(
+      conversationId,
+      { since: at, until: at },
+      TIES_PAGE,
+      signal,
+    )) {
+      messages.unshift(...page);
+    }
+    return messages;
+  }
+
+  /**
    * One chat's newest `limit` messages at or after `since` and at or before
-   * `before`, oldest first. With `includeBoundaryTies`, every message sharing
-   * the oldest returned second comes too, so a caller paging by timestamp
-   * cannot lose a message hidden behind a tie.
+   * `before`, oldest first.
+   *
+   * With `includeBoundaryTies` the window is for paging by timestamp: every
+   * message in the `before` second, plus the newest `limit` strictly older
+   * ones with every tie at their oldest second. A second holding more than
+   * `limit` messages then cannot stall the caller's paging on itself.
    */
   private async chatMessages(
     conversationId: string,
     input: { since?: Date; before?: Date; limit: number; includeBoundaryTies?: boolean },
     signal?: AbortSignal,
   ): Promise<BridgeMessage[]> {
-    const window = {
-      ...(input.since ? { since: input.since } : {}),
-      ...(input.before ? { until: input.before } : {}),
-    };
-    const first = await this.page(conversationId, { ...window, limit: input.limit }, signal);
-    const messages = first.messages;
-    const edge = messages[0]?.createdAt;
-    let cursor = input.includeBoundaryTies && edge ? first.cursor : null;
-    while (cursor) {
-      const older = await this.page(
+    const since = input.since ? { since: input.since } : {};
+    if (!input.includeBoundaryTies) {
+      const window = { ...since, ...(input.before ? { until: input.before } : {}) };
+      return (await this.page(conversationId, { ...window, limit: input.limit }, signal)).messages;
+    }
+
+    const sinceSecond = input.since ? toUnixSeconds(input.since.toISOString()) : null;
+    const beforeSecond = input.before ? toUnixSeconds(input.before.toISOString()) : null;
+    let older: BridgeMessage[] = [];
+    if (beforeSecond === null || sinceSecond === null || beforeSecond - 1 >= sinceSecond) {
+      const until = beforeSecond === null ? {} : { until: new Date((beforeSecond - 1) * 1000) };
+      const page = await this.page(
         conversationId,
-        { ...window, limit: TIES_PAGE, cursor },
+        { ...since, ...until, limit: input.limit },
         signal,
       );
-      const ties = older.messages.filter((message) => message.createdAt === edge);
-      messages.unshift(...ties);
-      cursor = ties.length === older.messages.length ? older.cursor : null;
+      older = page.messages;
+      const edge = older[0];
+      // With older history left, the oldest second may continue past the page.
+      if (edge && page.cursor) {
+        const edgeSecond = toUnixSeconds(edge.createdAt);
+        older = [
+          ...(await this.second(conversationId, new Date(edgeSecond * 1000), signal)),
+          ...older.filter((message) => toUnixSeconds(message.createdAt) !== edgeSecond),
+        ];
+      }
     }
-    return messages;
+    const atBefore =
+      beforeSecond !== null && (sinceSecond === null || beforeSecond >= sinceSecond)
+        ? await this.second(conversationId, new Date(beforeSecond * 1000), signal)
+        : [];
+    return [...older, ...atBefore];
   }
 
   async messages(
@@ -1178,16 +1277,9 @@ export class WechatUserReader {
    *  arrives as one oversized answer. */
   async count(conversationId: string, signal?: AbortSignal): Promise<number> {
     let total = 0;
-    let cursor: string | null = null;
-    do {
-      const page = await this.page(
-        conversationId,
-        { limit: COUNT_PAGE, ...(cursor ? { cursor } : {}) },
-        signal,
-      );
-      total += page.messages.length;
-      cursor = page.cursor;
-    } while (cursor);
+    for await (const page of this.pages(conversationId, {}, COUNT_PAGE, signal)) {
+      total += page.length;
+    }
     return total;
   }
 }
