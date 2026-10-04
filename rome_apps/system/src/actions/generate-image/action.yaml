@@ -1,6 +1,13 @@
 name: generate_image
 type: system
-description: Generate an image from a text prompt via the connected image generation provider (currently the Codex/ChatGPT account's built-in image generation). Optionally takes input images (local paths) to edit or combine as the prompt describes. Returns the saved image's absolute local path (valid as a send_message attachment source) and a dashboard asset URL. For several images, pass `prompts` (a list, up to 20) instead of `prompt`: they generate 5 at a time, each in its own session, and return one result per prompt in order, with per-prompt errors. Requires an image provider to be connected; returns a clear error naming what to connect when none is.
+description: >-
+  Generate an image from a text prompt via the connected image generation provider (currently the
+  Codex/ChatGPT account's built-in image generation). Optionally takes input images (local paths)
+  to edit or combine as the prompt describes. Returns the saved image's absolute local path (valid
+  as a send_message attachment source) and a dashboard asset URL. For several images, pass
+  `prompts` (a list, up to 20) instead of `prompt`: they generate 5 at a time, each in its own
+  session, and return one result per prompt in order, with per-prompt errors. Requires an image
+  provider to be connected; returns a clear error naming what to connect when none is.
 complexity: simple
 speed: slow
 reliability: medium
