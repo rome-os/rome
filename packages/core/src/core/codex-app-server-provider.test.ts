@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { isModelTurnEvent } from "./agent-runner.js";
+import { expectModelSessionTurnContract } from "../test/model-session-contract.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
 import type {
   ModelSession,
+  ModelSessionEvent,
   ModelSessionForkOpenParams,
   ModelSessionParams,
 } from "./agent-runner.js";
@@ -211,11 +213,14 @@ describe("CodexAppServerProvider", () => {
       return {};
     });
     const session = await new CodexAppServerProvider().openSession(buildParams());
+    const events: ModelSessionEvent[] = [];
     const seen: string[] = [];
     const reading = (async () => {
       for await (const event of session.events) {
+        events.push(event);
         if (event.type === "model_turn_start") seen.push(`start [${event.answers}]`);
-        else if (event.type === "model_turn_answers") seen.push(`answers +[${event.added}]`);
+        else if (event.type === "model_turn_answers" && event.added.length > 0)
+          seen.push(`answers +[${event.added}]`);
         else if (event.type === "model_turn_end") {
           seen.push(`end [${event.answers}]`);
           return;
@@ -243,6 +248,7 @@ describe("CodexAppServerProvider", () => {
       turn: { id: "native-a", status: "completed" },
     });
     await reading;
+    expectModelSessionTurnContract(events);
     expect(seen).toEqual(["start [a]", "answers +[b]", "result", "end [a,b]"]);
     await session.close();
   });

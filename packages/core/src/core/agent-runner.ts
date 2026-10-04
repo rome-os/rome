@@ -259,8 +259,9 @@ export interface ModelSessionFork {
  * turn answers come from the provider itself (the Claude SDK's echo of each
  * input's uuid), never from Rome's guesses.
  *
- * Every terminal (`result` or `error`) a provider yields falls inside a model
- * turn, between its start and its end. The provider never makes up a terminal:
+ * Every model turn emits `model_turn_start`, at least one `model_turn_answers`
+ * event (which may add no ids), its terminal (`result` or `error`), and
+ * `model_turn_end`, in that order. The provider never makes up a terminal:
  * a Claude Stop asks the SDK to interrupt and its resulting error terminal
  * closes the turn. An error result after which the SDK answers nothing
  * (Claude's zeroed or delivery-failure result, which echoes no input) also
@@ -360,11 +361,11 @@ export function createSessionFromRun(
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
   // other since the consumer hasn't had a chance to await again yet.
-  const buffer: AgentMessage[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentMessage) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       const r = resolvers.shift()!;
@@ -374,15 +375,15 @@ export function createSessionFromRun(
     }
   };
 
-  const events: AsyncIterable<AgentMessage> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentMessage>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) {
             return { value: buffer.shift()!, done: false };
           }
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentMessage>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -423,8 +424,18 @@ export function createSessionFromRun(
         executeSubmitOutput: params.executeSubmitOutput,
       };
       appliedReasoningEffort = runParams.reasoningEffort;
-      for await (const msg of run(runParams)) {
-        emit(msg);
+      const turnId = uuidv4();
+      const answers = input.inputId ? [input.inputId] : [];
+      // Legacy run callbacks execute exactly one model turn per input. Project
+      // that fact into the same boundary contract as SDK-backed sessions.
+      emit({ type: "model_turn_start", turnId, answers });
+      emit({ type: "model_turn_answers", turnId, added: [] });
+      try {
+        for await (const msg of run(runParams)) {
+          emit(msg);
+        }
+      } finally {
+        emit({ type: "model_turn_end", turnId, answers });
       }
     },
     async fork(): Promise<ModelSessionFork> {
@@ -454,11 +465,11 @@ export function createSessionFromRun(
  * fallback result rather than hanging, so the session never wedges.
  */
 export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: AgentMessage[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
+  const buffer: ModelSessionEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentMessage) => {
+  const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       resolvers.shift()!({ value: msg, done: false });
@@ -467,13 +478,13 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     }
   };
 
-  const events: AsyncIterable<AgentMessage> = {
+  const events: AsyncIterable<ModelSessionEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentMessage>> {
+        async next(): Promise<IteratorResult<ModelSessionEvent>> {
           if (buffer.length > 0) return { value: buffer.shift()!, done: false };
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentMessage>>((resolve) => {
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -488,9 +499,14 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     providerId: "mock",
     model: params.model,
     events,
-    async sendUserInput(): Promise<void> {
+    async sendUserInput(input: ModelUserInput): Promise<void> {
+      const turnId = uuidv4();
+      const answers = input.inputId ? [input.inputId] : [];
+      emit({ type: "model_turn_start", turnId, answers });
+      emit({ type: "model_turn_answers", turnId, added: [] });
       emit({ type: "text", content: FALLBACK });
       emit({ type: "result", content: FALLBACK });
+      emit({ type: "model_turn_end", turnId, answers });
     },
     async fork(): Promise<ModelSessionFork> {
       throw new Error("a code-backed agent session cannot fork");

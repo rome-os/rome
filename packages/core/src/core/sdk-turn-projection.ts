@@ -60,7 +60,12 @@ export class SdkTurnProjection {
         answers: new Set(echoed),
         frameless: message.type === "result",
       };
-      return [{ type: "model_turn_start", turnId: this.current.turnId, answers: echoed }];
+      return [
+        { type: "model_turn_start", turnId: this.current.turnId, answers: echoed },
+        // Every ModelSession turn includes this event. The SDK may already
+        // have named all inputs on its first frame, in which case it adds none.
+        { type: "model_turn_answers", turnId: this.current.turnId, added: [] },
+      ];
     }
     return this.add(echoed);
   }

@@ -1942,7 +1942,6 @@ class AgentSessionImpl implements AgentSession {
   readonly sessionId: string;
   readonly romeSessionId?: string;
   status: AgentSessionStatus = "idle";
-  currentTurnId?: string;
   lastActiveAt = Date.now();
   private activeForkedTurnCount = 0;
   // Forks run in this session's working dir; actions they call carry the fork's id.
@@ -2028,6 +2027,12 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
+  }
+
+  /** The visible turn belongs to the SDK model turn, not the last accepted input. */
+  get currentTurnId(): string | undefined {
+    const active = this.activeSdkTurnId ? this.sdkTurns.get(this.activeSdkTurnId) : undefined;
+    return active?.sink?.turnId;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind
@@ -2190,7 +2195,7 @@ class AgentSessionImpl implements AgentSession {
         // after model_turn_start([]) but before model_turn_answers(), so it
         // must not depend on a visible stream sink having been opened yet.
         if (msg.type === "input_status") {
-          const sink = this.waitingCallers.get(msg.inputId) ?? activeTurn?.sink ?? this.currentSink;
+          const sink = this.waitingCallers.get(msg.inputId) ?? activeTurn?.sink;
           if (!sink) {
             log.warn("agent session received input status with no caller", {
               inputId: msg.inputId,
@@ -2206,7 +2211,7 @@ class AgentSessionImpl implements AgentSession {
         // visible session turn, rather than being dropped into the last caller.
         const sink = activeTurn
           ? (activeTurn.sink ?? this.openSdkTurnSink(this.activeSdkTurnId!))
-          : this.currentSink;
+          : undefined;
         if (!sink) {
           log.warn("agent session received event with no active turn", {
             type: msg.type,
@@ -2306,22 +2311,23 @@ class AgentSessionImpl implements AgentSession {
           }
         }
 
-        if (isTerminalEvent(outbound) && this.activeSdkTurnId) {
-          const turn = this.sdkTurns.get(this.activeSdkTurnId);
-          if (turn) {
-            // The projection adds every result's ids immediately before its
-            // model_turn_end. Do not let a frameless background result settle
-            // the current caller while those ids are still unknown.
-            turn.terminal = outbound;
+        if (isTerminalEvent(outbound)) {
+          const turn = this.activeSdkTurnId ? this.sdkTurns.get(this.activeSdkTurnId) : undefined;
+          if (!turn) {
+            log.warn("model session emitted a terminal outside its turn boundary", {
+              sessionId: this.sessionId,
+              provider: session.providerId,
+              type: outbound.type,
+            });
             continue;
           }
+          // The projection adds every result's ids immediately before its
+          // model_turn_end. Do not let a frameless background result settle
+          // the current caller while those ids are still unknown.
+          turn.terminal = outbound;
+          continue;
         }
-
-        if (isTerminalEvent(outbound)) {
-          await this.finishSinkFromTerminal(session, sink, outbound);
-        } else {
-          this.publishOutbound(sink, outbound);
-        }
+        this.publishOutbound(sink, outbound);
       }
     } catch (err) {
       streamError = err;
@@ -2360,15 +2366,6 @@ class AgentSessionImpl implements AgentSession {
           for (const sink of deadSinks) {
             if (!sink.done) this.failTurn(sink, error);
           }
-        } else if (this.currentSink && !this.currentSink.done) {
-          // Legacy/mock sessions do not emit model-turn events and therefore
-          // have no waiting-caller binding.
-          this.failTurn(
-            this.currentSink,
-            streamError === undefined
-              ? "session closed without a terminal"
-              : streamFailurePayload(streamError),
-          );
         }
         return;
       }
@@ -2455,7 +2452,6 @@ class AgentSessionImpl implements AgentSession {
     if (!turn) return;
     if (!turn.sink) turn.sink = sink;
     this.currentSink = turn.sink;
-    this.currentTurnId = turn.sink.turnId;
   }
 
   private openSdkTurnSink(turnId: string, existing?: SdkTurnState): TurnSink {
@@ -2496,7 +2492,6 @@ class AgentSessionImpl implements AgentSession {
     };
     if (turn) turn.sink = sink;
     this.currentSink = sink;
-    this.currentTurnId = sink.turnId;
     this.status = "running";
     this.ensureTurnStart(sink);
     this.dispatchTurnStarted(sink, { prompt: "" });
@@ -2899,11 +2894,9 @@ class AgentSessionImpl implements AgentSession {
     this.inputs.finish(sink.turnId);
     if (this.waitingCallers.size === 0 && this.activeSdkTurnId === undefined) {
       this.status = "idle";
-      this.currentTurnId = undefined;
       if (!this.keepAlive) void this.close("user");
     } else {
       this.status = "running";
-      this.currentTurnId = this.currentSink?.turnId;
     }
     this.emitStatus();
   }
@@ -3523,7 +3516,6 @@ class AgentSessionImpl implements AgentSession {
       return;
     }
     this.currentSink = sink;
-    this.currentTurnId = turnId;
     this.status = "running";
     this.emitStatus();
 
