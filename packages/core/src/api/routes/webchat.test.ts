@@ -10,7 +10,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createWebchatRuntime } from "./webchat.js";
+import { createSseWriteQueue, createWebchatRuntime } from "./webchat.js";
 import { AgentInputQueue } from "../../core/agent-input-queue.js";
 import { MAX_BUFFERED_TOOL_OUTPUT_CHARS } from "../../core/agent-turn-stream-registry.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
@@ -28,6 +28,30 @@ import { ModelResolutionError } from "../../core/model-resolver.js";
 import { webchatProjects } from "../../db/schema.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+
+describe("SSE write queue", () => {
+  it("coalesces command previews behind a slow write", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const written: string[] = [];
+    const writer = createSseWriteQueue(async (event) => {
+      written.push(event.data);
+      if (written.length === 1) await firstWrite;
+    });
+
+    writer.enqueue({ event: "tool_output_text", data: "first" }, "tool-output:command");
+    await Promise.resolve();
+    for (let i = 0; i < 1_024; i += 1) {
+      writer.enqueue({ event: "tool_output_text", data: `snapshot-${i}` }, "tool-output:command");
+    }
+    writer.enqueue({ event: "done", data: "done" });
+
+    expect(written).toEqual(["first"]);
+    releaseFirst();
+    await writer.queue;
+    expect(written).toEqual(["first", "snapshot-1023", "done"]);
+  });
+});
 
 describe("Webchat API", () => {
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
