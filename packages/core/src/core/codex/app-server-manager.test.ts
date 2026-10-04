@@ -6,6 +6,7 @@ import {
   type CodexThreadBinding,
 } from "./app-server-manager.js";
 import type { ThreadStartParams } from "./app-server-protocol.js";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 
 interface FakeRequest {
   method: string;
@@ -311,5 +312,87 @@ describe("CodexAppServerManager", () => {
     });
     expect(result).toMatchObject({ success: false });
     manager.close();
+  });
+});
+
+describe("CodexAppServerManager Rome credits wiring", () => {
+  const capture = () => {
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-credits");
+        clients.push(client);
+        return client;
+      },
+    });
+    return { clients, manager };
+  };
+
+  it("passes the instance credential and credits provider definition to the app-server", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    setInstanceTokenInMemory("romeinst_wiring_test");
+    const { clients, manager } = capture();
+    try {
+      await manager.warmup();
+      expect(clients[0].options.env.ROME_CREDITS_TOKEN).toBe("romeinst_wiring_test");
+      const args = clients[0].options.configArgs ?? [];
+      expect(args.some((arg) => arg.includes('base_url="https://cloud.example/v1"'))).toBe(true);
+      expect(args.join(" ")).not.toContain("romeinst_wiring_test");
+    } finally {
+      manager.close();
+      setInstanceTokenInMemory(null);
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("leaves the credential out and the provider undefined for an unenrolled instance", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "");
+    rs.stubEnv("PANTHEON_DOMAIN", "");
+    setInstanceTokenInMemory(null);
+    const { clients, manager } = capture();
+    try {
+      await manager.warmup();
+      expect(clients[0].options.env).not.toHaveProperty("ROME_CREDITS_TOKEN");
+      expect(clients[0].options.configArgs).toEqual([
+        "-c",
+        'shell_environment_policy.exclude=["ROME_CREDITS_TOKEN"]',
+      ]);
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("restarts the process with the requested default only after its turn finishes", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-restart");
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const handle = await manager.openThread(config("rome_restart"), binding("restart"));
+      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
+
+      const switched = manager.setDefaultProvider("rome_credits");
+      await Promise.resolve();
+      expect(clients).toHaveLength(1);
+
+      clients[0].options.onNotification("turn/completed", { threadId: handle.threadId });
+      await switched;
+      expect(clients).toHaveLength(2);
+      expect(clients[0].closed).toBe(1);
+      expect(clients[1].options.configArgs).toContain('model_provider="rome_credits"');
+
+      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
+      const resume = clients[1].requests.find((request) => request.method === "thread/resume");
+      expect(resume?.params).not.toHaveProperty("modelProvider");
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
   });
 });

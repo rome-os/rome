@@ -1,5 +1,8 @@
 import { createLogger } from "../../logger.js";
+import { getInstanceToken } from "../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
+import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -34,6 +37,7 @@ interface StoredThreadBinding {
 interface Connection {
   client: CodexAppServerConnection;
   generation: number;
+  defaultProvider: string | null;
 }
 
 export interface CodexAppServerConnection {
@@ -51,7 +55,12 @@ export interface CodexThreadHandle {
 
 export interface CodexAppServerManagerOptions {
   cwd?: string;
+  /** Fixed child env. Defaults to the allowlist plus the instance credential, read at each spawn. */
   env?: Record<string, string>;
+  /** Fixed root `-c` overrides. Defaults to {@link codexAppServerConfigArgs} for this instance. */
+  configArgs?: readonly string[];
+  /** Codex's process-wide model provider. Null uses the guardian's OpenAI login. */
+  defaultProvider?: string | null;
   createClient?: (options: AppServerClientOptions) => CodexAppServerConnection;
 }
 
@@ -61,6 +70,10 @@ function defaultCodexEnvironment(): Record<string, string> {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
+  // The Rome credits provider reads the instance credential from the child
+  // env, so it never appears in a thread's config or rollout.
+  const instanceToken = getInstanceToken();
+  if (instanceToken) env[ROME_CREDITS_TOKEN_ENV] = instanceToken;
   return env;
 }
 
@@ -93,7 +106,8 @@ function buildThreadResumeParams(threadId: string, config: ThreadStartParams): T
 
 export class CodexAppServerManager {
   private readonly cwd: string;
-  private readonly env: Record<string, string>;
+  private readonly env: Record<string, string> | undefined;
+  private readonly configArgs: readonly string[] | undefined;
   private readonly createClient: (options: AppServerClientOptions) => CodexAppServerConnection;
   private readonly bindings = new Map<string, StoredThreadBinding>();
   private readonly notificationListeners = new Map<
@@ -101,21 +115,44 @@ export class CodexAppServerManager {
     Set<CodexAppServerNotificationListener>
   >();
   private readonly exitListeners = new Set<CodexAppServerExitListener>();
+  private readonly activeTurnThreads = new Set<string>();
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
   private startingClient: CodexAppServerConnection | null = null;
+  private defaultProvider: string | null;
+  private restartPending = false;
+  private restartPromise: Promise<void> | null = null;
+  private resolveRestart: (() => void) | null = null;
+  private rejectRestart: ((error: unknown) => void) | null = null;
   private nextGeneration = 1;
   private closed = false;
 
   constructor(options: CodexAppServerManagerOptions = {}) {
     this.cwd = options.cwd ?? process.cwd();
-    this.env = options.env ?? defaultCodexEnvironment();
+    this.env = options.env;
+    this.configArgs = options.configArgs;
+    this.defaultProvider = options.defaultProvider ?? null;
     this.createClient =
       options.createClient ?? ((clientOptions) => new AppServerClient(clientOptions));
   }
 
   async warmup(): Promise<void> {
     await this.ensureConnection();
+  }
+
+  /**
+   * Change the payer for the one shared Codex process. A running turn keeps
+   * its process; once every turn is terminal, the manager restarts Codex and
+   * idle threads lazily resume against the new default on their next turn.
+   */
+  async setDefaultProvider(provider: string | null): Promise<void> {
+    if (this.closed) throw new Error("codex app-server manager is closed");
+    if (this.defaultProvider === provider && !this.restartPending) return;
+    this.defaultProvider = provider;
+    this.restartPending = true;
+    do {
+      await this.restartWhenIdle();
+    } while (this.restartPending);
   }
 
   /** Issue a process-global app-server request on the shared connection. */
@@ -189,7 +226,17 @@ export class CodexAppServerManager {
 
   async requestForThread<T>(threadId: string, method: string, params: unknown): Promise<T> {
     const connection = await this.ensureThreadSubscribed(threadId);
-    return (await connection.client.request(method, params)) as T;
+    const isTurnStart = method === Method.turnStart;
+    if (isTurnStart) this.activeTurnThreads.add(threadId);
+    try {
+      return (await connection.client.request(method, params)) as T;
+    } catch (err) {
+      if (isTurnStart) {
+        this.activeTurnThreads.delete(threadId);
+        void this.restartWhenIdle();
+      }
+      throw err;
+    }
   }
 
   async unsubscribe(threadId: string): Promise<void> {
@@ -224,6 +271,7 @@ export class CodexAppServerManager {
       }
     }
     this.bindings.clear();
+    this.activeTurnThreads.clear();
     this.notificationListeners.clear();
     this.exitListeners.clear();
     this.startingClient?.close();
@@ -267,25 +315,92 @@ export class CodexAppServerManager {
     return connection;
   }
 
+  private restartWhenIdle(): Promise<void> {
+    if (!this.restartPending || this.closed) return Promise.resolve();
+    if (!this.restartPromise) {
+      this.restartPromise = new Promise<void>((resolve, reject) => {
+        this.resolveRestart = resolve;
+        this.rejectRestart = reject;
+      });
+    }
+    this.maybeRestartWhenIdle();
+    return this.restartPromise;
+  }
+
+  private maybeRestartWhenIdle(): void {
+    if (!this.restartPending || this.closed || this.activeTurnThreads.size > 0) return;
+    if (this.connectionPromise) {
+      void this.connectionPromise.then(
+        () => this.maybeRestartWhenIdle(),
+        (error) => this.finishRestart(error),
+      );
+      return;
+    }
+    const connection = this.connection;
+    // A payer chosen before Codex first starts is already part of that spawn.
+    if (!connection || connection.defaultProvider === this.defaultProvider) {
+      this.restartPending = false;
+      this.finishRestart();
+      return;
+    }
+
+    this.restartPending = false;
+    this.connection = null;
+    const error = new Error("codex app-server restarted to change default provider");
+    for (const binding of this.bindings.values()) {
+      if (binding.generation !== connection.generation) continue;
+      binding.generation = 0;
+      try {
+        binding.callbacks.onExit(error);
+      } catch (err) {
+        log.warn("codex thread exit handler failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    connection.client.close();
+    void this.ensureConnection().then(
+      () => this.finishRestart(),
+      (restartError) => this.finishRestart(restartError),
+    );
+  }
+
+  private finishRestart(error?: unknown): void {
+    const resolve = this.resolveRestart;
+    const reject = this.rejectRestart;
+    this.restartPromise = null;
+    this.resolveRestart = null;
+    this.rejectRestart = null;
+    if (error) reject?.(error);
+    else resolve?.();
+    if (this.restartPending && !this.closed) void this.restartWhenIdle();
+  }
+
   private async ensureConnection(): Promise<Connection> {
     if (this.closed) throw new Error("codex app-server manager is closed");
     if (this.connection) return this.connection;
     if (this.connectionPromise) return await this.connectionPromise;
 
     const generation = this.nextGeneration++;
-    this.connectionPromise = this.createConnection(generation).finally(() => {
+    const defaultProvider = this.defaultProvider;
+    this.connectionPromise = this.createConnection(generation, defaultProvider).finally(() => {
       this.connectionPromise = null;
     });
     return await this.connectionPromise;
   }
 
-  private async createConnection(generation: number): Promise<Connection> {
+  private async createConnection(
+    generation: number,
+    defaultProvider: string | null,
+  ): Promise<Connection> {
     const startedAt = Date.now();
     let exited = false;
     let client!: CodexAppServerConnection;
     client = this.createClient({
       cwd: this.cwd,
-      env: this.env,
+      env: this.env ?? defaultCodexEnvironment(),
+      configArgs:
+        this.configArgs ?? codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
       onNotification: (method, params) => this.routeNotification(method, params),
       onServerRequest: async (method, params) => await this.routeServerRequest(method, params),
       onExit: (code) => {
@@ -303,7 +418,7 @@ export class CodexAppServerManager {
       client.notify(Method.initialized, {});
       if (exited) throw new Error("codex app-server exited during initialization");
       if (this.closed) throw new Error("codex app-server manager closed during initialization");
-      const connection = { client, generation };
+      const connection = { client, generation, defaultProvider };
       this.connection = connection;
       log.info("codex shared app-server initialized", {
         generation,
@@ -331,6 +446,14 @@ export class CodexAppServerManager {
     }
 
     const threadId = threadIdFromParams(params);
+    if (method === "turn/completed" && threadId) {
+      this.activeTurnThreads.delete(threadId);
+      void this.restartWhenIdle().catch((err) => {
+        log.warn("codex app-server restart failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     if (!threadId) return;
     const binding = this.bindings.get(threadId);
     if (!binding) {
@@ -369,6 +492,7 @@ export class CodexAppServerManager {
   ): void {
     if (this.closed || this.connection?.client !== client) return;
     this.connection = null;
+    this.activeTurnThreads.clear();
     const error = new Error(`codex app-server exited (code ${code ?? "null"})`);
     for (const listener of this.exitListeners) {
       try {
@@ -390,5 +514,10 @@ export class CodexAppServerManager {
         });
       }
     }
+    void this.restartWhenIdle().catch((err) => {
+      log.warn("codex app-server restart failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 }
