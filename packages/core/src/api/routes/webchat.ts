@@ -3770,11 +3770,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           agentName: msg.agent ?? stream.agentName,
           channelThreadKey: stream.channelThreadKey,
         });
-        // The wrapper may outlive its provider turn. Never stop a later turn
-        // merely because it reuses the same runtime session.
-        if (owner?.currentTurnId === msg.turnId) {
+        if (owner) {
           stream.interrupt = async (reason) => {
-            if (owner.currentTurnId === msg.turnId) await owner.interrupt(reason);
+            // turn_start precedes the provider's model_turn_start, so SDK
+            // ownership may not be visible yet. The expected turn id lets
+            // AgentSession accept this caller before that boundary and reject
+            // a later session turn after it.
+            if (owner.currentTurnId === undefined || owner.currentTurnId === msg.turnId) {
+              await owner.interrupt(reason, msg.turnId);
+            }
           };
         }
       }

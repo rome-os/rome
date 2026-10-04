@@ -3943,10 +3943,13 @@ describe("Webchat API", () => {
   });
 
   describe("session message events", () => {
-    it("retries backend continuation Stop without interrupting a later provider turn", async () => {
+    it("stops a backend continuation before and after SDK ownership without interrupting later work", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
-      const owner = { currentTurnId: "backend-provider-turn", interrupt: rs.fn(async () => {}) };
+      const owner = {
+        currentTurnId: undefined as string | undefined,
+        interrupt: rs.fn(async () => {}),
+      };
       rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
       let finish!: () => void;
@@ -3976,7 +3979,13 @@ describe("Webchat API", () => {
         expect(turnId).toMatch(/^backend:/);
       });
       const stop = () => routes.request(`/chat/turns/${turnId}/interrupt`, { method: "POST" });
+      // turn_start is emitted before model_turn_start, so the callback must
+      // reach AgentSession while the SDK-owned turn id is still unavailable.
       expect((await stop()).status).toBe(202);
+      expect(owner.interrupt).toHaveBeenCalledWith("user-stop", "backend-provider-turn");
+      // Once model_turn_start binds the caller, the same continuation remains
+      // interruptible by its synthetic backend stream id.
+      owner.currentTurnId = "backend-provider-turn";
       expect((await stop()).status).toBe(202);
       expect(owner.interrupt).toHaveBeenCalledTimes(2);
       owner.currentTurnId = "later-turn";
