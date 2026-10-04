@@ -2247,6 +2247,53 @@ describe("AgentRunner", () => {
       });
     });
 
+    it("fails a waiting turn when a provider stream ends without a terminal", async () => {
+      let endStream!: () => void;
+      const streamEnded = new Promise<void>((resolve) => {
+        endStream = resolve;
+      });
+      let closed = false;
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "Process death",
+        builtinTools: new Set<string>(),
+        async openSession() {
+          return {
+            providerId: "mock",
+            model: "mock-large",
+            get isClosed() {
+              return closed;
+            },
+            events: (async function* () {
+              await streamEnded;
+            })(),
+            async sendUserInput() {
+              closed = true;
+              endStream();
+            },
+            async fork() {
+              throw new Error("unsupported");
+            },
+            async interrupt() {},
+            async close() {
+              closed = true;
+            },
+          };
+        },
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+
+      expect(messages).toContainEqual({
+        type: "error",
+        error: "session closed without a terminal",
+      });
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
     it("persists the provider checkpoint for a completed Rome turn", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const openSession = provider.openSession.bind(provider);

@@ -2256,14 +2256,16 @@ class AgentSessionImpl implements AgentSession {
       if (session.isClosed) {
         this.modelSessionAvailable = false;
         if (sink && !sink.done) {
-          if (sink.lifecycleInterrupted && !streamError) {
-            this.finalizeTurn(sink, { type: "result", content: "" });
-          } else {
-            this.failTurn(
-              sink,
-              streamError instanceof Error ? streamError.message : "session closed mid-turn",
-            );
-          }
+          const error =
+            streamError instanceof Error
+              ? streamError.message
+              : "session closed without a terminal";
+          log.warn("model session closed without a terminal", {
+            sessionId: this.sessionId,
+            provider: session.providerId,
+            interrupted: sink.lifecycleInterrupted,
+          });
+          this.failTurn(sink, error);
         }
         return;
       }
