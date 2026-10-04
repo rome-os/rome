@@ -16,5 +16,7 @@ export const ANTHROPIC_USAGE_LIMIT_RE =
 
 /** Whether a failed Claude turn's error text denotes an exhausted usage limit. */
 export function isAnthropicUsageLimitError(message: unknown): boolean {
-  return typeof message === "string" && ANTHROPIC_USAGE_LIMIT_RE.test(message);
+  if (typeof message === "string") return ANTHROPIC_USAGE_LIMIT_RE.test(message);
+  if (message instanceof Error) return ANTHROPIC_USAGE_LIMIT_RE.test(message.message);
+  return false;
 }

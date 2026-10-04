@@ -2257,10 +2257,10 @@ describe("AgentRunner", () => {
         id: "mock",
         displayName: "Process death",
         builtinTools: new Set<string>(),
-        async openSession() {
+        async openSession(params) {
           return {
             providerId: "mock",
-            model: "mock-large",
+            model: params.model,
             get isClosed() {
               return closed;
             },
@@ -2277,6 +2277,7 @@ describe("AgentRunner", () => {
             async interrupt() {},
             async close() {
               closed = true;
+              endStream();
             },
           };
         },
@@ -2287,11 +2288,68 @@ describe("AgentRunner", () => {
         runner.run({ agentName: "test-main", prompt: "Hello" }),
       );
 
-      expect(messages).toContainEqual({
-        type: "error",
-        error: "session closed without a terminal",
-      });
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "error",
+          error: "session closed without a terminal",
+        }),
+      );
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    it("preserves a classified stream failure when it fails the waiting turn", async () => {
+      let failStream!: () => void;
+      const streamFailure = new Promise<void>((resolve) => {
+        failStream = resolve;
+      });
+      let closed = false;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "Claude",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          return {
+            providerId: "anthropic",
+            model: params.model,
+            get isClosed() {
+              return closed;
+            },
+            events: (async function* () {
+              await streamFailure;
+              throw Object.assign(new Error("OAuth token revoked · Please run /login"), {
+                code: "auth_revoked",
+                provider: "anthropic",
+              });
+            })(),
+            async sendUserInput() {
+              closed = true;
+              failStream();
+            },
+            async fork() {
+              throw new Error("unsupported");
+            },
+            async interrupt() {},
+            async close() {
+              closed = true;
+              failStream();
+            },
+          };
+        },
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "error",
+          error: "OAuth token revoked · Please run /login",
+          code: "auth_revoked",
+          provider: "anthropic",
+        }),
+      );
     });
 
     it("persists the provider checkpoint for a completed Rome turn", async () => {

@@ -419,6 +419,7 @@ describe("AnthropicProvider", () => {
 
     it("settles the messages still waiting with a frameless error that names none", async () => {
       let controller!: AbortController;
+      const interrupt = rs.fn(async () => {});
       queryMock.mockImplementation(({ prompt, options }) => {
         controller = options.abortController;
         return {
@@ -440,6 +441,7 @@ describe("AnthropicProvider", () => {
               );
             }
           },
+          interrupt,
           close: rs.fn(),
         };
       });
@@ -468,8 +470,9 @@ describe("AnthropicProvider", () => {
         }
       })();
       await session.interrupt("user-stop");
-      expect(await rest).toEqual([]);
+      expect(interrupt).toHaveBeenCalledOnce();
       await session.close();
+      expect(await rest).toEqual([]);
     });
 
     it("leaves waiting messages alone after a frameless error from a background task", async () => {
@@ -716,7 +719,7 @@ describe("AnthropicProvider", () => {
       await started;
       await session.interrupt("user-stop");
       const seen = await reading;
-      expect(seen.slice(-3)).toEqual(["error interrupted", "answers +[A]", "end [A]"]);
+      expect(seen.slice(-3)).toEqual(["answers +[A]", "error interrupted", "end [A]"]);
       await session.close();
     });
 
@@ -1406,8 +1409,32 @@ describe("AnthropicProvider", () => {
       const session = await provider.openSession(buildParams());
       await session.sendUserInput({ text: "Hello", inputId: SENT });
 
-      await expect(collectEvents(session)).rejects.toThrow("OAuth token revoked");
+      await expect(collectEvents(session)).rejects.toMatchObject({
+        message: "OAuth token revoked · Please run /login",
+        code: "auth_revoked",
+        provider: "anthropic",
+      });
       expect(markAnthropicAuthRevokedMock).toHaveBeenCalledTimes(1);
+
+      await session.close();
+    });
+
+    it("classifies a thrown usage-limit error for AgentSession", async () => {
+      mockThrowingQuery(new Error("Claude usage limit reached. Please try again later."));
+      let quotaMarked = false;
+      const provider = new AnthropicProvider({
+        onQuotaExhausted: () => {
+          quotaMarked = true;
+        },
+      });
+      const session = await provider.openSession(buildParams());
+      await session.sendUserInput({ text: "Hello", inputId: SENT });
+
+      await expect(collectEvents(session)).rejects.toMatchObject({
+        code: "usage_limit",
+        provider: "anthropic",
+      });
+      expect(quotaMarked).toBe(true);
 
       await session.close();
     });

@@ -25,6 +25,8 @@ import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentMessage, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
+  AgentErrorCode,
+  AgentErrorProvider,
   AgentTurnOutput,
   AgentTurnStatus,
   ErrorMessage,
@@ -88,6 +90,38 @@ import {
   type Span,
 } from "@opentelemetry/api";
 import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
+
+const AGENT_ERROR_CODES = new Set<AgentErrorCode>([
+  "usage_limit",
+  "auth_revoked",
+  "model_provider_unavailable",
+  "model_unavailable",
+  "no_model_provider_available",
+  "context_window_exceeded",
+  "transient",
+  "invalid_request",
+]);
+
+/** Turn a provider's classified stream failure into the caller-facing terminal. */
+function streamFailurePayload(error: unknown): ErrorMessage {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!error || typeof error !== "object") return { type: "error", error: message };
+  const failure = error as { code?: unknown; provider?: unknown };
+  const code =
+    typeof failure.code === "string" && AGENT_ERROR_CODES.has(failure.code as AgentErrorCode)
+      ? (failure.code as AgentErrorCode)
+      : undefined;
+  const provider: AgentErrorProvider | undefined =
+    failure.provider === "anthropic" || failure.provider === "openai"
+      ? failure.provider
+      : undefined;
+  return {
+    type: "error",
+    error: message,
+    ...(code ? { code } : {}),
+    ...(provider ? { provider } : {}),
+  };
+}
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -2257,9 +2291,9 @@ class AgentSessionImpl implements AgentSession {
         this.modelSessionAvailable = false;
         if (sink && !sink.done) {
           const error =
-            streamError instanceof Error
-              ? streamError.message
-              : "session closed without a terminal";
+            streamError === undefined
+              ? "session closed without a terminal"
+              : streamFailurePayload(streamError);
           log.warn("model session closed without a terminal", {
             sessionId: this.sessionId,
             provider: session.providerId,
@@ -2429,7 +2463,10 @@ class AgentSessionImpl implements AgentSession {
    * Terminate a turn on a failure path: publish the error block, then bracket
    * and close the turn.
    */
-  private failTurn(sink: TurnSink, error: string | ModelResolutionErrorPayload): void {
+  private failTurn(
+    sink: TurnSink,
+    error: string | ModelResolutionErrorPayload | ErrorMessage,
+  ): void {
     const terminal: ErrorMessage =
       typeof error === "string" ? { type: "error", error } : { type: "error", ...error };
     this.ensureTurnStart(sink);

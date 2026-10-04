@@ -1,6 +1,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
+import type { AgentErrorCode } from "@rome-os/app-runtime";
 import type {
   EffortLevel,
   Query,
@@ -84,6 +85,23 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 const CLAUDE_AGENT_SDK_ENV = {
   IS_SANDBOX: "1",
 } as const;
+
+/**
+ * A stream failure has no SDK result, so it cannot close a projected model
+ * turn. Preserve a classification the session layer can safely expose while
+ * it fails the caller that was waiting for the stream.
+ */
+class AnthropicStreamError extends Error {
+  readonly provider = "anthropic" as const;
+
+  constructor(
+    error: unknown,
+    readonly code?: AgentErrorCode,
+  ) {
+    super(error instanceof Error ? error.message : String(error));
+    this.name = "AnthropicStreamError";
+  }
+}
 
 function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
   if (effort === "xhigh") return "max";
@@ -635,6 +653,21 @@ export class AnthropicProvider implements ModelProvider {
         blockId
           ? { type: "text", content, turnPhase, blockId }
           : { type: "text", content, turnPhase };
+      // Completed text is held until a following SDK event tells us whether it
+      // was narration or the closing answer. A dead stream has no such event,
+      // but it must not discard text the SDK already delivered. This writes the
+      // buffered blocks only; terminals and model-turn boundaries remain SDK-owned.
+      function* flushBufferedText(): Generator<AgentMessage> {
+        if (params.outputSchema) return;
+        if (pendingText !== null) {
+          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+          pendingText = null;
+        }
+        if (partialText) {
+          yield textBlock(partialText, "final", partialTextBlockId);
+          partialText = "";
+        }
+      }
       try {
         for await (const message of q) {
           for (const event of projection.before(message)) {
@@ -912,6 +945,7 @@ export class AnthropicProvider implements ModelProvider {
         // correlation. Do not invent one: the session layer fails any caller
         // still waiting, while this warning preserves the process-death clue.
         if (running()) {
+          yield* flushBufferedText();
           log.warn("Claude SDK stream ended without a result", {
             openTurn: projection.isOpen,
             unreadInputIds: [...unreadSends],
@@ -921,8 +955,11 @@ export class AnthropicProvider implements ModelProvider {
         // A thrown stream error has no SDK result and therefore no trustworthy
         // turn correlation. Let AgentSession fail its waiting caller instead
         // of projecting a blank success or a made-up model turn.
-        if (isAnthropicUsageLimitError(err)) onQuotaExhausted?.();
-        if (isAnthropicAuthRevokedError(err)) {
+        yield* flushBufferedText();
+        const usageLimit = isAnthropicUsageLimitError(err);
+        const authRevoked = isAnthropicAuthRevokedError(err);
+        if (usageLimit) onQuotaExhausted?.();
+        if (authRevoked) {
           await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
         }
         log.warn("Claude SDK stream failed without a result", {
@@ -930,7 +967,14 @@ export class AnthropicProvider implements ModelProvider {
           openTurn: projection.isOpen,
           unreadInputIds: [...unreadSends],
         });
-        throw err;
+        throw new AnthropicStreamError(
+          err,
+          usageLimit
+            ? "usage_limit"
+            : authRevoked && authRevokedSource
+              ? ANTHROPIC_AUTH_REVOKED_CODE
+              : undefined,
+        );
       } finally {
         closed = true;
       }
