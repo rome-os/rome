@@ -61,7 +61,7 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "infra/**/*.test.mjs"],
+      "entry": ["scripts/**/*.{mjs,ts,js}", "infra/**/*.test.mjs"],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
