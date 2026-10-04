@@ -897,7 +897,7 @@ export class AnthropicProvider implements ModelProvider {
             };
 
             let terminal: AgentMessage;
-            if (isResultSuccess(message)) {
+            if (isResultSuccess(message) && !message.is_error) {
               log.info("agent SDK result", resultData);
               recordModelCallMetrics(effectiveModel, accounting, message, {
                 agentName: params.agentName,
@@ -940,7 +940,13 @@ export class AnthropicProvider implements ModelProvider {
                 };
               }
             } else {
-              const errors = message.errors ?? [];
+              // A `success` result with `is_error` is a turn that ended on an API
+              // error (e.g. "You've hit your session limit"); `result` holds its text.
+              const errors = isResultSuccess(message)
+                ? message.result
+                  ? [message.result]
+                  : []
+                : (message.errors ?? []);
               log.error("agent SDK result", { ...resultData, errors });
               const errorText = errors.join("; ") || `Agent run failed (${message.subtype})`;
               // A 401 here means the credential `claude auth status` reports as

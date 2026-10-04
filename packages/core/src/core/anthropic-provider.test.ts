@@ -1214,6 +1214,38 @@ describe("AnthropicProvider", () => {
     });
   });
 
+  it("surfaces a success result flagged is_error as a usage-limit error", async () => {
+    mockQuery([
+      {
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        result: "You've hit your session limit · resets 5pm",
+        num_turns: 1,
+        stop_reason: "stop_sequence",
+        total_cost_usd: 0,
+        duration_ms: 1,
+      },
+    ]);
+    let quotaMarked = false;
+    const provider = new AnthropicProvider({
+      env: { PATH: "/usr/bin" },
+      onQuotaExhausted: () => {
+        quotaMarked = true;
+      },
+    });
+    const session = await provider.openSession(buildParams());
+
+    const terminal = await session.events[Symbol.asyncIterator]().next();
+
+    expect(quotaMarked).toBe(true);
+    expect(terminal.value).toMatchObject({
+      type: "error",
+      error: "You've hit your session limit · resets 5pm",
+      code: "usage_limit",
+    });
+  });
+
   it("marks quota before exposing a usage-limit terminal", async () => {
     mockQuery([
       {

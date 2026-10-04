@@ -12,7 +12,7 @@
 // TODO: confirm against a real Claude usage-limit error sample and tighten.
 
 export const ANTHROPIC_USAGE_LIMIT_RE =
-  /\b(?:usage limit (?:reached|exceeded)|reached your usage limit|hit your usage limit|usage limit\b)/i;
+  /\b(?:usage limit (?:reached|exceeded)|reached your usage limit|hit your (?:usage|session|weekly|opus|sonnet) limit|usage limit\b)/i;
 
 /** Whether a failed Claude turn's error text denotes an exhausted usage limit. */
 export function isAnthropicUsageLimitError(message: unknown): boolean {

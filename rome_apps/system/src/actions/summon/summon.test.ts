@@ -142,6 +142,44 @@ describe("summon", () => {
     );
   });
 
+  it("fails when the summoned agent's run ends on an error", async () => {
+    const runner = createMockRunner([
+      {
+        type: "session_init",
+        sessionId: "session-001",
+        romeSession: { _romeSessionId: "action:exec-1:coder", _type: "action" },
+      },
+      { type: "turn_start", turnId: "turn-001", sessionId: "session-001", userPrompt: "fix bug" },
+      {
+        type: "error",
+        error: "You've hit your session limit · resets 5pm",
+        code: "usage_limit",
+      },
+      { type: "turn_end", turnId: "turn-001", status: "error", durationMs: 5 },
+    ]);
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+
+    await expect(tool.execute({ agentName: "coder", prompt: "fix bug" })).rejects.toThrow(
+      'Summoned agent "coder" failed: You\'ve hit your session limit · resets 5pm',
+    );
+  });
+
+  it("returns the reply when a later turn recovers from an error", async () => {
+    const runner = createMockRunner([
+      {
+        type: "session_init",
+        sessionId: "session-001",
+        romeSession: { _romeSessionId: "action:exec-1:coder", _type: "action" },
+      },
+      { type: "error", error: "transient failure" },
+      { type: "result", content: "recovered" },
+    ]);
+    const tool = createSummonAction(actionConfig, summonDeps(runner));
+
+    const actionResult = await tool.execute({ agentName: "coder", prompt: "fix bug" });
+    expect(actionResult).toMatchObject({ status: "ok", data: { result: "recovered" } });
+  });
+
   it("returns session id and result", async () => {
     const runner = createMockRunner();
     const tool = createSummonAction(actionConfig, summonDeps(runner));
