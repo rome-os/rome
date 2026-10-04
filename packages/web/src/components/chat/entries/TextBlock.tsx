@@ -9,27 +9,42 @@ export function TextBlock({
   content,
   compact = false,
   disclosureStateKey,
+  disclosureStateKeyAliases,
 }: {
   content: string;
   compact?: boolean;
   disclosureStateKey?: string;
+  disclosureStateKeyAliases?: readonly string[];
 }) {
   if (!compact) {
     return (
-      <Markdown className="text-foreground" compact={false} disclosureStateKey={disclosureStateKey}>
+      <Markdown
+        className="text-foreground"
+        compact={false}
+        disclosureStateKey={disclosureStateKey}
+        disclosureStateKeyAliases={disclosureStateKeyAliases}
+      >
         {content}
       </Markdown>
     );
   }
-  return <CompactTextBlock content={content} disclosureStateKey={disclosureStateKey} />;
+  return (
+    <CompactTextBlock
+      content={content}
+      disclosureStateKey={disclosureStateKey}
+      disclosureStateKeyAliases={disclosureStateKeyAliases}
+    />
+  );
 }
 
 export function CompactTextBlock({
   content,
   disclosureStateKey,
+  disclosureStateKeyAliases,
 }: {
   content: string;
   disclosureStateKey?: string;
+  disclosureStateKeyAliases?: readonly string[];
 }) {
   const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
@@ -81,7 +96,12 @@ export function CompactTextBlock({
             : undefined
         }
       >
-        <Markdown className="text-foreground" compact disclosureStateKey={disclosureStateKey}>
+        <Markdown
+          className="text-foreground"
+          compact
+          disclosureStateKey={disclosureStateKey}
+          disclosureStateKeyAliases={disclosureStateKeyAliases}
+        >
           {content}
         </Markdown>
       </div>

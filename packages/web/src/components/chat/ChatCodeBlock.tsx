@@ -12,7 +12,10 @@ import { CollapsibleCard, CollapsibleSection } from "@/components/chat/Collapsib
 // The live preview and persisted transcript mount different Markdown trees.
 // MessageList owns this map so the replacement can recover the same fence state.
 export const ChatCodeBlockStateContext = createContext<Map<string, boolean> | null>(null);
-export const ChatCodeBlockScopeContext = createContext<string | null>(null);
+// The first scope is the block's canonical provider identity. Older live
+// previews can know only their projection index, so retain that scope as an
+// alias until the provider id arrives on the persisted replacement.
+export const ChatCodeBlockScopeContext = createContext<readonly string[] | null>(null);
 
 interface MarkdownNode {
   position?: { start?: { offset?: number } };
@@ -23,14 +26,18 @@ type ChatCodeBlockProps = ComponentProps<"pre"> & { node?: MarkdownNode };
 export function ChatCodeBlock({ children, node }: ChatCodeBlockProps) {
   const { t } = useTranslation("chat");
   const disclosureState = useContext(ChatCodeBlockStateContext);
-  const disclosureScope = useContext(ChatCodeBlockScopeContext);
+  const disclosureScopes = useContext(ChatCodeBlockScopeContext);
   const fenceOffset = node?.position?.start?.offset;
-  const disclosureKey =
-    disclosureScope !== null && fenceOffset !== undefined
-      ? `${disclosureScope}:${fenceOffset}`
+  const disclosureKeys =
+    disclosureScopes !== null && fenceOffset !== undefined
+      ? disclosureScopes.map((scope) => `${scope}:${fenceOffset}`)
       : null;
   const [open, setOpen] = useState(() =>
-    disclosureKey === null ? true : (disclosureState?.get(disclosureKey) ?? true),
+    disclosureKeys === null
+      ? true
+      : (disclosureKeys
+          .map((key) => disclosureState?.get(key))
+          .find((value) => value !== undefined) ?? true),
   );
   const code = isValidElement<{ className?: string; "data-block"?: string }>(children)
     ? children
@@ -44,7 +51,9 @@ export function ChatCodeBlock({ children, node }: ChatCodeBlockProps) {
       <CollapsibleSection
         open={open}
         onOpenChange={(next) => {
-          if (disclosureKey !== null) disclosureState?.set(disclosureKey, next);
+          if (disclosureKeys !== null) {
+            for (const key of disclosureKeys) disclosureState?.set(key, next);
+          }
           setOpen(next);
         }}
         title={<span className="truncate text-aux text-muted-foreground">{label}</span>}

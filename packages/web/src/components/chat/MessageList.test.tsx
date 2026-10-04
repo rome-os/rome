@@ -406,6 +406,20 @@ describe("MessageList streaming input", () => {
     );
   });
 
+  it("keeps a code fence collapsed when a legacy live block gains a provider id", () => {
+    const text = "```\nlong code\n```";
+    const { rerender } = render(streamingList([], text));
+    const liveToggle = screen.getByRole("button", { name: "Code" });
+    fireEvent.click(liveToggle);
+    expect(liveToggle.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(streamingList([commentary(text, "a-text", 0, "provider-text-1")], text));
+
+    expect(screen.getByRole("button", { name: "Code" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("does not repeat persisted commentary after a follow-up input", () => {
     const original = commentary("I am checking the implementation.");
     const followup = humanReply("Please include pseudocode.");
