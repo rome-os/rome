@@ -27,6 +27,7 @@ import "@/connect-card";
 // bundle's SDK registry.
 import "@/login-card";
 import { useComposioLogin } from "@/lib/use-composio-login";
+import { readApiResponse, requiresComposioSignIn } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   buildConnectionViews,
@@ -59,14 +60,12 @@ async function fetchStatus(): Promise<StatusPayload> {
   return (await res.json()) as StatusPayload;
 }
 
-// 409 = not signed in yet (the expected case before sign-in) — an empty list,
-// not an error. Any other failure throws so it surfaces in the notice bar,
-// since a blanked list otherwise looks identical to "no apps connected".
 async function fetchAccounts(): Promise<ConnectedAccount[]> {
   const res = await fetchAppApi("connectors");
-  if (res.status === 409) return [];
-  if (!res.ok) throw new Error(`Couldn't load your connectors (${res.status}).`);
-  const body = (await res.json()) as { items: ConnectedAccount[] };
+  const body = await readApiResponse<{ items: ConnectedAccount[] }>(
+    res,
+    `Could not load your connectors (${res.status})`,
+  );
   return body.items;
 }
 
@@ -95,12 +94,33 @@ function ConnectionsPage() {
   const [notice, setNotice] = useState<Notice>(null);
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [registeringWebhook, setRegisteringWebhook] = useState(false);
+  const [authorizationRejected, setAuthorizationRejected] = useState(false);
 
   const statusQuery = useQuery({ queryKey: ["status"], queryFn: fetchStatus });
-  const accountsQuery = useQuery({ queryKey: ["connectors"], queryFn: fetchAccounts });
+  const accountsQuery = useQuery({
+    queryKey: ["connectors"],
+    queryFn: fetchAccounts,
+    enabled: statusQuery.data?.hasKey === true,
+  });
 
-  const signedIn = statusQuery.data?.hasKey ?? false;
-  const accounts = accountsQuery.data ?? [];
+  const hasKey = statusQuery.data?.hasKey ?? false;
+  const requiresSignIn = authorizationRejected || requiresComposioSignIn(accountsQuery.error);
+  const signedIn = hasKey && !requiresSignIn && accountsQuery.data !== undefined;
+  const accounts = requiresSignIn ? [] : (accountsQuery.data ?? []);
+
+  // A later transport failure cannot make a rejected session valid again.
+  useEffect(() => {
+    if (requiresComposioSignIn(accountsQuery.error)) setAuthorizationRejected(true);
+  }, [accountsQuery.error]);
+
+  const reportError = useCallback((err: unknown) => {
+    if (requiresComposioSignIn(err)) {
+      setAuthorizationRejected(true);
+      setNotice(null);
+      return;
+    }
+    setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+  }, []);
 
   // The connector callback redirects back with ?connector=<slug>&status=<status>;
   // confirm only on an active result (a declined/failed round-trip must not read
@@ -137,12 +157,11 @@ function ConnectionsPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ provider: slug }),
         });
-        const body = (await res.json()) as {
+        const body = await readApiResponse<{
           authorizationUrl?: string;
           alreadyConnected?: boolean;
           message?: string;
-        };
-        if (!res.ok) throw new Error(body.message ?? `connectors: ${res.status}`);
+        }>(res, `connectors: ${res.status}`);
         if (body.alreadyConnected) {
           await qc.invalidateQueries({ queryKey: ["connectors"] });
           setNotice({ kind: "info", text: "Already connected." });
@@ -156,12 +175,12 @@ function ConnectionsPage() {
           });
         }
       } catch (err) {
-        setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+        reportError(err);
       } finally {
         setBusySlug(null);
       }
     },
-    [qc],
+    [qc, reportError],
   );
 
   const disconnect = useCallback(
@@ -172,19 +191,16 @@ function ConnectionsPage() {
         const res = await fetchAppApi(`connectors/${encodeURIComponent(slug)}`, {
           method: "DELETE",
         });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { message?: string };
-          throw new Error(body.message ?? `disconnect: ${res.status}`);
-        }
+        await readApiResponse(res, `disconnect: ${res.status}`);
         await qc.invalidateQueries({ queryKey: ["connectors"] });
         setNotice({ kind: "info", text: "Disconnected." });
       } catch (err) {
-        setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+        reportError(err);
       } finally {
         setBusySlug(null);
       }
     },
-    [qc],
+    [qc, reportError],
   );
 
   const signOut = useCallback(async () => {
@@ -192,6 +208,7 @@ function ConnectionsPage() {
     try {
       const res = await fetchAppApi("logout", { method: "POST" });
       if (!res.ok) throw new Error(`logout: ${res.status}`);
+      setAuthorizationRejected(false);
       // Mirror onSignedIn: flip hasKey=false at once so the signed-in row and
       // unlocked connect buttons disappear immediately rather than lingering
       // until the status refetch lands (or indefinitely if it fails), and drop
@@ -211,23 +228,20 @@ function ConnectionsPage() {
     setRegisteringWebhook(true);
     try {
       const res = await fetchAppApi("webhook/register", { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { message?: string };
-      if (!res.ok) throw new Error(body.message ?? `webhook/register: ${res.status}`);
+      await readApiResponse(res, `webhook/register: ${res.status}`);
       await qc.invalidateQueries({ queryKey: ["status"] });
       setNotice({ kind: "info", text: "Webhook registered. Event delivery is ready." });
     } catch (err) {
-      setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      reportError(err);
     } finally {
       setRegisteringWebhook(false);
     }
-  }, [qc]);
+  }, [qc, reportError]);
 
   const onSignedIn = useCallback(() => {
-    // Reflect the new key immediately so the gate doesn't repaint while status
-    // revalidates, and drop the signed-out empty-connectors snapshot so the grid
-    // shows a skeleton (not "No connectors added yet") until the real list lands —
-    // without this the card-jump flash reappears for a user who signs in after
-    // first loading the page signed out.
+    setAuthorizationRejected(false);
+    setNotice(null);
+    // Reset the rejected session's accounts before validating the new key.
     qc.setQueryData<StatusPayload>(["status"], (prev) => (prev ? { ...prev, hasKey: true } : prev));
     // resetQueries, not removeQueries: connectors has a mounted observer, so it
     // must be reset to its pristine pending state (and refetched) — removeQueries
@@ -253,13 +267,14 @@ function ConnectionsPage() {
 
   // Action feedback wins over load errors; either renders in the one notice bar.
   const loadError = statusQuery.error ?? accountsQuery.error;
-  const shownNotice =
-    notice ?? (loadError ? { kind: "error" as const, text: loadError.message } : null);
+  const shownNotice = requiresSignIn
+    ? null
+    : (notice ?? (loadError ? { kind: "error" as const, text: loadError.message } : null));
 
   // While the accounts list (a Composio round trip) is loading for a signed-in
   // owner, both grids show placeholders — rendering the catalog as "available"
   // before the list arrives would let cards jump between sections.
-  const accountsLoading = signedIn && accountsQuery.isPending;
+  const accountsLoading = hasKey && !requiresSignIn && accountsQuery.isPending;
 
   return (
     <main className="mx-auto max-w-[1080px] px-8 py-8">
@@ -298,8 +313,21 @@ function ConnectionsPage() {
               onRegisterWebhook={registerWebhook}
               onSignOut={signOut}
             />
+          ) : hasKey && !requiresSignIn ? (
+            <div className="mb-8 flex items-center gap-3 text-ui text-muted-foreground">
+              {accountsQuery.isPending ? (
+                <span>Checking Composio authorization…</span>
+              ) : (
+                <>
+                  <span>Could not check Composio authorization</span>
+                  <Button variant="outline" onClick={() => void accountsQuery.refetch()}>
+                    Retry
+                  </Button>
+                </>
+              )}
+            </div>
           ) : (
-            <SignInGate onSignedIn={onSignedIn} />
+            <SignInGate onSignedIn={onSignedIn} requiresSignIn={requiresSignIn} />
           )}
 
           {ROME_MANAGED_CATALOG.length > 0 && (
@@ -338,7 +366,9 @@ function ConnectionsPage() {
             <p className="mb-12 text-sm text-muted-foreground">
               {signedIn
                 ? "No connectors added yet — add one below."
-                : "Sign in to see and add connectors."}
+                : hasKey && !requiresSignIn
+                  ? "Could not load connectors"
+                  : "Sign in to see and add connectors."}
             </p>
           ) : (
             <CardGrid className="mb-12">
@@ -588,7 +618,13 @@ function ManagedCard({ entry, connected }: { entry: CatalogEntry; connected: boo
 
 /** Sign-in gate. Logging in to Composio is the one prerequisite to connecting
     apps; "Composio" stays a small powered-by line, not the headline. */
-function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
+function SignInGate({
+  onSignedIn,
+  requiresSignIn,
+}: {
+  onSignedIn: () => void;
+  requiresSignIn: boolean;
+}) {
   const { phase, loginUrl, message: msg, start, cancel } = useComposioLogin(onSignedIn);
 
   return (
@@ -598,11 +634,14 @@ function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
       </div>
       <div className="min-w-[240px] flex-1">
         <div className="text-base font-semibold leading-tight text-foreground">
-          Sign in to add connectors
+          {requiresSignIn
+            ? "Composio authorization is no longer valid"
+            : "Sign in to add connectors"}
         </div>
         <div className="mt-1 max-w-[52ch] text-sm leading-normal text-muted-foreground">
-          One sign-in lets Rome securely link the connectors below. Your accounts stay yours — you
-          can disconnect any of them anytime.
+          {requiresSignIn
+            ? "Sign in again to use your connectors."
+            : "One sign-in lets Rome securely link the connectors below. Your accounts stay yours — you can disconnect any of them anytime."}
         </div>
         {msg && <div className="mt-2 text-sm text-muted-foreground">{msg}</div>}
       </div>
@@ -635,7 +674,7 @@ function SignInGate({ onSignedIn }: { onSignedIn: () => void }) {
         ) : (
           <Button onClick={start} disabled={phase !== "idle"}>
             <LogIn />
-            {phase === "starting" ? "Starting…" : "Sign in"}
+            {phase === "starting" ? "Starting…" : requiresSignIn ? "Sign in again" : "Sign in"}
           </Button>
         )}
         <span className="font-mono text-aux text-muted-foreground">Secured by Composio</span>

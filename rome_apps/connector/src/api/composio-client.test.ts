@@ -1,10 +1,11 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   AliasConflictError,
   ComposioClient,
   disconnectManagedToolkit,
   isAliasConflict,
+  isComposioAuthenticationError,
   reconcileManagedConnection,
   ROME_MANAGED_ALIAS,
   selectReusableAuthConfig,
@@ -13,6 +14,53 @@ import {
   type ConnectAccountRow,
   type ConnectPort,
 } from "./composio-client.js";
+
+describe("Composio credential rejection", () => {
+  afterEach(() => rs.restoreAllMocks());
+
+  it("preserves the webhook list 401 and sends the user key on its own header", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        {
+          error: { slug: "UserApiKey_Unauthorized", message: "Invalid or revoked user API key" },
+        },
+        { status: 401 },
+      ),
+    );
+    const client = new ComposioClient({ apiKey: "uak_test" });
+
+    const error = await client
+      .setWebhookUrl("https://relay.example/h/mailbox")
+      .catch((err: unknown) => err);
+
+    expect(isComposioAuthenticationError(error)).toBe(true);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      "https://backend.composio.dev/api/v3.1/webhook_subscriptions",
+      { method: "GET", headers: { "x-user-api-key": "uak_test" } },
+    );
+  });
+
+  it.each([401, 403, 500])("preserves webhook write status %i", async (status) => {
+    rs.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ items: [] }))
+      .mockResolvedValueOnce(Response.json({ error: "request rejected" }, { status }));
+    const client = new ComposioClient({ apiKey: "ak_test" });
+
+    const error = await client
+      .setWebhookUrl("https://relay.example/h/mailbox")
+      .catch((err: unknown) => err);
+
+    expect(error).toMatchObject({ status });
+    expect(isComposioAuthenticationError(error)).toBe(status === 401);
+  });
+
+  it("recognizes SDK 401 errors without treating permissions or transport failures as revoked keys", () => {
+    expect(isComposioAuthenticationError({ status: 401 })).toBe(true);
+    expect(isComposioAuthenticationError({ status: 403 })).toBe(false);
+    expect(isComposioAuthenticationError({ status: 429 })).toBe(false);
+    expect(isComposioAuthenticationError(new Error("fetch failed"))).toBe(false);
+  });
+});
 
 /** A connected-account row in the shape Composio's list endpoint returns. */
 function accountRow(id: string, slug: string, status: string, alias: string | null = null) {

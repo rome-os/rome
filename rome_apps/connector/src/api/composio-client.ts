@@ -71,6 +71,20 @@ function authHeaderFor(apiKey: string): Record<string, string> {
   return apiKey.startsWith("uak_") ? { "x-user-api-key": apiKey } : { "x-api-key": apiKey };
 }
 
+class ComposioHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Recognizes credential rejection from both the SDK and direct Composio requests. */
+export function isComposioAuthenticationError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 401;
+}
+
 /**
  * Module-scope dedup: `ensureAuthConfig` is a list-then-create flow
  * that races on double-click — two parallel calls for the same toolkit can
@@ -864,8 +878,9 @@ export class ComposioClient {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions ${method} returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
     const body = (await response.json()) as { id?: string; secret?: string };
@@ -882,8 +897,9 @@ export class ComposioClient {
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions list returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
     const body = (await response.json()) as { items?: Array<{ id?: string }> };
@@ -899,8 +915,9 @@ export class ComposioClient {
     });
     if (!response.ok && response.status !== 404) {
       const text = await response.text();
-      throw new Error(
+      throw new ComposioHttpError(
         `Composio webhook_subscriptions DELETE ${id} returned ${response.status}: ${text || response.statusText}`,
+        response.status,
       );
     }
   }
