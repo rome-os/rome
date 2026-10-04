@@ -22,6 +22,7 @@ class FakeConnection implements CodexAppServerConnection {
   constructor(
     readonly options: AppServerClientOptions,
     private readonly nextThreadId: () => string,
+    private readonly beforeRequest?: (method: string, params: unknown) => void | Promise<void>,
   ) {}
 
   start(): void {
@@ -30,6 +31,7 @@ class FakeConnection implements CodexAppServerConnection {
 
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
+    await this.beforeRequest?.(method, params);
     if (method === "thread/start") {
       return {
         thread: {
@@ -363,7 +365,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     }
   });
 
-  it("restarts the process with the requested default only after its turn finishes", async () => {
+  it("forwards a successful final turn before restarting the shared process", async () => {
     rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
     const clients: FakeConnection[] = [];
     const manager = new CodexAppServerManager({
@@ -374,7 +376,8 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       },
     });
     try {
-      const handle = await manager.openThread(config("rome_restart"), binding("restart"));
+      const callbacks = binding("restart");
+      const handle = await manager.openThread(config("rome_restart"), callbacks);
       await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
 
       const switched = manager.setDefaultProvider("rome_credits");
@@ -385,6 +388,10 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       await switched;
       expect(clients).toHaveLength(2);
       expect(clients[0].closed).toBe(1);
+      expect(callbacks.exits).toHaveLength(0);
+      expect(callbacks.notifications).toEqual([
+        { method: "turn/completed", params: { threadId: handle.threadId } },
+      ]);
       expect(clients[1].options.configArgs).toContain('model_provider="rome_credits"');
 
       await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
@@ -393,6 +400,85 @@ describe("CodexAppServerManager Rome credits wiring", () => {
     } finally {
       manager.close();
       rs.unstubAllEnvs();
+    }
+  });
+
+  it("keeps a starting lazy-resume turn ahead of a payer switch", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    const clients: FakeConnection[] = [];
+    let resumeStarted!: () => void;
+    const resumeStartedPromise = new Promise<void>((resolve) => {
+      resumeStarted = resolve;
+    });
+    let releaseResume!: () => void;
+    const resumeGate = new Promise<void>((resolve) => {
+      releaseResume = resolve;
+    });
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const beforeRequest =
+          clients.length === 1
+            ? async (method: string) => {
+                if (method !== "thread/resume") return;
+                resumeStarted();
+                await resumeGate;
+              }
+            : undefined;
+        const client = new FakeConnection(options, () => "thread-resume", beforeRequest);
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const handle = await manager.openThread(config("rome_resume"), binding("resume"));
+      await manager.setDefaultProvider("rome_credits");
+
+      const starting = manager.requestForThread(handle.threadId, "turn/start", {
+        threadId: handle.threadId,
+      });
+      await resumeStartedPromise;
+      const switched = manager.setDefaultProvider(null);
+      await Promise.resolve();
+      expect(clients).toHaveLength(2);
+      expect(clients[1].closed).toBe(0);
+
+      releaseResume();
+      await starting;
+      clients[1].options.onNotification("turn/completed", { threadId: handle.threadId });
+      await switched;
+      expect(clients).toHaveLength(3);
+      expect(clients[1].closed).toBe(1);
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("settles a cancelled pending switch while forwarding the terminal notification", async () => {
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-cancel");
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const callbacks = binding("cancel");
+      const handle = await manager.openThread(config("rome_cancel"), callbacks);
+      await manager.requestForThread(handle.threadId, "turn/start", { threadId: handle.threadId });
+
+      const switchingToCredits = manager.setDefaultProvider("rome_credits");
+      const revertingToLogin = manager.setDefaultProvider(null);
+      clients[0].options.onNotification("turn/completed", { threadId: handle.threadId });
+      await Promise.all([switchingToCredits, revertingToLogin]);
+
+      expect(clients).toHaveLength(1);
+      expect(callbacks.notifications).toEqual([
+        { method: "turn/completed", params: { threadId: handle.threadId } },
+      ]);
+    } finally {
+      manager.close();
     }
   });
 });

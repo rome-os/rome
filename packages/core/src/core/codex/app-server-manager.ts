@@ -225,10 +225,10 @@ export class CodexAppServerManager {
   }
 
   async requestForThread<T>(threadId: string, method: string, params: unknown): Promise<T> {
-    const connection = await this.ensureThreadSubscribed(threadId);
     const isTurnStart = method === Method.turnStart;
     if (isTurnStart) this.activeTurnThreads.add(threadId);
     try {
+      const connection = await this.ensureThreadSubscribed(threadId);
       return (await connection.client.request(method, params)) as T;
     } catch (err) {
       if (isTurnStart) {
@@ -323,8 +323,9 @@ export class CodexAppServerManager {
         this.rejectRestart = reject;
       });
     }
+    const restartPromise = this.restartPromise;
     this.maybeRestartWhenIdle();
-    return this.restartPromise;
+    return restartPromise;
   }
 
   private maybeRestartWhenIdle(): void {
@@ -346,17 +347,9 @@ export class CodexAppServerManager {
 
     this.restartPending = false;
     this.connection = null;
-    const error = new Error("codex app-server restarted to change default provider");
     for (const binding of this.bindings.values()) {
       if (binding.generation !== connection.generation) continue;
       binding.generation = 0;
-      try {
-        binding.callbacks.onExit(error);
-      } catch (err) {
-        log.warn("codex thread exit handler failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
     }
     connection.client.close();
     void this.ensureConnection().then(
