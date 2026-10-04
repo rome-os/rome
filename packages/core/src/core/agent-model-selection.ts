@@ -1,6 +1,7 @@
 // Model selection contract: docs/concepts/sessions.md#model-pin.
 
 import type { AgentConfig } from "../types.js";
+import type { ProviderId } from "./agent-runner.js";
 import type { ExactModelResolutionRequest, ModelResolutionRequest } from "./model-resolver.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 
@@ -9,6 +10,7 @@ export function resolveAgentModelRequest(
   config: Pick<AgentConfig, "tier" | "providerId" | "modelId">,
   selectionId?: ModelSelectionId,
   sessionPin?: ExactModelResolutionRequest["exact"],
+  providerAffinity?: ProviderId,
 ): ModelResolutionRequest {
   if (selectionId) {
     const { providerId, model } = WEBCHAT_LARGE_MODEL_SELECTIONS[selectionId];
@@ -24,5 +26,5 @@ export function resolveAgentModelRequest(
   if (!config.tier) {
     throw new Error("Agent config requires a tier or a provider with modelId");
   }
-  return { tier: config.tier, providerId: config.providerId };
+  return { tier: config.tier, providerId: config.providerId ?? providerAffinity };
 }

@@ -160,6 +160,8 @@ describe("agent model pins through AgentSessionManager", () => {
     const firstManager = createManager(false, true);
     const first = await firstManager.acquire(key, { workingDir: directory });
     await collect(first.sendTurn({ prompt: "first" }).events);
+    // A newly usable Claude account must not replace this Codex transcript.
+    state.claude.loggedIn = true;
     await collect(first.sendTurn({ prompt: "second" }).events);
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol"]);
@@ -167,11 +169,13 @@ describe("agent model pins through AgentSessionManager", () => {
       provider: "openai",
       model: null,
     });
+    expect(anthropic.openSession).not.toHaveBeenCalled();
     await firstManager.shutdown();
 
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "third" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol", "gpt-6-sol"]);
+    expect(anthropic.openSession).not.toHaveBeenCalled();
   });
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {

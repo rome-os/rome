@@ -872,6 +872,11 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
+  // Credit-funded tier conversations keep Codex thread affinity without a
+  // concrete model pin, so a newly available Claude login cannot replace the
+  // conversation's provider history on a later turn or cold resume.
+  const creditProviderAffinity =
+    resumeResult?.provider === "openai" && !resumeResult.model ? "openai" : undefined;
   // The channel-thread-key selection restores a webchat thread's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
@@ -1624,7 +1629,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(config, selectionId, sessionPin),
+      resolveAgentModelRequest(config, selectionId, sessionPin, creditProviderAffinity),
     );
     modelSession = await openModelSession(
       initialResolution,
@@ -1655,6 +1660,10 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
+    creditProviderAffinity:
+      initialResolution?.payer === "rome_credits"
+        ? initialResolution.modelProvider.id
+        : creditProviderAffinity,
     usesRomeCredits: initialResolution?.payer === "rome_credits",
     openModelSession,
     toolCount:
@@ -1700,6 +1709,8 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
+  /** Credit-funded tier session's provider history, retained without a model pin. */
+  creditProviderAffinity?: ProviderId;
   /** Credit-funded tier sessions must re-resolve their tier, not create an exact ChatGPT pin. */
   usesRomeCredits: boolean;
   openModelSession: (
@@ -1943,6 +1954,7 @@ class AgentSessionImpl implements AgentSession {
    * each continuation re-resolves through their active payer.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
+  private creditProviderAffinity?: ProviderId;
   private usesRomeCredits: boolean;
   /** Last effort written to the session row, so an unchanged effort skips the write. */
   private storedReasoningEffort?: string;
@@ -1983,6 +1995,7 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
+    this.creditProviderAffinity = args.creditProviderAffinity;
     this.usesRomeCredits = args.usesRomeCredits;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2069,9 +2082,15 @@ class AgentSessionImpl implements AgentSession {
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
+      resolveAgentModelRequest(
+        this.config,
+        this.selectionId,
+        this.sessionPin,
+        this.creditProviderAffinity,
+      ),
     );
     this.usesRomeCredits = resolution.payer === "rome_credits";
+    if (this.usesRomeCredits) this.creditProviderAffinity = resolution.modelProvider.id;
     if (
       this.modelSessionAvailable &&
       !this.modelSession.isClosed &&
