@@ -228,7 +228,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb x11-utils imagemagick \
+      gdb x11-utils imagemagick \
       at-spi2-core xdotool python3-jeepney
 
 # Install AI tool CLIs globally (early for better layer caching).

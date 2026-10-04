@@ -22,11 +22,6 @@ export const bundledAssets = [
   ["packages/app-template/workflow", "dist/app-template-workflow", "app template"],
   ["packages/core/memory.example", "dist/memory.example", "memory template"],
   [
-    "packages/core/src/channels/wechat-user-helper.py",
-    "dist/wechat-user-helper.py",
-    "WeChat reader helper",
-  ],
-  [
     "packages/core/src/channels/wechat-user-launch-driver.py",
     "dist/wechat-user-launch-driver.py",
     "WeChat launch driver",

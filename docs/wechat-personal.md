@@ -26,7 +26,9 @@ Enabling WeChat does not change the Rome service user. The entrypoint prepares t
 
 The older `scripts/setup.sh` writes its own Compose file, which sets no `shm_size`. The client faults during startup there. Use `docker-compose.yml` for this connection.
 
-The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction. The reader dependencies are pinned separately.
+The Rome image includes the client libraries, debugger, and QR screenshot tools. Setup downloads WeChat 4.1.13.9 and verifies the archive checksum before extraction.
+
+The reader is the [`wechat-bridge`](https://www.npmjs.com/package/wechat-bridge) package, pinned to an exact version in `packages/core`. Rome runs its `wechat-cli` command with `-f json` for sessions and messages, so the image needs no Python reader environment. The bridge never writes to WeChat's databases. It keeps decrypted copies of them under its home, `~/.local/share/wechat/bridge`, private to `rome`.
 
 ## WeChat's own display
 
@@ -62,9 +64,9 @@ Connect's key capture kills the client and relaunches it under the debugger. Fro
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
 
-Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Persisted reader keys have mode `0600` in a mode `0700` directory. The debugger launches the client as a child of the runtime user. No host helper is involved.
+Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Rome derives the per-database keys from the captured passphrase and writes them to the bridge's `keys.json`, mode `0600` in a mode `0700` directory. Keys the earlier Python reader stored under `~/.wechat-cli` move there on the first status check if they still open the store, so an account connected before the bridge needs no new capture. The debugger launches the client as a child of the runtime user. No host helper is involved.
 
-Setup verifies the session database and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
+Setup verifies the session database, the contact database, and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
 
 The client can create the message databases after key capture finishes, and it can finish writing a database after creating it. Setup keeps the captured passphrase and waits while it opens some databases but not yet every required one. A passphrase that opens none of them fails immediately. An unlocked but empty store needs messages synced from the phone before People can show history.
 

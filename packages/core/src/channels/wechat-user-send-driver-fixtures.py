@@ -690,10 +690,14 @@ class SendTests(unittest.TestCase):
 
 class ReadinessTests(unittest.TestCase):
     def test_echo_limits_match_the_reader(self):
-        spec = importlib.util.spec_from_file_location("helper", HERE / "wechat-user-helper.py")
-        helper = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(helper)
-        self.assertEqual((d.MAX_TEXT, d.ENVELOPE_MARKERS), (helper.MAX_TEXT, helper.ENVELOPE_MARKERS))
+        reader = (HERE / "wechat-user.ts").read_text()
+        self.assertIn(f"const MAX_TEXT = {d.MAX_TEXT};", reader)
+        markers = ", ".join(json.dumps(m) for m in d.ENVELOPE_MARKERS)
+        self.assertIn(f"const ENVELOPE_MARKERS = [{markers}];", reader)
+
+    def test_the_store_cuts_text_the_way_the_reader_does(self):
+        self.assertEqual(d.clean_text("[Link] hi <?xml x"), "[Link] hi")
+        self.assertEqual(d.clean_text("x" * 5000), "x" * d.MAX_TEXT)
 
     def test_no_active_window_is_not_active(self):
         desk = d.Desktop()

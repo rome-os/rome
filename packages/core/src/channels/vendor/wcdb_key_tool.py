@@ -4,9 +4,9 @@
 # and arm the breakpoint at the PIE load base as well as the r-x segment base.
 # Rome uses only capture_passphrase(pid): the hosting VM's root script attaches
 # GDB to the WeChat client running in the Rome container and recovers the
-# passphrase. Key derivation and every read live in wechat-user-helper.py; the
-# decrypt/CLI halves of this tool are unused. Do not edit to fit Rome's style —
-# keep it diffable against upstream.
+# passphrase. Key derivation lives in wechat-user-store-keys.ts and every read
+# in wechat-bridge; the decrypt/CLI halves of this tool are unused. Do not edit
+# to fit Rome's style — keep it diffable against upstream.
 """wcdb-key-tool — 微信数据库密钥提取工具
 
 Linux 微信数据库密钥提取工具。通过 ELF 静态分析自动适配新版本，无需每次更新手动逆向。

@@ -10,10 +10,16 @@ import {
 
 describe("registerBuiltinConnections", () => {
   it("gives WeChat personal the client runtime boot shares with the channel list", async () => {
-    const readerCommand = rs.fn(async () => ({
-      conversations: [{ id: "wxid_friend", name: "A Friend", isGroup: false, unread: 0 }],
-    }));
-    const runtime = { readerCommand } as unknown as WechatUserRuntime;
+    const bridgeCommand = rs.fn(async () => [
+      {
+        username: "wxid_friend",
+        displayName: "A Friend",
+        type: "private",
+        unread: 0,
+        lastMessage: { content: "hi", createdAt: "2026-10-01T00:00:00.000Z" },
+      },
+    ]);
+    const runtime = { bridgeCommand } as unknown as WechatUserRuntime;
     const registered = new Map<string, ConnectionDescriptor>();
     const registry = {
       register: (descriptor: ConnectionDescriptor) =>
@@ -40,7 +46,7 @@ describe("registerBuiltinConnections", () => {
     const page = await talker.feature("directory")!.listConversations({ limit: 10 });
 
     expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
-    expect(readerCommand).toHaveBeenCalled();
+    expect(bridgeCommand).toHaveBeenCalled();
   });
   it("offers no WeChat personal connection without a runtime, so none is built twice", () => {
     const registered = new Map<string, ConnectionDescriptor>();

@@ -236,7 +236,7 @@ export interface WechatUserSetupDeps {
 
 /**
  * Build the WeChat user-account conferral setup. A linear coroutine:
- *   1. `ensure-runtime` — install the client and reader if absent, bring up the
+ *   1. `ensure-runtime` — install the client if absent, bring up the
  *      session the client draws into, and stage the capture driver (an
  *      already-ready account confers immediately). The client is not started
  *      here; recovery launches it under gdb to catch the first login's key.
@@ -300,7 +300,6 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           interact.show(installingView());
           await runtime.install(signal);
         }
-        await runtime.installReader(signal);
         // The client is deliberately not started here — recovery launches it under
         // gdb to own it from birth and catch the first login. Only the session it
         // draws into and the capture driver are readied.
@@ -352,7 +351,7 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             const deadline = Date.now() + loginTimeoutMs;
             for (;;) {
               try {
-                await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
+                await runtime.deriveKeys(passphrase);
                 break;
               } catch (error) {
                 if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline)

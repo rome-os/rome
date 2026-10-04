@@ -17,7 +17,7 @@ Down then Up makes the tree mark the current search result `focused`, and Return
 opens it only when that is the one local result named after the chat. xdotool,
 on DISPLAY, presses only Down, Up and Return (Escape would open "Log out?"),
 each only while AT-SPI and X agree WeChat is in front. Only the store confirms
-a send, answered with the reader's message id (`<wxid>:<local id>`).
+a send, answered with the reader's message id (`<wxid>:<shard>:<local id>`).
 """
 import argparse
 import contextlib
@@ -171,22 +171,62 @@ class Desktop:
 
 
 class Store:
-    """Reads through the reader helper, in the reader's own environment."""
+    """Reads through `wechat-cli` (the wechat-bridge package), against the keys
+    and store the Rome runtime uses. `WECHAT_CLI` names the command."""
 
     def __init__(self):
-        venv = os.path.join(os.path.expanduser("~"), ".local/share/wechat/cli/bin/python3")
-        self.python = os.environ.get("WECHAT_READER_PYTHON", venv)
-        self.helper = os.path.join(HERE, "wechat-user-helper.py")
+        self.command = os.environ.get("WECHAT_CLI", "wechat-cli").split()
+        self.env = {**os.environ}
+        self.env.setdefault("WECHAT_CLI_HOME",
+                            os.path.join(os.path.expanduser("~"), ".local/share/wechat/bridge"))
 
-    def lines(self, *args, timeout):
-        r = subprocess.run([self.python, self.helper, "messages", *args],
-                           capture_output=True, text=True, timeout=timeout)
-        if r.returncode != 0:
-            raise Failure("not-ready", f"the store could not be read: {r.stderr.strip()[:300]}")
-        return json.loads(r.stdout)["messages"]
+    def call(self, *args, timeout):
+        r = subprocess.run([*self.command, "-f", "json", *args],
+                           capture_output=True, text=True, timeout=timeout, env=self.env)
+        try:
+            out = json.loads(r.stdout)
+        except ValueError:
+            out = None
+        if not isinstance(out, dict) or not out.get("ok"):
+            reason = (out or {}).get("error", {}).get("message") if isinstance(out, dict) else r.stderr
+            raise Failure("not-ready", f"the store could not be read: {str(reason).strip()[:300]}")
+        return out["data"]
 
-    def chat(self, chat_id, timeout): return self.lines("--conversation", chat_id, "--limit", "200", timeout=timeout)
-    def recent(self, since, timeout): return self.lines("--since", str(since), "--limit", "500", timeout=timeout)
+    def lines(self, chat_id, name, *args, timeout):
+        """One chat's messages in the shape the driver compares: the bridge's
+        `content` cut the way the Rome reader cuts it."""
+        page = self.call("query", chat_id, *args, timeout=timeout)
+        return [{"id": m["id"], "conversationId": m["session"], "conversationName": name,
+                 "isSelf": m["isSelf"], "type": m["type"], "text": clean_text(m["content"])}
+                for m in page["messages"]]
+
+    def names(self, limit, timeout):
+        return {s["username"]: s["displayName"] for s in self.call("sessions", "-n", str(limit), timeout=timeout)
+                if s.get("type") != "folded"}
+
+    def chat(self, chat_id, timeout):
+        deadline = time.monotonic() + timeout
+        name = self.names(500, timeout).get(chat_id)
+        return self.lines(chat_id, name, "-n", "200", timeout=max(deadline - time.monotonic(), 1))
+
+    def recent(self, since, timeout):
+        """Messages since `since` across the most recently active chats."""
+        deadline = time.monotonic() + timeout
+        start = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since))
+        out = []
+        for chat_id, name in self.names(20, timeout).items():
+            out += self.lines(chat_id, name, "--since", start, "-n", "500",
+                              timeout=max(deadline - time.monotonic(), 1))
+        return out
+
+
+def clean_text(text):
+    cut = len(text)
+    for marker in ENVELOPE_MARKERS:
+        found = text.find(marker)
+        if found != -1:
+            cut = min(cut, found)
+    return text[:cut].strip()[:MAX_TEXT]
 
 
 def is_echo(m, body):
