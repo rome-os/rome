@@ -941,8 +941,11 @@ export class WechatUserRuntime {
    */
   private async checkKeys(): Promise<void> {
     if (Date.now() - this.keysCheckedAt < KEYS_CHECK_TTL_MS) return;
+    const paths = { accountDir: await this.accountDir(), keysFile: this.keysFile };
+    // A read can come before the first status() after an upgrade.
+    await migrateLegacyStoreKeys(this.legacyKeysDir, paths);
     try {
-      await checkStoreKeys({ accountDir: await this.accountDir(), keysFile: this.keysFile });
+      await checkStoreKeys(paths);
     } catch (error) {
       throw asSessionFault(error);
     }

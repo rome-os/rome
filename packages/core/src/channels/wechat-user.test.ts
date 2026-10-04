@@ -1140,6 +1140,33 @@ describe("WechatUserReader", () => {
     expect(calls.map((argv) => argv[3])).toContain("250");
   });
 
+  it("reads with the Python reader's keys before any status check migrates them", async () => {
+    const h = await tempHome();
+    const runtime = new WechatUserRuntime({
+      home: h,
+      run: async (file) => (file === "sh" ? ok("wxid_guardian\n") : envelope(SESSIONS)),
+    });
+    await readableStore(h, runtime);
+    // Move the keys back to where the Python reader kept them.
+    const { dbDir, keys } = JSON.parse(await readFile(runtime.keysFile, "utf8"));
+    await rm(runtime.keysFile);
+    const legacy = await ensureDir(join(h, ".wechat-cli"));
+    await writeFile(join(legacy, "config.json"), JSON.stringify({ db_dir: dbDir }));
+    await writeFile(
+      join(legacy, "all_keys.json"),
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(keys as Record<string, { encKey: string; salt: string }>).map(
+            ([rel, k]) => [rel, { enc_key: k.encKey, salt: k.salt, size_mb: 0 }],
+          ),
+        ),
+      ),
+    );
+    const conversations = await new WechatUserReader(runtime).conversations({ limit: 5 });
+    expect(conversations).toHaveLength(2);
+    expect(existsSync(runtime.keysFile)).toBe(true);
+  });
+
   it("refuses to read a store whose keys no longer open every database", async () => {
     const { reader, calls } = await readerWith(() => envelope(SESSIONS), { stale: true });
     await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(
