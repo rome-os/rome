@@ -1,7 +1,7 @@
 import type {
   AppRefDto,
-  SubagentResultEvent,
-  SubagentStartEvent,
+  TraceSubagentResultEvent,
+  TraceSubagentStartEvent,
   ToolUseBlock,
   ToolResultBlock,
   TraceEventDto,
@@ -15,8 +15,8 @@ import { isTerminalEvent } from "../core/agent-message.js";
 
 export type {
   AppRefDto,
-  SubagentResultEvent,
-  SubagentStartEvent,
+  TraceSubagentResultEvent,
+  TraceSubagentStartEvent,
   ToolUseBlock,
   ToolResultBlock,
   TraceEventDto,
@@ -28,11 +28,11 @@ export type {
 
 export interface AppResolver {
   /** Resolve the App that owns a given tool invocation. */
-  resolveTool(block: ToolUseBlock | SubagentStartEvent): AppRefDto;
+  resolveTool(block: ToolUseBlock | TraceSubagentStartEvent): AppRefDto;
 }
 
-type InvocationStart = ToolUseBlock | SubagentStartEvent;
-type InvocationResult = ToolResultBlock | SubagentResultEvent;
+type InvocationStart = ToolUseBlock | TraceSubagentStartEvent;
+type InvocationResult = ToolResultBlock | TraceSubagentResultEvent;
 
 interface RunState {
   segId: string;

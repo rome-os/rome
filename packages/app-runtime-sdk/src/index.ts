@@ -1400,11 +1400,12 @@ export type MessagePart =
        *  (Anthropic `stop_reason`; Codex app-server `phase`). Absent on legacy
        *  rows (and channels that don't split turns) → treated as `final`. */
       turnPhase?: "commentary" | "final";
-      /** Block id of the text block this part holds, from the producing
-       *  turn's stream (`TextBlockEvent.blockId`). Unique only within that
-       *  turn, so `(turnId, blockId)` identifies the block. Prefer it when
-       *  present. Absent when the provider gave the block no id, and on rows
-       *  written without it. */
+      /** Block id of the block whose position this text part takes in the
+       *  producing turn's stream (`TextBlockEvent.blockId`). For the final
+       *  answer, it can differ from this part's content when the result carries
+       *  structured output. Unique only within that turn, so `(turnId, blockId)`
+       *  identifies the block. Prefer it when present. Absent when the provider
+       *  gave the block no id, and on rows written without it. */
       blockId?: string;
       /** Zero-based position of this WebChat assistant text block within its
        *  turn, assigned by the WebChat projection and written on every text

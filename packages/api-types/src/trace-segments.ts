@@ -101,7 +101,7 @@ export interface ToolResultBlock extends TraceEventBase {
   isError?: boolean;
 }
 
-export interface SubagentStartEvent extends TraceEventBase {
+export interface TraceSubagentStartEvent extends TraceEventBase {
   type: "subagent_start";
   toolUseId: string;
   agentName: string;
@@ -111,7 +111,7 @@ export interface SubagentStartEvent extends TraceEventBase {
   startedAt?: string;
 }
 
-export type SubagentResultEvent =
+export type TraceSubagentResultEvent =
   | (TraceEventBase & {
       type: "subagent_result";
       toolUseId: string;
@@ -177,7 +177,7 @@ export interface TraceAccounting {
   usageByModel?: TraceModelUsage[];
 }
 
-export interface ResultEvent extends TraceEventBase {
+export interface TraceResultEvent extends TraceEventBase {
   type: "result";
   content: string;
   structuredOutput?: unknown;
@@ -194,12 +194,12 @@ export interface TraceErrorEvent extends TraceEventBase {
   reason?: AgentErrorReason;
 }
 
-export interface StructuredOutputEvent extends TraceEventBase {
+export interface TraceStructuredOutputEvent extends TraceEventBase {
   type: "structured_output";
   payload: unknown;
 }
 
-export interface PlanUpdateEvent extends TraceEventBase {
+export interface TracePlanUpdateEvent extends TraceEventBase {
   type: "plan_update";
   plan: AgentPlan;
 }
@@ -212,12 +212,12 @@ export type TraceEventDto =
   | ThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
-  | SubagentStartEvent
-  | SubagentResultEvent
-  | ResultEvent
+  | TraceSubagentStartEvent
+  | TraceSubagentResultEvent
+  | TraceResultEvent
   | TraceErrorEvent
-  | StructuredOutputEvent
-  | PlanUpdateEvent;
+  | TraceStructuredOutputEvent
+  | TracePlanUpdateEvent;
 
 export interface TraceRunSegment {
   kind: "run";

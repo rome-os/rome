@@ -1,3 +1,5 @@
+import type { AgentDeltaEvent } from "@rome-os/app-runtime";
+
 /** Per-turn terminals — result or error — produced by an agent. Works
  *  generically over `AgentMessage`, `StreamAgentMessage`, and
  *  `TraceEventDto`, all of which discriminate on `type`. */
@@ -14,9 +16,14 @@ const TRANSIENT_DELTA_TYPE_LIST = [
   "thinking_delta",
   "tool_input_delta",
   "tool_output_delta",
-] as const;
+] as const satisfies readonly AgentDeltaEvent["type"][];
 
 export type TransientDeltaType = (typeof TRANSIENT_DELTA_TYPE_LIST)[number];
+
+type Assert<T extends true> = T;
+type _AllAgentDeltaTypesAreTransient = Assert<
+  Exclude<AgentDeltaEvent["type"], TransientDeltaType> extends never ? true : false
+>;
 
 const TRANSIENT_DELTA_TYPES: ReadonlySet<string> = new Set(TRANSIENT_DELTA_TYPE_LIST);
 
