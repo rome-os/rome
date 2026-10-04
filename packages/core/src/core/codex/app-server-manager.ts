@@ -118,6 +118,7 @@ export class CodexAppServerManager {
   private readonly activeTurnThreads = new Set<string>();
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
+  private connectionPromiseProvider: string | null = null;
   private startingClient: CodexAppServerConnection | null = null;
   private defaultProvider: string | null;
   private restartPending = false;
@@ -261,6 +262,12 @@ export class CodexAppServerManager {
     if (this.closed) return;
     this.closed = true;
     const error = new Error("codex app-server manager closed");
+    this.restartPending = false;
+    const rejectRestart = this.rejectRestart;
+    this.restartPromise = null;
+    this.resolveRestart = null;
+    this.rejectRestart = null;
+    rejectRestart?.(error);
     for (const binding of this.bindings.values()) {
       try {
         binding.callbacks.onExit(error);
@@ -279,6 +286,7 @@ export class CodexAppServerManager {
     this.connection?.client.close();
     this.connection = null;
     this.connectionPromise = null;
+    this.connectionPromiseProvider = null;
   }
 
   private async ensureThreadSubscribed(threadId: string): Promise<Connection> {
@@ -331,9 +339,11 @@ export class CodexAppServerManager {
   private maybeRestartWhenIdle(): void {
     if (!this.restartPending || this.closed || this.activeTurnThreads.size > 0) return;
     if (this.connectionPromise) {
-      void this.connectionPromise.then(
+      const connectionPromise = this.connectionPromise;
+      const provider = this.connectionPromiseProvider;
+      void connectionPromise.then(
         () => this.maybeRestartWhenIdle(),
-        (error) => this.finishRestart(error),
+        (error) => this.finishRestart(provider, error),
       );
       return;
     }
@@ -341,7 +351,7 @@ export class CodexAppServerManager {
     // A payer chosen before Codex first starts is already part of that spawn.
     if (!connection || connection.defaultProvider === this.defaultProvider) {
       this.restartPending = false;
-      this.finishRestart();
+      this.finishRestart(this.defaultProvider);
       return;
     }
 
@@ -352,13 +362,22 @@ export class CodexAppServerManager {
       binding.generation = 0;
     }
     connection.client.close();
+    const provider = this.defaultProvider;
     void this.ensureConnection().then(
-      () => this.finishRestart(),
-      (restartError) => this.finishRestart(restartError),
+      () => this.finishRestart(provider),
+      (restartError) => this.finishRestart(provider, restartError),
     );
   }
 
-  private finishRestart(error?: unknown): void {
+  private finishRestart(provider: string | null, error?: unknown): void {
+    if (this.closed) return;
+    // A payer can change while an app-server initialize request is in flight.
+    // Only the attempt for the current provider may settle the switch waiters.
+    if (provider !== this.defaultProvider) {
+      this.restartPending = true;
+      void this.restartWhenIdle();
+      return;
+    }
     const resolve = this.resolveRestart;
     const reject = this.rejectRestart;
     this.restartPromise = null;
@@ -376,9 +395,14 @@ export class CodexAppServerManager {
 
     const generation = this.nextGeneration++;
     const defaultProvider = this.defaultProvider;
-    this.connectionPromise = this.createConnection(generation, defaultProvider).finally(() => {
+    let connectionPromise!: Promise<Connection>;
+    connectionPromise = this.createConnection(generation, defaultProvider).finally(() => {
+      if (this.connectionPromise !== connectionPromise) return;
       this.connectionPromise = null;
+      this.connectionPromiseProvider = null;
     });
+    this.connectionPromise = connectionPromise;
+    this.connectionPromiseProvider = defaultProvider;
     return await this.connectionPromise;
   }
 
