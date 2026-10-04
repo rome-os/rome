@@ -699,6 +699,22 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(d.clean_text("[Link] hi <?xml x"), "[Link] hi")
         self.assertEqual(d.clean_text("x" * 5000), "x" * d.MAX_TEXT)
 
+    def test_the_store_scans_the_most_recently_active_chats(self):
+        store = d.Store()
+        sessions = [
+            {"username": "pinned", "displayName": "Pinned", "type": "private",
+             "lastMessage": {"content": "", "createdAt": "2026-01-01T00:00:00.000Z"}},
+            {"username": "@fold", "displayName": "Folded", "type": "folded"},
+            {"username": "quiet", "displayName": "Quiet", "type": "private"},
+            {"username": "active", "displayName": "Active", "type": "group",
+             "lastMessage": {"content": "", "createdAt": "2026-10-01T00:00:00.000Z"}},
+        ]
+        calls = []
+        store.call = lambda *args, timeout: calls.append(args) or sessions
+        self.assertEqual(store.names(1, timeout=5), {"active": "Active"})
+        self.assertEqual(list(store.names(5, timeout=5)), ["active", "pinned", "quiet"])
+        self.assertEqual(calls[0], ("sessions",))
+
     def test_no_active_window_is_not_active(self):
         desk = d.Desktop()
         out = {"xprop": "_NET_ACTIVE_WINDOW:  not found.\n",

@@ -201,8 +201,12 @@ class Store:
                 for m in page["messages"]]
 
     def names(self, limit, timeout):
-        return {s["username"]: s["displayName"] for s in self.call("sessions", "-n", str(limit), timeout=timeout)
-                if s.get("type") != "folded"}
+        """The `limit` most recently active chats' names. The bridge lists
+        pinned chats first however old, so the whole list is ordered by last
+        message before the limit applies, as the Rome reader does."""
+        chats = [s for s in self.call("sessions", timeout=timeout) if s.get("type") != "folded"]
+        chats.sort(key=lambda s: (s.get("lastMessage") or {}).get("createdAt") or "", reverse=True)
+        return {s["username"]: s["displayName"] for s in chats[:limit]}
 
     def chat(self, chat_id, timeout):
         deadline = time.monotonic() + timeout
