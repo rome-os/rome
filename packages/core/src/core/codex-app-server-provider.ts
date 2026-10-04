@@ -367,6 +367,8 @@ interface CodexAppServerProviderOptions {
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
   onQuotaExhausted?: () => void;
+  /** Only the Rome credits payer may classify its 402 as exhausted credits. */
+  isUsingRomeCredits?: () => boolean;
 }
 
 interface CodexFailureClassification {
@@ -418,7 +420,7 @@ function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
 ): CodexFailureClassification {
-  if (isRomeCreditsExhaustedError(turnError)) {
+  if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
   if (isCodexUsageLimitError(turnError)) {

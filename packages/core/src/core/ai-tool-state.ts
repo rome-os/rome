@@ -113,6 +113,13 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     claude: { quotaExhausted: false },
   };
   const notifyChange = (): void => options.onChange?.();
+  const quotaSignalVersions: Record<AIToolProviderId, number> = { openai: 0, anthropic: 0 };
+  const applyRuntimeQuotaSignal = (provider: AIToolProviderId): boolean => {
+    const target = provider === "openai" ? value.codex : value.claude;
+    if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
+    target.quotaExhausted = true;
+    return true;
+  };
 
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
@@ -152,11 +159,18 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     const existing = refreshesInFlight.get(provider);
     if (existing) return existing;
 
-    const pending = refreshProvider(provider).finally(() => {
-      if (refreshesInFlight.get(provider) === pending) {
-        refreshesInFlight.delete(provider);
-      }
-    });
+    const quotaSignalVersion = quotaSignalVersions[provider];
+    const pending = refreshProvider(provider)
+      .then(() => {
+        // A runtime failure that arrived while this older probe was in flight
+        // wins before refresh() publishes availability to the payer.
+        if (quotaSignalVersions[provider] !== quotaSignalVersion) applyRuntimeQuotaSignal(provider);
+      })
+      .finally(() => {
+        if (refreshesInFlight.get(provider) === pending) {
+          refreshesInFlight.delete(provider);
+        }
+      });
     refreshesInFlight.set(provider, pending);
     return pending;
   };
@@ -189,26 +203,9 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       notifyChange();
     },
     markQuotaExhausted(provider) {
-      const applyRuntimeSignal = (): boolean => {
-        const target = provider === "openai" ? value.codex : value.claude;
-        if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
-        target.quotaExhausted = true;
-        return true;
-      };
-      if (!applyRuntimeSignal()) return;
+      if (!applyRuntimeQuotaSignal(provider)) return;
+      quotaSignalVersions[provider] += 1;
       notifyChange();
-
-      // Keep this newer runtime signal after any older probe settles.
-      const olderRefresh = refreshesInFlight.get(provider);
-      if (olderRefresh)
-        void olderRefresh.then(
-          () => {
-            if (applyRuntimeSignal()) notifyChange();
-          },
-          () => {
-            if (applyRuntimeSignal()) notifyChange();
-          },
-        );
     },
     close() {
       if (timer) clearInterval(timer);

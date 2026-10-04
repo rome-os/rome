@@ -1655,6 +1655,7 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
+    usesRomeCredits: initialResolution?.payer === "rome_credits",
     openModelSession,
     toolCount:
       (initialResolution
@@ -1699,6 +1700,8 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
+  /** Credit-funded tier sessions must re-resolve their tier, not create an exact ChatGPT pin. */
+  usesRomeCredits: boolean;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1935,12 +1938,12 @@ class AgentSessionImpl implements AgentSession {
   private threadContextInjected = false;
   private selectionId?: ModelSelectionId;
   /**
-   * The session model pin: the concrete model this session's history
-   * was produced on. Seeded from the resumed row at open and refreshed after
-   * every successful pin persist, so per-turn re-resolution requests exactly
-   * this model (never a tier re-map) once a pin exists.
+   * The session model pin: the concrete model this session's history was
+   * produced on. Credit-funded tier sessions deliberately keep this absent so
+   * each continuation re-resolves through their active payer.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
+  private usesRomeCredits: boolean;
   /** Last effort written to the session row, so an unchanged effort skips the write. */
   private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
@@ -1980,6 +1983,7 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
+    this.usesRomeCredits = args.usesRomeCredits;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -2067,6 +2071,7 @@ class AgentSessionImpl implements AgentSession {
     const resolution = await this.deps.modelResolver.getModelProvider(
       resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
     );
+    this.usesRomeCredits = resolution.payer === "rome_credits";
     if (
       this.modelSessionAvailable &&
       !this.modelSession.isClosed &&
@@ -2483,6 +2488,7 @@ class AgentSessionImpl implements AgentSession {
     channelThreadKey: string,
     forkSessionId: string,
     forkSession: ModelSession,
+    usesRomeCredits: boolean,
   ): Promise<void> {
     const providerThreadId = forkSession.providerThreadId;
     if (!providerThreadId) {
@@ -2507,7 +2513,7 @@ class AgentSessionImpl implements AgentSession {
         forkSessionId,
         forkSession.providerId,
         providerThreadId,
-        forkSession.model,
+        usesRomeCredits ? undefined : forkSession.model,
       );
     } catch (err) {
       log.warn("failed to persist fork thread; the branch stays one-shot", {
@@ -2547,13 +2553,15 @@ class AgentSessionImpl implements AgentSession {
         this.sessionId,
         identity.providerId,
         identity.providerThreadId,
-        identity.model,
+        this.usesRomeCredits ? undefined : identity.model,
       );
       this.providerInfoStored = true;
       // The pin becomes readable only once recorded: later turns of
       // this live session now resolve exactly this model, matching what a
       // cold resume of the row would do.
-      this.sessionPin = { providerId: identity.providerId, model: identity.model };
+      this.sessionPin = this.usesRomeCredits
+        ? undefined
+        : { providerId: identity.providerId, model: identity.model };
     } catch (err) {
       log.warn("failed to persist session provider info", {
         sessionId: this.sessionId,
@@ -2772,6 +2780,7 @@ class AgentSessionImpl implements AgentSession {
     // a terminal. Mirror the failTurn handling of regular turns by
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
+    let forkUsesRomeCredits = this.usesRomeCredits;
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
@@ -2823,6 +2832,8 @@ class AgentSessionImpl implements AgentSession {
                 providerId: sourceModelSession.providerId,
               })
             : undefined;
+          forkUsesRomeCredits =
+            forkModel?.payer === "rome_credits" || (!forkModel && this.usesRomeCredits);
           const fork = await sourceModelSession.fork({
             sessionId: forkSessionId,
             // Two different "mode"s meet here — do not confuse them.
@@ -2946,6 +2957,7 @@ class AgentSessionImpl implements AgentSession {
           input.persistThreadKey(forkSessionId),
           forkSessionId,
           forkSession,
+          forkUsesRomeCredits,
         );
       }
       // Best-effort: turn_end is the stream's true terminal, so a close-time

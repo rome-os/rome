@@ -554,6 +554,7 @@ async function main() {
     appServerManager: codexAppServerManager,
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
+    isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
   });
   const modelResolver = createModelResolver({
     aiToolState,

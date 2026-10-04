@@ -1,5 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
+import { createRomeCreditsPayer } from "./rome-credits-payer.js";
 
 function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
   return {
@@ -112,6 +113,46 @@ describe("AIToolState", () => {
     await refresh;
 
     expect(state.get().codex.quotaExhausted).toBe(true);
+  });
+
+  it("does not briefly switch the payer back while an older refresh settles", async () => {
+    let releaseUsage!: () => void;
+    const usageGate = new Promise<void>((resolve) => {
+      releaseUsage = resolve;
+    });
+    const payerChanges: Array<string | null> = [];
+    let syncPayer = (): void => {};
+    const state = createAIToolState({
+      probes: probes({
+        codexUsage: async () => {
+          await usageGate;
+          return {
+            checkedAt: "2026-08-07T00:00:00.000Z",
+            source: "test",
+            fiveHour: { usedPercent: 50 },
+          };
+        },
+      }),
+      onChange: () => syncPayer(),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    const payer = createRomeCreditsPayer({
+      aiToolState: state,
+      appServerManager: {
+        setDefaultProvider: (provider) => payerChanges.push(provider),
+        restart: () => {},
+      },
+      getInstanceToken: () => "romeinst_test",
+    });
+    syncPayer = () => payer.sync();
+
+    const refresh = state.refresh("openai");
+    state.markQuotaExhausted("openai");
+    releaseUsage();
+    await refresh;
+
+    expect(payerChanges).toEqual(["rome_credits"]);
   });
 
   it.each([

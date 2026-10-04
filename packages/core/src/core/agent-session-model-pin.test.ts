@@ -89,7 +89,7 @@ describe("agent model pins through AgentSessionManager", () => {
     await loader.loadAll(directory);
   }
 
-  function createManager(isSubagent = false): AgentSessionManager {
+  function createManager(isSubagent = false, useRomeCredits = false): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
@@ -103,6 +103,10 @@ describe("agent model pins through AgentSessionManager", () => {
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           aiToolState: { get: () => state, refresh: async () => state },
+          romeCreditsPayer: {
+            sync: () => {},
+            isUsingRomeCredits: () => useRomeCredits,
+          },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(),
@@ -147,6 +151,27 @@ describe("agent model pins through AgentSessionManager", () => {
       model: MODEL,
       providerThreadId: `native-${session.sessionId}`,
     });
+  });
+
+  it("continues a credit-funded tier session without creating a ChatGPT pin", async () => {
+    await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
+    state.codex.loggedIn = false;
+    state.claude.loggedIn = false;
+    const firstManager = createManager(false, true);
+    const first = await firstManager.acquire(key, { workingDir: directory });
+    await collect(first.sendTurn({ prompt: "first" }).events);
+    await collect(first.sendTurn({ prompt: "second" }).events);
+
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol"]);
+    expect(await sessionManager.findResumableSessionById(first.sessionId, AGENT)).toMatchObject({
+      provider: "openai",
+      model: null,
+    });
+    await firstManager.shutdown();
+
+    const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
+    await collect(resumed.sendTurn({ prompt: "third" }).events);
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol", "gpt-6-sol"]);
   });
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {

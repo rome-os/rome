@@ -98,6 +98,8 @@ export type ModelResolutionRequest = TierModelResolutionRequest | ExactModelReso
 export interface ModelResolution {
   modelProvider: ModelProvider;
   model: string;
+  /** This tier was resolved through the instance's Rome credits, not ChatGPT. */
+  payer?: "rome_credits";
 }
 
 export interface ModelResolver {
@@ -305,7 +307,11 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
         if (!(provider.id === "openai" && usingRomeCredits)) requireUsableProvider(provider, state);
-        return { modelProvider: provider, model: resolveTierModel(provider) };
+        return {
+          modelProvider: provider,
+          model: resolveTierModel(provider),
+          ...(provider.id === "openai" && usingRomeCredits ? { payer: "rome_credits" } : {}),
+        };
       }
 
       const claude = providers.get("anthropic");
@@ -320,7 +326,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       if (codex && usingRomeCredits) {
-        return { modelProvider: codex, model: resolveTierModel(codex) };
+        return { modelProvider: codex, model: resolveTierModel(codex), payer: "rome_credits" };
       }
 
       // Test providers have no login/quota concept. Production only registers
