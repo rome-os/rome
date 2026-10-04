@@ -661,12 +661,14 @@ export class AnthropicProvider implements ModelProvider {
         if (params.outputSchema) return;
         if (pendingText !== null) {
           yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-          pendingText = null;
         }
+        pendingText = null;
+        pendingTextBlockId = undefined;
         if (partialText) {
           yield textBlock(partialText, "final", partialTextBlockId);
-          partialText = "";
         }
+        partialText = "";
+        partialTextBlockId = undefined;
       }
       try {
         for await (const message of q) {
@@ -818,10 +820,10 @@ export class AnthropicProvider implements ModelProvider {
             // Block ids are unique within a turn; start the next turn's count fresh.
             assistantBlockCounts.clear();
             // The turn is ending: any text still held was the closing answer.
-            if (!params.outputSchema && pendingText !== null) {
-              yield textBlock(pendingText, "final", pendingTextBlockId);
-              pendingText = null;
-            }
+            // An interrupt can end during a delta-only block, before the SDK
+            // sends its completed assistant message. Persist and reset it here
+            // so it cannot be lost or leak into the next SDK turn.
+            yield* flushBufferedText();
             const contextUsage = await readSdkContextUsage(q);
             const accounting = buildAnthropicAccounting(
               message,

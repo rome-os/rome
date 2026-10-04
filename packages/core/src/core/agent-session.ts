@@ -45,6 +45,7 @@ import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
+  ModelTurnEvent,
   ModelSessionForkOpenParams,
   ModelSessionParams,
   ModelReasoningEffort,
@@ -1745,6 +1746,11 @@ interface ImplArgs {
   onClosed: () => void;
 }
 
+interface SdkTurnState {
+  answers: Set<string>;
+  terminal?: ResultMessage | ErrorMessage;
+}
+
 interface TurnSink {
   turnId: string;
   /** Prompt that opened the turn; carried on the turn_start event. */
@@ -1941,6 +1947,11 @@ class AgentSessionImpl implements AgentSession {
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
+  /** Callers waiting for the SDK turn whose result names their message id. */
+  private readonly waitingCallers = new Map<string, TurnSink>();
+  /** SDK turn state is authoritative for result-to-caller correlation. */
+  private readonly sdkTurns = new Map<string, SdkTurnState>();
+  private activeSdkTurnId?: string;
   /** Exactly-once submission for the current conversational handback turn. */
   private submittedOutputTurnId?: string;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
@@ -2142,13 +2153,20 @@ class AgentSessionImpl implements AgentSession {
     try {
       enterSession(this.sessionId);
       for await (const msg of session.events) {
-        // Model turn boundaries are not consumed yet; AgentSession still opens
-        // its turns per send (dev/sdk-turns: PR 2 opens them from these).
-        if (isModelTurnEvent(msg)) continue;
+        if (isModelTurnEvent(msg)) {
+          await this.consumeModelTurnEvent(session, msg);
+          continue;
+        }
         const sink = this.currentSink;
         if (!sink) {
-          // No active turn — log and drop. Should not happen because
-          // sendTurn allocates the sink before sendUserInput.
+          // SDK-started turns become visible session turns in PR 2b. PR 2a still
+          // records their terminal so an empty background result cannot invent
+          // a caller-owned completion.
+          if (isTerminalEvent(msg) && this.activeSdkTurnId) {
+            const turn = this.sdkTurns.get(this.activeSdkTurnId);
+            if (turn) turn.terminal = msg;
+            continue;
+          }
           log.warn("agent session received event with no active turn", {
             type: msg.type,
             sessionId: this.sessionId,
@@ -2160,15 +2178,10 @@ class AgentSessionImpl implements AgentSession {
           this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
           continue;
         }
-        if (msg.type === "result" || msg.type === "error") await this.inputs.seal(sink.turnId);
         // Time-to-first-token: the first *text* event of the turn (a text_delta
-        // or a completed text block) marks when the model started
-        // producing visible output. Gate strictly to text — thinking/tool_use
-        // can precede any token (Codex emits tool_use before agentMessageDelta),
-        // and counting those would make tool-first turns look artificially fast.
-        // For a cold summon this is dominated by uncached first-turn prompt
-        // processing, so it isolates that cost from the whole-turn duration
-        // `modelTurnDurationMetric` already records.
+        // or a completed text block) marks when the model started producing
+        // visible output. Gate strictly to text — thinking/tool_use can precede
+        // any token (Codex emits tool_use before agentMessageDelta).
         if (
           !sink.ttftRecorded &&
           sink.modelTurnStartMs > 0 &&
@@ -2257,24 +2270,21 @@ class AgentSessionImpl implements AgentSession {
           }
         }
 
-        this.publishOutbound(sink, outbound);
+        if (isTerminalEvent(outbound) && this.activeSdkTurnId) {
+          const turn = this.sdkTurns.get(this.activeSdkTurnId);
+          if (turn) {
+            // The projection adds every result's ids immediately before its
+            // model_turn_end. Do not let a frameless background result settle
+            // the current caller while those ids are still unknown.
+            turn.terminal = outbound;
+            continue;
+          }
+        }
 
         if (isTerminalEvent(outbound)) {
-          // The branch action becomes available when turn_end is published.
-          // Persist the provider-native anchor first so an immediate click can
-          // never fall back to (or race with) a later provider-thread head.
-          if (outbound.type === "result") {
-            const interrupted =
-              sink.lifecycleInterrupted || isInterruptedAccounting(outbound.accounting);
-            if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
-            await this.maybePersistProviderInfo();
-            await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
-          }
-          // Use `outbound` (not `msg`) so provider-output validation is
-          // reflected in span status and the turn_end bracket. The turn_end
-          // bracket ships after the spans close, so the trace contract is
-          // complete by the time consumers observe the end of the turn.
-          this.finalizeTurn(sink, outbound);
+          await this.finishSinkFromTerminal(session, sink, outbound);
+        } else {
+          this.publishOutbound(sink, outbound);
         }
       }
     } catch (err) {
@@ -2286,10 +2296,10 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
-      const sink = this.currentSink;
       if (session.isClosed) {
         this.modelSessionAvailable = false;
-        if (sink && !sink.done) {
+        const waiting = new Set(this.waitingCallers.values());
+        if (waiting.size > 0) {
           const error =
             streamError === undefined
               ? "session closed without a terminal"
@@ -2297,20 +2307,103 @@ class AgentSessionImpl implements AgentSession {
           log.warn("model session closed without a terminal", {
             sessionId: this.sessionId,
             provider: session.providerId,
-            interrupted: sink.lifecycleInterrupted,
+            waitingCallers: waiting.size,
           });
-          this.failTurn(sink, error);
+          for (const sink of waiting) {
+            if (!sink.done) this.failTurn(sink, error);
+          }
+        } else if (this.currentSink && !this.currentSink.done) {
+          // Legacy/mock sessions do not emit model-turn events and therefore
+          // have no waiting-caller binding.
+          this.failTurn(
+            this.currentSink,
+            streamError === undefined
+              ? "session closed without a terminal"
+              : streamFailurePayload(streamError),
+          );
         }
         return;
       }
       this.inputs.close();
-      if (sink && !sink.done) {
-        this.failTurn(sink, "session closed mid-turn");
-      }
+      if (this.currentSink && !this.currentSink.done)
+        this.failTurn(this.currentSink, "session closed mid-turn");
       this.status = "closed";
       this.emitStatus();
       this.onClosed();
     }
+  }
+
+  private async consumeModelTurnEvent(session: ModelSession, event: ModelTurnEvent): Promise<void> {
+    switch (event.type) {
+      case "model_turn_start": {
+        this.sdkTurns.set(event.turnId, { answers: new Set(event.answers) });
+        this.activeSdkTurnId = event.turnId;
+        return;
+      }
+      case "model_turn_answers": {
+        const turn = this.sdkTurns.get(event.turnId);
+        if (!turn) {
+          log.warn("received answers for an unknown model turn", {
+            sessionId: this.sessionId,
+            turnId: event.turnId,
+          });
+          return;
+        }
+        for (const id of event.added) turn.answers.add(id);
+        return;
+      }
+      case "model_turn_end": {
+        const turn = this.sdkTurns.get(event.turnId);
+        this.sdkTurns.delete(event.turnId);
+        if (this.activeSdkTurnId === event.turnId) this.activeSdkTurnId = undefined;
+        if (!turn) {
+          log.warn("received end for an unknown model turn", {
+            sessionId: this.sessionId,
+            turnId: event.turnId,
+          });
+          return;
+        }
+        for (const id of event.answers) turn.answers.add(id);
+        if (!turn.terminal) {
+          log.warn("model turn ended without a terminal", {
+            sessionId: this.sessionId,
+            turnId: event.turnId,
+          });
+          return;
+        }
+        const sinks = new Set<TurnSink>();
+        for (const id of turn.answers) {
+          const sink = this.waitingCallers.get(id);
+          if (sink) {
+            this.waitingCallers.delete(id);
+            sinks.add(sink);
+          }
+        }
+        // An SDK-started background turn answers []. It is not a Rome caller's
+        // result and must not complete the current sink (#510).
+        if (sinks.size === 0) return;
+        for (const sink of sinks) {
+          if (!sink.done) await this.finishSinkFromTerminal(session, sink, turn.terminal);
+        }
+        return;
+      }
+    }
+  }
+
+  private async finishSinkFromTerminal(
+    session: ModelSession,
+    sink: TurnSink,
+    terminal: ResultMessage | ErrorMessage,
+  ): Promise<void> {
+    await this.inputs.seal(sink.turnId);
+    if (terminal.type === "result") {
+      const interrupted = sink.lifecycleInterrupted || isInterruptedAccounting(terminal.accounting);
+      if (!interrupted) await this.maybePersistTurnCheckpoint(session, sink.turnId);
+      await this.maybePersistProviderInfo();
+      await this.maybePersistReasoningEffort(session.appliedReasoningEffort);
+    }
+    this.publishOutbound(sink, terminal);
+    this.finalizeTurn(sink, terminal);
   }
 
   /**
@@ -2650,6 +2743,9 @@ class AgentSessionImpl implements AgentSession {
     }
     if (this.currentSink === sink) {
       this.currentSink = null;
+    }
+    for (const [inputId, waiting] of this.waitingCallers) {
+      if (waiting === sink) this.waitingCallers.delete(inputId);
     }
     this.lastActiveAt = Date.now();
     this.status = "idle";
@@ -3081,6 +3177,10 @@ class AgentSessionImpl implements AgentSession {
     // channel name). No upper layer ever invents one — eliminates duplicate
     // / collision concerns by construction.
     const turnId = uuidv4();
+    // The SDK correlates results by message UUID. Give the caller an id even
+    // when the public sendTurn API omitted one, so AgentSession can wait for
+    // the SDK's own answer list instead of guessing from terminal order.
+    const turnInput: AgentTurnInput = input.inputId ? input : { ...input, inputId: turnId };
     const sink: TurnSink = {
       turnId,
       userPrompt: input.prompt,
@@ -3160,7 +3260,7 @@ class AgentSessionImpl implements AgentSession {
       .runExclusive(
         async () => {
           try {
-            await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
+            await context.with(turnCtx, () => this.runOneTurn(turnId, turnInput, sink, turnCtx));
           } catch (err) {
             // Safety net: if runOneTurn threw before reaching its own finally
             // (e.g. synchronous failure before the modelSession call), the
@@ -3370,6 +3470,9 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
+            // A result names this SDK message id. Retain the caller until the
+            // matching model_turn_end, not merely until the next terminal.
+            if (input.inputId) this.waitingCallers.set(input.inputId, sink);
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,
