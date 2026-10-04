@@ -15,6 +15,7 @@ export function expectModelSessionTurnContract(
     | {
         turnId: string;
         answers: Set<string>;
+        answersReceived: boolean;
         terminal: boolean;
       }
     | undefined;
@@ -24,10 +25,16 @@ export function expectModelSessionTurnContract(
     switch (event.type) {
       case "model_turn_start":
         expect(current).toBeUndefined();
-        current = { turnId: event.turnId, answers: new Set(event.answers), terminal: false };
+        current = {
+          turnId: event.turnId,
+          answers: new Set(event.answers),
+          answersReceived: false,
+          terminal: false,
+        };
         break;
       case "model_turn_answers":
         expect(current?.turnId).toBe(event.turnId);
+        current!.answersReceived = true;
         for (const id of event.added) {
           expect(current!.answers.has(id)).toBe(false);
           current!.answers.add(id);
@@ -43,6 +50,7 @@ export function expectModelSessionTurnContract(
       case "result":
       case "error":
         expect(current).toBeDefined();
+        expect(current?.answersReceived).toBe(true);
         expect(current?.terminal).toBe(false);
         current!.terminal = true;
         break;

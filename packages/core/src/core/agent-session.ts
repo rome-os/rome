@@ -2367,6 +2367,15 @@ class AgentSessionImpl implements AgentSession {
             if (!sink.done) this.failTurn(sink, error);
           }
         }
+        // sendUserInput can reject before the stream loop observes its end.
+        // In that race failTurn has already removed the waiting caller while
+        // SDK ownership was still live. Recompute after clearing ownership so
+        // the session cannot remain visibly running forever.
+        if (this.waitingCallers.size === 0 && this.activeSdkTurnId === undefined) {
+          this.status = "idle";
+          this.emitStatus();
+          if (!this.keepAlive) void this.close("user");
+        }
         return;
       }
       this.inputs.close();
@@ -2450,8 +2459,14 @@ class AgentSessionImpl implements AgentSession {
   private bindSdkTurnSink(turnId: string, sink: TurnSink): void {
     const turn = this.sdkTurns.get(turnId);
     if (!turn) return;
-    if (!turn.sink) turn.sink = sink;
-    this.currentSink = turn.sink;
+    const acquiredOwner = !turn.sink;
+    const owner = turn.sink ?? sink;
+    turn.sink = owner;
+    this.currentSink = owner;
+    // Provider acceptance can precede its first turn frame. Tell existing
+    // status subscribers as soon as that SDK frame gives the session a visible
+    // caller-owned turn id.
+    if (acquiredOwner) this.emitStatus();
   }
 
   private openSdkTurnSink(turnId: string, existing?: SdkTurnState): TurnSink {

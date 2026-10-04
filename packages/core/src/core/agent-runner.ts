@@ -362,14 +362,18 @@ export function createSessionFromRun(
   // share a single `pending` slot — back-to-back emits would clobber each
   // other since the consumer hasn't had a chance to await again yet.
   const buffer: ModelSessionEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
+  const resolvers: Array<{
+    resolve: (item: IteratorResult<ModelSessionEvent>) => void;
+    reject: (error: unknown) => void;
+  }> = [];
   let closed = false;
+  let streamFailure: unknown;
+  let failed = false;
 
   const emit = (msg: ModelSessionEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
-      const r = resolvers.shift()!;
-      r({ value: msg, done: false });
+      resolvers.shift()!.resolve({ value: msg, done: false });
     } else {
       buffer.push(msg);
     }
@@ -382,9 +386,10 @@ export function createSessionFromRun(
           if (buffer.length > 0) {
             return { value: buffer.shift()!, done: false };
           }
+          if (failed) throw streamFailure;
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
-            resolvers.push(resolve);
+          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve, reject) => {
+            resolvers.push({ resolve, reject });
           });
         },
       };
@@ -397,6 +402,9 @@ export function createSessionFromRun(
     providerId,
     model: params.model,
     events,
+    get isClosed(): boolean {
+      return closed;
+    },
     get appliedReasoningEffort(): string | undefined {
       return appliedReasoningEffort;
     },
@@ -430,12 +438,23 @@ export function createSessionFromRun(
       // that fact into the same boundary contract as SDK-backed sessions.
       emit({ type: "model_turn_start", turnId, answers });
       emit({ type: "model_turn_answers", turnId, added: [] });
+      let completed = false;
       try {
         for await (const msg of run(runParams)) {
           emit(msg);
         }
+        completed = true;
+      } catch (err) {
+        // An exception is an unfinished provider stream, not a terminal result.
+        // End the iterable without model_turn_end so AgentSession clears SDK
+        // ownership before it fails the caller.
+        failed = true;
+        streamFailure = err;
+        closed = true;
+        while (resolvers.length > 0) resolvers.shift()!.reject(err);
+        throw err;
       } finally {
-        emit({ type: "model_turn_end", turnId, answers });
+        if (completed) emit({ type: "model_turn_end", turnId, answers });
       }
     },
     async fork(): Promise<ModelSessionFork> {
@@ -446,8 +465,7 @@ export function createSessionFromRun(
       if (closed) return;
       closed = true;
       while (resolvers.length > 0) {
-        const r = resolvers.shift()!;
-        r({ value: undefined as never, done: true });
+        resolvers.shift()!.resolve({ value: undefined as never, done: true });
       }
     },
   };
