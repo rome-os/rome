@@ -247,12 +247,13 @@ const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 /**
  * A session preview as text. The client sometimes stores the preview as a
  * BLOB, often zstd-compressed, and the bridge passes it through as raw bytes,
- * which JSON renders as an object of byte values. An unreadable preview
- * reads as empty rather than failing the whole session list.
+ * which JSON renders as an object of byte values. A missing (null) or
+ * unreadable preview reads as empty rather than failing the whole list.
  */
 const previewSchema = z
-  .union([z.string(), z.record(z.string(), z.number().int().min(0).max(255))])
+  .union([z.string(), z.null(), z.record(z.string(), z.number().int().min(0).max(255))])
   .transform((value) => {
+    if (value === null) return "";
     if (typeof value === "string") return value;
     const bytes = Buffer.from(
       Object.keys(value)
@@ -1189,7 +1190,7 @@ export class WechatUserReader {
     window: { since?: Date; until?: Date },
     limit: number,
     signal?: AbortSignal,
-  ): AsyncGenerator<BridgeMessage[]> {
+  ): AsyncGenerator<z.infer<typeof bridgePageSchema>> {
     let cursor: string | null = null;
     for (;;) {
       let page: z.infer<typeof bridgePageSchema>;
@@ -1206,10 +1207,32 @@ export class WechatUserReader {
         }
         throw error;
       }
-      yield page.messages;
+      yield page;
       if (!page.cursor) return;
       cursor = page.cursor;
     }
+  }
+
+  /**
+   * A chat's newest `limit` messages in a window, oldest first, read through
+   * {@link pages} so long bodies split the read instead of failing it. `more`
+   * says whether older messages remain.
+   */
+  private async newest(
+    conversationId: string,
+    window: { since?: Date; until?: Date },
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<{ messages: BridgeMessage[]; more: boolean }> {
+    const messages: BridgeMessage[] = [];
+    let more = false;
+    for await (const page of this.pages(conversationId, window, limit, signal)) {
+      messages.unshift(...page.messages);
+      more = page.cursor !== null;
+      if (messages.length >= limit) break;
+    }
+    if (messages.length > limit) more = true;
+    return { messages: messages.slice(-limit), more };
   }
 
   /** Every message a chat holds in the second starting at `at`, oldest first. */
@@ -1225,7 +1248,7 @@ export class WechatUserReader {
       TIES_PAGE,
       signal,
     )) {
-      messages.unshift(...page);
+      messages.unshift(...page.messages);
     }
     return messages;
   }
@@ -1247,7 +1270,7 @@ export class WechatUserReader {
     const since = input.since ? { since: input.since } : {};
     if (!input.includeBoundaryTies) {
       const window = { ...since, ...(input.before ? { until: input.before } : {}) };
-      return (await this.page(conversationId, { ...window, limit: input.limit }, signal)).messages;
+      return (await this.newest(conversationId, window, input.limit, signal)).messages;
     }
 
     const sinceSecond = input.since ? toUnixSeconds(input.since.toISOString()) : null;
@@ -1255,15 +1278,11 @@ export class WechatUserReader {
     let older: BridgeMessage[] = [];
     if (beforeSecond === null || sinceSecond === null || beforeSecond - 1 >= sinceSecond) {
       const until = beforeSecond === null ? {} : { until: new Date((beforeSecond - 1) * 1000) };
-      const page = await this.page(
-        conversationId,
-        { ...since, ...until, limit: input.limit },
-        signal,
-      );
+      const page = await this.newest(conversationId, { ...since, ...until }, input.limit, signal);
       older = page.messages;
       const edge = older[0];
       // With older history left, the oldest second may continue past the page.
-      if (edge && page.cursor) {
+      if (edge && page.more) {
         const edgeSecond = toUnixSeconds(edge.createdAt);
         older = [
           ...(await this.second(conversationId, new Date(edgeSecond * 1000), signal)),
@@ -1315,7 +1334,7 @@ export class WechatUserReader {
   async count(conversationId: string, signal?: AbortSignal): Promise<number> {
     let total = 0;
     for await (const page of this.pages(conversationId, {}, COUNT_PAGE, signal)) {
-      total += page.length;
+      total += page.messages.length;
     }
     return total;
   }

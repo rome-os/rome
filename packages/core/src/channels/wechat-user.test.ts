@@ -965,6 +965,40 @@ describe("WechatUserReader", () => {
     expect(conversations.map((c) => c.lastMessagePreview)).toEqual(["squeezed", "plain bytes"]);
   });
 
+  it("reads a chat with no stored preview as empty", async () => {
+    const { reader } = await readerWith(() =>
+      envelope([{ ...SESSIONS[1], lastMessage: { ...SESSIONS[1]!.lastMessage, content: null } }]),
+    );
+    const conversations = await reader.conversations({ limit: 5 });
+    expect(conversations).toEqual([
+      expect.objectContaining({ id: "wxid_friend", lastMessagePreview: "" }),
+    ]);
+  });
+
+  it("splits a window too large to capture into smaller pages", async () => {
+    const history = Array.from({ length: 400 }, (_, i) =>
+      message(i, new Date(Date.parse("2026-10-01T00:00:00Z") + i * 1000).toISOString()),
+    );
+    const query = queryOver(history, 60);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
+    const plain = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    expect(plain).toHaveLength(300);
+    expect(plain[0]!.text).toBe("line 100");
+    expect(plain.at(-1)!.text).toBe("line 399");
+    const paged = await reader.messages({
+      conversationId: "wxid_friend",
+      before: new Date("2026-10-01T00:05:00Z"),
+      limit: 250,
+      includeBoundaryTies: true,
+    });
+    // 250 strictly older messages, plus the one in the cursor second.
+    expect(paged).toHaveLength(251);
+    expect(paged[0]!.text).toBe("line 50");
+    expect(paged.at(-1)!.text).toBe("line 300");
+  });
+
   it("runs one bridge process at a time", async () => {
     let running = 0;
     let most = 0;
