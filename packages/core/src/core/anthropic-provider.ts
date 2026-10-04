@@ -1,4 +1,4 @@
-import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
@@ -580,10 +580,11 @@ export class AnthropicProvider implements ModelProvider {
     // The SDK is working: a turn is open, or a sent message is still queued.
     // A turn the SDK starts by itself counts as much as one Rome asked for.
     const running = () => projection.isOpen || unreadSends.size > 0;
-    // Messages the SDK never picked up that Rome answers itself, in send
-    // order. Minted ids (forks, titles) are included: those callers also need
-    // a terminal, and their turn events never reach a client.
-    const settleUnread = (): string[] => {
+    // A documented zeroed/delivery-failure SDK result names no send and the
+    // SDK answers none afterwards. It is the one exceptional result that
+    // settles every queued send at once. Stop is not that: `Query.interrupt()`
+    // leaves the Query alive and its following result supplies the correlation.
+    const settleUnreadAfterUnanswerableResult = (): string[] => {
       const unread = [...unreadSends];
       unreadSends.clear();
       for (const id of unread) mintedIds.delete(id);
@@ -617,40 +618,6 @@ export class AnthropicProvider implements ModelProvider {
       let pendingTextBlockId: string | undefined;
       let partialText = "";
       let partialTextBlockId: string | undefined;
-      // Rome ends what the SDK didn't finish (an interrupt, or a stream error
-      // it classifies). The open SDK turn, if any, closes with `terminal(true)`
-      // after its held text; it names only what the SDK's echo named. Messages
-      // the SDK never picked up get no reply from it: one made-up turn names
-      // exactly those and carries `terminal(false)`, with a warning. Nothing
-      // else is made up: no turn naming nothing, no repeat of a finished turn.
-      const endUnfinished = function* (
-        terminal: (forOpenTurn: boolean) => AgentMessage,
-      ): Generator<ModelSessionEvent, boolean> {
-        let answered = false;
-        if (projection.isOpen) {
-          answered = true;
-          const closing = terminal(true);
-          if (!params.outputSchema && pendingText !== null) {
-            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-            pendingText = null;
-          }
-          if (!params.outputSchema && partialText)
-            yield textBlock(partialText, "final", partialTextBlockId);
-          yield closing;
-          yield* projection.close();
-        }
-        const unread = settleUnread();
-        if (unread.length === 0) return answered;
-        log.warn("ending messages the Claude SDK never picked up", { inputIds: unread });
-        yield* projection.openForTerminal(unread);
-        yield terminal(false);
-        yield* projection.close();
-        return true;
-      };
-      const interrupted = (forOpenTurn: boolean): AgentMessage =>
-        params.outputSchema
-          ? { type: "error", error: "Claude structured-output turn was interrupted" }
-          : { type: "result", content: forOpenTurn ? partialText || pendingText || "" : "" };
       // Block identity is `<API message id>:<content block index>`. The stream
       // reports the index on each `content_block_*` event; the SDK then sends
       // each completed block as its own assistant message, in index order, so
@@ -822,16 +789,13 @@ export class AnthropicProvider implements ModelProvider {
               yield textBlock(pendingText, "final", pendingTextBlockId);
               pendingText = null;
             }
-            if (abortController.signal.aborted) await queryProcess.abort();
-            const contextUsage = abortController.signal.aborted
-              ? undefined
-              : await readSdkContextUsage(q);
+            const contextUsage = await readSdkContextUsage(q);
             const accounting = buildAnthropicAccounting(
               message,
               effectiveModel,
               providerId,
               contextUsage,
-              abortController.signal.aborted,
+              false,
             );
             const resultData = {
               subtype: message.subtype,
@@ -933,7 +897,7 @@ export class AnthropicProvider implements ModelProvider {
               projection.isFrameless &&
               message.subtype !== "success" &&
               message.origin?.kind !== "task-notification"
-                ? settleUnread()
+                ? settleUnreadAfterUnanswerableResult()
                 : [];
             if (settles.length > 0) {
               log.warn("a Claude SDK result that names no message settles the ones still waiting", {
@@ -944,52 +908,28 @@ export class AnthropicProvider implements ModelProvider {
             yield* projection.end(message, settles);
           }
         }
-        if (abortController.signal.aborted && running()) {
-          await queryProcess.abort();
-          yield* endUnfinished(interrupted);
+        // A Query that ends without its result has lost the SDK's turn
+        // correlation. Do not invent one: the session layer fails any caller
+        // still waiting, while this warning preserves the process-death clue.
+        if (running()) {
+          log.warn("Claude SDK stream ended without a result", {
+            openTurn: projection.isOpen,
+            unreadInputIds: [...unreadSends],
+          });
         }
       } catch (err) {
-        // The stream threw without delivering a terminal `result` (raw abort,
-        // SDK panic, …). Flush any held text as the closing answer before the
-        // error propagates, so a completed block the consumer already previewed
-        // isn't silently dropped. Done in `catch` rather than `finally` on
-        // purpose: a `yield` in `finally` re-suspends the generator when the
-        // consumer abandons iteration via `.return()`, swallowing the close.
-        if (abortController.signal.aborted && err instanceof AbortError) {
-          await queryProcess.abort();
-          yield* endUnfinished(interrupted);
-          return;
-        }
-        // A 401 can also surface as a thrown stream error rather than a result
-        // with `subtype: error`. Convert it to a classified terminal and persist
-        // the marker instead of rethrowing a raw 401 up the events loop.
-        if (isAnthropicUsageLimitError(err)) {
-          onQuotaExhausted?.();
-          const error = err instanceof Error ? err.message : String(err);
-          if (!(yield* endUnfinished(() => ({ type: "error", error, code: "usage_limit" })))) {
-            log.warn("Claude usage-limit error with no turn or message waiting", { error });
-          }
-          return;
-        }
+        // A thrown stream error has no SDK result and therefore no trustworthy
+        // turn correlation. Let AgentSession fail its waiting caller instead
+        // of projecting a blank success or a made-up model turn.
+        if (isAnthropicUsageLimitError(err)) onQuotaExhausted?.();
         if (isAnthropicAuthRevokedError(err)) {
           await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
-          const error = err instanceof Error ? err.message : String(err);
-          const ended = yield* endUnfinished(() => ({
-            type: "error",
-            error,
-            ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
-          }));
-          if (!ended)
-            log.warn("Claude credential error with no turn or message waiting", { error });
-          return;
         }
-        // Any other error ends the stream: an open turn gets no end, and the
-        // stream's end closes it (see ModelTurnEvent). Flush held text into it.
-        if (projection.isOpen && !params.outputSchema && pendingText !== null) {
-          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-        }
-        if (projection.isOpen && !params.outputSchema && partialText)
-          yield textBlock(partialText, "final", partialTextBlockId);
+        log.warn("Claude SDK stream failed without a result", {
+          error: err instanceof Error ? err.message : String(err),
+          openTurn: projection.isOpen,
+          unreadInputIds: [...unreadSends],
+        });
         throw err;
       } finally {
         closed = true;
@@ -1002,7 +942,7 @@ export class AnthropicProvider implements ModelProvider {
       // Claude fixes effort at open and ignores a per-turn effort.
       appliedReasoningEffort: effort,
       get isClosed(): boolean {
-        return closed || abortController.signal.aborted;
+        return closed;
       },
       get providerThreadId(): string | undefined {
         return establishedThreadId;
@@ -1012,7 +952,7 @@ export class AnthropicProvider implements ModelProvider {
       },
       events,
       async sendUserInput(input: ModelUserInput): Promise<void> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("ModelSession is closed");
         }
         activeTurnLastAssistantMessageId = undefined;
@@ -1051,7 +991,7 @@ export class AnthropicProvider implements ModelProvider {
         inputQueue.push(sdkMsg);
       },
       async steerUserInput(input: ModelUserInput): Promise<"accepted" | "deferred"> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("ModelSession is closed");
         }
         // Fire-and-forget: the SDK folds it into the running turn at the next
@@ -1072,7 +1012,7 @@ export class AnthropicProvider implements ModelProvider {
         return "accepted";
       },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("Cannot fork a closed ModelSession");
         }
         if (running()) throw new Error("Cannot fork while source session is running");
@@ -1111,14 +1051,18 @@ export class AnthropicProvider implements ModelProvider {
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });
-        await queryProcess.abort();
-        inputQueue.end();
+        await q.interrupt();
       },
       async close(): Promise<void> {
         if (queryDisposed) return;
         queryDisposed = true;
         try {
           inputQueue.end();
+        } catch {
+          // ignore
+        }
+        try {
+          await queryProcess.abort();
         } catch {
           // ignore
         }

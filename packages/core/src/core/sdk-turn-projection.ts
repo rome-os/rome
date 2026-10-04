@@ -79,26 +79,6 @@ export class SdkTurnProjection {
     return events;
   }
 
-  /**
-   * Open a turn Rome makes up to answer `inputs`: messages the SDK never
-   * picked up when Rome ended the session (an interrupt, or a stream error it
-   * classifies). `close()` it after its terminal. Never opens a turn naming
-   * nothing, which would read as a turn the SDK started by itself.
-   */
-  openForTerminal(inputs: string[]): ModelTurnEvent[] {
-    if (this.current || inputs.length === 0) return [];
-    this.current = { turnId: randomUUID(), answers: new Set(inputs), frameless: false };
-    return [{ type: "model_turn_start", turnId: this.current.turnId, answers: [...inputs] }];
-  }
-
-  /** End the open turn with the inputs its echoes named so far. */
-  close(): ModelTurnEvent[] {
-    const current = this.current;
-    if (!current) return [];
-    this.current = undefined;
-    return [{ type: "model_turn_end", turnId: current.turnId, answers: [...current.answers] }];
-  }
-
   private add(ids: string[]): ModelTurnEvent[] {
     const current = this.current;
     if (!current) return [];

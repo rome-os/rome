@@ -14,8 +14,6 @@ import type {
 } from "./agent-runner.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../lib/anthropic-compatible-providers.js";
 
-const { AbortError } = claudeAgentSdkModule;
-
 const {
   queryMock,
   createSdkMcpServerMock,
@@ -183,6 +181,7 @@ describe("AnthropicProvider", () => {
         return {
           [Symbol.asyncIterator]: () =>
             script(async () => (await inputs.next()).value as { uuid: string }),
+          interrupt: rs.fn(async () => {}),
           close: rs.fn(),
         };
       });
@@ -505,219 +504,314 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
-    it("gives an interrupted fork or title send its terminal, though Rome minted its id", async () => {
-      let controller!: AbortController;
-      const sends: { uuid: string }[] = [];
-      queryMock.mockImplementation(({ prompt, options }) => {
-        controller = options.abortController;
-        return {
-          async *[Symbol.asyncIterator]() {
-            sends.push((await prompt[Symbol.asyncIterator]().next()).value);
-            if (!controller.signal.aborted) {
-              await new Promise<void>((resolve) =>
-                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-              );
-            }
-            throw new AbortError("Cancelled");
-          },
-          close: rs.fn(),
-        };
+    function interruptResult(ids: string[]) {
+      return {
+        type: "result",
+        subtype: "error_during_execution",
+        terminal_reason: "aborted_streaming",
+        result: "",
+        num_turns: 1,
+        total_cost_usd: 0,
+        duration_ms: 1,
+        errors: ["interrupted"],
+        ...(ids.length ? { user_message_uuid: ids.at(-1), user_message_uuids: ids } : {}),
+      };
+    }
+
+    it("keeps a send that races Stop before SDK acceptance for its next SDK turn", async () => {
+      let releaseInterrupt!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
       });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          await interrupted;
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const input = (await inputs.next()).value;
+          yield { ...input, isReplay: true };
+          yield say("after Stop", input.uuid);
+          yield result("after Stop", [input.uuid], "human");
+        },
+      };
+      queryMock.mockReturnValue(q);
       const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Name this conversation" });
-      const reading = read(session);
-      await new Promise((resolve) => setImmediate(resolve));
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 1);
       await session.interrupt("user-stop");
-      const minted = sends[0]!.uuid;
-      expect(await reading).toEqual([`start [${minted}]`, "result ", `end [${minted}]`]);
-      await session.close();
-    });
-
-    it("reports no end when the stream stops mid-turn", async () => {
-      scripted(async function* (sent) {
-        const prompt = await sent();
-        yield { ...prompt, isReplay: true };
-        yield say("1 2 3", prompt.uuid);
-      });
-      const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Count", inputId: a });
-      const seen = await read(session);
-      expect(seen.filter((line) => line.startsWith("end"))).toEqual([]);
-      expect(seen.slice(0, 3)).toEqual(["start []", "consumed A", "answers +[A]"]);
-      await session.close();
-    });
-
-    it("counts a turn the SDK starts by itself as running, so a fork waits for it", async () => {
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      scripted(async function* (sent) {
-        const prompt = await sent();
-        yield { ...prompt, isReplay: true };
-        yield say("DONE", prompt.uuid);
-        yield result("DONE", [prompt.uuid], "human");
-        yield notification;
-        yield say("Checking the task.");
-        await gate;
-        yield result("Checking the task.", [], "task-notification");
-      });
-      const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Start it", inputId: a });
-      const events = session.events[Symbol.asyncIterator]();
-      let starts = 0;
-      while (starts < 2) {
-        const next = await events.next();
-        if (next.value?.type === "model_turn_start") starts++;
-      }
-      await expect(session.fork({ sessionId: "fork-1", mode: "thread" })).rejects.toThrow(
-        "Cannot fork while source session is running",
-      );
-      release();
-      for (;;) {
-        const next = await events.next();
-        if (next.done || next.value.type === "model_turn_end") break;
-      }
-      await expect(session.fork({ sessionId: "fork-2", mode: "thread" })).resolves.toBeDefined();
-      await session.close();
-    });
-
-    it("ends an interrupted turn the SDK started with a terminal, inside the turn", async () => {
-      let controller!: AbortController;
-      let started!: () => void;
-      const taskTurnStarted = new Promise<void>((resolve) => {
-        started = resolve;
-      });
-      queryMock.mockImplementation(({ prompt, options }) => {
-        controller = options.abortController;
-        return {
-          async *[Symbol.asyncIterator]() {
-            const inputs = prompt[Symbol.asyncIterator]();
-            const first = (await inputs.next()).value;
-            yield { ...first, isReplay: true };
-            yield say("DONE", first.uuid);
-            yield result("DONE", [first.uuid], "human");
-            yield notification;
-            yield say("Checking the task.");
-            started();
-            if (!controller.signal.aborted) {
-              await new Promise<void>((resolve) =>
-                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-              );
-            }
-            throw new AbortError("Cancelled");
-          },
-          close: rs.fn(),
-        };
-      });
-      const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Start it", inputId: a });
-      const reading = read(session);
-      await taskTurnStarted;
-      await session.interrupt("user-stop");
-      const seen = await reading;
-      expect(seen.slice(-4)).toEqual([
-        "start []",
-        "text Checking the task.",
-        "result Checking the task.",
-        "end []",
-      ]);
-      expect(seen.filter((line) => line.startsWith("end"))).toEqual(["end [A]", "end []"]);
-      await session.close();
-    });
-
-    it("answers a waiting message with a classified stream error, and nothing else", async () => {
-      mockThrowingQuery(new Error("OAuth token revoked · Please run /login"));
-      const session = await new AnthropicProvider({ env: { PATH: "/usr/bin" } }).openSession(
-        buildParams(),
-      );
-      await session.sendUserInput({ text: "Hello", inputId: a });
-      expect(await read(session)).toEqual([
-        "start [A]",
-        "error OAuth token revoked · Please run /login",
-        "end [A]",
-      ]);
-      await session.close();
-
-      // With nothing waiting, nothing is made up (the error is logged).
-      mockThrowingQuery(new Error("OAuth token revoked · Please run /login"));
-      const idle = await new AnthropicProvider({ env: { PATH: "/usr/bin" } }).openSession(
-        buildParams(),
-      );
-      expect(await read(idle)).toEqual([]);
-      await idle.close();
-    });
-
-    it("on interrupt, answers only the message the SDK never picked up, not the finished turn", async () => {
-      let controller!: AbortController;
-      let resultSeen!: () => void;
-      const afterResult = new Promise<void>((resolve) => {
-        resultSeen = resolve;
-      });
-      queryMock.mockImplementation(({ prompt, options }) => {
-        controller = options.abortController;
-        return {
-          async *[Symbol.asyncIterator]() {
-            const inputs = prompt[Symbol.asyncIterator]();
-            const first = (await inputs.next()).value;
-            yield { ...first, isReplay: true };
-            yield say("Done.", first.uuid);
-            await inputs.next(); // the follow-up, never picked up
-            if (!controller.signal.aborted) {
-              await new Promise<void>((resolve) =>
-                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-              );
-            }
-            // A real result arrives after the abort; then the stream ends.
-            yield result("Done.", [first.uuid], "human");
-            resultSeen();
-          },
-          close: rs.fn(),
-        };
-      });
-      const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Go", inputId: a });
-      const reading = read(session);
-      await session.steerUserInput!({ text: "Then this", inputId: s });
-      await new Promise((resolve) => setImmediate(resolve));
-      await session.interrupt("user-stop");
-      await afterResult;
+      expect(q.interrupt).toHaveBeenCalledOnce();
       expect(await reading).toEqual([
         "start []",
         "consumed A",
         "answers +[A]",
-        "text Done.",
-        "result Done.",
+        "text after Stop",
+        "result after Stop",
         "end [A]",
-        "start [S]",
-        "result ",
+      ]);
+      await session.close();
+    });
+
+    it.each([
+      { label: "cold", params: buildParams() },
+      {
+        label: "warm",
+        params: buildParams({ isNewSession: false, providerThreadId: "sdk-thread" }),
+      },
+    ])("uses the SDK result when Stop arrives before replay in a $label session", async ({
+      params,
+    }) => {
+      let releaseInterrupt!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const input = (await inputs.next()).value;
+          await interrupted;
+          yield { ...input, isReplay: true };
+          yield interruptResult([input.uuid]);
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(params);
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      await session.interrupt("user-stop");
+      expect(q.interrupt).toHaveBeenCalledOnce();
+      expect(await reading).toEqual([
+        "start []",
+        "consumed A",
+        "error interrupted",
+        "answers +[A]",
+        "end [A]",
+      ]);
+      await session.close();
+    });
+
+    it("uses the SDK result when Stop arrives after replay but before its first frame", async () => {
+      let releaseInterrupt!: () => void;
+      let replayed!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const replay = new Promise<void>((resolve) => {
+        replayed = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const input = (await inputs.next()).value;
+          yield { ...input, isReplay: true };
+          replayed();
+          await interrupted;
+          yield interruptResult([input.uuid]);
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 1);
+      await replay;
+      await session.interrupt("user-stop");
+      expect(await reading).toEqual([
+        "start []",
+        "consumed A",
+        "error interrupted",
+        "answers +[A]",
+        "end [A]",
+      ]);
+      await session.close();
+    });
+
+    it("keeps B queued through a mid-stream Stop and lets the SDK run it", async () => {
+      let releaseInterrupt!: () => void;
+      let streaming!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const streamStarted = new Promise<void>((resolve) => {
+        streaming = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const first = (await inputs.next()).value;
+          yield { ...first, isReplay: true };
+          yield say("working", first.uuid);
+          streaming();
+          await interrupted;
+          yield interruptResult([first.uuid]);
+          const second = (await inputs.next()).value;
+          yield { ...second, isReplay: true };
+          yield say("B completed", second.uuid);
+          yield result("B completed", [second.uuid], "human");
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 2);
+      await streamStarted;
+      await session.steerUserInput!({ text: "B", inputId: s });
+      await session.interrupt("user-stop");
+      expect(await reading).toEqual([
+        "start []",
+        "consumed A",
+        "answers +[A]",
+        "text working",
+        "error interrupted",
+        "end [A]",
+        "start []",
+        "consumed S",
+        "answers +[S]",
+        "text B completed",
+        "result B completed",
         "end [S]",
       ]);
       await session.close();
     });
 
-    it("on interrupt before the SDK reads anything, answers that message alone", async () => {
-      let controller!: AbortController;
-      queryMock.mockImplementation(({ options }) => {
-        controller = options.abortController;
-        return {
-          async *[Symbol.asyncIterator]() {
-            if (!controller.signal.aborted) {
-              await new Promise<void>((resolve) =>
-                controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-              );
-            }
-            throw new AbortError("Cancelled");
-          },
-          close: rs.fn(),
-        };
+    it("uses the SDK error result when Stop interrupts a tool", async () => {
+      let releaseInterrupt!: () => void;
+      let toolStarted!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
       });
+      const started = new Promise<void>((resolve) => {
+        toolStarted = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const input = (await inputs.next()).value;
+          yield { ...input, isReplay: true };
+          yield {
+            type: "assistant",
+            uuid: "assistant-tool",
+            session_id: "sdk-thread",
+            parent_tool_use_id: null,
+            user_message_uuid: input.uuid,
+            message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: {} }] },
+          };
+          toolStarted();
+          await interrupted;
+          yield interruptResult([input.uuid]);
+        },
+      };
+      queryMock.mockReturnValue(q);
       const session = await new AnthropicProvider().openSession(buildParams());
-      await session.sendUserInput({ text: "Go", inputId: a });
-      const reading = read(session);
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 1);
+      await started;
+      await session.interrupt("user-stop");
+      const seen = await reading;
+      expect(seen.slice(-3)).toEqual(["error interrupted", "answers +[A]", "end [A]"]);
+      await session.close();
+    });
+
+    it("settles a folded S from the SDK result even when Stop follows its replay", async () => {
+      let releaseInterrupt!: () => void;
+      let steerReplayed!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const replayed = new Promise<void>((resolve) => {
+        steerReplayed = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const first = (await inputs.next()).value;
+          yield { ...first, isReplay: true };
+          yield {
+            type: "assistant",
+            uuid: "assistant-tool",
+            session_id: "sdk-thread",
+            parent_tool_use_id: null,
+            user_message_uuid: first.uuid,
+            message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: {} }] },
+          };
+          const steer = (await inputs.next()).value;
+          yield { ...steer, isReplay: true };
+          steerReplayed();
+          await interrupted;
+          yield interruptResult([first.uuid, steer.uuid]);
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 1);
+      await session.steerUserInput!({ text: "S", inputId: s });
+      await replayed;
+      await session.interrupt("user-stop");
+      const seen = await reading;
+      expect(seen).toContain("answers +[S]");
+      expect(seen.at(-1)).toBe("end [A,S]");
+      await session.close();
+    });
+
+    it("accepts the next message after Stop in the same SDK Query", async () => {
+      let releaseInterrupt!: () => void;
+      let interruptedTurnEnded!: () => void;
+      const interrupted = new Promise<void>((resolve) => {
+        releaseInterrupt = resolve;
+      });
+      const ended = new Promise<void>((resolve) => {
+        interruptedTurnEnded = resolve;
+      });
+      const q = {
+        interrupt: rs.fn(async () => releaseInterrupt()),
+        close: rs.fn(),
+        async *[Symbol.asyncIterator]() {
+          const inputs = queryMock.mock.calls[0]![0].prompt[Symbol.asyncIterator]();
+          const first = (await inputs.next()).value;
+          yield { ...first, isReplay: true };
+          await interrupted;
+          yield interruptResult([first.uuid]);
+          interruptedTurnEnded();
+          const next = (await inputs.next()).value;
+          yield { ...next, isReplay: true };
+          yield say("next", next.uuid);
+          yield result("next", [next.uuid], "human");
+        },
+      };
+      queryMock.mockReturnValue(q);
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const reading = read(session, 2);
       await new Promise((resolve) => setImmediate(resolve));
       await session.interrupt("user-stop");
-      expect(await reading).toEqual(["start [A]", "result ", "end [A]"]);
+      await ended;
+      await session.sendUserInput({ text: "S", inputId: s });
+      expect(await reading).toEqual(expect.arrayContaining(["end [A]", "result next", "end [S]"]));
+      await session.close();
+    });
+
+    it("does not invent a model turn when the process dies without a result", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield { ...prompt, isReplay: true };
+        yield say("partial", prompt.uuid);
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "A", inputId: a });
+      const seen = await read(session);
+      expect(seen).toEqual(["start []", "consumed A", "answers +[A]", "text partial"]);
+      expect(session.isClosed).toBe(true);
       await session.close();
     });
 
@@ -926,49 +1020,15 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
-  it.each([
-    "startup",
-    "partial",
-    "completed-block",
-  ])("aborts the Query during %s and preserves received output", async (phase) => {
+  it("reserves process abort and close for session close", async () => {
     let controller!: AbortController;
-    let begin!: () => void;
-    const begun = new Promise<void>((resolve) => {
-      begin = resolve;
-    });
     const q = {
-      interrupt: rs.fn(),
+      interrupt: rs.fn(async () => {}),
       close: rs.fn(),
       async *[Symbol.asyncIterator]() {
-        if (phase === "partial") {
-          yield {
-            type: "stream_event",
-            parent_tool_use_id: null,
-            user_message_uuid: SENT,
-            event: {
-              type: "content_block_delta",
-              delta: { type: "text_delta", text: "Saved work" },
-            },
-          };
-        }
-        if (phase === "completed-block") {
-          yield {
-            type: "assistant",
-            uuid: "assistant-before-stop",
-            session_id: "persisted-thread",
-            parent_tool_use_id: null,
-            user_message_uuid: SENT,
-            message: { content: [{ type: "text", text: "Saved work" }] },
-          };
-        }
-        begin();
-        if (!controller.signal.aborted) {
-          await new Promise<void>((resolve) =>
-            controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-          );
-        }
-        if (phase === "completed-block") return;
-        throw new AbortError("Cancelled");
+        await new Promise<void>((resolve) =>
+          controller.signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
       },
     };
     queryMock.mockImplementation(({ options }) => {
@@ -976,111 +1036,13 @@ describe("AnthropicProvider", () => {
       return q;
     });
     const session = await new AnthropicProvider().openSession(buildParams());
-    await session.sendUserInput({ text: "work", inputId: SENT });
-    const collected = collectEvents(session);
-    await begun;
     await session.interrupt("user-stop");
-    const messages = await collected;
-    expect(q.interrupt).not.toHaveBeenCalled();
+    expect(q.interrupt).toHaveBeenCalledOnce();
+    expect(controller.signal.aborted).toBe(false);
     expect(q.close).not.toHaveBeenCalled();
+    await session.close();
     expect(controller.signal.aborted).toBe(true);
-    expect(session.isClosed).toBe(true);
-    expect(messages.filter((message) => message.type === "result")).toEqual([
-      { type: "result", content: phase === "startup" ? "" : "Saved work" },
-    ]);
-    if (phase !== "startup") {
-      expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
-    }
-    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
-    await expect(session.sendUserInput({ text: "next" })).rejects.toThrow("closed");
-    await session.close();
-  });
-
-  it.each([
-    { label: "the current assistant checkpoint", interruptedCheckpoint: "assistant-current" },
-    { label: "no checkpoint", interruptedCheckpoint: undefined },
-  ])("does not publish $label when interrupted after a successful turn", async ({
-    interruptedCheckpoint,
-  }) => {
-    let controller!: AbortController;
-    let beginInterruptibleTurn!: () => void;
-    const interruptibleTurnBegun = new Promise<void>((resolve) => {
-      beginInterruptibleTurn = resolve;
-    });
-    queryMock.mockImplementation(({ prompt, options }) => {
-      controller = options.abortController;
-      return {
-        async *[Symbol.asyncIterator]() {
-          const inputs = prompt[Symbol.asyncIterator]();
-          const first = (await inputs.next()).value;
-          yield {
-            type: "assistant",
-            uuid: "assistant-previous",
-            session_id: "persisted-thread",
-            parent_tool_use_id: null,
-            user_message_uuid: first.uuid,
-            message: { content: [{ type: "text", text: "Previous turn" }] },
-          };
-          yield {
-            type: "result",
-            subtype: "success",
-            result: "Previous turn",
-            num_turns: 1,
-            stop_reason: "end_turn",
-            total_cost_usd: 0,
-            duration_ms: 1,
-          };
-
-          const second = (await inputs.next()).value;
-          if (interruptedCheckpoint) {
-            yield {
-              type: "assistant",
-              uuid: interruptedCheckpoint,
-              session_id: "persisted-thread",
-              parent_tool_use_id: null,
-              user_message_uuid: second.uuid,
-              message: { content: [{ type: "text", text: "Current turn" }] },
-            };
-          }
-          beginInterruptibleTurn();
-          if (!controller.signal.aborted) {
-            await new Promise<void>((resolve) =>
-              controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-            );
-          }
-          throw new AbortError("Cancelled");
-        },
-        close: rs.fn(),
-      };
-    });
-
-    const session = await new AnthropicProvider().openSession(buildParams());
-    const events = withoutTurnEvents(session.events)[Symbol.asyncIterator]();
-    await session.sendUserInput({ text: "first", inputId: "input-first" });
-    expect((await events.next()).value).toMatchObject({
-      type: "text",
-      content: "Previous turn",
-    });
-    expect((await events.next()).value).toMatchObject({ type: "result", content: "Previous turn" });
-    expect(session.lastCompletedTurnCheckpoint).toBe("assistant-previous");
-
-    await session.sendUserInput({ text: "second", inputId: "input-second" });
-    const remaining = (async () => {
-      const messages: AgentMessage[] = [];
-      for (;;) {
-        const next = await events.next();
-        if (next.done) return messages;
-        if (!isModelTurnEvent(next.value)) messages.push(next.value);
-      }
-    })();
-    await interruptibleTurnBegun;
-    await session.interrupt("user-stop");
-    expect(await remaining).toContainEqual({
-      type: "result",
-      content: interruptedCheckpoint ? "Current turn" : "",
-    });
-    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
-    await session.close();
+    expect(q.close).toHaveBeenCalledOnce();
   });
 
   it("projects top-level TodoWrite snapshots while preserving generic tool events", async () => {
@@ -1438,22 +1400,14 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
-    it("converts thrown invalid-credential stream errors into auth_revoked terminals", async () => {
+    it("persists a thrown invalid credential error without inventing an SDK turn", async () => {
       mockThrowingQuery(new Error("OAuth token revoked · Please run /login"));
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
       const session = await provider.openSession(buildParams());
       await session.sendUserInput({ text: "Hello", inputId: SENT });
 
-      const messages = await collectEvents(session);
-
+      await expect(collectEvents(session)).rejects.toThrow("OAuth token revoked");
       expect(markAnthropicAuthRevokedMock).toHaveBeenCalledTimes(1);
-      expect(messages).toEqual([
-        {
-          type: "error",
-          error: "OAuth token revoked · Please run /login",
-          code: "auth_revoked",
-        },
-      ]);
 
       await session.close();
     });
