@@ -590,7 +590,7 @@ export interface SseWriteQueue {
 /**
  * Serializes SSE writes while retaining only the latest pending replacement
  * for a coalesced key. A slow reader can therefore hold one in-flight and one
- * pending command preview rather than every intermediate snapshot.
+ * pending preview rather than every intermediate snapshot.
  */
 export function createSseWriteQueue(
   write: (event: WebchatSseEvent) => Promise<void>,
@@ -2864,12 +2864,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           if (message.type === "text_delta") {
             assistantText += message.content;
             if (message.blockId) assistantBlockId = message.blockId;
-            write("assistant_text", {
-              turnId,
-              ...(assistantBlockId ? { blockId: assistantBlockId } : {}),
-              blockIx: assistantBlockIx,
-              text: assistantText,
-            });
+            write(
+              "assistant_text",
+              {
+                turnId,
+                ...(assistantBlockId ? { blockId: assistantBlockId } : {}),
+                blockIx: assistantBlockIx,
+                text: assistantText,
+              },
+              "assistant_text",
+            );
             return;
           }
           if (message.type === "text") {
@@ -3427,6 +3431,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   "thinking_text",
                   { turnId, blockId: msg.blockId, text },
                   `thinking:${msg.blockId}`,
+                  `thinking:${msg.blockId}`,
                 );
                 continue;
               }
@@ -3467,6 +3472,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     text: stream.assistantText,
                   },
                   "assistant_text",
+                  "assistant_text",
                 );
                 continue;
               }
@@ -3493,6 +3499,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       blockIx: stream.assistantBlockIx,
                       text: stream.assistantText,
                     },
+                    "assistant_text",
                     "assistant_text",
                   );
                 }

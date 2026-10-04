@@ -51,6 +51,28 @@ describe("SSE write queue", () => {
     await writer.queue;
     expect(written).toEqual(["first", "snapshot-1023", "done"]);
   });
+
+  it("coalesces reasoning previews behind a slow write", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const written: string[] = [];
+    const writer = createSseWriteQueue(async (event) => {
+      written.push(event.data);
+      if (written.length === 1) await firstWrite;
+    });
+
+    writer.enqueue({ event: "thinking_text", data: "first" }, "thinking:block");
+    await Promise.resolve();
+    for (let i = 0; i < 2_048; i += 1) {
+      writer.enqueue({ event: "thinking_text", data: `snapshot-${i}` }, "thinking:block");
+    }
+    writer.enqueue({ event: "done", data: "done" });
+
+    expect(written).toEqual(["first"]);
+    releaseFirst();
+    await writer.queue;
+    expect(written).toEqual(["first", "snapshot-2047", "done"]);
+  });
 });
 
 describe("Webchat API", () => {
