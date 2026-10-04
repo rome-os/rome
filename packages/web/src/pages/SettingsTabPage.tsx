@@ -386,6 +386,7 @@ export default function SettingsPage() {
       {onSection ? (
         <Link
           to="/settings"
+          replace
           className="flex min-h-11 items-center gap-1 self-start text-ui text-primary md:hidden"
         >
           <ChevronLeft className="size-5" aria-hidden />

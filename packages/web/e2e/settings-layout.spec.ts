@@ -129,3 +129,18 @@ test("bare /settings on a phone is the list of sections alone, and Appearance pa
     "/settings/appearance",
   );
 });
+
+test("the phone Settings back link replaces the section history entry", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
+  await page.goto("/settings");
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings\/connections$/);
+  await page.locator("main").getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+
+  // A contextual back action must not leave the section as the next browser
+  // history entry; otherwise the browser's own back immediately reopens it.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/settings$/);
+});

@@ -396,42 +396,46 @@ function ApprovalCard({
             </Collapsible>
           )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2 max-md:items-stretch">
-          {isPending && (
-            <div className="flex gap-2 max-md:*:flex-1">
+        {(isPending || canRetry) && (
+          <div className="flex shrink-0 flex-col items-end gap-2 max-md:items-stretch">
+            {isPending && (
+              <div className="flex gap-2 max-md:*:flex-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAction("reject")}
+                  disabled={acting !== null}
+                >
+                  {acting === "reject"
+                    ? t("approval.actions.pending")
+                    : t("approval.actions.reject")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleAction("approve")}
+                  disabled={acting !== null}
+                >
+                  {acting === "approve"
+                    ? t("approval.actions.pending")
+                    : t("approval.actions.approve")}
+                </Button>
+              </div>
+            )}
+            {canRetry && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => handleAction("reject")}
-                disabled={acting !== null}
+                onClick={handleRetry}
+                disabled={retrying}
               >
-                {acting === "reject" ? t("approval.actions.pending") : t("approval.actions.reject")}
+                {retrying ? t("approval.actions.pending") : t("approval.actions.retry")}
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => handleAction("approve")}
-                disabled={acting !== null}
-              >
-                {acting === "approve"
-                  ? t("approval.actions.pending")
-                  : t("approval.actions.approve")}
-              </Button>
-            </div>
-          )}
-          {canRetry && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleRetry}
-              disabled={retrying}
-            >
-              {retrying ? t("approval.actions.pending") : t("approval.actions.retry")}
-            </Button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </CardShell>
   );

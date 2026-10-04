@@ -61,3 +61,42 @@ it.each([403, 409, 500])("shows approval HTTP %s errors and allows retry", async
   expect(screen.queryByRole("alert")).toBeNull();
   client.clear();
 });
+
+it("does not render an empty action column for a resolved approval", async () => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    return Response.json(
+      url === "/api/approvals"
+        ? [
+            {
+              id: "resolved-approval",
+              type: "custom",
+              status: "approved",
+              requestedBy: "test",
+              description: "Already resolved approval",
+              createdAt: new Date().toISOString(),
+              resolvedAt: new Date().toISOString(),
+              resolvedBy: "test",
+              payload: null,
+              executionError: null,
+              executedAt: null,
+            },
+          ]
+        : [],
+    );
+  });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <ActivityPage />
+    </QueryClientProvider>,
+  );
+
+  const card = (await screen.findByText("Already resolved approval")).closest("article");
+  // On phones this column would still contribute the parent flex gap even
+  // without controls, leaving a blank 12px row after the approval text.
+  expect(card?.querySelector(".shrink-0.flex-col.items-end")).toBeNull();
+  client.clear();
+});
