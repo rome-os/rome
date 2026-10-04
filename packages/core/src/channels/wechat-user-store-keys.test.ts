@@ -6,12 +6,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import {
-  checkStoreKeys,
-  deriveStoreKeys,
-  migrateLegacyStoreKeys,
-  WechatStoreKeysError,
-} from "./wechat-user-store-keys.js";
+import { checkStoreKeys, deriveStoreKeys, WechatStoreKeysError } from "./wechat-user-store-keys.js";
 import { pageKey, STORE_DATABASES, writeStore } from "./wechat-user-store-fixture.js";
 
 const PASSPHRASE = randomBytes(32);
@@ -119,46 +114,5 @@ describe("checkStoreKeys", () => {
     await writeFile(keysFile, JSON.stringify({ dbDir, wxid: "wxid_guardian", keys }));
     await writeStore(dbDir, randomBytes(32), SALT, ["message/message_0.db"]);
     await expectKind(checkStoreKeys({ accountDir, keysFile }), "rejected");
-  });
-});
-
-describe("migrateLegacyStoreKeys", () => {
-  const legacyDir = () => join(home, ".wechat-cli");
-
-  async function writeLegacy(
-    dbDirInConfig: string,
-    keys: Record<string, { encKey: string; salt: string }>,
-  ) {
-    await mkdir(legacyDir(), { recursive: true });
-    await writeFile(join(legacyDir(), "config.json"), JSON.stringify({ db_dir: dbDirInConfig }));
-    const legacy = Object.fromEntries(
-      Object.entries(keys).map(([rel, k]) => [
-        rel,
-        { enc_key: k.encKey, salt: k.salt, size_mb: 1.5 },
-      ]),
-    );
-    await writeFile(join(legacyDir(), "all_keys.json"), JSON.stringify(legacy));
-  }
-
-  it("carries the Python reader's keys into the bridge's file", async () => {
-    await writeLegacy(dbDir, await writeStore(dbDir, ENC_KEY, SALT));
-    expect(await migrateLegacyStoreKeys(legacyDir(), { accountDir, keysFile })).toBe(true);
-    await checkStoreKeys({ accountDir, keysFile });
-    const stored = JSON.parse(await readFile(keysFile, "utf8"));
-    expect(stored.keys["session/session.db"].sizeMb).toBe(1.5);
-    // Once the bridge's file exists, the old keys are never read again.
-    expect(await migrateLegacyStoreKeys(legacyDir(), { accountDir, keysFile })).toBe(false);
-  });
-
-  it("leaves another account's or stale keys behind", async () => {
-    const keys = await writeStore(dbDir, ENC_KEY, SALT);
-    await writeLegacy("/home/rome/xwechat_files/wxid_other/db_storage", keys);
-    expect(await migrateLegacyStoreKeys(legacyDir(), { accountDir, keysFile })).toBe(false);
-
-    // The client re-keyed the contact list since the old keys were stored.
-    await writeStore(dbDir, randomBytes(32), SALT, ["contact/contact.db"]);
-    await writeLegacy(dbDir, keys);
-    expect(await migrateLegacyStoreKeys(legacyDir(), { accountDir, keysFile })).toBe(false);
-    await expect(stat(keysFile)).rejects.toThrow();
   });
 });

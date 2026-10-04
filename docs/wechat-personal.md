@@ -64,7 +64,7 @@ Connect's key capture kills the client and relaunches it under the debugger. Fro
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
 
-Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Rome derives the per-database keys from the captured passphrase and writes them to the bridge's `keys.json`, mode `0600` in a mode `0700` directory. Keys the earlier Python reader stored under `~/.wechat-cli` move there on the first status check if they still open the store, so an account connected before the bridge needs no new capture. The debugger launches the client as a child of the runtime user. No host helper is involved.
+Capture files live in a private directory under `/run` and are removed after recovery, including on failure or cancellation. Rome derives the per-database keys from the captured passphrase and writes them to the bridge's `keys.json`, mode `0600` in a mode `0700` directory. An account connected before the bridge captures once more after upgrading, because keys the earlier Python reader stored are not carried over. The debugger launches the client as a child of the runtime user. No host helper is involved.
 
 Setup verifies the session database, the contact database, and every message shard before reporting readiness. A missing or stale shard key keeps the store locked. A readable contact list alone does not establish that message history is readable.
 

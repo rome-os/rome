@@ -9,12 +9,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { DESKTOP_SCRIPT, type DesktopSlot, desktopSlot, startDesktopArgs } from "../desktops.js";
 import { createLogger } from "../logger.js";
-import {
-  checkStoreKeys,
-  deriveStoreKeys,
-  migrateLegacyStoreKeys,
-  WechatStoreKeysError,
-} from "./wechat-user-store-keys.js";
+import { checkStoreKeys, deriveStoreKeys, WechatStoreKeysError } from "./wechat-user-store-keys.js";
 
 const log = createLogger("wechat-user");
 
@@ -455,11 +450,6 @@ export class WechatUserRuntime {
     return join(this.bridgeHome, "keys.json");
   }
 
-  /** Where the earlier Python reader kept its keys, migrated on first status. */
-  private get legacyKeysDir(): string {
-    return join(this.home, ".wechat-cli");
-  }
-
   /** The cached account store directory, or null when no store exists. */
   async accountDir(): Promise<string | null> {
     const root = join(this.home, "xwechat_files");
@@ -629,11 +619,9 @@ export class WechatUserRuntime {
     const account = installed ? await this.accountDir() : null;
     let keysReady = false;
     if (account !== null) {
-      const paths = { accountDir: account, keysFile: this.keysFile };
-      await migrateLegacyStoreKeys(this.legacyKeysDir, paths);
       if (await exists(this.keysFile)) {
         try {
-          await checkStoreKeys(paths);
+          await checkStoreKeys({ accountDir: account, keysFile: this.keysFile });
           keysReady = true;
         } catch (error) {
           if (!(error instanceof WechatStoreKeysError)) throw error;
@@ -941,11 +929,8 @@ export class WechatUserRuntime {
    */
   private async checkKeys(): Promise<void> {
     if (Date.now() - this.keysCheckedAt < KEYS_CHECK_TTL_MS) return;
-    const paths = { accountDir: await this.accountDir(), keysFile: this.keysFile };
-    // A read can come before the first status() after an upgrade.
-    await migrateLegacyStoreKeys(this.legacyKeysDir, paths);
     try {
-      await checkStoreKeys(paths);
+      await checkStoreKeys({ accountDir: await this.accountDir(), keysFile: this.keysFile });
     } catch (error) {
       throw asSessionFault(error);
     }
