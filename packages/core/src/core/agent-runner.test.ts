@@ -3761,6 +3761,32 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("keeps a closed legacy session closed after its provider stream drains", async () => {
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "Closing legacy run",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          return createSessionFromRun("mock", async function* () {}, params);
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-close-drain",
+      });
+
+      await session.close("shutdown");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(session.status).toBe("closed");
+      expect(() => session.sendTurn({ prompt: "reopen" })).toThrow(/is closed/);
+      await manager.shutdown();
+    });
+
     it("preserves a classified stream failure when it fails the waiting turn", async () => {
       let failStream!: () => void;
       const streamFailure = new Promise<void>((resolve) => {

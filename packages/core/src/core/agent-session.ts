@@ -2371,7 +2371,13 @@ class AgentSessionImpl implements AgentSession {
         // In that race failTurn has already removed the waiting caller while
         // SDK ownership was still live. Recompute after clearing ownership so
         // the session cannot remain visibly running forever.
-        if (this.waitingCallers.size === 0 && this.activeSdkTurnId === undefined) {
+        // An explicit close owns the closed state while the provider stream drains.
+        if (
+          this.closingPromise === undefined &&
+          this.status !== "closed" &&
+          this.waitingCallers.size === 0 &&
+          this.activeSdkTurnId === undefined
+        ) {
           this.status = "idle";
           this.emitStatus();
           if (!this.keepAlive) void this.close("user");
