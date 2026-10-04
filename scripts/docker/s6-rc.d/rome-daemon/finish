@@ -16,4 +16,7 @@ else
 fi
 echo "Health-check daemon exited with status ${code}, stopping the container ..."
 echo "$code" >/run/s6-linux-init-container-results/exitcode
-exec /run/s6/basedir/bin/halt
+# halt returns before shutdown acquires a pending s6-rc transition lock.
+# Finish status 125 keeps the daemon down while that shutdown waits.
+/run/s6/basedir/bin/halt
+exit 125
