@@ -178,8 +178,8 @@ function renderSubagents(
 }
 
 // Persisted WebChat text blocks retain the same identity as their live SSE
-// preview. Provider ids are primary; the projection index remains a fallback
-// for rows written before providers exposed block ids.
+// preview. Provider ids are primary; the projection index also remains for
+// legacy live consumers that do not yet receive block ids.
 function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
   const index = new Map<string, ChatRow>();
   for (const row of rows) {
@@ -189,7 +189,7 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
       for (const part of parseMessageEntries(message)) {
         if (part.type !== "text") continue;
         if (part.blockId) index.set(`${message.turnId}:id:${part.blockId}`, row);
-        else if (part.blockIx !== undefined) index.set(`${message.turnId}:ix:${part.blockIx}`, row);
+        if (part.blockIx !== undefined) index.set(`${message.turnId}:ix:${part.blockIx}`, row);
       }
     }
   }

@@ -309,7 +309,12 @@ describe("MessageList side-chat eligibility", () => {
   });
 });
 
-function commentary(text: string, id = "a-text", blockIx: number | null = 0): ChatMessage {
+function commentary(
+  text: string,
+  id = "a-text",
+  blockIx: number | null = 0,
+  blockId?: string,
+): ChatMessage {
   return {
     id,
     sessionId: "s-1",
@@ -321,6 +326,7 @@ function commentary(text: string, id = "a-text", blockIx: number | null = 0): Ch
         content: text,
         turnPhase: "commentary",
         ...(blockIx !== null ? { blockIx } : {}),
+        ...(blockId ? { blockId } : {}),
       },
     ]),
     createdAt: "2026-06-13T00:00:01.000Z",
@@ -462,6 +468,20 @@ describe("MessageList streaming input", () => {
 
     expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
     expectBefore(screen.getByLabelText("Working"), screen.getByText("Please include pseudocode."));
+  });
+
+  it("deduplicates an id-bearing persisted block for a legacy index-only preview", () => {
+    render(
+      streamingList(
+        [
+          commentary("I am checking the implementation.", "provider-id", 0, "msg-1"),
+          humanReply("Please include pseudocode."),
+        ],
+        "I am checking the implementation.",
+      ),
+    );
+
+    expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
   });
 
   it("uses the source text to suppress a persisted block while typing catches up", () => {
