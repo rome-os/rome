@@ -65,6 +65,12 @@ describe("AgentTurnStreamRegistry output replay", () => {
       toolUseId: "command",
       content: "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS * 2),
     });
+    const firstReplay = stream.messages()[0] as Extract<
+      ReturnType<typeof stream.messages>[number],
+      { type: "tool_output_delta" }
+    >;
+    expect(firstReplay.content).toHaveLength(MAX_BUFFERED_TOOL_OUTPUT_CHARS);
+
     stream.publish({ type: "tool_output_delta", toolUseId: "command", content: "later" });
 
     expect(received).toEqual(["x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS * 2), "later"]);

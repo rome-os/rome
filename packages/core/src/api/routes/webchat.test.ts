@@ -1979,7 +1979,8 @@ describe("Webchat API", () => {
           if (
             !released &&
             evt.event === "tool_output_text" &&
-            (JSON.parse(evt.data) as { text: string }).text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS
+            (JSON.parse(evt.data) as { text: string }).text.length ===
+              MAX_BUFFERED_TOOL_OUTPUT_CHARS
           ) {
             released = true;
             releaseTail();
@@ -1990,7 +1991,9 @@ describe("Webchat API", () => {
       const previews = events
         .filter((event) => event.event === "tool_output_text")
         .map((event) => JSON.parse(event.data) as { text: string });
-      expect(previews.some(({ text }) => text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS)).toBe(true);
+      expect(previews.some(({ text }) => text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS)).toBe(
+        true,
+      );
       expect(previews.some(({ text }) => text.endsWith("later"))).toBe(true);
     });
 

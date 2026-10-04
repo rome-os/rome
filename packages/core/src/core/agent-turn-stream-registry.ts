@@ -105,7 +105,10 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
               };
             } else {
               bufferedToolOutputIndex.set(message.toolUseId, values.length);
-              values.push(message);
+              values.push({
+                ...message,
+                content: appendBufferedToolOutput("", message.content),
+              });
             }
           } else {
             values.push(message);
