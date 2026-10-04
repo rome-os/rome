@@ -1,5 +1,4 @@
-import type { ConversationRef } from "@rome-os/app-runtime";
-import type { StreamAgentEvent } from "./agent-session.js";
+import type { ConversationRef, StreamAgentEvent } from "@rome-os/app-runtime";
 
 export interface ActiveAgentTurnStream {
   sessionId: string;

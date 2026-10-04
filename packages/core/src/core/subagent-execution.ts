@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSessionManager, StreamAgentEvent } from "./agent-session.js";
+import type { AgentSessionManager } from "./agent-session.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
