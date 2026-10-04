@@ -1,6 +1,7 @@
-import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
+import type { AgentErrorCode } from "@rome-os/app-runtime";
 import type {
   EffortLevel,
   Query,
@@ -18,6 +19,7 @@ import type {
   ModelSessionFork,
   ModelProvider,
   ModelSession,
+  ModelSessionEvent,
   ModelSessionForkParams,
   ModelSessionParams,
   ModelUserInput,
@@ -52,6 +54,7 @@ import {
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
+import { echoedSendIds, SdkTurnProjection } from "./sdk-turn-projection.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -82,6 +85,23 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 const CLAUDE_AGENT_SDK_ENV = {
   IS_SANDBOX: "1",
 } as const;
+
+/**
+ * A stream failure has no SDK result, so it cannot close a projected model
+ * turn. Preserve a classification the session layer can safely expose while
+ * it fails the caller that was waiting for the stream.
+ */
+class AnthropicStreamError extends Error {
+  readonly provider = "anthropic" as const;
+
+  constructor(
+    error: unknown,
+    readonly code?: AgentErrorCode,
+  ) {
+    super(error instanceof Error ? error.message : String(error));
+    this.name = "AnthropicStreamError";
+  }
+}
 
 function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
   if (effort === "xhigh") return "max";
@@ -143,42 +163,6 @@ function isPartialAssistantMessage(message: SDKMessage): message is SDKPartialAs
 
 function isResultSuccess(result: SDKResultMessage): result is SDKResultSuccess {
   return result.subtype === "success";
-}
-
-/** The uuids of the sends a frame or result answers (the SDK's echo). */
-function echoedSendIds(message: {
-  user_message_uuid?: string;
-  user_message_uuids?: string[];
-}): string[] {
-  return (
-    message.user_message_uuids ?? (message.user_message_uuid ? [message.user_message_uuid] : [])
-  );
-}
-
-/** The uuid of a replayed user message, if `message` is one. */
-function replayedSendId(message: SDKMessage): string | undefined {
-  return isUserMessage(message) && "isReplay" in message && message.isReplay
-    ? message.uuid
-    : undefined;
-}
-
-// Which side owns the SDK turn after `message`, from the SDK's echo alone. A
-// top-level frame echoing one of Rome's sends gives the turn to Rome; that is
-// also how a send the SDK folds into its own turn takes it over, since the
-// first reply after the fold echoes it. A turn whose first frame echoes none
-// of Rome's sends is one the SDK started by itself. Later frames carry no
-// echo, so they keep the owner.
-function sdkTurnOwnerAfter(
-  message: SDKMessage,
-  current: "rome" | "sdk" | undefined,
-  romeSendIds: ReadonlySet<string>,
-): "rome" | "sdk" | undefined {
-  const isModelFrame =
-    (isAssistantMessage(message) || isPartialAssistantMessage(message)) &&
-    message.parent_tool_use_id === null;
-  if (!isModelFrame) return current;
-  if (echoedSendIds(message).some((id) => romeSendIds.has(id))) return "rome";
-  return current ?? "sdk";
 }
 
 function isTextBlock(block: AssistantContentBlock): block is BetaTextBlock {
@@ -541,32 +525,14 @@ export class AnthropicProvider implements ModelProvider {
     const queryProcess = createClaudeQueryProcess();
     const { abortController } = queryProcess;
     const { sessionId } = params;
-    const pendingSteers = new Set<string>();
-    const deferredInputs = new Set<string>();
     // Every send carries a uuid and origin {kind:"human"}. The SDK echoes a
     // send's uuid on the turn that answers it, and a turn it starts by itself
-    // (a finished background task) echoes none. That echo decides which Rome
-    // turn owns the SDK's output.
-    const romeSendIds = new Set<string>();
-    // Uuids minted for sends without an inputId. Rome issued no id for them,
-    // so their replay reports no input status.
-    const mintedSendIds = new Set<string>();
-    // Owner of the SDK turn now streaming; undefined between a result and the
-    // next turn's first frame.
-    let sdkTurnOwner: "rome" | "sdk" | undefined;
-    // Output for one of Rome's sends can arrive with no Rome turn open, e.g. a
-    // steer the SDK carried past the previous turn's result. Reading pauses
-    // until Rome opens the next turn, so the output has a turn to go to. The
-    // pause ends because the provider reported that send as queued, and
-    // Rome's next turn adopts a queued input before anything else; interrupt
-    // and close also end it.
-    // The send that opened the current Rome turn.
-    let turnSendId: string | undefined;
-    let resumeReading: (() => void) | undefined;
-    const openRomeTurn = () => {
-      resumeReading?.();
-      resumeReading = undefined;
-    };
+    // (a finished background task) echoes none. The projection reports each
+    // SDK turn and the sends it answers; the provider tracks no sends itself.
+    const projection = new SdkTurnProjection();
+    // Uuids minted for sends without an inputId (forks, titles). Rome issued
+    // no id for them, so their replay reports no input status.
+    const mintedIds = new Set<string>();
     // A cancelled first turn can leave a user-only transcript that is not
     // resumable. Its id is still reserved by the CLI, so don't reuse it.
     const sdkSessionId =
@@ -627,7 +593,21 @@ export class AnthropicProvider implements ModelProvider {
     // q.close() exactly once.
     let closed = false;
     let queryDisposed = false;
-    let running = false;
+    // Messages sent to the SDK that it hasn't picked up yet (no replay seen).
+    const unreadSends = new Set<string>();
+    // The SDK is working: a turn is open, or a sent message is still queued.
+    // A turn the SDK starts by itself counts as much as one Rome asked for.
+    const running = () => projection.isOpen || unreadSends.size > 0;
+    // A documented zeroed/delivery-failure SDK result names no send and the
+    // SDK answers none afterwards. It is the one exceptional result that
+    // settles every queued send at once. Stop is not that: `Query.interrupt()`
+    // leaves the Query alive and its following result supplies the correlation.
+    const settleUnreadAfterUnanswerableResult = (): string[] => {
+      const unread = [...unreadSends];
+      unreadSends.clear();
+      for (const id of unread) mintedIds.delete(id);
+      return unread;
+    };
 
     // The SDK's own session id, captured from the first assistant message once a
     // transcript with real content exists. Exposed via `session.providerThreadId`
@@ -639,7 +619,7 @@ export class AnthropicProvider implements ModelProvider {
 
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
-    const events: AsyncIterable<AgentMessage> = (async function* () {
+    const events: AsyncIterable<ModelSessionEvent> = (async function* () {
       // In-turn narration vs. closing answer. The agent SDK never sets
       // `stop_reason` on its streamed assistant messages (always null) and splits
       // a single API message into one `assistant` message per content block, so
@@ -673,24 +653,28 @@ export class AnthropicProvider implements ModelProvider {
         blockId
           ? { type: "text", content, turnPhase, blockId }
           : { type: "text", content, turnPhase };
+      // Completed text is held until a following SDK event tells us whether it
+      // was narration or the closing answer. A dead stream has no such event,
+      // but it must not discard text the SDK already delivered. This writes the
+      // buffered blocks only; terminals and model-turn boundaries remain SDK-owned.
+      function* flushBufferedText(): Generator<AgentMessage> {
+        if (params.outputSchema) return;
+        if (pendingText !== null) {
+          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+          pendingText = null;
+        }
+        if (partialText) {
+          yield textBlock(partialText, "final", partialTextBlockId);
+          partialText = "";
+        }
+      }
       try {
         for await (const message of q) {
-          const replayedId = replayedSendId(message);
-          const romeReplay = replayedId !== undefined && romeSendIds.has(replayedId);
-          const owner = sdkTurnOwnerAfter(message, sdkTurnOwner, romeSendIds);
-          const romeClaims = romeReplay || (owner === "rome" && sdkTurnOwner !== "rome");
-          sdkTurnOwner = owner;
-          if (romeClaims && !running && !closed) {
-            const inputId =
-              replayedId ??
-              (isAssistantMessage(message) || isPartialAssistantMessage(message)
-                ? echoedSendIds(message).find((id) => romeSendIds.has(id))
-                : undefined);
-            log.info("pausing SDK stream until Rome opens a turn for a queued send", { inputId });
-            await new Promise<void>((resolve) => {
-              resumeReading = resolve;
-            });
-            log.info("resumed SDK stream", { inputId });
+          for (const event of projection.before(message)) {
+            // A send the SDK names in its echo has been picked up.
+            const named = event.type === "model_turn_answers" ? event.added : event.answers;
+            for (const id of named) unreadSends.delete(id);
+            yield event;
           }
           // First assistant message means the SDK has written user+assistant
           // turns to the transcript: record the SDK's own session id so the
@@ -701,13 +685,6 @@ export class AnthropicProvider implements ModelProvider {
           if (establishedThreadId === undefined && isAssistantMessage(message)) {
             establishedThreadId = message.session_id;
           }
-          // A turn the SDK started by itself reaches no Rome turn. Replays of
-          // Rome's own sends still report their input status.
-          const turnFrame =
-            isPartialAssistantMessage(message) ||
-            isAssistantMessage(message) ||
-            isUserMessage(message);
-          if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
           if (isPartialAssistantMessage(message)) {
             // Deltas of in-flight blocks. Each complete block still arrives
             // on its own assistant message, so this is purely additive for
@@ -826,9 +803,13 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
           } else if (isUserMessage(message)) {
-            if (romeReplay && replayedId && !mintedSendIds.has(replayedId)) {
-              pendingSteers.delete(replayedId);
-              yield { type: "input_status", inputId: replayedId, state: "consumed" };
+            // The SDK picked up one of Rome's messages. Replays of messages
+            // Rome didn't send (task notifications) carry another origin.
+            if ("isReplay" in message && message.isReplay) unreadSends.delete(message.uuid);
+            if ("isReplay" in message && message.isReplay && message.origin?.kind === "human") {
+              if (!mintedIds.delete(message.uuid)) {
+                yield { type: "input_status", inputId: message.uuid, state: "consumed" };
+              }
             }
             for (const toolResult of extractToolResultMessages(message, toolUseNames)) {
               yield toolResult;
@@ -836,53 +817,18 @@ export class AnthropicProvider implements ModelProvider {
           } else if (isResultMessage(message)) {
             // Block ids are unique within a turn; start the next turn's count fresh.
             assistantBlockCounts.clear();
-            const echoed = echoedSendIds(message).filter((id) => romeSendIds.has(id));
-            const ownerAtResult = sdkTurnOwner;
-            sdkTurnOwner = undefined;
-            // A result follows the owner its frames were routed to. A turn with
-            // no frames (the empty results of a resumed or batched background
-            // task) is the SDK's own when its origin says so. Such a result ends
-            // no Rome turn, but it runs the same accounting, metrics and account
-            // handling as any other: it may have called the model.
-            const sdkOwned =
-              echoed.length === 0 &&
-              ownerAtResult !== "rome" &&
-              (ownerAtResult === "sdk" || message.origin?.kind === "task-notification");
-            if (!sdkOwned) {
-              running = false;
-              // The SDK owns these queued messages already. Rebind them to a
-              // new Rome turn before reading on into the turn that answers them.
-              for (const inputId of pendingSteers) {
-                deferredInputs.add(inputId);
-                yield { type: "input_status", inputId, state: "queued" };
-              }
-              pendingSteers.clear();
-              // Forget the sends this result answered. A send it didn't answer
-              // may still get a reply, which must reach a Rome turn. A result
-              // that answers none (a frameless SDK error) takes the place of
-              // this turn's own reply, so that send is forgotten instead.
-              const answered = echoed.length > 0 ? echoed : turnSendId ? [turnSendId] : [];
-              for (const id of answered) {
-                if (deferredInputs.has(id)) continue;
-                romeSendIds.delete(id);
-                mintedSendIds.delete(id);
-              }
-              // The turn is ending: any text still held was the closing answer.
-              if (!params.outputSchema && pendingText !== null) {
-                yield textBlock(pendingText, "final", pendingTextBlockId);
-                pendingText = null;
-              }
+            // The turn is ending: any text still held was the closing answer.
+            if (!params.outputSchema && pendingText !== null) {
+              yield textBlock(pendingText, "final", pendingTextBlockId);
+              pendingText = null;
             }
-            if (abortController.signal.aborted) await queryProcess.abort();
-            const contextUsage = abortController.signal.aborted
-              ? undefined
-              : await readSdkContextUsage(q);
+            const contextUsage = await readSdkContextUsage(q);
             const accounting = buildAnthropicAccounting(
               message,
               effectiveModel,
               providerId,
               contextUsage,
-              abortController.signal.aborted,
+              false,
             );
             const resultData = {
               subtype: message.subtype,
@@ -890,7 +836,6 @@ export class AnthropicProvider implements ModelProvider {
               stopReason: message.stop_reason,
               costUsd: accounting?.costUsd,
               durationMs: message.duration_ms,
-              ...(sdkOwned ? { sdkInitiated: true } : {}),
             };
 
             let terminal: AgentMessage;
@@ -904,7 +849,7 @@ export class AnthropicProvider implements ModelProvider {
               // lingering revoked marker (covers a Keychain re-login whose file
               // fingerprint we can't diff).
               void clearAnthropicAuthRevoked(authRevokedSource).catch(() => {});
-              if (!sdkOwned) lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
+              lastCompletedTurnCheckpoint = activeTurnLastAssistantMessageId;
               if (params.outputSchema) {
                 if (!("structured_output" in message) || message.structured_output === undefined) {
                   terminal = {
@@ -968,67 +913,68 @@ export class AnthropicProvider implements ModelProvider {
                 terminal = { type: "error", error: errorText, accounting };
               }
             }
-            if (!sdkOwned) yield terminal;
+            yield terminal;
+            // A result names the sends its turn took, whether or not their
+            // replay arrived.
+            const echoed = echoedSendIds(message);
+            for (const id of echoed) unreadSends.delete(id);
+            // A zeroed or delivery-failure result names nothing, and the SDK
+            // answers nothing after it (documented on the result's
+            // user_message_uuid). It is the last word for every message still
+            // waiting: settle them with it, with a warning, so none is left
+            // running or gets a reply made up later. A frameless result from a
+            // background task (origin task-notification, e.g. #510's empty
+            // resume result) is not one: a message may still be queued behind it.
+            const settles =
+              echoed.length === 0 &&
+              projection.isFrameless &&
+              message.subtype !== "success" &&
+              message.origin?.kind !== "task-notification"
+                ? settleUnreadAfterUnanswerableResult()
+                : [];
+            if (settles.length > 0) {
+              log.warn("a Claude SDK result that names no message settles the ones still waiting", {
+                subtype: message.subtype,
+                inputIds: settles,
+              });
+            }
+            yield* projection.end(message, settles);
           }
         }
-        if (abortController.signal.aborted && running) {
-          await queryProcess.abort();
-          if (!params.outputSchema && pendingText !== null) {
-            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-          }
-          if (!params.outputSchema && partialText)
-            yield textBlock(partialText, "final", partialTextBlockId);
-          running = false;
-          yield params.outputSchema
-            ? { type: "error", error: "Claude structured-output turn was interrupted" }
-            : { type: "result", content: partialText || pendingText || "" };
+        // A Query that ends without its result has lost the SDK's turn
+        // correlation. Do not invent one: the session layer fails any caller
+        // still waiting, while this warning preserves the process-death clue.
+        if (running()) {
+          yield* flushBufferedText();
+          log.warn("Claude SDK stream ended without a result", {
+            openTurn: projection.isOpen,
+            unreadInputIds: [...unreadSends],
+          });
         }
       } catch (err) {
-        // The stream threw without delivering a terminal `result` (raw abort,
-        // SDK panic, …). Flush any held text as the closing answer before the
-        // error propagates, so a completed block the consumer already previewed
-        // isn't silently dropped. Done in `catch` rather than `finally` on
-        // purpose: a `yield` in `finally` re-suspends the generator when the
-        // consumer abandons iteration via `.return()`, swallowing the close.
-        if (!params.outputSchema && pendingText !== null) {
-          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
-        }
-        if (!params.outputSchema && partialText)
-          yield textBlock(partialText, "final", partialTextBlockId);
-        if (abortController.signal.aborted && err instanceof AbortError) {
-          await queryProcess.abort();
-          if (running) {
-            running = false;
-            yield params.outputSchema
-              ? { type: "error", error: "Claude structured-output turn was interrupted" }
-              : { type: "result", content: partialText || pendingText || "" };
-          }
-          return;
-        }
-        // A 401 can also surface as a thrown stream error rather than a result
-        // with `subtype: error`. Convert it to a classified terminal and persist
-        // the marker instead of rethrowing a raw 401 up the events loop.
-        if (isAnthropicUsageLimitError(err)) {
-          running = false;
-          onQuotaExhausted?.();
-          yield {
-            type: "error",
-            error: err instanceof Error ? err.message : String(err),
-            code: "usage_limit",
-          };
-          return;
-        }
-        if (isAnthropicAuthRevokedError(err)) {
-          running = false;
+        // A thrown stream error has no SDK result and therefore no trustworthy
+        // turn correlation. Let AgentSession fail its waiting caller instead
+        // of projecting a blank success or a made-up model turn.
+        yield* flushBufferedText();
+        const usageLimit = isAnthropicUsageLimitError(err);
+        const authRevoked = isAnthropicAuthRevokedError(err);
+        if (usageLimit) onQuotaExhausted?.();
+        if (authRevoked) {
           await persistAnthropicAuthRevoked(authRevokedSource, onAuthRevoked);
-          yield {
-            type: "error",
-            error: err instanceof Error ? err.message : String(err),
-            ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
-          };
-          return;
         }
-        throw err;
+        log.warn("Claude SDK stream failed without a result", {
+          error: err instanceof Error ? err.message : String(err),
+          openTurn: projection.isOpen,
+          unreadInputIds: [...unreadSends],
+        });
+        throw new AnthropicStreamError(
+          err,
+          usageLimit
+            ? "usage_limit"
+            : authRevoked && authRevokedSource
+              ? ANTHROPIC_AUTH_REVOKED_CODE
+              : undefined,
+        );
       } finally {
         closed = true;
       }
@@ -1040,7 +986,7 @@ export class AnthropicProvider implements ModelProvider {
       // Claude fixes effort at open and ignores a per-turn effort.
       appliedReasoningEffort: effort,
       get isClosed(): boolean {
-        return closed || abortController.signal.aborted;
+        return closed;
       },
       get providerThreadId(): string | undefined {
         return establishedThreadId;
@@ -1050,7 +996,7 @@ export class AnthropicProvider implements ModelProvider {
       },
       events,
       async sendUserInput(input: ModelUserInput): Promise<void> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("ModelSession is closed");
         }
         activeTurnLastAssistantMessageId = undefined;
@@ -1060,12 +1006,6 @@ export class AnthropicProvider implements ModelProvider {
         // transcript, so never let a prior or partial UUID stand in for the
         // current turn.
         lastCompletedTurnCheckpoint = undefined;
-        running = true;
-        openRomeTurn();
-        if (input.inputId && deferredInputs.delete(input.inputId)) {
-          turnSendId = input.inputId;
-          return;
-        }
         const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
         if (input.injectedToolResult) {
           content.push({
@@ -1077,14 +1017,9 @@ export class AnthropicProvider implements ModelProvider {
         if (input.text) {
           content.push({ type: "text", text: input.text });
         }
-        if (content.length > 0) {
-          activeTurnLastAssistantMessageId = undefined;
-          running = true;
-        }
         const uuid = input.inputId ?? randomUUID();
-        turnSendId = uuid;
-        romeSendIds.add(uuid);
-        if (!input.inputId) mintedSendIds.add(uuid);
+        if (!input.inputId) mintedIds.add(uuid);
+        unreadSends.add(uuid);
         const sdkMsg: SDKUserMessage = {
           type: "user",
           uuid: uuid as SDKUserMessage["uuid"],
@@ -1100,14 +1035,15 @@ export class AnthropicProvider implements ModelProvider {
         inputQueue.push(sdkMsg);
       },
       async steerUserInput(input: ModelUserInput): Promise<"accepted" | "deferred"> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("ModelSession is closed");
         }
-        if (!running || !input.inputId || input.injectedToolResult) return "deferred";
+        // Fire-and-forget: the SDK folds it into the running turn at the next
+        // tool boundary, or runs it as its own turn after the result.
+        if (!input.inputId || input.injectedToolResult) return "deferred";
         if (input.reasoningEffort && toAnthropicEffort(input.reasoningEffort) !== effort)
           return "deferred";
-        pendingSteers.add(input.inputId);
-        romeSendIds.add(input.inputId);
+        unreadSends.add(input.inputId);
         inputQueue.push({
           type: "user",
           uuid: input.inputId as SDKUserMessage["uuid"],
@@ -1120,10 +1056,10 @@ export class AnthropicProvider implements ModelProvider {
         return "accepted";
       },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
-        if (closed || abortController.signal.aborted) {
+        if (closed) {
           throw new Error("Cannot fork a closed ModelSession");
         }
-        if (running) throw new Error("Cannot fork while source session is running");
+        if (running()) throw new Error("Cannot fork while source session is running");
         const mode = forkParams.mode ?? "ephemeral";
         const sourceSessionId = params.sessionId;
         const sourceProviderThreadId = establishedThreadId ?? params.providerThreadId;
@@ -1159,16 +1095,18 @@ export class AnthropicProvider implements ModelProvider {
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });
-        openRomeTurn();
-        await queryProcess.abort();
-        inputQueue.end();
+        await q.interrupt();
       },
       async close(): Promise<void> {
         if (queryDisposed) return;
         queryDisposed = true;
-        openRomeTurn();
         try {
           inputQueue.end();
+        } catch {
+          // ignore
+        }
+        try {
+          await queryProcess.abort();
         } catch {
           // ignore
         }

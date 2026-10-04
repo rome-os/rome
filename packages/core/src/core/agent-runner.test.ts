@@ -45,6 +45,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
   ModelProvider,
+  ModelSessionEvent,
   ModelSession,
   ModelSessionForkParams,
   ModelSessionForkOpenParams,
@@ -195,7 +196,7 @@ describe("AgentRunner", () => {
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
-    const drained: AgentMessage[] = [];
+    const drained: ModelSessionEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();
@@ -2244,6 +2245,111 @@ describe("AgentRunner", () => {
         status: "completed",
         durationMs: expect.any(Number),
       });
+    });
+
+    it("fails a waiting turn when a provider stream ends without a terminal", async () => {
+      let endStream!: () => void;
+      const streamEnded = new Promise<void>((resolve) => {
+        endStream = resolve;
+      });
+      let closed = false;
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "Process death",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          return {
+            providerId: "mock",
+            model: params.model,
+            get isClosed() {
+              return closed;
+            },
+            events: (async function* () {
+              await streamEnded;
+            })(),
+            async sendUserInput() {
+              closed = true;
+              endStream();
+            },
+            async fork() {
+              throw new Error("unsupported");
+            },
+            async interrupt() {},
+            async close() {
+              closed = true;
+              endStream();
+            },
+          };
+        },
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "error",
+          error: "session closed without a terminal",
+        }),
+      );
+      expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    it("preserves a classified stream failure when it fails the waiting turn", async () => {
+      let failStream!: () => void;
+      const streamFailure = new Promise<void>((resolve) => {
+        failStream = resolve;
+      });
+      let closed = false;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "Claude",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          return {
+            providerId: "anthropic",
+            model: params.model,
+            get isClosed() {
+              return closed;
+            },
+            events: (async function* () {
+              await streamFailure;
+              throw Object.assign(new Error("OAuth token revoked · Please run /login"), {
+                code: "auth_revoked",
+                provider: "anthropic",
+              });
+            })(),
+            async sendUserInput() {
+              closed = true;
+              failStream();
+            },
+            async fork() {
+              throw new Error("unsupported");
+            },
+            async interrupt() {},
+            async close() {
+              closed = true;
+              failStream();
+            },
+          };
+        },
+      };
+      const runner = createRunner(provider);
+
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Hello" }),
+      );
+
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "error",
+          error: "OAuth token revoked · Please run /login",
+          code: "auth_revoked",
+          provider: "anthropic",
+        }),
+      );
     });
 
     it("persists the provider checkpoint for a completed Rome turn", async () => {

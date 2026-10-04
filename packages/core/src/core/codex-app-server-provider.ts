@@ -14,6 +14,7 @@
 // approval gate (inside the Rome tool facade) is the only gate and no server→client
 // approval round-trips are needed.
 
+import { randomUUID } from "node:crypto";
 import type { AgentErrorCode, ErrorMessage } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
@@ -538,6 +539,9 @@ export class CodexAppServerProvider implements ModelProvider {
     // be replaced.
     let contaminatedReason: string | null = null;
     let activeTurn: ActiveTurn | null = null;
+    // The model turn now running: Codex runs one native turn per dispatched
+    // batch of inputs, and a steer the app-server confirms joins it.
+    let modelTurn: { turnId: string; answers: Set<string>; sink: AgentMessageSink } | null = null;
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
@@ -573,6 +577,14 @@ export class CodexAppServerProvider implements ModelProvider {
           )
             resolveSourceStarted?.();
           turnSink.push({ type: "input_status", inputId: clientId, state: "consumed" });
+          if (modelTurn && !modelTurn.answers.has(clientId)) {
+            modelTurn.answers.add(clientId);
+            modelTurn.sink.push({
+              type: "model_turn_answers",
+              turnId: modelTurn.turnId,
+              added: [clientId],
+            });
+          }
         }
         return;
       }
@@ -921,6 +933,27 @@ export class CodexAppServerProvider implements ModelProvider {
         .join("\n")
         .trim();
       if (!text || closed || runtime.isClosed()) return;
+      const answers = inputs.flatMap((input) => (input.inputId ? [input.inputId] : []));
+      const current = { turnId: randomUUID(), answers: new Set(answers), sink: runtime.sink };
+      modelTurn = current;
+      runtime.sink.push({ type: "model_turn_start", turnId: current.turnId, answers });
+      try {
+        await runModelTurn(inputs, runtime, text);
+      } finally {
+        modelTurn = null;
+        current.sink.push({
+          type: "model_turn_end",
+          turnId: current.turnId,
+          answers: [...current.answers],
+        });
+      }
+    };
+
+    const runModelTurn = async (
+      inputs: ModelUserInput[],
+      runtime: CodexTurnRuntime,
+      text: string,
+    ): Promise<void> => {
       if (contaminatedReason) {
         runtime.sink.push({ type: "error", error: contaminatedReason });
         return;

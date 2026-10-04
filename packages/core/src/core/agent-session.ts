@@ -25,6 +25,8 @@ import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentMessage, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
 import type {
   AgentStop,
+  AgentErrorCode,
+  AgentErrorProvider,
   AgentTurnOutput,
   AgentTurnStatus,
   ErrorMessage,
@@ -38,7 +40,7 @@ import type {
   ConversationRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession } from "./agent-runner.js";
+import { createNullModelSession, isModelTurnEvent } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -88,6 +90,38 @@ import {
   type Span,
 } from "@opentelemetry/api";
 import { isTerminalEvent, isTransientDelta } from "./agent-message.js";
+
+const AGENT_ERROR_CODES = new Set<AgentErrorCode>([
+  "usage_limit",
+  "auth_revoked",
+  "model_provider_unavailable",
+  "model_unavailable",
+  "no_model_provider_available",
+  "context_window_exceeded",
+  "transient",
+  "invalid_request",
+]);
+
+/** Turn a provider's classified stream failure into the caller-facing terminal. */
+function streamFailurePayload(error: unknown): ErrorMessage {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!error || typeof error !== "object") return { type: "error", error: message };
+  const failure = error as { code?: unknown; provider?: unknown };
+  const code =
+    typeof failure.code === "string" && AGENT_ERROR_CODES.has(failure.code as AgentErrorCode)
+      ? (failure.code as AgentErrorCode)
+      : undefined;
+  const provider: AgentErrorProvider | undefined =
+    failure.provider === "anthropic" || failure.provider === "openai"
+      ? failure.provider
+      : undefined;
+  return {
+    type: "error",
+    error: message,
+    ...(code ? { code } : {}),
+    ...(provider ? { provider } : {}),
+  };
+}
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type {
   ExecuteSubagentInput,
@@ -2108,6 +2142,9 @@ class AgentSessionImpl implements AgentSession {
     try {
       enterSession(this.sessionId);
       for await (const msg of session.events) {
+        // Model turn boundaries are not consumed yet; AgentSession still opens
+        // its turns per send (dev/sdk-turns: PR 2 opens them from these).
+        if (isModelTurnEvent(msg)) continue;
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
@@ -2253,14 +2290,16 @@ class AgentSessionImpl implements AgentSession {
       if (session.isClosed) {
         this.modelSessionAvailable = false;
         if (sink && !sink.done) {
-          if (sink.lifecycleInterrupted && !streamError) {
-            this.finalizeTurn(sink, { type: "result", content: "" });
-          } else {
-            this.failTurn(
-              sink,
-              streamError instanceof Error ? streamError.message : "session closed mid-turn",
-            );
-          }
+          const error =
+            streamError === undefined
+              ? "session closed without a terminal"
+              : streamFailurePayload(streamError);
+          log.warn("model session closed without a terminal", {
+            sessionId: this.sessionId,
+            provider: session.providerId,
+            interrupted: sink.lifecycleInterrupted,
+          });
+          this.failTurn(sink, error);
         }
         return;
       }
@@ -2424,7 +2463,10 @@ class AgentSessionImpl implements AgentSession {
    * Terminate a turn on a failure path: publish the error block, then bracket
    * and close the turn.
    */
-  private failTurn(sink: TurnSink, error: string | ModelResolutionErrorPayload): void {
+  private failTurn(
+    sink: TurnSink,
+    error: string | ModelResolutionErrorPayload | ErrorMessage,
+  ): void {
     const terminal: ErrorMessage =
       typeof error === "string" ? { type: "error", error } : { type: "error", ...error };
     this.ensureTurnStart(sink);
@@ -2861,6 +2903,7 @@ class AgentSessionImpl implements AgentSession {
         void (async () => {
           try {
             for await (const msg of providerEvents) {
+              if (isModelTurnEvent(msg)) continue;
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
               if (projected.some(isTerminalEvent)) break;
