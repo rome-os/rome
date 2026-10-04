@@ -9,7 +9,7 @@
 <h1 align="center">Rome</h1>
 
 <p align="center">
-  <strong>The agentic OS for humans and agents.</strong>
+  <strong>A compounding agent OS for recursive agents.</strong>
 </p>
 
 <p align="center">

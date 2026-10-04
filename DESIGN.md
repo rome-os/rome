@@ -1,6 +1,6 @@
 ---
 name: Rome
-description: The agentic OS for humans and agents.
+description: A compounding agent OS for recursive agents.
 colors:
   # Ember light, the default theme. Ash and Slate remap every role below to
   # their own palettes; the mappings live in packages/web/src/lib/themes.ts.

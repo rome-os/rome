@@ -23,7 +23,7 @@ The guardian dashboard (`packages/web`) and the app shells are web surfaces. `pa
 
 ## Product Purpose
 
-Rome is the agentic OS for humans and agents. It scales the environment an agent works within, meaning its tools, workflows, memory, and interfaces, instead of only the model ([`VISION.md`](VISION.md)).
+Rome is a compounding agent OS for recursive agents. It scales the environment an agent works within, meaning its tools, workflows, memory, and interfaces, instead of only the model ([`VISION.md`](VISION.md)).
 
 The guardian describes an outcome. Rome completes it, and when the work repeats, Rome turns it into a durable capability: an action, a skill, a workflow, or a Rome App with its own interface, agent, and data. Each capability becomes a building block for later, more ambitious requests.
 
@@ -64,7 +64,7 @@ Rome is open source (MIT), self-hostable or run on Rome Cloud, and exportable, s
 
 ## Brand Commitments
 
-- **Name and line.** "Rome" and "The agentic OS for humans and agents." The closing line "Give your agents a place to grow." appears in the README.
+- **Name and line.** "Rome" and "A compounding agent OS for recursive agents." The closing line "Give your agents a place to grow." appears in the README.
 - **Voice.** [`docs/ui/VOICE.md`](docs/ui/VOICE.md) governs every string a guardian reads. Rome is plain and calm, describes what the system does and what that costs, and does not perform warmth or apologize. Failure copy is economical, and everything else uses full sentences. Negative contractions are spelled out. Rome names itself only when Rome is the actor.
 - **Documentation prose** follows [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
 - **Assets.** The logo (`packages/web/src/components/logo/rome-logo.svg`), the 3D mark (`docs/assets/rome-3d.png`), and the overview video poster (`docs/assets/rome-overview-video.jpg`).
