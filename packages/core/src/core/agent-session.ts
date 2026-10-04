@@ -40,7 +40,12 @@ import type {
   ConversationRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession, isModelTurnEvent } from "./agent-runner.js";
+import {
+  CODE_BACKED_FALLBACK,
+  createNullModelSession,
+  isModelTurnEvent,
+  type CodeBackedTurn,
+} from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -2208,7 +2213,10 @@ class AgentSessionImpl implements AgentSession {
         // after model_turn_start([]) but before model_turn_answers(), so it
         // must not depend on a visible stream sink having been opened yet.
         if (msg.type === "input_status") {
-          const sink = this.waitingCallers.get(msg.inputId) ?? activeTurn?.sink;
+          // The active SDK turn is the public stream. A caller handle only
+          // correlates the input; routing a read acknowledgement through it
+          // hides the update from subscribers when the SDK began detached.
+          const sink = activeTurn?.sink ?? this.waitingCallers.get(msg.inputId);
           if (!sink) {
             log.warn("agent session received input status with no caller", {
               inputId: msg.inputId,
@@ -3686,6 +3694,7 @@ class AgentSessionImpl implements AgentSession {
       let emittedTerminal: ResultMessage | ErrorMessage | undefined;
       let modelRan = false;
       const middlewareEvents: AgentMessage[] = [];
+      let codeBackedTurn: CodeBackedTurn | undefined;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
         session: {
@@ -3710,16 +3719,43 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result" || outbound.type === "error") {
             emittedTerminal = outbound;
           }
-          // Middleware-only output is replayed by the code-backed
-          // ModelSession as a correlated model turn below. Do not bypass the
-          // model-turn contract by publishing it directly to a caller sink.
-          middlewareEvents.push(outbound);
+          // A code-backed session has already opened a correlated model turn,
+          // so narration stays live while middleware waits. Other middleware
+          // replies retain the buffered completion path below.
+          if (codeBackedTurn) codeBackedTurn.emit(outbound);
+          else middlewareEvents.push(outbound);
         },
         meta: {},
       };
 
+      // Code-backed middleware has no provider query, but it still owns a
+      // real model-session turn. Open it before executing middleware so every
+      // emitted narration block reaches the public turn stream immediately.
+      if (this.config.codeBacked) {
+        const startCodeBackedTurn = this.modelSession.startCodeBackedTurn;
+        if (!startCodeBackedTurn) {
+          throw new Error("ModelSession cannot stream a code-backed turn");
+        }
+        if (input.inputId) this.waitingCallers.set(input.inputId, sink);
+        codeBackedTurn = startCodeBackedTurn.call(this.modelSession, {
+          inputId: input.inputId,
+          text: mwInput.prompt,
+          images: input.images,
+          reasoningEffort: mwInput.reasoningEffort,
+          injectedToolResult: input.injectedToolResult,
+        });
+        modelRan = true;
+      }
+
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
+        if (codeBackedTurn) {
+          // A misconfigured code-backed middleware that calls next() still
+          // completes the already-open turn rather than minting a second one.
+          mwCtx.emit({ type: "text", content: CODE_BACKED_FALLBACK });
+          mwCtx.emit({ type: "result", content: CODE_BACKED_FALLBACK });
+          return;
+        }
         if (sink.lifecycleInterrupted) {
           // Same pre-acceptance cancellation rule as above. Once accepted,
           // the handle's interrupt path targets its matching SDK-owned sink.
@@ -3778,11 +3814,24 @@ class AgentSessionImpl implements AgentSession {
         await runModelTerminal();
       }
 
-      // Middleware-only output is still a real ModelSession turn: the
-      // code-backed session brackets its buffered reply with model-turn events
-      // that echo this input id. This keeps delivery, input completion, and
-      // webchat's visible-stream boundary identical to provider-backed turns.
-      if (!sink.done && !modelRan) {
+      // Middleware-only output is still a real ModelSession turn. A
+      // code-backed session opened its boundary above and forwards events as
+      // they arrive; other middleware sessions complete their buffered reply
+      // after the chain returns.
+      if (!sink.done && codeBackedTurn) {
+        if (!emittedTerminal) {
+          let terminal: ResultMessage | ErrorMessage = { type: "result", content: "" };
+          if (this.structuredOutputValidator) {
+            terminal = validateProviderStructuredResult(
+              terminal,
+              this.structuredOutputValidator,
+              sink.outputSchemaSuspended,
+            ) as ResultMessage | ErrorMessage;
+          }
+          mwCtx.emit(terminal);
+        }
+        await codeBackedTurn.complete();
+      } else if (!sink.done && !modelRan) {
         let terminal: ResultMessage | ErrorMessage = emittedTerminal ?? {
           type: "result",
           content: "",

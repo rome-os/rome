@@ -299,6 +299,17 @@ export function isModelTurnEvent(event: ModelSessionEvent): event is ModelTurnEv
   );
 }
 
+/** A live code-backed model turn, used while middleware produces its reply. */
+export interface CodeBackedTurn {
+  /** Forward one middleware event through the session's model-turn stream. */
+  emit(message: AgentMessage): void;
+  /** Close the model turn after its terminal event has been emitted. */
+  complete(): Promise<void>;
+}
+
+export const CODE_BACKED_FALLBACK =
+  "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
+
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
@@ -339,6 +350,12 @@ export interface ModelSession {
    * settle only from the resulting model_turn_end echo.
    */
   completeTurn?(input: ModelUserInput, events: readonly AgentMessage[]): Promise<void>;
+
+  /**
+   * Open a live code-backed turn. Middleware forwards its events while it runs,
+   * then completes the same model-turn boundary after its terminal event.
+   */
+  startCodeBackedTurn?(input: ModelUserInput): CodeBackedTurn;
 
   /** Create an isolated provider-owned branch from this live session. */
   fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
@@ -525,8 +542,23 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     },
   };
 
-  const FALLBACK =
-    "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
+  const startCodeBackedTurn = (input: ModelUserInput): CodeBackedTurn => {
+    const turnId = uuidv4();
+    const answers = input.inputId ? [input.inputId] : [];
+    let completed = false;
+    emit({ type: "model_turn_start", turnId, answers });
+    emit({ type: "model_turn_answers", turnId, added: [] });
+    return {
+      emit(message) {
+        if (!completed) emit(message);
+      },
+      async complete() {
+        if (completed) return;
+        completed = true;
+        emit({ type: "model_turn_end", turnId, answers });
+      },
+    };
+  };
 
   return {
     providerId: "mock",
@@ -534,18 +566,16 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     events,
     async sendUserInput(input: ModelUserInput): Promise<void> {
       await this.completeTurn!(input, [
-        { type: "text", content: FALLBACK },
-        { type: "result", content: FALLBACK },
+        { type: "text", content: CODE_BACKED_FALLBACK },
+        { type: "result", content: CODE_BACKED_FALLBACK },
       ]);
     },
     async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
-      const turnId = uuidv4();
-      const answers = input.inputId ? [input.inputId] : [];
-      emit({ type: "model_turn_start", turnId, answers });
-      emit({ type: "model_turn_answers", turnId, added: [] });
-      for (const message of messages) emit(message);
-      emit({ type: "model_turn_end", turnId, answers });
+      const turn = startCodeBackedTurn(input);
+      for (const message of messages) turn.emit(message);
+      await turn.complete();
     },
+    startCodeBackedTurn,
     async fork(): Promise<ModelSessionFork> {
       throw new Error("a code-backed agent session cannot fork");
     },

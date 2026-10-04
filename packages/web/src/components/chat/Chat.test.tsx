@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
+import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import {
   deleteSession,
   interruptTurn,
@@ -182,6 +183,19 @@ class MockEventSource {
 beforeEach(() => {
   appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
+  rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  rs.mocked(openTurnStream).mockImplementation((_turnId: string, signal?: AbortSignal) => {
+    const body = new ReadableStream({
+      start(controller) {
+        signal?.addEventListener(
+          "abort",
+          () => controller.error(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      },
+    });
+    return Promise.resolve(new Response(body));
+  });
   mockUseSessionIdentity.mockReturnValue({
     sessionName: null,
     pinnedAgentMention: null,
@@ -356,6 +370,36 @@ describe("Chat turn stream lifecycle", () => {
     await user.click(within(dialog).getByRole("button", { name: "navbar.delete" }));
 
     await waitFor(() => expect(deleteSession).toHaveBeenCalledWith("session-1"));
+  });
+
+  it("consumes a completed stream only once across reattach polls", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      {
+        turnId: "completed-turn",
+        streamId: "stream-1",
+        startedAt: "2026-10-04T00:00:00Z",
+        status: "completed",
+      },
+    ]);
+    rs.mocked(openTurnStream).mockResolvedValue(
+      new Response(
+        [
+          "event: widget_placement\n",
+          'data: {"appId":"calendar"}\n\n',
+          "event: done\n",
+          'data: {"success":true}\n\n',
+        ].join(""),
+      ),
+    );
+
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() =>
+      expect(autoPlaceApp).toHaveBeenCalledWith("calendar", undefined, undefined),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    expect(openTurnStream).toHaveBeenCalledTimes(1);
+    expect(autoPlaceApp).toHaveBeenCalledTimes(1);
   });
 
   it("aborts an attached turn stream when the chat unmounts", async () => {

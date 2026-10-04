@@ -346,6 +346,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Per-session FIFO queue of in-flight turnIds; the session's
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Finished streams stay discoverable briefly so a reload can recover a
+  // terminal frame. Once this client consumed one, do not replay it on every
+  // reattach poll (widget placement is intentionally an SSE side effect).
+  const consumedCompletedTurnsRef = useRef<Map<string, Set<string>>>(new Map());
 
   // Auto stick-to-bottom against the message scroller — a bounded
   // `overflow-y-auto` node, NOT the document. The chat shell is now
@@ -769,6 +773,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         updateSessionSnapshot(sessionId, turnId, { segments: segArr.slice(), summary });
       };
       let shouldStop = false;
+      let consumedTerminal = false;
 
       while (!shouldStop) {
         // Stall watchdog: race each read against the keepalive-derived
@@ -825,6 +830,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            consumedTerminal = true;
             shouldStop = true;
             break;
           }
@@ -842,6 +848,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            consumedTerminal = true;
             shouldStop = true;
             break;
           }
@@ -942,6 +949,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
       // After stream ends, reload messages from DB (gets both trace + assistant)
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      if (consumedTerminal) {
+        const turns = consumedCompletedTurnsRef.current.get(sessionId) ?? new Set<string>();
+        turns.add(turnId);
+        consumedCompletedTurnsRef.current.set(sessionId, turns);
+      }
     },
     [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
   );
@@ -987,7 +999,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         const turns = await listSessionTurns(reattachSessionId);
         if (!turns || turns.length === 0 || cancelled) return;
 
-        const target = turns.find((t) => t.status === "running") ?? turns[0];
+        const consumedCompleted = consumedCompletedTurnsRef.current.get(reattachSessionId);
+        const target =
+          turns.find((turn) => turn.status === "running") ??
+          turns.find((turn) => turn.status === "queued") ??
+          turns.find((turn) => turn.status === "completed" && !consumedCompleted?.has(turn.turnId));
+        if (!target) return;
         attachedTurnId = target.turnId;
         startSessionStream(reattachSessionId, attachedTurnId);
         setStreamError(null);

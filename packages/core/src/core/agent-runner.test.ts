@@ -360,6 +360,47 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("streams code-backed middleware narration before the hook resolves", async () => {
+    let releaseMiddleware!: () => void;
+    const middlewareGate = new Promise<void>((resolve) => {
+      releaseMiddleware = resolve;
+    });
+    const turnMiddleware = createTurnMiddlewareChain();
+    rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {
+      ctx.emit({ type: "text", content: "Welcome to Rome", turnPhase: "commentary" });
+      await middlewareGate;
+      ctx.emit({ type: "result", content: "Welcome to Rome" });
+    });
+    const manager = createAgentSessionManager(
+      {
+        ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+        turnMiddleware,
+      },
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-code-backed",
+      channelThreadKey: "webchat:scripted-live-narration",
+    });
+    const turn = session.sendTurn({ inputId: "scripted-input", prompt: "hello" });
+    const messages: AgentMessage[] = [];
+    const drained = (async () => {
+      for await (const message of turn.events) messages.push(message);
+    })();
+
+    // The welcome hook waits for specialist work after its narration. The
+    // narration must reach the caller's public model turn before that wait.
+    await rs.waitFor(() =>
+      expect(messages).toContainEqual(
+        expect.objectContaining({ type: "text", content: "Welcome to Rome" }),
+      ),
+    );
+    releaseMiddleware();
+    await drained;
+    expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+    await manager.shutdown();
+  });
+
   it("reuses a code-backed session across acquires without resolving a provider", async () => {
     // A code-backed session's null model session reports providerId "mock", but
     // the resolved active provider is real (here "anthropic"). The reuse check
@@ -2821,7 +2862,7 @@ describe("AgentRunner", () => {
 
     it("observes input status before the SDK binds its stream sink", async () => {
       let runtime!: ReturnType<typeof createSdkEventSession>;
-      const statuses: string[] = [];
+      const statuses: Array<{ state: string; turnId?: string }> = [];
       const provider: ModelProvider = {
         id: "anthropic",
         displayName: "SDK input status",
@@ -2847,9 +2888,13 @@ describe("AgentRunner", () => {
             handle = turn;
           },
           onInputStatus: (status) => {
-            statuses.push(status.state);
+            statuses.push({ state: status.state, turnId: status.turnId });
           },
         },
+      );
+      const published: Array<{ message: AgentMessage; turnId: string }> = [];
+      const unsubscribe = session.subscribe((message, turnId) =>
+        published.push({ message, turnId }),
       );
       const messages = collectMessages(handle.events);
       await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "first" }]));
@@ -2858,13 +2903,22 @@ describe("AgentRunner", () => {
       // stream sink exists yet when the provider acknowledges A.
       runtime.emit({ type: "model_turn_start", turnId: "replay", answers: [] });
       runtime.emit({ type: "input_status", inputId: "A", state: "read" });
+      await rs.waitFor(() =>
+        expect(published).toContainEqual(
+          expect.objectContaining({
+            message: expect.objectContaining({ type: "input_status", inputId: "A", state: "read" }),
+            turnId: "replay",
+          }),
+        ),
+      );
       runtime.emit({ type: "model_turn_answers", turnId: "replay", added: ["A"] });
       runtime.emit({ type: "result", content: "done" });
       runtime.emit({ type: "model_turn_end", turnId: "replay", answers: ["A"] });
 
       await messages;
-      expect(statuses).toContain("read");
-      expect(statuses.at(-1)).toBe("answered");
+      expect(statuses).toContainEqual({ state: "read", turnId: "replay" });
+      expect(statuses.at(-1)).toMatchObject({ state: "answered" });
+      unsubscribe();
       await manager.shutdown();
     });
 
