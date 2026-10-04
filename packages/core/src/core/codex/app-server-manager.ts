@@ -359,6 +359,7 @@ export class CodexAppServerManager {
       },
       onExit: (code) => {
         exited = true;
+        invalidated = true;
         this.handleExit(client, generation, code);
       },
     });
