@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import { AgentInputQueue } from "../../core/agent-input-queue.js";
+import { MAX_BUFFERED_TOOL_OUTPUT_CHARS } from "../../core/agent-turn-stream-registry.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
@@ -1955,6 +1956,42 @@ describe("Webchat API", () => {
         expect(trace!.content).not.toContain(type);
         expect(events.some((e) => e.data.includes(type))).toBe(false);
       }
+    });
+
+    it("keeps a capped command preview advancing for attached subscribers", async () => {
+      let releaseTail!: () => void;
+      const tailGate = new Promise<void>((resolve) => (releaseTail = resolve));
+      let released = false;
+      const { events } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield {
+              type: "tool_output_delta",
+              toolUseId: "tu-1",
+              content: "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS),
+            };
+            await tailGate;
+            yield { type: "tool_output_delta", toolUseId: "tu-1", content: "later" };
+            yield { type: "tool_result", toolUseId: "tu-1", tool: "some_tool", output: {} };
+            yield { type: "result", content: "Done" };
+          })() as AsyncGenerator<never>,
+        (evt) => {
+          if (
+            !released &&
+            evt.event === "tool_output_text" &&
+            (JSON.parse(evt.data) as { text: string }).text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS
+          ) {
+            released = true;
+            releaseTail();
+          }
+        },
+      );
+
+      const previews = events
+        .filter((event) => event.event === "tool_output_text")
+        .map((event) => JSON.parse(event.data) as { text: string });
+      expect(previews.some(({ text }) => text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS)).toBe(true);
+      expect(previews.some(({ text }) => text.endsWith("later"))).toBe(true);
     });
 
     it("keeps Claude reasoning on the completed-block path", async () => {

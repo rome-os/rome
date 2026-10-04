@@ -43,18 +43,13 @@ const FINISHED_STREAM_TTL_MS = 30_000;
  * unbounded copy for the turn's 30-second grace period.
  */
 export const MAX_BUFFERED_TOOL_OUTPUT_CHARS = 256 * 1024;
-const TRUNCATED_TOOL_OUTPUT_SUFFIX = "\n… output truncated in the live replay …";
+const TRUNCATED_TOOL_OUTPUT_PREFIX = "… earlier output truncated in the live replay …\n";
 
 export function appendBufferedToolOutput(previous: string, next: string): string {
-  if (previous.length >= MAX_BUFFERED_TOOL_OUTPUT_CHARS) return previous;
-  const available = MAX_BUFFERED_TOOL_OUTPUT_CHARS - previous.length;
-  if (next.length <= available) return previous + next;
-  const suffix = TRUNCATED_TOOL_OUTPUT_SUFFIX.slice(
-    0,
-    Math.max(0, MAX_BUFFERED_TOOL_OUTPUT_CHARS - previous.length),
-  );
-  const contentLimit = Math.max(0, available - suffix.length);
-  return previous + next.slice(0, contentLimit) + suffix;
+  const output = previous + next;
+  if (output.length <= MAX_BUFFERED_TOOL_OUTPUT_CHARS) return output;
+  const contentLimit = MAX_BUFFERED_TOOL_OUTPUT_CHARS - TRUNCATED_TOOL_OUTPUT_PREFIX.length;
+  return TRUNCATED_TOOL_OUTPUT_PREFIX + output.slice(-contentLimit);
 }
 
 function conversationKey(ref: ConversationRef): string {

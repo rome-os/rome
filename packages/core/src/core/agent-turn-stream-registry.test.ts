@@ -1,7 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId } from "@rome-os/app-runtime";
 import {
-  appendBufferedToolOutput,
   createAgentTurnStreamRegistry,
   MAX_BUFFERED_TOOL_OUTPUT_CHARS,
 } from "./agent-turn-stream-registry.js";
@@ -53,7 +52,7 @@ describe("AgentTurnStreamRegistry conversation routing", () => {
 });
 
 describe("AgentTurnStreamRegistry output replay", () => {
-  it("coalesces and caps retained command output without dropping live chunks", () => {
+  it("caps an oversized first command chunk and keeps the replay advancing", () => {
     const registry = createAgentTurnStreamRegistry();
     const stream = registry.register({ sessionId: "session", turnId: "turn", agentName: "main" });
     const received: string[] = [];
@@ -61,24 +60,19 @@ describe("AgentTurnStreamRegistry output replay", () => {
       if (event.type === "tool_output_delta") received.push(event.content);
     });
 
-    stream.publish({ type: "tool_output_delta", toolUseId: "command", content: "first" });
     stream.publish({
       type: "tool_output_delta",
       toolUseId: "command",
-      content: "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS),
+      content: "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS * 2),
     });
+    stream.publish({ type: "tool_output_delta", toolUseId: "command", content: "later" });
 
-    expect(received).toEqual(["first", "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS)]);
+    expect(received).toEqual(["x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS * 2), "later"]);
     expect(stream.messages()).toHaveLength(1);
     const replay = stream.messages()[0];
     expect(replay).toMatchObject({ type: "tool_output_delta", toolUseId: "command" });
-    expect((replay as Extract<typeof replay, { type: "tool_output_delta" }>).content.length).toBe(
-      MAX_BUFFERED_TOOL_OUTPUT_CHARS,
-    );
-  });
-
-  it("keeps an already capped replay stable", () => {
-    const capped = appendBufferedToolOutput("x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS), "later");
-    expect(capped).toHaveLength(MAX_BUFFERED_TOOL_OUTPUT_CHARS);
+    const content = (replay as Extract<typeof replay, { type: "tool_output_delta" }>).content;
+    expect(content).toHaveLength(MAX_BUFFERED_TOOL_OUTPUT_CHARS);
+    expect(content.endsWith("later")).toBe(true);
   });
 });
