@@ -2042,8 +2042,9 @@ class AgentSessionImpl implements AgentSession {
    * fallback for providers without model-turn events.
    */
   private get currentExecutionSink(): TurnSink | null {
-    const sdkSink = this.activeSdkTurnId
-      ? this.sdkTurns.get(this.activeSdkTurnId)?.sink
+    const activeTurn = this.activeSdkTurnId ? this.sdkTurns.get(this.activeSdkTurnId) : undefined;
+    const sdkSink = activeTurn
+      ? (activeTurn.sink ?? this.openSdkTurnSink(this.activeSdkTurnId!, activeTurn))
       : undefined;
     return sdkSink ?? this.currentSink;
   }
@@ -2131,6 +2132,17 @@ class AgentSessionImpl implements AgentSession {
       !this.modelSession.isClosed &&
       resolution.modelProvider.id === this.modelSession.providerId &&
       resolution.model === this.modelSession.model
+    ) {
+      return;
+    }
+
+    // An accepted input remains owned by its current SDK backend until that
+    // backend echoes a result. Replacing it would strand the old caller; a
+    // later idle turn will apply the newly resolved backend instead.
+    if (
+      this.modelSessionAvailable &&
+      !this.modelSession.isClosed &&
+      (this.waitingCallers.size > 0 || this.activeSdkTurnId !== undefined)
     ) {
       return;
     }
@@ -2504,11 +2516,13 @@ class AgentSessionImpl implements AgentSession {
       // Tool callbacks happen while the SDK is still streaming. Do not let a
       // transient candidate create a card; the last valid submission settles
       // atomically with this turn's successful result.
-      if (sink.hasSubmittedOutput) {
+      if (!interrupted && sink.hasSubmittedOutput) {
         this.publishOutbound(sink, { type: "structured_output", payload: sink.submittedOutput });
-        sink.hasSubmittedOutput = false;
-        sink.submittedOutput = undefined;
       }
+      // An interrupted result is terminal, but it must never replace a
+      // previously successful handback candidate with an approval card.
+      sink.hasSubmittedOutput = false;
+      sink.submittedOutput = undefined;
     }
     this.publishOutbound(sink, terminal);
     this.finalizeTurn(sink, terminal);
@@ -2656,6 +2670,9 @@ class AgentSessionImpl implements AgentSession {
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
     this.closeSink(sink);
+    // Detached SDK-owned turns have no consumer draining buildTurnEvents(),
+    // so iterator cleanup cannot be their only subagent registry release.
+    if (sink.detached) this.clearSubagentLinks(sink);
   }
 
   /**
@@ -3462,7 +3479,9 @@ class AgentSessionImpl implements AgentSession {
     // leak close events into the new turn.
     if (!sink.lifecycleInterrupted) await this.ensureModelSessionForTurn();
     if (sink.lifecycleInterrupted) {
-      await this.modelSession.interrupt("user-stop");
+      // This caller was cancelled before provider acceptance. It owns no SDK
+      // turn, so completing its handle must not interrupt another active turn.
+      if (this.currentExecutionSink === sink) await this.modelSession.interrupt("user-stop");
       this.ensureTurnStart(sink);
       this.finalizeTurn(sink, { type: "result", content: "" });
       span.end();
@@ -3605,7 +3624,9 @@ class AgentSessionImpl implements AgentSession {
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
         if (sink.lifecycleInterrupted) {
-          await this.modelSession.interrupt("user-stop");
+          // Same pre-acceptance cancellation rule as above. Once accepted,
+          // the handle's interrupt path targets its matching SDK-owned sink.
+          if (this.currentExecutionSink === sink) await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
           return;
         }
