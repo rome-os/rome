@@ -687,7 +687,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // into webchat streams. It intentionally outlives an individual POST so a
   // background SDK turn is visible even when no caller is awaiting it.
   type ModelTurnSubscription = {
-    deferCaller(handle: AgentTurnHandle): void;
+    deferCaller(handle: AgentTurnHandle, inputId?: string): void;
     unsubscribe(): void;
   };
   const modelTurnSubscriptions = new WeakMap<AgentSession, ModelTurnSubscription>();
@@ -2702,22 +2702,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       status: "running" as const,
     }));
     return c.json([
-      ...list
-        .filter((s) => !s.finished)
-        .map((s) => ({
-          turnId: s.turnId,
-          streamId: s.streamId,
-          startedAt: s.startedAt,
-          status:
-            s.channelThreadKey &&
-            s.turnId ===
-              deps.agentSessionManager.peek({
-                agentName: s.agentName,
-                channelThreadKey: s.channelThreadKey,
-              })?.currentTurnId
-              ? "running"
-              : "queued",
-        })),
+      ...list.map((s) => ({
+        turnId: s.turnId,
+        streamId: s.streamId,
+        startedAt: s.startedAt,
+        status: s.finished
+          ? "completed"
+          : s.channelThreadKey &&
+              s.turnId ===
+                deps.agentSessionManager.peek({
+                  agentName: s.agentName,
+                  channelThreadKey: s.channelThreadKey,
+                })?.currentTurnId
+            ? "running"
+            : "queued",
+      })),
       ...registeredTurns,
     ]);
   });
@@ -3674,6 +3673,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       };
       const turns = new Map<string, BufferedModelTurn>();
       const callerFallbacks = new Map<string, BufferedModelTurn>();
+      // A provider echoes input ids, whereas provisional handles have their
+      // own turn ids. Keep both correlations so every caller folded into one
+      // SDK turn is suppressed before its fallback can deliver a duplicate.
+      const callerFallbacksByInput = new Map<string, Set<string>>();
+      const dropCallerFallback = (turnId: string): void => {
+        callerFallbacks.delete(turnId);
+        for (const [inputId, turnIds] of callerFallbacksByInput) {
+          turnIds.delete(turnId);
+          if (turnIds.size === 0) callerFallbacksByInput.delete(inputId);
+        }
+      };
+      const suppressCallerFallbacks = (answers: readonly string[]): void => {
+        for (const inputId of answers) {
+          for (const turnId of callerFallbacksByInput.get(inputId) ?? []) {
+            dropCallerFallback(turnId);
+          }
+        }
+      };
       const next = (turn: BufferedModelTurn): Promise<IteratorResult<StreamAgentMessage>> => {
         const value = turn.values.shift();
         if (value) return Promise.resolve({ value, done: false });
@@ -3700,15 +3717,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         events: { [Symbol.asyncIterator]: () => ({ next: () => next(turn) }) },
         interrupt: source.interrupt,
       });
-      const deferCaller = (handle: AgentTurnHandle): void => {
+      const deferCaller = (handle: AgentTurnHandle, inputId?: string): void => {
         const turn = { values: [], resolvers: [], ended: false } satisfies BufferedModelTurn;
         callerFallbacks.set(handle.turnId, turn);
+        for (const id of new Set([handle.turnId, inputId].filter((id): id is string => !!id))) {
+          const turnIds = callerFallbacksByInput.get(id) ?? new Set<string>();
+          turnIds.add(handle.turnId);
+          callerFallbacksByInput.set(id, turnIds);
+        }
         void (async () => {
           for await (const message of handle.events) {
             push(turn, message);
             if (message.type === "turn_end") {
               if (callerFallbacks.get(handle.turnId) === turn) {
-                callerFallbacks.delete(handle.turnId);
+                dropCallerFallback(handle.turnId);
                 void attachTurn(bufferedHandle(handle.turnId, turn, handle)).catch((error) =>
                   log.error("failed to attach pre-model turn", {
                     turnId: handle.turnId,
@@ -3738,7 +3760,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const unsubscribeTurns = agentSess.onModelTurnStart((turnId) => {
         // A provider-owned boundary wins over the provisional caller handle.
         // If the caller later ends, its buffer must not open a duplicate stream.
-        callerFallbacks.delete(turnId);
+        dropCallerFallback(turnId);
         if (turns.has(turnId) || streamsByTurnId.has(turnId)) return;
         const turn: BufferedModelTurn = { values: [], resolvers: [], ended: false };
         turns.set(turnId, turn);
@@ -3769,11 +3791,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           agent: agentName,
         });
       });
+      const unsubscribeAnswers = agentSess.onModelTurnAnswers?.((_turnId, answers) => {
+        suppressCallerFallbacks(answers);
+      });
       modelTurnSubscriptions.set(agentSess, {
         deferCaller,
         unsubscribe: () => {
           unsubscribeMessages();
           unsubscribeTurns();
+          unsubscribeAnswers?.();
         },
       });
     }
@@ -3795,7 +3821,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // ownership. Buffer that existing handle and attach it only if no
           // model-turn boundary arrives; ordinary SDK turns still get exactly
           // one stream at their model boundary.
-          modelBridge.deferCaller(handle);
+          modelBridge.deferCaller(handle, input.inputId);
           return;
         }
         started = attachTurn(handle);
@@ -3914,14 +3940,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           channelThreadKey: stream.channelThreadKey,
         });
         if (owner) {
+          // The backend task announces its caller before ModelSession creates
+          // the visible SDK-owned turn. Rebind to that exact model turn when
+          // it appears; otherwise Stop would keep using the caller id and
+          // become a 409 after an empty model_turn_start([]). Capturing the
+          // SDK id also prevents this older backend stream from stopping a
+          // later turn in the same session.
+          let ownedModelTurnId: string | undefined;
+          const unsubscribeModelTurn = owner.onModelTurnStart?.((turnId) => {
+            ownedModelTurnId ??= turnId;
+          });
+          void stream.onFinish.finally(() => unsubscribeModelTurn?.());
           stream.interrupt = async (reason) => {
-            // turn_start precedes the provider's model_turn_start, so SDK
-            // ownership may not be visible yet. The expected turn id lets
-            // AgentSession accept this caller before that boundary and reject
-            // a later session turn after it.
-            if (owner.currentTurnId === undefined || owner.currentTurnId === msg.turnId) {
-              await owner.interrupt(reason, msg.turnId);
+            const expectedTurnId = ownedModelTurnId ?? msg.turnId;
+            if (
+              (ownedModelTurnId && owner.currentTurnId !== ownedModelTurnId) ||
+              (!ownedModelTurnId &&
+                owner.currentTurnId !== undefined &&
+                owner.currentTurnId !== msg.turnId)
+            ) {
+              return;
             }
+            await owner.interrupt(reason, expectedTurnId);
           };
         }
       }

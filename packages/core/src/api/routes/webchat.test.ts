@@ -182,6 +182,180 @@ describe("Webchat API", () => {
     expect(inputs.map((message) => message.inputState)).toEqual(["sent", "sent"]);
   });
 
+  it("suppresses every caller fallback echoed by an SDK turn", async () => {
+    const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
+    deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
+    const subscribers = new Set<
+      (message: import("@rome-os/app-runtime").StreamAgentMessage, turnId: string) => void
+    >();
+    let onModelTurnStart: ((turnId: string) => void) | undefined;
+    let onModelTurnAnswers: ((turnId: string, answers: readonly string[]) => void) | undefined;
+    const finishers: (() => void)[] = [];
+    const agent: AgentSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:folded" },
+      sessionId: "agent-session",
+      status: "running",
+      sendTurn(input) {
+        const turnId = `caller-${input.inputId}`;
+        let finish!: () => void;
+        const done = new Promise<void>((resolve) => (finish = resolve));
+        finishers.push(finish);
+        return {
+          turnId,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            await done;
+            yield { type: "result" as const, content: "duplicate" };
+            yield {
+              type: "turn_end" as const,
+              turnId,
+              status: "completed" as const,
+              durationMs: 1,
+            };
+          })(),
+        };
+      },
+      submitInput(input, options) {
+        const handle = this.sendTurn(input, options);
+        options.onTurn(handle);
+        return { inputId: input.inputId, turnId: null, disposition: "sent" };
+      },
+      subscribe(handler) {
+        subscribers.add(handler);
+        return () => subscribers.delete(handler);
+      },
+      onModelTurnStart(listener) {
+        onModelTurnStart = listener;
+        return () => undefined;
+      },
+      onModelTurnAnswers(listener) {
+        onModelTurnAnswers = listener;
+        return () => undefined;
+      },
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    };
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => agent),
+      peek: () => agent,
+      shutdown: async () => {},
+    };
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Folded" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    const inputIds = [
+      "00000000-0000-4000-8000-000000000011",
+      "00000000-0000-4000-8000-000000000012",
+    ];
+    for (const inputId of inputIds) {
+      await app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inputId, text: inputId }),
+      });
+    }
+
+    // The SDK starts detached, then echoes both callers by input id. On the
+    // reviewed head only the SDK id was removed from callerFallbacks, so both
+    // terminal caller handles subsequently delivered duplicate replies.
+    onModelTurnStart!("sdk-folded");
+    onModelTurnAnswers!("sdk-folded", inputIds);
+    for (const subscriber of subscribers) {
+      subscriber({ type: "result", content: "combined" }, "sdk-folded");
+      subscriber(
+        { type: "turn_end", turnId: "sdk-folded", status: "completed", durationMs: 1 },
+        "sdk-folded",
+      );
+    }
+    for (const finish of finishers) finish();
+
+    await rs.waitFor(() =>
+      expect(sendMessageRun).toHaveBeenCalledWith(
+        "send_message",
+        expect.objectContaining({ text: "combined", turnId: "sdk-folded" }),
+        expect.anything(),
+      ),
+    );
+    expect(sendMessageRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists a completed SDK stream so a poll after its terminal event can replay it", async () => {
+    deps.actionEngine = {
+      run: rs.fn(async () => ({ status: "ok" })),
+    } as unknown as typeof deps.actionEngine;
+    const subscribers = new Set<
+      (message: import("@rome-os/app-runtime").StreamAgentMessage, turnId: string) => void
+    >();
+    let onModelTurnStart: ((turnId: string) => void) | undefined;
+    const agent: AgentSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:finished" },
+      sessionId: "agent-session",
+      status: "idle",
+      sendTurn: () => ({
+        turnId: "caller-finished",
+        turnContext: otelContext.active(),
+        events: { async *[Symbol.asyncIterator]() {} },
+      }),
+      subscribe(handler) {
+        subscribers.add(handler);
+        return () => subscribers.delete(handler);
+      },
+      onModelTurnStart(listener) {
+        onModelTurnStart = listener;
+        return () => undefined;
+      },
+      onStatusChange: () => () => undefined,
+      interrupt: async () => undefined,
+      close: async () => undefined,
+    };
+    deps.agentSessionManager = {
+      acquire: rs.fn(async () => agent),
+      peek: () => agent,
+      shutdown: async () => {},
+    };
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Fast SDK turn" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    await app.request(`/chat/sessions/${id}/turns`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "quick" }),
+    });
+    onModelTurnStart!("sdk-finished");
+    for (const subscriber of subscribers) {
+      subscriber({ type: "result", content: "quick reply" }, "sdk-finished");
+      subscriber(
+        { type: "turn_end", turnId: "sdk-finished", status: "completed", durationMs: 1 },
+        "sdk-finished",
+      );
+    }
+
+    await rs.waitFor(async () => {
+      const turns = (await (await app.request(`/chat/sessions/${id}/turns`)).json()) as Array<{
+        turnId: string;
+        status: string;
+      }>;
+      expect(turns).toContainEqual({
+        turnId: "sdk-finished",
+        streamId: expect.any(String),
+        startedAt: expect.any(String),
+        status: "completed",
+      });
+    });
+    const replay = await app.request("/chat/turns/sdk-finished/stream");
+    expect(replay.status).toBe(200);
+    await expect(replay.text()).resolves.toContain("event: done");
+  });
+
   it("delivers a caller turn that ends before ModelSession ownership", async () => {
     const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
     deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
@@ -4052,9 +4226,16 @@ describe("Webchat API", () => {
     it("stops a backend continuation before and after SDK ownership without interrupting later work", async () => {
       const sessionId = "sess-backend-stop";
       await deps.webchatRepo.createSession(sessionId, "Backend stop");
+      let onModelTurnStart: ((turnId: string) => void) | undefined;
       const owner = {
         currentTurnId: undefined as string | undefined,
         interrupt: rs.fn(async () => {}),
+        onModelTurnStart(listener: (turnId: string) => void) {
+          onModelTurnStart = listener;
+          return () => {
+            onModelTurnStart = undefined;
+          };
+        },
       };
       rs.spyOn(deps.agentSessionManager, "peek").mockReturnValue(owner as unknown as AgentSession);
       const { routes, runtime } = createWebchatRuntime(deps);
@@ -4089,11 +4270,12 @@ describe("Webchat API", () => {
       // reach AgentSession while the SDK-owned turn id is still unavailable.
       expect((await stop()).status).toBe(202);
       expect(owner.interrupt).toHaveBeenCalledWith("user-stop", "backend-provider-turn");
-      // Once model_turn_start binds the caller, the same continuation remains
-      // interruptible by its synthetic backend stream id.
-      owner.currentTurnId = "backend-provider-turn";
+      // An empty SDK start changes the visible owner id before the provider
+      // echoes this backend caller. Stop must rebind to that real model turn.
+      owner.currentTurnId = "sdk-owned-backend-turn";
+      onModelTurnStart!("sdk-owned-backend-turn");
       expect((await stop()).status).toBe(202);
-      expect(owner.interrupt).toHaveBeenCalledTimes(2);
+      expect(owner.interrupt).toHaveBeenLastCalledWith("user-stop", "sdk-owned-backend-turn");
       owner.currentTurnId = "later-turn";
       await stop();
       expect(owner.interrupt).toHaveBeenCalledTimes(2);

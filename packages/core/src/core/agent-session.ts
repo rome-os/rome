@@ -350,6 +350,11 @@ export type AgentSessionSubscriber = (msg: StreamAgentMessage, turnId: string) =
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
 /** Fires only when the provider has opened an SDK model turn. */
 export type AgentSessionModelTurnListener = (turnId: string) => void;
+/** Reports caller input ids newly echoed by an SDK model turn. */
+export type AgentSessionModelTurnAnswersListener = (
+  turnId: string,
+  answers: readonly string[],
+) => void;
 
 export interface AgentSession {
   readonly key: AgentSessionKey;
@@ -371,6 +376,8 @@ export interface AgentSession {
   subscribe(handler: AgentSessionSubscriber): () => void;
   /** Model-turn boundary for consumers that render one stream per SDK turn. */
   onModelTurnStart?(listener: AgentSessionModelTurnListener): () => void;
+  /** Caller echoes newly claimed by a provider-owned model turn. */
+  onModelTurnAnswers?(listener: AgentSessionModelTurnAnswersListener): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
@@ -1964,6 +1971,7 @@ class AgentSessionImpl implements AgentSession {
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private modelTurnListeners = new Map<string, AgentSessionModelTurnListener>();
+  private modelTurnAnswersListeners = new Map<string, AgentSessionModelTurnAnswersListener>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
   /** Callers waiting for the SDK turn whose result names their message id. */
@@ -2417,6 +2425,7 @@ class AgentSessionImpl implements AgentSession {
           .find((sink): sink is TurnSink => !!sink);
         if (streamSink) this.bindSdkTurnSink(event.turnId, streamSink);
         else this.openSdkTurnSink(event.turnId);
+        this.announceModelTurnAnswers(event.turnId, event.answers);
         return;
       }
       case "model_turn_answers": {
@@ -2429,6 +2438,7 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         for (const id of event.added) turn.answers.add(id);
+        this.announceModelTurnAnswers(event.turnId, event.added);
         // The first named caller owns the model stream. Later names may have
         // folded into this SDK turn; they receive the same terminal below.
         const streamSink = event.added
@@ -2449,6 +2459,7 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         for (const id of event.answers) turn.answers.add(id);
+        this.announceModelTurnAnswers(event.turnId, event.answers);
         if (!turn.terminal) {
           log.warn("model turn ended without a terminal", {
             sessionId: this.sessionId,
@@ -3875,6 +3886,26 @@ class AgentSessionImpl implements AgentSession {
         listener(turnId);
       } catch (err) {
         log.warn("agent session model-turn listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: this.sessionId,
+        });
+      }
+    }
+  }
+
+  onModelTurnAnswers(listener: AgentSessionModelTurnAnswersListener): () => void {
+    const id = uuidv4();
+    this.modelTurnAnswersListeners.set(id, listener);
+    return () => this.modelTurnAnswersListeners.delete(id);
+  }
+
+  private announceModelTurnAnswers(turnId: string, answers: readonly string[]): void {
+    if (answers.length === 0) return;
+    for (const listener of this.modelTurnAnswersListeners.values()) {
+      try {
+        listener(turnId, answers);
+      } catch (err) {
+        log.warn("agent session model-turn answers listener threw", {
           error: err instanceof Error ? err.message : String(err),
           sessionId: this.sessionId,
         });

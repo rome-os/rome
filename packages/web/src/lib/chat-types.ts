@@ -262,7 +262,7 @@ export interface TurnInfo {
   turnId: string;
   streamId: string;
   startedAt: string;
-  status: "running" | "queued";
+  status: "running" | "queued" | "completed";
 }
 
 // Shape of POST /chat/sessions/:id/turns response.
