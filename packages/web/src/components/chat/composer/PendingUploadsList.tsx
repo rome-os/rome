@@ -1,21 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  File as FileGlyph,
   FileArchive,
   FileAudio,
   FileCode,
+  FileImage,
   FileJson,
   FileSpreadsheet,
   FileText,
   FileVideo,
   X,
-  ZoomIn,
+  type LucideIcon,
 } from "lucide-react";
 import Zoom from "react-medium-image-zoom";
 import "react-medium-image-zoom/dist/styles.css";
 import "./pending-image-preview.css";
 import { useTranslation } from "react-i18next";
-import { IconButton } from "@/components/ui/icon-button";
 import type { PendingUpload } from "@/lib/chat-types";
+import { cn } from "@/lib/utils";
 import { UploadRing } from "./ComposerChip";
 import { ImagePreviewContent } from "./ImagePreviewContent";
 
@@ -56,245 +58,219 @@ function splitProgressByFile(uploads: PendingUpload[], overall: number): number[
   });
 }
 
-function getFileCategory(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+type FileKind =
+  | "code"
+  | "data"
+  | "table"
+  | "text"
+  | "pdf"
+  | "sheet"
+  | "archive"
+  | "audio"
+  | "video"
+  | "image"
+  | "other";
 
-  if (ext === "pdf") {
-    return {
-      Icon: FileText,
-      label: "PDF",
-      badgeClass: "pending-badge-pdf",
-      isCode: false,
-    };
-  }
+// `text` decides whether the card reads a snippet, and `mono` sets it in the
+// code stack. Both hang off the kind so the glyph and the preview never disagree
+// about what a file is.
+const KINDS: Record<FileKind, { Icon: LucideIcon; text: boolean; mono: boolean }> = {
+  code: { Icon: FileCode, text: true, mono: true },
+  data: { Icon: FileJson, text: true, mono: true },
+  table: { Icon: FileSpreadsheet, text: true, mono: true },
+  text: { Icon: FileText, text: true, mono: false },
+  pdf: { Icon: FileText, text: false, mono: false },
+  sheet: { Icon: FileSpreadsheet, text: false, mono: false },
+  archive: { Icon: FileArchive, text: false, mono: false },
+  audio: { Icon: FileAudio, text: false, mono: false },
+  video: { Icon: FileVideo, text: false, mono: false },
+  image: { Icon: FileImage, text: false, mono: false },
+  other: { Icon: FileGlyph, text: false, mono: false },
+};
 
-  if (
-    [
-      "ts",
-      "tsx",
-      "js",
-      "jsx",
-      "py",
-      "rs",
-      "go",
-      "java",
-      "c",
-      "cpp",
-      "h",
-      "hpp",
-      "cs",
-      "rb",
-      "php",
-      "swift",
-      "kt",
-      "scala",
-      "sh",
-      "sql",
-      "html",
-      "css",
-      "scss",
-      "less",
-    ].includes(ext)
-  ) {
-    return {
-      Icon: FileCode,
-      label: ext.toUpperCase().slice(0, 4),
-      badgeClass: "pending-badge-code",
-      isCode: true,
-    };
-  }
+const EXTENSIONS: Partial<Record<FileKind, string>> = {
+  code: "ts tsx js jsx mjs cjs py rs go java kt scala c h cpp hpp cs rb php swift sh sql html css scss less",
+  data: "json jsonl yaml yml toml xml ini env",
+  table: "csv tsv",
+  text: "txt md mdx log rst",
+  pdf: "pdf",
+  sheet: "xlsx xls ods numbers",
+  archive: "zip tar gz tgz bz2 xz 7z rar",
+  audio: "mp3 wav flac m4a ogg aac",
+  video: "mp4 mov mkv webm avi m4v",
+  image: "png jpg jpeg gif webp svg heic heif avif bmp tiff",
+};
 
-  if (["json", "yaml", "yml", "toml", "xml"].includes(ext)) {
-    return {
-      Icon: FileJson,
-      label: ext.toUpperCase().slice(0, 4),
-      badgeClass: "pending-badge-json",
-      isCode: true,
-    };
-  }
+const KIND_BY_EXTENSION = new Map(
+  Object.entries(EXTENSIONS).flatMap(([kind, extensions]) =>
+    extensions.split(" ").map((extension) => [extension, kind as FileKind] as const),
+  ),
+);
 
-  if (["csv", "tsv", "xlsx", "xls"].includes(ext)) {
-    return {
-      Icon: FileSpreadsheet,
-      label: ext === "csv" || ext === "tsv" ? ext.toUpperCase() : "XLS",
-      badgeClass: "pending-badge-sheet",
-      isCode: false,
-    };
-  }
+const TEXT_MIME = /^(text\/|application\/(json|xml|javascript|x-sh|x-yaml|toml)\b)/;
 
-  if (["zip", "tar", "gz", "tgz", "7z", "rar", "bz2"].includes(ext)) {
-    return {
-      Icon: FileArchive,
-      label: "ZIP",
-      badgeClass: "pending-badge-archive",
-      isCode: false,
-    };
-  }
-
-  if (["mp3", "wav", "flac", "m4a", "ogg", "aac"].includes(ext)) {
-    return {
-      Icon: FileAudio,
-      label: "AUDIO",
-      badgeClass: "pending-badge-audio",
-      isCode: false,
-    };
-  }
-
-  if (["mp4", "mov", "mkv", "webm", "avi", "m4v"].includes(ext)) {
-    return {
-      Icon: FileVideo,
-      label: "VIDEO",
-      badgeClass: "pending-badge-video",
-      isCode: false,
-    };
-  }
-
-  return {
-    Icon: FileText,
-    label: ext ? ext.toUpperCase().slice(0, 4) : "DOC",
-    badgeClass: "pending-badge-doc",
-    isCode: false,
-  };
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-function PendingDocumentPreview({
-  file,
-  prefix,
-  onRemove,
-  progress,
-}: {
-  file: File;
-  prefix?: ReactNode;
-  onRemove?: () => void;
-  progress?: number | null;
-}) {
-  const { t } = useTranslation("chat");
-  const [snippet, setSnippet] = useState<string>("");
+function fileKind(file: File): FileKind {
+  const byExtension = KIND_BY_EXTENSION.get(extensionOf(file.name));
+  if (byExtension) return byExtension;
+  const type = file.type;
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("audio/")) return "audio";
+  if (type.startsWith("video/")) return "video";
+  if (type === "application/pdf") return "pdf";
+  if (TEXT_MIME.test(type)) return "text";
+  return "other";
+}
+
+const SNIPPET_BYTES = 1024;
+
+/** The first kilobyte of a text file, or "" until it is read or when it reads as binary. */
+function useTextSnippet(file: File, enabled: boolean): string {
+  const [snippet, setSnippet] = useState<{ file: File; text: string } | null>(null);
 
   useEffect(() => {
-    const isTextLike =
-      file.type.startsWith("text/") ||
-      file.type === "application/json" ||
-      file.type === "application/javascript" ||
-      file.type === "application/xml" ||
-      /\.(txt|md|mdx|json|ts|tsx|js|jsx|py|rs|go|html|css|scss|yaml|yml|toml|sql|sh|csv|tsv|log)$/i.test(
-        file.name,
+    if (!enabled) return;
+    let live = true;
+    file
+      .slice(0, SNIPPET_BYTES)
+      .text()
+      .then(
+        (text) => {
+          // An extension can name two formats (`.ts` is also MPEG transport
+          // stream), and a NUL byte never appears in text.
+          if (live) setSnippet({ file, text: text.includes("\u0000") ? "" : text.trimEnd() });
+        },
+        () => {},
       );
-
-    if (!isTextLike) return;
-
-    let cancelled = false;
-    try {
-      const slice = typeof file.slice === "function" ? file.slice(0, 1024) : file;
-      if (typeof slice.text === "function") {
-        slice
-          .text()
-          .then((text) => {
-            if (!cancelled) setSnippet(text.trim());
-          })
-          .catch(() => {});
-      }
-    } catch {
-      // slice or text not available
-    }
-
     return () => {
-      cancelled = true;
+      live = false;
     };
-  }, [file]);
+  }, [file, enabled]);
 
-  const meta = getFileCategory(file.name);
-  const firstLineHeading = snippet.startsWith("#");
+  return snippet?.file === file ? snippet.text : "";
+}
+
+interface CardProps {
+  file: File;
+  /** The send-order label the agent sees, such as "#File 2". */
+  label: string;
+  index: number;
+  onRemove?: () => void;
+  progress?: number | null;
+}
+
+/**
+ * The card chrome both kinds share: a 96px tile, its send-order number, and
+ * the top-right action. The action slot holds either the remove button or the
+ * upload ring, never both, which is what keeps a file from being removed while
+ * its bytes are in flight.
+ */
+function PendingCard({
+  file,
+  label,
+  index,
+  onRemove,
+  progress,
+  children,
+}: CardProps & { children: ReactNode }) {
+  const { t } = useTranslation("chat");
+  // The action floats over a thumbnail, so it carries its own surface and a
+  // hairline rather than a shadow. Its visible box stays 24px to leave the
+  // thumbnail visible, and the hit area reaches 6px past it, under half the
+  // tray's 8px gap.
+  const slot =
+    "absolute right-1 top-1 flex size-6 items-center justify-center rounded-full border border-border bg-surface text-foreground";
 
   return (
-    <div
-      className="pending-doc-card relative size-24 shrink-0 flex flex-col overflow-hidden rounded-8 border shadow-xs select-none"
-      title={typeof prefix === "string" ? `${prefix} ${file.name}` : file.name}
-    >
-      {/* Document content preview */}
-      <div className="pending-doc-paper relative flex-1 overflow-hidden">
-        {snippet ? (
-          <div
-            className={`pointer-events-none line-clamp-6 p-2 ${
-              meta.isCode ? "pending-doc-sheet-code" : "pending-doc-sheet"
-            }`}
-          >
-            {firstLineHeading ? (
-              <span className="pending-doc-heading block">{snippet.split("\n")[0]}</span>
-            ) : null}
-            <span className={meta.isCode ? "pending-doc-code" : "pending-doc-body"}>
-              {firstLineHeading ? snippet.split("\n").slice(1).join("\n") : snippet}
-            </span>
-          </div>
-        ) : (
-          /* Simulated document sheet layout for non-text / binary files */
-          <div className="flex h-full flex-col justify-between p-2">
-            <div className="flex flex-col gap-1 opacity-40">
-              <div className="pending-doc-skeleton-bar-dark h-1 w-3/4 rounded-full" />
-              <div className="pending-doc-skeleton-bar h-1 w-full rounded-full" />
-            </div>
-            <div className="my-auto flex flex-col items-center justify-center gap-1">
-              <span
-                className={`flex size-7 items-center justify-center rounded-6 shadow-xs ${meta.badgeClass}`}
-              >
-                <meta.Icon className="size-4 stroke-[2]" aria-hidden="true" />
-              </span>
-              <span className="pending-doc-badge-label uppercase text-muted-foreground">
-                {meta.label}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1 opacity-30">
-              <div className="pending-doc-skeleton-bar h-1 w-5/6 rounded-full" />
-              <div className="pending-doc-skeleton-bar h-1 w-2/3 rounded-full" />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Attachment footer */}
-      <div className="pending-doc-footer flex h-7 shrink-0 items-center px-2">
-        {prefix ? <span className="sr-only">{prefix}</span> : null}
-        <span
-          className={`flex size-4.5 shrink-0 items-center justify-center rounded-4 ${meta.badgeClass}`}
-        >
-          <meta.Icon className="size-3 stroke-[2]" aria-hidden="true" />
-        </span>
-        <span className="pending-doc-filename truncate" title={file.name}>
-          {file.name}
-        </span>
-      </div>
-      {/* Top-right action: progress ring or remove button */}
+    <li className="relative size-24 shrink-0" title={`${label} · ${file.name}`}>
+      <span className="sr-only">{label}</span>
+      {children}
+      <span
+        data-pending-card-overlay
+        aria-hidden
+        className="pointer-events-none absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full border border-border bg-surface px-1 text-badge text-foreground tabular-nums"
+      >
+        {index}
+      </span>
       {progress !== undefined ? (
-        <span className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-surface text-foreground shadow-sm">
+        <span data-pending-card-overlay className={slot}>
           <UploadRing
             progress={progress}
             label={t("composer.uploadProgressFor", { name: file.name })}
+            className="m-0"
           />
         </span>
       ) : onRemove ? (
-        <IconButton
-          data-pending-image-remove
-          size="xs"
+        <button
+          type="button"
+          data-pending-card-overlay
           onClick={onRemove}
-          label={t("composer.removeFile", { name: file.name })}
-          icon={<X className="size-3" strokeWidth={2.5} />}
-          className="absolute right-1 top-1 rounded-full bg-surface shadow-sm"
-        />
+          aria-label={t("composer.removeFile", { name: file.name })}
+          title={t("composer.removeFile", { name: file.name })}
+          className={cn(
+            slot,
+            "outline-1 outline-offset-0 outline-transparent transition-colors after:absolute after:-inset-1.5 hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50",
+          )}
+        >
+          <X className="size-3" strokeWidth={2.5} aria-hidden />
+        </button>
       ) : null}
-    </div>
+    </li>
   );
 }
-function PendingImagePreview({
-  file,
-  prefix,
-  onRemove,
-  progress,
-}: {
-  file: File;
-  prefix?: ReactNode;
-  onRemove?: () => void;
-  progress?: number | null;
-}) {
+
+function PendingDocumentPreview(props: CardProps) {
+  const { file } = props;
+  const kind = KINDS[fileKind(file)];
+  const snippet = useTextSnippet(file, kind.text);
+  const extension = extensionOf(file.name);
+
+  return (
+    <PendingCard {...props}>
+      <div className="flex size-24 flex-col overflow-hidden rounded-8 border border-border bg-surface select-none">
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-surface-muted">
+          {snippet ? (
+            <div
+              aria-hidden
+              data-pending-doc-page
+              className={cn(
+                // The top inset clears the number and the action, which sit
+                // over this band, so the file's first line stays visible.
+                "pending-doc-page absolute left-0 top-0 overflow-hidden whitespace-pre-wrap break-words px-5 pt-16 pb-5 text-aux text-muted-foreground",
+                kind.mono && "font-mono",
+              )}
+            >
+              {snippet}
+            </div>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-1 text-muted-foreground">
+              <kind.Icon className="size-6" strokeWidth={1.5} aria-hidden />
+              {extension ? (
+                <span className="max-w-full truncate px-2 text-badge uppercase" aria-hidden>
+                  {extension}
+                </span>
+              ) : null}
+            </div>
+          )}
+        </div>
+        <span className="truncate border-t border-border px-2 py-1 text-aux text-foreground">
+          {file.name}
+        </span>
+      </div>
+    </PendingCard>
+  );
+}
+
+// The zoom button covers the whole card when focused, so the focus edge is the
+// card's own outline and no glyph is needed.
+const NoGlyph = () => null;
+
+function PendingImagePreview(props: CardProps) {
+  const { file } = props;
   const { t } = useTranslation("chat");
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -306,52 +282,45 @@ function PendingImagePreview({
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  if (failed || !src) {
-    return (
-      <PendingDocumentPreview file={file} prefix={prefix} onRemove={onRemove} progress={progress} />
-    );
-  }
+  // Browsers that cannot decode a format (HEIC on most desktops) fire onError,
+  // and an empty frame would hide which file is attached.
+  if (failed || !src) return <PendingDocumentPreview {...props} />;
 
   return (
-    <div className="relative size-24 shrink-0 [&_[data-rmiz-btn-zoom]]:left-2 [&_[data-rmiz-btn-zoom]]:right-auto">
-      <Zoom
-        a11yNameButtonZoom={t("composer.previewImage")}
-        a11yNameButtonUnzoom={t("composer.closeImagePreview")}
-        classDialog="pending-image-preview"
-        IconZoom={ZoomIn}
-        IconUnzoom={X}
-        ZoomContent={ImagePreviewContent}
-        canSwipeToUnzoom={false}
-        zoomMargin={64}
-      >
-        <img
-          src={src}
-          alt={file.name}
-          className="visible size-24 rounded-8 border border-border bg-surface object-cover"
-          onError={() => setFailed(true)}
-        />
-      </Zoom>
-      {progress !== undefined ? (
-        <span className="absolute right-1 top-1 flex size-6 items-center justify-center rounded-full bg-surface text-foreground shadow-sm">
-          <UploadRing
-            progress={progress}
-            label={t("composer.uploadProgressFor", { name: file.name })}
+    <PendingCard {...props}>
+      <div className="pending-image-card size-24">
+        <Zoom
+          a11yNameButtonZoom={t("composer.previewImage")}
+          a11yNameButtonUnzoom={t("composer.closeImagePreview")}
+          classDialog="pending-image-preview"
+          IconZoom={NoGlyph}
+          IconUnzoom={X}
+          ZoomContent={ImagePreviewContent}
+          canSwipeToUnzoom={false}
+          zoomMargin={64}
+        >
+          <img
+            src={src}
+            alt={file.name}
+            className="visible size-24 rounded-8 border border-border bg-surface-muted object-cover"
+            onError={() => setFailed(true)}
           />
-        </span>
-      ) : onRemove ? (
-        <IconButton
-          data-pending-image-remove
-          size="xs"
-          onClick={onRemove}
-          label={t("composer.removeFile", { name: file.name })}
-          icon={<X className="size-3" strokeWidth={2.5} />}
-          className="absolute right-1 top-1 rounded-full bg-surface shadow-sm"
-        />
-      ) : null}
-    </div>
+        </Zoom>
+      </div>
+    </PendingCard>
   );
 }
 
+/**
+ * Pending attachments as one row of 96px cards. An image shows its pixels and
+ * opens a full-size viewer. Any other file shows a scaled render of its first
+ * lines when it is text, or its kind's glyph when it is not.
+ *
+ * Each card carries its send-order number because the turn lists attachments
+ * to the agent as "File N", so the guardian can point at "file 2" in the draft.
+ * Upload progress rides on the cards, taking the remove button's slot, so the
+ * tray does not reflow when a send starts.
+ */
 export function PendingUploadsList({
   uploads,
   onRemove,
@@ -366,31 +335,23 @@ export function PendingUploadsList({
     uploading && uploadProgress !== null ? splitProgressByFile(uploads, uploadProgress) : null;
 
   return (
-    <div className="mb-3 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex w-max min-w-full items-start gap-2 p-1">
+    <div className="mb-3 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+      <ul className="flex w-max min-w-full items-start gap-2 p-1">
         {uploads.map((upload, index) => {
-          const progress = uploading ? (perFile ? perFile[index] : null) : undefined;
-          const remove = disabled || uploading ? undefined : () => onRemove(upload.id);
-          const prefix = t("composer.filePill", { index: index + 1 });
+          const props: CardProps = {
+            file: upload.file,
+            label: t("composer.filePill", { index: index + 1 }),
+            index: index + 1,
+            onRemove: disabled || uploading ? undefined : () => onRemove(upload.id),
+            progress: uploading ? (perFile ? perFile[index] : null) : undefined,
+          };
           return upload.file.type.startsWith("image/") ? (
-            <PendingImagePreview
-              key={upload.id}
-              file={upload.file}
-              prefix={prefix}
-              onRemove={remove}
-              progress={progress}
-            />
+            <PendingImagePreview key={upload.id} {...props} />
           ) : (
-            <PendingDocumentPreview
-              key={upload.id}
-              file={upload.file}
-              prefix={prefix}
-              onRemove={remove}
-              progress={progress}
-            />
+            <PendingDocumentPreview key={upload.id} {...props} />
           );
         })}
-      </div>
+      </ul>
     </div>
   );
 }

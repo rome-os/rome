@@ -37,7 +37,15 @@ export interface ComposerChipProps extends Omit<ComponentPropsWithoutRef<"span">
 // swaps for the other.
 const TRAILING_SLOT = "relative -mr-1 ml-1 shrink-0 rounded-full p-1";
 
-export function UploadRing({ progress, label }: { progress: number | null; label?: string }) {
+export function UploadRing({
+  progress,
+  label,
+  className,
+}: {
+  progress: number | null;
+  label?: string;
+  className?: string;
+}) {
   // r=5 in a 12px box matches the X icon's size-3 footprint.
   const RADIUS = 5;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -45,7 +53,7 @@ export function UploadRing({ progress, label }: { progress: number | null; label
   const fraction = indeterminate ? 0.25 : Math.max(0, Math.min(1, progress));
   return (
     <span
-      className={cn(TRAILING_SLOT, "opacity-80")}
+      className={cn(TRAILING_SLOT, "opacity-80", className)}
       role="progressbar"
       aria-label={label}
       aria-valuemin={0}

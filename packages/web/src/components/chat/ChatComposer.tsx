@@ -1040,7 +1040,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
-        <div ref={attachmentTrayRef} className="flow-root">
+        {/* flow-root keeps the tray's bottom margin inside this box, so the
+            measured height is the full space the tray takes from the input. */}
+        <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
           <PendingUploadsList
             uploads={pendingUploads}
             onRemove={removePendingUpload}

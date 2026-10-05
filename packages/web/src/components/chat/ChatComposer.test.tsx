@@ -652,7 +652,7 @@ describe("composer content height budget", () => {
       class {
         constructor(private callback: () => void) {}
         observe(target: HTMLElement) {
-          if (target.classList.contains("flow-root")) {
+          if (target.hasAttribute("data-attachment-tray")) {
             rs.spyOn(target, "getBoundingClientRect").mockImplementation(
               () => ({ height: trayHeight }) as DOMRect,
             );
