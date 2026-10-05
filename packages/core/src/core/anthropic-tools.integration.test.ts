@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@rstest/core";
+import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV } from "./anthropic-provider.js";
+import { createRomeMcpServer, type RomeMcpGroup } from "./mcp/server.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
 
 const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
@@ -12,14 +14,29 @@ const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
 
 /**
  * Smoke the bundled Claude Code CLI, not a mocked SDK. A CLI upgrade can drop a
- * builtin tool without any error (#629 lost TodoWrite this way). The CLI
- * reports the agent's tools in its init message, before it calls the model
- * API, so no network or mock server is needed.
+ * builtin tool or Rome's own MCP tools without any error (#629 lost TodoWrite
+ * this way). The CLI reports the agent's tools in its init message, before it
+ * calls the model API, so no network or mock server is needed.
  */
 describe("bundled Claude Code", () => {
   const builtinTools = [...new AnthropicProvider().builtinTools];
+  // A web chat's Rome tools: actions, skills and the interactive ones.
+  const facade = {
+    getActionCatalog: () => [],
+    getSkillCatalog: () => [],
+    subagentTools: [],
+    executeAction: async () => ({ ok: true }),
+    executeSubagent: async () => "unused",
+    supportsInteractiveSurface: true,
+  };
 
-  it.each(claudeModels)("gives %s every builtin tool Rome requests", async (model) => {
+  it.each(claudeModels)("gives %s every tool Rome requests", async (model) => {
+    // SDK MCP servers hold one connection each, so build them per query.
+    const mcpServers = buildAnthropicMcpServers(facade);
+    const romeServer = createRomeMcpServer(facade);
+    const romeTools = Object.keys(mcpServers).flatMap((group) =>
+      romeServer.listTools(group as RomeMcpGroup).map((tool) => `mcp__${group}__${tool.name}`),
+    );
     const home = await mkdtemp(join(tmpdir(), "rome-claude-tools-"));
     const abortController = new AbortController();
     const q = query({
@@ -47,7 +64,7 @@ describe("bundled Claude Code", () => {
           ...CLAUDE_AGENT_SDK_ENV,
         },
         tools: builtinTools,
-        mcpServers: {},
+        mcpServers,
         strictMcpConfig: true,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
@@ -58,7 +75,9 @@ describe("bundled Claude Code", () => {
     try {
       for await (const message of q) {
         if (message.type !== "system" || message.subtype !== "init") continue;
-        const missing = builtinTools.filter((tool) => !message.tools.includes(tool));
+        const missing = [...builtinTools, ...romeTools].filter(
+          (tool) => !message.tools.includes(tool),
+        );
         expect(
           missing,
           `Claude Code ${message.claude_code_version} dropped tools for ${model}`,
