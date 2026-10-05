@@ -8,6 +8,15 @@ import { AnthropicProvider, CLAUDE_AGENT_SDK_ENV } from "./anthropic-provider.js
 import { createRomeMcpServer, type RomeMcpGroup } from "./mcp/server.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
 
+// Every Rome MCP group, so a group the builder stops registering still counts.
+const ROME_MCP_GROUPS: readonly RomeMcpGroup[] = [
+  "actions",
+  "subagents",
+  "skills",
+  "output",
+  "ask_user",
+];
+
 const claudeModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
   .filter((selection) => selection.providerId === "anthropic")
   .map((selection) => selection.model);
@@ -34,8 +43,8 @@ describe("bundled Claude Code", () => {
     // SDK MCP servers hold one connection each, so build them per query.
     const mcpServers = buildAnthropicMcpServers(facade);
     const romeServer = createRomeMcpServer(facade);
-    const romeTools = Object.keys(mcpServers).flatMap((group) =>
-      romeServer.listTools(group as RomeMcpGroup).map((tool) => `mcp__${group}__${tool.name}`),
+    const romeTools = ROME_MCP_GROUPS.flatMap((group) =>
+      romeServer.listTools(group).map((tool) => `mcp__${group}__${tool.name}`),
     );
     const home = await mkdtemp(join(tmpdir(), "rome-claude-tools-"));
     const abortController = new AbortController();
