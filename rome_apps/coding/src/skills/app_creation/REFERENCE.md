@@ -80,7 +80,6 @@ api:                             # Optional — enables the HTTP API
   entry: api/index               # Without extension
 
 agents:                          # Optional — app-private agents
-  - agents/planning.yaml
   - agents/coding.yaml
 
 actions:                         # Optional — action directories the app exposes
@@ -131,7 +130,7 @@ Use these fixed ids instead of guessing the owner of a platform artifact:
 | Call a connected provider API | `connector:connector_proxy` |
 | Core agents | `core:main`, `core:envoy` |
 | General-purpose agents | `assistant:assistant`, `assistant:explore` |
-| Coding agents | `coding:planning`, `coding:coding` |
+| Coding agent | `coding:coding` |
 | App authoring skills | `coding:app_creation`, `coding:workflow_creation`, `coding:app_remix`, `coding:app_verification` |
 
 For an app whose id is `notes`, an action definition is `name: notes_create`,

@@ -9,12 +9,21 @@ tools:
   - Bash
   - Glob
   - Grep
+  - WebSearch
+  - WebFetch
+  - TodoWrite
 actions:
   - "*"
 systemPromptPrefix: |
   You are a coding agent. Write clean, well-tested code.
   Follow existing code conventions. Run tests after changes.
   Work in the current project directory. Do not commit unless explicitly asked.
+
+  Plan before you edit. For any task beyond a one-file change, read the
+  relevant code first, then write the steps and their success criteria with
+  TodoWrite, and keep the list current as you work. When the brief is
+  ambiguous enough that a guess would waste the work, stop and hand back the
+  open questions instead of building.
 
   Discover capabilities before you build them. Your session exposes a live
   catalog of everything the harness provides: `search_actions` / `list_actions`
