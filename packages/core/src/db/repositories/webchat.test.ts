@@ -1782,6 +1782,8 @@ describe("WebChatRepository", () => {
       }),
     ).resolves.toEqual({
       days: [],
+      providerDays: [],
+      providerTotals: [],
       monthCostUsd: 0,
       monthTokens: 0,
       totalCacheReadTokens: 0,
@@ -1850,6 +1852,104 @@ describe("WebChatRepository", () => {
       outputTokens: 9,
     });
     expect(totals.days[0]?.costUsd).toBeCloseTo(0.6);
+  });
+
+  it("splits usage totals by the provider each terminal block reports", async () => {
+    const monthStart = new Date("2030-03-01T00:00:00.000Z");
+    const dayStart = new Date("2030-03-05T00:00:00.000Z");
+    const dayEnd = new Date("2030-03-06T00:00:00.000Z");
+    const terminalBlock = (
+      type: "result" | "error",
+      provider: string | undefined,
+      inputTokens: number,
+      costUsd: number,
+    ) => ({
+      type,
+      content: "done",
+      accounting: {
+        ...(provider ? { provider } : {}),
+        model: "model",
+        usage: { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens, outputTokens: 3 },
+        costUsd,
+      },
+    });
+
+    await repo.createSession("sess-split", "Split", undefined, "alpha", null, "alpha");
+    await repo.createSession("sess-split-other", "Other", undefined, "other", null, "other");
+    // A turn that failed on Codex and finished on Claude, stored inline.
+    await repo.addMessage(
+      "trace-split-inline",
+      "sess-split",
+      "trace",
+      JSON.stringify([
+        { type: "text", content: "no accounting" },
+        terminalBlock("error", "openai", 10, 0.1),
+        terminalBlock("result", "anthropic", 20, 0.2),
+      ]),
+    );
+    await repo.appendTraceBlocks({
+      messageId: "trace-split-blocks",
+      sessionId: "sess-split",
+      turnId: "turn-split-blocks",
+      startSeq: 0,
+      blocks: [
+        { type: "text", content: "no accounting" },
+        terminalBlock("result", "anthropic", 40, 0.4),
+        terminalBlock("result", undefined, 50, 0.5),
+      ],
+    });
+    await repo.addMessage(
+      "trace-split-other",
+      "sess-split-other",
+      "trace",
+      JSON.stringify([terminalBlock("result", "openai", 1000, 10)]),
+    );
+
+    for (const [id, createdAt] of [
+      ["trace-split-inline", new Date("2030-02-20T12:00:00.000Z")],
+      ["trace-split-blocks", new Date("2030-03-05T12:00:00.000Z")],
+      ["trace-split-other", new Date("2030-03-05T12:00:00.000Z")],
+    ] as const) {
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt })
+        .where(eq(romeAgentMessages.id, id));
+    }
+
+    const totals = await repo.getProjectUsageTotals("alpha", {
+      dayRanges: [{ date: "2030-03-05", start: dayStart, end: dayEnd }],
+      monthStart,
+    });
+
+    const amounts = (inputTokens: number, costUsd: number) => ({
+      cacheReadTokens: expect.any(Number),
+      cacheWriteTokens: expect.any(Number),
+      costUsd: expect.closeTo(costUsd),
+      inputTokens,
+      outputTokens: expect.any(Number),
+    });
+    const none = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+    expect(totals.providerTotals).toEqual([
+      { provider: "anthropic", total: amounts(60, 0.6), month: amounts(40, 0.4) },
+      { provider: "openai", total: amounts(10, 0.1), month: none },
+      { provider: "unknown", total: amounts(50, 0.5), month: amounts(50, 0.5) },
+    ]);
+    expect(totals.providerDays).toEqual([
+      { date: "2030-03-05", provider: "anthropic", ...amounts(40, 0.4) },
+      { date: "2030-03-05", provider: "unknown", ...amounts(50, 0.5) },
+    ]);
+
+    // The split reconciles with the trace rows' stored accounting.
+    const sum = (key: "inputTokens" | "costUsd") =>
+      totals.providerTotals.reduce((acc, row) => acc + row.total[key], 0);
+    expect(sum("inputTokens")).toBe(totals.totalInputTokens);
+    expect(sum("costUsd")).toBeCloseTo(totals.totalCostUsd);
   });
 
   describe("turn feedback", () => {

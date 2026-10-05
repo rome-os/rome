@@ -13,6 +13,7 @@ import {
   like,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import {
   sharedChats,
@@ -123,6 +124,99 @@ interface ProjectUsageTotalsOptions {
   dayRanges?: ProjectUsageDayRange[];
   dayStart?: Date;
   monthStart: Date;
+}
+
+interface ProviderUsageAmounts {
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+const UNKNOWN_USAGE_PROVIDER = "unknown";
+
+function providerUsageAmountsSql(condition = sql`1`) {
+  const sum = (path: string) =>
+    sql`COALESCE(SUM(CASE WHEN ${condition} AND json_type(block, ${path}) IN ('integer', 'real') THEN json_extract(block, ${path}) ELSE 0 END), 0)`;
+  return {
+    cacheReadTokens: sum("$.accounting.usage.cacheReadTokens"),
+    cacheWriteTokens: sum("$.accounting.usage.cacheWriteTokens"),
+    costUsd: sum("$.accounting.costUsd"),
+    inputTokens: sum("$.accounting.usage.inputTokens"),
+    outputTokens: sum("$.accounting.usage.outputTokens"),
+  };
+}
+
+function readProviderUsageAmounts(
+  row: Record<string, unknown>,
+  prefix: string,
+): ProviderUsageAmounts {
+  return {
+    cacheReadTokens: Number(row[`${prefix}CacheReadTokens`] ?? 0),
+    cacheWriteTokens: Number(row[`${prefix}CacheWriteTokens`] ?? 0),
+    costUsd: Number(row[`${prefix}CostUsd`] ?? 0),
+    inputTokens: Number(row[`${prefix}InputTokens`] ?? 0),
+    outputTokens: Number(row[`${prefix}OutputTokens`] ?? 0),
+  };
+}
+
+/**
+ * Every terminal block carrying accounting, with its trace row's `created_at`
+ * for bucketing. A trace's stored accounting columns are summed from these
+ * same blocks, so per-provider sums reconcile with the row totals while still
+ * splitting a turn that ran on more than one provider. Block-store traces read
+ * through the terminal-block partial index; legacy traces still hold their
+ * blocks inline, and `mergeTraceContent` ignores that copy once block rows
+ * exist. `rowFilter` sees `session_id` and `created_at` unambiguously.
+ */
+function terminalAccountingBlocksSql(rowFilter: SQL) {
+  return sql`
+    SELECT m.created_at AS created_at, terminal.content AS block
+    FROM rome_agent_messages m
+    JOIN (
+      SELECT message_id, content
+      FROM rome_agent_trace_blocks
+      WHERE json_extract(content, '$.type') IN ('result', 'error')
+    ) terminal ON terminal.message_id = m.id
+    WHERE m.role = 'trace'
+      ${rowFilter}
+    UNION ALL
+    SELECT m.created_at AS created_at, inline_block.value AS block
+    FROM rome_agent_messages m, json_each(m.content) inline_block
+    WHERE m.role = 'trace'
+      AND m.content <> '[]'
+      AND json_valid(m.content)
+      AND json_type(m.content) = 'array'
+      AND NOT EXISTS (
+        SELECT 1 FROM rome_agent_trace_blocks stored WHERE stored.message_id = m.id
+      )
+      AND json_extract(inline_block.value, '$.type') IN ('result', 'error')
+      ${rowFilter}
+  `;
+}
+
+const terminalBlockProviderSql = sql`COALESCE(NULLIF(TRIM(json_extract(block, '$.accounting.provider')), ''), ${UNKNOWN_USAGE_PROVIDER})`;
+
+function usageDayRangeSql(dayRanges: ProjectUsageDayRange[]) {
+  const dateCase = sql`CASE ${sql.join(
+    dayRanges.map(
+      (range) =>
+        sql`WHEN created_at >= ${Math.floor(range.start.getTime() / 1000)}
+            AND created_at < ${Math.floor(range.end.getTime() / 1000)}
+            THEN ${range.date}`,
+    ),
+    sql.raw(" "),
+  )} END`;
+  const dateFilter = sql.join(
+    dayRanges.map(
+      (range) =>
+        sql`(created_at >= ${Math.floor(range.start.getTime() / 1000)}
+            AND created_at < ${Math.floor(range.end.getTime() / 1000)})`,
+    ),
+    sql.raw(" OR "),
+  );
+  return { dateCase, dateFilter };
 }
 
 export interface AddTurnRecapMessageInput {
@@ -2127,8 +2221,18 @@ export class WebChatRepository {
           }>)
         : [];
 
+    const providerTotals = await this.getProviderUsageTotals(
+      options.monthStart,
+      sessionScopeFilter,
+    );
+    const providerDays = options.dayRanges
+      ? await this.getProviderUsageDayRangeTotals(options.dayRanges, sessionScopeFilter)
+      : [];
+
     const totals = totalsRows[0];
     return {
+      providerDays,
+      providerTotals,
       days: dailyRows.map((row) => ({
         cacheReadTokens: Number(row.cacheReadTokens ?? 0),
         cacheWriteTokens: Number(row.cacheWriteTokens ?? 0),
@@ -2147,29 +2251,10 @@ export class WebChatRepository {
     };
   }
 
-  private async getUsageDayRangeTotals(
-    dayRanges: ProjectUsageDayRange[],
-    sessionScopeFilter: ReturnType<typeof sql>,
-  ) {
+  private async getUsageDayRangeTotals(dayRanges: ProjectUsageDayRange[], sessionScopeFilter: SQL) {
     if (dayRanges.length === 0) return [];
 
-    const dateCase = sql`CASE ${sql.join(
-      dayRanges.map(
-        (range) =>
-          sql`WHEN created_at >= ${Math.floor(range.start.getTime() / 1000)}
-              AND created_at < ${Math.floor(range.end.getTime() / 1000)}
-              THEN ${range.date}`,
-      ),
-      sql.raw(" "),
-    )} END`;
-    const dateFilter = sql.join(
-      dayRanges.map(
-        (range) =>
-          sql`(created_at >= ${Math.floor(range.start.getTime() / 1000)}
-              AND created_at < ${Math.floor(range.end.getTime() / 1000)})`,
-      ),
-      sql.raw(" OR "),
-    );
+    const { dateCase, dateFilter } = usageDayRangeSql(dayRanges);
     return (await this.db.all(sql`
       SELECT
         ${dateCase} AS date,
@@ -2192,6 +2277,66 @@ export class WebChatRepository {
       inputTokens: number | null;
       outputTokens: number | null;
     }>;
+  }
+
+  private async getProviderUsageTotals(monthStart: Date, sessionScopeFilter: SQL) {
+    const isThisMonth = sql`created_at >= ${Math.floor(monthStart.getTime() / 1000)}`;
+    const total = providerUsageAmountsSql();
+    const month = providerUsageAmountsSql(isThisMonth);
+    const rows = (await this.db.all(sql`
+      SELECT
+        ${terminalBlockProviderSql} AS provider,
+        ${total.inputTokens} AS totalInputTokens,
+        ${total.outputTokens} AS totalOutputTokens,
+        ${total.cacheReadTokens} AS totalCacheReadTokens,
+        ${total.cacheWriteTokens} AS totalCacheWriteTokens,
+        ${total.costUsd} AS totalCostUsd,
+        ${month.inputTokens} AS monthInputTokens,
+        ${month.outputTokens} AS monthOutputTokens,
+        ${month.cacheReadTokens} AS monthCacheReadTokens,
+        ${month.cacheWriteTokens} AS monthCacheWriteTokens,
+        ${month.costUsd} AS monthCostUsd
+      FROM (${terminalAccountingBlocksSql(sessionScopeFilter)})
+      WHERE json_type(block, '$.accounting') = 'object'
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<Record<string, unknown> & { provider: string }>;
+
+    return rows.map((row) => ({
+      month: readProviderUsageAmounts(row, "month"),
+      provider: row.provider,
+      total: readProviderUsageAmounts(row, "total"),
+    }));
+  }
+
+  private async getProviderUsageDayRangeTotals(
+    dayRanges: ProjectUsageDayRange[],
+    sessionScopeFilter: SQL,
+  ) {
+    if (dayRanges.length === 0) return [];
+
+    const { dateCase, dateFilter } = usageDayRangeSql(dayRanges);
+    const amounts = providerUsageAmountsSql();
+    const rows = (await this.db.all(sql`
+      SELECT
+        ${dateCase} AS date,
+        ${terminalBlockProviderSql} AS provider,
+        ${amounts.inputTokens} AS dayInputTokens,
+        ${amounts.outputTokens} AS dayOutputTokens,
+        ${amounts.cacheReadTokens} AS dayCacheReadTokens,
+        ${amounts.cacheWriteTokens} AS dayCacheWriteTokens,
+        ${amounts.costUsd} AS dayCostUsd
+      FROM (${terminalAccountingBlocksSql(sql`AND (${dateFilter}) ${sessionScopeFilter}`)})
+      WHERE json_type(block, '$.accounting') = 'object'
+      GROUP BY 1, 2
+      ORDER BY 1 ASC, 2 ASC
+    `)) as Array<Record<string, unknown> & { date: string; provider: string }>;
+
+    return rows.map((row) => ({
+      ...readProviderUsageAmounts(row, "day"),
+      date: row.date,
+      provider: row.provider,
+    }));
   }
 
   async getUsageTotals(options: ProjectUsageTotalsOptions) {
