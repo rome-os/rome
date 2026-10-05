@@ -285,21 +285,29 @@ export function buildChatView(
 }
 
 // Whether the floor session is parked on a card the guardian has not answered
-// yet (an ask_question card, a connect-AI card, an app component). The card
-// ends the turn, so only the floor session's last message counts: an older card
-// left open further up the transcript is no longer what the agent waits on.
+// yet (an ask_question card, a connect-AI card, an app component). Only the
+// floor session's latest turn counts, meaning every assistant message after its
+// last user message: the card is saved mid-turn and the turn's closing text and
+// recap land after it, while a card left open in an earlier turn is no longer
+// what the agent waits on.
 export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
 ): boolean {
   const { displayMessages, floorSessionId, interactionResults } = view;
-  const last = displayMessages.findLast((m) => m.sessionId === floorSessionId);
-  if (!last || last.role !== "assistant") return false;
-  return parseMessageEntries(last).some(
-    (b) =>
-      b.type === "pending_interaction" &&
-      !!b.toolUseId &&
-      !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
-  );
+  for (let i = displayMessages.length - 1; i >= 0; i--) {
+    const msg = displayMessages[i];
+    if (msg.sessionId !== floorSessionId) continue;
+    if (msg.role === "user") return false;
+    if (msg.role !== "assistant") continue;
+    const waiting = parseMessageEntries(msg).some(
+      (b) =>
+        b.type === "pending_interaction" &&
+        !!b.toolUseId &&
+        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
+    );
+    if (waiting) return true;
+  }
+  return false;
 }
 
 // Render rows: group the flat transcript into speaker blocks. Pure data — the

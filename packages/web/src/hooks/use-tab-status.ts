@@ -48,6 +48,7 @@ const claims = new Map<symbol, TabStatus>();
 // and background tabs throttle the timers a JS animation would need.
 const BADGE_SIZE = 64;
 let baseHref: string | null = null;
+let baseType: string | null = null;
 let logo: HTMLImageElement | null = null;
 const badgeUrls = new Map<TabStatus, string>();
 
@@ -96,6 +97,23 @@ function badgeUrl(status: Exclude<TabStatus, "idle">, image: HTMLImageElement): 
   canvas.height = BADGE_SIZE;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
+  // A logo served from another origin taints the canvas and toDataURL throws.
+  // The badge is cosmetic, so the tab keeps the plain logo instead.
+  try {
+    drawBadge(ctx, status, image);
+    const url = canvas.toDataURL("image/png");
+    badgeUrls.set(status, url);
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function drawBadge(
+  ctx: CanvasRenderingContext2D,
+  status: Exclude<TabStatus, "idle">,
+  image: HTMLImageElement,
+): void {
   ctx.drawImage(image, 0, 0, BADGE_SIZE, BADGE_SIZE);
   ctx.scale(BADGE_SIZE / GRID, BADGE_SIZE / GRID);
   // Cut the logo away around the glyph instead of putting a disc behind it, so
@@ -106,20 +124,21 @@ function badgeUrl(status: Exclude<TabStatus, "idle">, image: HTMLImageElement): 
   ctx.fillStyle = BADGE_COLORS[status];
   ctx.strokeStyle = BADGE_COLORS[status];
   traceGlyph(ctx, status, false);
-  const url = canvas.toDataURL("image/png");
-  badgeUrls.set(status, url);
-  return url;
 }
 
 function render(): void {
   if (typeof document === "undefined") return;
   const link = iconLink();
   if (!link) return;
-  baseHref ??= link.getAttribute("href");
+  if (baseHref === null) {
+    baseHref = link.getAttribute("href");
+    baseType = link.getAttribute("type");
+  }
   if (!baseHref) return;
   const status = topTabStatus(claims.values());
   if (status === "idle") {
     link.setAttribute("href", baseHref);
+    if (baseType) link.setAttribute("type", baseType);
     return;
   }
   if (!logo) {
@@ -129,7 +148,11 @@ function render(): void {
   }
   if (!logo.complete || logo.naturalWidth === 0) return;
   const url = badgeUrl(status, logo);
-  if (url) link.setAttribute("href", url);
+  if (!url) return;
+  // index.html declares the logo as SVG, and a browser may skip an icon whose
+  // declared type does not match what it loads.
+  link.setAttribute("type", "image/png");
+  link.setAttribute("href", url);
 }
 
 /**
@@ -158,17 +181,20 @@ function isAway(): boolean {
 
 /**
  * True once a reply ends while the guardian is away from the tab, until they
- * come back. Local to this tab: the open chat marks itself read on every
- * message, so the server's unread flag never covers it.
+ * come back. `turnEnds` counts the turns the server has reported finished; the
+ * caller bumps it on the stream's terminal event, never on a dropped
+ * connection, which leaves the turn running. Local to this tab: the open chat
+ * marks itself read on every message, so the server's unread flag never covers
+ * it.
  */
-export function useFinishedUnseen(streaming: boolean): boolean {
+export function useFinishedUnseen(turnEnds: number): boolean {
   const [finishedUnseen, setFinishedUnseen] = useState(false);
-  const wasStreaming = useRef(streaming);
+  const seenTurnEnds = useRef(turnEnds);
 
   useEffect(() => {
-    if (wasStreaming.current && !streaming && isAway()) setFinishedUnseen(true);
-    wasStreaming.current = streaming;
-  }, [streaming]);
+    if (turnEnds > seenTurnEnds.current && isAway()) setFinishedUnseen(true);
+    seenTurnEnds.current = turnEnds;
+  }, [turnEnds]);
 
   useEffect(() => {
     if (!finishedUnseen) return;
@@ -187,7 +213,11 @@ export function useFinishedUnseen(streaming: boolean): boolean {
 }
 
 /** Shows one chat's status on the tab favicon while the chat is mounted. */
-export function useChatTabStatus(streaming: boolean, awaitingGuardian: boolean): void {
-  const finishedUnseen = useFinishedUnseen(streaming);
+export function useChatTabStatus(
+  streaming: boolean,
+  awaitingGuardian: boolean,
+  turnEnds: number,
+): void {
+  const finishedUnseen = useFinishedUnseen(turnEnds);
   useTabStatus(deriveTabStatus({ streaming, awaitingGuardian, finishedUnseen }));
 }

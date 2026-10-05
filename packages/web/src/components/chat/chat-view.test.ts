@@ -289,6 +289,18 @@ describe("isAwaitingGuardian", () => {
     ).toBe(true);
   });
 
+  it("is true when the turn's closing text follows the card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "assistant", "t1", [{ type: "text", content: "Choose the dates above." }], {
+          turnPhase: "final",
+        }),
+      ]),
+    ).toBe(true);
+  });
+
   it("is false once the card is answered", () => {
     expect(
       awaiting([
