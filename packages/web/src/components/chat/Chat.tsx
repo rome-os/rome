@@ -540,7 +540,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     () => isAwaitingGuardian(view, runningTurnId),
     [view, runningTurnId],
   );
-  useChatTabStatus(isActiveSessionStreaming, awaitingGuardian, turnEnds);
   // Typewriter-paced reveal of the latest assistant text block — the SSE
   // stream updates in provider-sized deltas; this smooths them into typing.
   // Keyed by turn + block: a new block retypes from zero (delayed fold — it
@@ -1424,6 +1423,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const activeSubmission = useMemo(
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
+  );
+  // A submission waiting on Approve is the specialist asking the guardian, the
+  // same as an open card.
+  useChatTabStatus(
+    isActiveSessionStreaming,
+    awaitingGuardian || activeSubmission !== null,
+    turnEnds,
   );
 
   // Verbal approval: the specialist relays the guardian's "yes" via

@@ -85,6 +85,15 @@ describe("useFinishedUnseen", () => {
     expect(result.current).toBe(false);
   });
 
+  it("clears at once when the guardian is back before the listeners attach", () => {
+    const { result, rerender } = mount();
+    // Away when the turn ends, back by the time the listeners attach.
+    let checks = 0;
+    document.hasFocus = () => checks++ > 0;
+    rerender({ turnEnds: 1 });
+    expect(result.current).toBe(false);
+  });
+
   it("ignores a re-render without a new turn end, such as a dropped connection", () => {
     const { result, rerender } = mount();
     hidden = true;

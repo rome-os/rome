@@ -219,6 +219,9 @@ export function useFinishedUnseen(turnEnds: number): boolean {
     };
     document.addEventListener("visibilitychange", clearIfBack);
     window.addEventListener("focus", clearIfBack);
+    // The guardian may have come back between the turn ending and these
+    // listeners attaching, in which case no event is left to fire.
+    clearIfBack();
     return () => {
       document.removeEventListener("visibilitychange", clearIfBack);
       window.removeEventListener("focus", clearIfBack);
