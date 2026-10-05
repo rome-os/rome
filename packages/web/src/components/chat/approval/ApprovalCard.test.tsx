@@ -63,6 +63,17 @@ describe("ApprovalCard tab status", () => {
     await waitFor(() => expect(lastTabStatus()).toBe("needs-you"));
   });
 
+  it("claims Needs you for a card that arrives in a hidden tab", async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      mockFetchApproval.mockResolvedValue(record({ status: "pending" }));
+      mountCard();
+      await waitFor(() => expect(lastTabStatus()).toBe("needs-you"));
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+
   it("stays idle for an approval the server already resolved", async () => {
     mockFetchApproval.mockResolvedValue(record({ status: "rejected" }));
     mountCard();

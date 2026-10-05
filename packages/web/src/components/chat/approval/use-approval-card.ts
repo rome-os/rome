@@ -52,6 +52,7 @@ export function useApprovalCard({
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let consecutiveFailures = 0;
+    let loaded = false;
 
     const computeDelay = () => {
       // Exponential backoff on consecutive failures so dropped server / tab
@@ -67,6 +68,7 @@ export function useApprovalCard({
           return;
         }
         consecutiveFailures = 0;
+        loaded = true;
         if (cancelled) return;
         // Reuse prior reference when nothing observable changed so children
         // memoized on `record` don't re-render every 3s.
@@ -82,10 +84,11 @@ export function useApprovalCard({
 
     const tick = async () => {
       if (cancelled) return;
-      // Skip work entirely while the tab is hidden — cheap server, cheap
-      // battery. The visibilitychange listener below kicks a fresh fetch
-      // when the user comes back.
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      // Skip work while the tab is hidden — cheap server, cheap battery. The
+      // visibilitychange listener below kicks a fresh fetch when the user
+      // comes back. A card that has never loaded still fetches, so a card
+      // that arrives in a background tab can flag the tab as waiting.
+      if (loaded && typeof document !== "undefined" && document.visibilityState === "hidden") {
         if (!isTerminal) timer = setTimeout(tick, BASE_INTERVAL_MS);
         return;
       }
