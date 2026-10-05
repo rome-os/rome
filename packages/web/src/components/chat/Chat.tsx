@@ -47,6 +47,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  isAwaitingGuardian,
   type AgentIdentity,
   type HandoffNode,
 } from "@/components/chat/chat-view";
@@ -59,6 +60,7 @@ import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
@@ -530,6 +532,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
   const runningTurnId = floorSessionStream?.turnId ?? null;
   const isActiveSessionStreaming = !!floorSessionStream;
+  const awaitingGuardian = useMemo(() => isAwaitingGuardian(view), [view]);
+  useChatTabStatus(isActiveSessionStreaming, awaitingGuardian);
   // Typewriter-paced reveal of the latest assistant text block — the SSE
   // stream updates in provider-sized deltas; this smooths them into typing.
   // Keyed by turn + block: a new block retypes from zero (delayed fold — it

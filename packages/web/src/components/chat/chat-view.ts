@@ -284,6 +284,24 @@ export function buildChatView(
   };
 }
 
+// Whether the floor session is parked on a card the guardian has not answered
+// yet (an ask_question card, a connect-AI card, an app component). The card
+// ends the turn, so only the floor session's last message counts: an older card
+// left open further up the transcript is no longer what the agent waits on.
+export function isAwaitingGuardian(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+): boolean {
+  const { displayMessages, floorSessionId, interactionResults } = view;
+  const last = displayMessages.findLast((m) => m.sessionId === floorSessionId);
+  if (!last || last.role !== "assistant") return false;
+  return parseMessageEntries(last).some(
+    (b) =>
+      b.type === "pending_interaction" &&
+      !!b.toolUseId &&
+      !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
+  );
+}
+
 // Render rows: group the flat transcript into speaker blocks. Pure data — the
 // view layer turns rows into JSX. Depends on runningTurnId/isStreaming, but
 // those only change at turn boundaries (not per token), so a memo on these

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
-import { buildChatView, buildRows, interactionResultKey, type AgentIdentity } from "./chat-view";
+import {
+  buildChatView,
+  buildRows,
+  interactionResultKey,
+  isAwaitingGuardian,
+  type AgentIdentity,
+} from "./chat-view";
 
 const MAIN = "M";
 const CHILD = "C";
@@ -252,5 +258,71 @@ describe("buildRows", () => {
       expect(agentRows[0].kind === "agent" && agentRows[0].messages).toHaveLength(2);
       expect(agentRows[0].kind === "agent" && agentRows[0].trace).toBe(trace); // trace as subtitle
     }
+  });
+});
+
+describe("isAwaitingGuardian", () => {
+  const questionCard = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "core",
+    render: { kind: "inline", componentId: "question-card", builtin: true, props: {} },
+  });
+  const appForm = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "survey",
+    render: { kind: "inline", componentId: "form", props: {} },
+  });
+  const awaiting = (main: ChatMessage[], child?: ChatMessage[]) => {
+    const messages = new Map<string, ChatMessage[]>([[MAIN, main]]);
+    if (child) messages.set(CHILD, child);
+    return isAwaitingGuardian(buildChatView(messages, MAIN, MAIN_IDENTITY));
+  };
+
+  it("is true while the last message is an unanswered card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false once the card is answered", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "q_0", output: {} }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false once the guardian replies in chat instead", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "user", "t2", [{ type: "text", content: "never mind" }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores an app form left open further up the transcript", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [appForm("f_0")]),
+        mk(MAIN, "user", "t2", [{ type: "text", content: "skip the form" }]),
+        mk(MAIN, "assistant", "t2", [{ type: "text", content: "Okay." }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("reads the floor session while a handoff is open", () => {
+    expect(
+      awaiting(
+        [mk(MAIN, "assistant", "t1", [handoffBlock])],
+        [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
+      ),
+    ).toBe(true);
   });
 });
