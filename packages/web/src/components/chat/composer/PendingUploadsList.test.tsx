@@ -87,4 +87,30 @@ describe("pending attachment previews", () => {
     );
     expect(screen.getByText("#File 1")).toBeTruthy();
   });
+
+  it("renders document card preview with snippet and remove control", async () => {
+    const doc = {
+      id: "doc",
+      file: new File(["# Sample Title\nContent snippet"], "sample.md", { type: "text/markdown" }),
+    };
+    const remove = rs.fn();
+    render(<PendingUploadsList uploads={[doc]} onRemove={remove} disabled={false} />);
+    expect(await screen.findByText("# Sample Title")).toBeTruthy();
+    expect(screen.getByText("sample.md")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove sample.md" }));
+    expect(remove).toHaveBeenCalledWith("doc");
+  });
+
+  it("renders distinct category badges for PDF and code files", async () => {
+    const pdf = { id: "pdf", file: new File([], "manual.pdf", { type: "application/pdf" }) };
+    const code = {
+      id: "code",
+      file: new File(["def main():\n  pass"], "app.py", { type: "text/x-python" }),
+    };
+    render(<PendingUploadsList uploads={[pdf, code]} onRemove={rs.fn()} disabled={false} />);
+    expect(screen.getByText("PDF")).toBeTruthy();
+    expect(screen.getByText("manual.pdf")).toBeTruthy();
+    expect(await screen.findByText(/def main/)).toBeTruthy();
+    expect(screen.getByText("app.py")).toBeTruthy();
+  });
 });

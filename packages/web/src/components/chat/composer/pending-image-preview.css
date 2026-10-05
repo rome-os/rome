@@ -60,3 +60,113 @@ body:has(.pending-image-preview[open]) [data-pending-image-remove] {
     transition-duration: 0.01ms;
   }
 }
+
+.pending-doc-sheet {
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  user-select: none;
+}
+
+.pending-doc-sheet-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  user-select: none;
+}
+
+.pending-doc-heading {
+  font-size: 6.5px;
+  line-height: 8.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.pending-doc-body {
+  font-size: 5.5px;
+  line-height: 7.5px;
+  word-break: break-all;
+  color: #3f3f46;
+}
+
+.pending-doc-code {
+  font-size: 5.5px;
+  line-height: 7.5px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  color: #27272a;
+}
+
+.pending-doc-filename {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.pending-doc-badge-label {
+  font-size: 7px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.pending-doc-card {
+  background-color: var(--card-bg, #09090b);
+  border-color: var(--border);
+}
+
+.pending-doc-paper {
+  background-color: #ffffff;
+  color: #27272a;
+}
+
+.pending-doc-skeleton-bar {
+  background-color: #e4e4e7;
+}
+
+.pending-doc-skeleton-bar-dark {
+  background-color: #d4d4d8;
+}
+
+.pending-doc-footer {
+  background-color: #09090b;
+  color: #ffffff;
+  gap: 6px;
+}
+
+.pending-badge-pdf {
+  background-color: rgba(244, 63, 94, 0.15);
+  color: #f43f5e;
+}
+
+.pending-badge-code {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.pending-badge-json {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.pending-badge-sheet {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.pending-badge-archive {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.pending-badge-audio {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
+.pending-badge-video {
+  background-color: rgba(99, 102, 241, 0.15);
+  color: #6366f1;
+}
+
+.pending-badge-doc {
+  background-color: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+}
