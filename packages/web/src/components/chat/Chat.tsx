@@ -536,7 +536,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
   const runningTurnId = floorSessionStream?.turnId ?? null;
   const isActiveSessionStreaming = !!floorSessionStream;
-  const awaitingGuardian = useMemo(() => isAwaitingGuardian(view), [view]);
+  const awaitingGuardian = useMemo(
+    () => isAwaitingGuardian(view, runningTurnId),
+    [view, runningTurnId],
+  );
   useChatTabStatus(isActiveSessionStreaming, awaitingGuardian, turnEnds);
   // Typewriter-paced reveal of the latest assistant text block — the SSE
   // stream updates in provider-sized deltas; this smooths them into typing.

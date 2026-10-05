@@ -34,10 +34,11 @@ export function deriveTabStatus(state: {
   awaitingGuardian: boolean;
   finishedUnseen: boolean;
 }): TabStatus {
-  if (state.awaitingGuardian) return "needs-you";
-  if (state.streaming) return "working";
-  if (state.finishedUnseen) return "done";
-  return "idle";
+  return topTabStatus([
+    state.awaitingGuardian ? "needs-you" : "idle",
+    state.streaming ? "working" : "idle",
+    state.finishedUnseen ? "done" : "idle",
+  ]);
 }
 
 // One claim per mounted chat, rendered in priority order, so the result does not
@@ -127,6 +128,13 @@ function drawBadge(
   traceGlyph(ctx, status, false);
 }
 
+function showLogo(link: HTMLLinkElement, href: string): void {
+  link.setAttribute("href", href);
+  if (baseType) link.setAttribute("type", baseType);
+  else link.removeAttribute("type");
+  shownBadge = null;
+}
+
 function render(): void {
   if (typeof document === "undefined") return;
   const link = iconLink();
@@ -141,10 +149,7 @@ function render(): void {
   if (!baseHref) return;
   const status = topTabStatus(claims.values());
   if (status === "idle") {
-    link.setAttribute("href", baseHref);
-    if (baseType) link.setAttribute("type", baseType);
-    else link.removeAttribute("type");
-    shownBadge = null;
+    showLogo(link, baseHref);
     return;
   }
   if (!logo) {
@@ -154,7 +159,11 @@ function render(): void {
   }
   if (!logo.complete || logo.naturalWidth === 0) return;
   const url = badgeUrl(status, logo);
-  if (!url) return;
+  // Falls back to the logo rather than leaving another status's badge up.
+  if (!url) {
+    showLogo(link, baseHref);
+    return;
+  }
   // index.html declares the logo as SVG, and a browser may skip an icon whose
   // declared type does not match what it loads.
   link.setAttribute("type", "image/png");

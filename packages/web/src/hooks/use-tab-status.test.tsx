@@ -152,6 +152,19 @@ describe("useTabStatus", () => {
     expect(link().getAttribute("type")).toBe("image/svg+xml");
   });
 
+  it("falls back to the logo when a later badge cannot be drawn", () => {
+    toDataURL = () => PNG;
+    const { rerender } = render(<Badge status="working" />);
+    expect(link().getAttribute("href")).toBe(PNG);
+
+    toDataURL = () => {
+      throw new Error("tainted");
+    };
+    rerender(<Badge status="needs-you" />);
+    expect(link().getAttribute("href")).toBe("/icon.svg");
+    expect(link().getAttribute("type")).toBe("image/svg+xml");
+  });
+
   it("drops the PNG type on release when the logo link declared none", () => {
     document.head.innerHTML = '<link rel="icon" href="/icon.svg" />';
     toDataURL = () => PNG;

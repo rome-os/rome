@@ -274,10 +274,10 @@ describe("isAwaitingGuardian", () => {
     appId: "survey",
     render: { kind: "inline", componentId: "form", props: {} },
   });
-  const awaiting = (main: ChatMessage[], child?: ChatMessage[]) => {
+  const awaiting = (main: ChatMessage[], child?: ChatMessage[], runningTurnId?: string) => {
     const messages = new Map<string, ChatMessage[]>([[MAIN, main]]);
     if (child) messages.set(CHILD, child);
-    return isAwaitingGuardian(buildChatView(messages, MAIN, MAIN_IDENTITY));
+    return isAwaitingGuardian(buildChatView(messages, MAIN, MAIN_IDENTITY), runningTurnId);
   };
 
   it("is true while the last message is an unanswered card", () => {
@@ -309,6 +309,32 @@ describe("isAwaitingGuardian", () => {
         mk(MAIN, "assistant", "backend:b1", [{ type: "text", content: "Approved. Booking now." }]),
       ]),
     ).toBe(false);
+  });
+
+  it("is false while a newer turn runs that has saved nothing yet", () => {
+    expect(
+      awaiting(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+          mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        ],
+        undefined,
+        "backend:b1",
+      ),
+    ).toBe(false);
+  });
+
+  it("is true while the running turn itself is parked on the card", () => {
+    expect(
+      awaiting(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+          mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        ],
+        undefined,
+        "t1",
+      ),
+    ).toBe(true);
   });
 
   it("is true when the turn's recap follows the card", () => {
