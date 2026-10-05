@@ -20,20 +20,37 @@ const codexModels = Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS)
 // Codex tools Rome renders: plan updates, commands and file changes.
 const CODEX_TOOLS = ["update_plan", "exec_command", "apply_patch"];
 
-/**
- * The tool part of a Responses request. Codex has moved tools between the
- * top-level `tools` field and nested `additional_tools` input items, so this
- * reads both and matches names as text instead of relying on one layout.
- */
 interface ResponsesRequest {
   model: string;
   tools?: unknown;
   input?: Array<{ type?: string }>;
 }
 
-function toolText(body: ResponsesRequest): string {
-  const extra = (body.input ?? []).filter((item) => item.type === "additional_tools");
-  return JSON.stringify([body.tools ?? [], extra]);
+/**
+ * Names of the tools a Responses request offers. Codex has moved tools between
+ * the top-level `tools` field and nested `additional_tools` input items, and
+ * Codex 0.160 declares most of them inside the `exec` tool's description as
+ * `declare const tools: { name(`. Prose that mentions a tool doesn't count.
+ */
+function toolNames(body: ResponsesRequest): string[] {
+  const part = [
+    body.tools ?? [],
+    (body.input ?? []).filter((item) => item.type === "additional_tools"),
+  ];
+  const names = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === "object") {
+      const { name } = value as { name?: unknown };
+      if (typeof name === "string") names.add(name);
+      Object.values(value).forEach(walk);
+    }
+  };
+  walk(part);
+  for (const match of JSON.stringify(part).matchAll(/declare const tools: \{ (\w+)\(/g)) {
+    names.add(match[1]!);
+  }
+  return [...names];
 }
 
 /**
@@ -42,7 +59,7 @@ function toolText(body: ResponsesRequest): string {
  * turn's request to the mock gateway carries the model's tool list.
  */
 describe("bundled Codex app-server", () => {
-  const requests: Array<{ model: string; tools: string }> = [];
+  const requests: Array<{ model: string; tools: string[] }> = [];
   let home: string;
   let gateway: ReturnType<typeof createServer>;
   let provider: CodexAppServerProvider;
@@ -61,7 +78,7 @@ describe("bundled Codex app-server", () => {
       });
       request.on("end", () => {
         const body = JSON.parse(raw) as ResponsesRequest;
-        requests.push({ model: body.model, tools: toolText(body) });
+        requests.push({ model: body.model, tools: toolNames(body) });
         const item = {
           type: "message",
           role: "assistant",
@@ -137,6 +154,8 @@ describe("bundled Codex app-server", () => {
     try {
       await session.sendUserInput({ text: "Reply with ok." });
       for await (const event of session.events) {
+        if (event.type === "error")
+          throw new Error(`Codex turn failed for ${model}: ${event.error}`);
         if (event.type === "result") break;
       }
     } finally {
@@ -145,9 +164,7 @@ describe("bundled Codex app-server", () => {
 
     const request = requests.find((entry) => entry.model === model);
     expect(request, `no request for ${model}`).toBeDefined();
-    const missing = [...CODEX_TOOLS, ...romeTools].filter(
-      (tool) => !new RegExp(`\\b${tool}\\b`).test(request!.tools),
-    );
+    const missing = [...CODEX_TOOLS, ...romeTools].filter((tool) => !request!.tools.includes(tool));
     expect(missing, `Codex dropped tools for ${model}`).toEqual([]);
   }, 30_000);
 });
