@@ -1,0 +1,62 @@
+body:has(.pending-image-preview[open]) [data-pending-image-remove] {
+  visibility: hidden;
+}
+
+.pending-image-preview {
+  --preview-return-duration: 280ms;
+  --preview-return-easing: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.pending-image-preview [data-rmiz-modal-img] {
+  transition-property: transform, clip-path;
+}
+
+.pending-image-preview [data-rmiz-modal-img],
+.pending-image-preview [data-rmiz-modal-overlay] {
+  transition-duration: var(--preview-return-duration);
+  transition-timing-function: var(--preview-return-easing);
+}
+
+/* Return the user's pan and scale alongside the viewer's thumbnail transform. */
+.pending-image-preview [data-preview-state="UNLOADING"] [data-preview-transform] {
+  transition: transform var(--preview-return-duration) var(--preview-return-easing);
+}
+
+.pending-image-preview [data-preview-controls] {
+  transition: opacity 120ms ease-out;
+}
+
+.pending-image-preview [data-preview-state="UNLOADING"] [data-preview-controls] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pending-image-preview [data-rmiz-modal-overlay="visible"] {
+  background-color: var(--overlay);
+}
+
+.pending-image-preview [data-rmiz-modal-overlay="hidden"] {
+  background-color: transparent;
+}
+
+.pending-image-preview [data-rmiz-modal-img] {
+  cursor: default;
+}
+
+.pending-image-preview [data-preview-pannable="true"] [data-rmiz-modal-img] {
+  cursor: grab;
+}
+
+.pending-image-preview [data-preview-pannable="true"] [data-rmiz-modal-img]:active {
+  cursor: grabbing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending-image-preview {
+    --preview-return-duration: 0.01ms;
+  }
+
+  .pending-image-preview [data-preview-controls] {
+    transition-duration: 0.01ms;
+  }
+}

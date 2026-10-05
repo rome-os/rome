@@ -642,3 +642,44 @@ describe("programmatic draft insertion", () => {
     expect(focus).toHaveBeenCalled();
   });
 });
+
+describe("composer content height budget", () => {
+  it("shrinks long text when the attachment tray grows and restores it when cleared", () => {
+    let resizeTray: (() => void) | undefined;
+    let trayHeight = 0;
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: () => void) {}
+        observe(target: HTMLElement) {
+          if (target.classList.contains("flow-root")) {
+            rs.spyOn(target, "getBoundingClientRect").mockImplementation(
+              () => ({ height: trayHeight }) as DOMRect,
+            );
+            resizeTray = this.callback;
+          }
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    renderComposer({});
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    Object.defineProperty(textarea, "scrollHeight", { configurable: true, value: 600 });
+    fireEvent.input(textarea, { target: { value: "long draft\n".repeat(60) } });
+    expect(textarea.style.height).toBe("240px");
+    expect(resizeTray).toBeDefined();
+
+    trayHeight = 116;
+    act(() => resizeTray?.());
+    expect(textarea.style.height).toBe("124px");
+    expect(textarea.style.maxHeight).toBe("124px");
+    expect(textarea.style.overflowY).toBe("auto");
+    expect(textarea.value).toBe("long draft\n".repeat(60));
+
+    trayHeight = 0;
+    act(() => resizeTray?.());
+    expect(textarea.style.height).toBe("240px");
+    expect(textarea.style.maxHeight).toBe("240px");
+  });
+});

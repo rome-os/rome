@@ -37,7 +37,7 @@ export interface ComposerChipProps extends Omit<ComponentPropsWithoutRef<"span">
 // swaps for the other.
 const TRAILING_SLOT = "relative -mr-1 ml-1 shrink-0 rounded-full p-1";
 
-function UploadRing({ progress, label }: { progress: number | null; label?: string }) {
+export function UploadRing({ progress, label }: { progress: number | null; label?: string }) {
   // r=5 in a 12px box matches the X icon's size-3 footprint.
   const RADIUS = 5;
   const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
