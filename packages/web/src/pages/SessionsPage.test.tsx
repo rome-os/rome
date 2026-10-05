@@ -230,12 +230,9 @@ describe("SessionsPage missing sessions", () => {
     );
   });
 
-  it.each([
-    "",
-    "?hideSidebar=1",
-  ])("asks the parent to recover an embedded session%s", async (search) => {
+  it("keeps a missing workspace tile inside its frame", async () => {
     const frame = document.createElement("iframe");
-    frame.src = `/full/apps/sessions/missing${search}`;
+    frame.src = "/full/apps/sessions/missing";
     document.body.appendChild(frame);
     frame.contentDocument!.write("<!doctype html><html><body></body></html>");
     const parentWindow = frame.contentWindow!.parent;
@@ -244,18 +241,11 @@ describe("SessionsPage missing sessions", () => {
     rs.mocked(getRomeSession).mockResolvedValue(null);
 
     try {
-      const view = renderDetail(
-        `/full/apps/sessions/missing${search}`,
-        frame.contentDocument!.body,
-      );
+      const view = renderDetail("/full/apps/sessions/missing", frame.contentDocument!.body);
 
-      await waitFor(() =>
-        expect(postMessage).toHaveBeenCalledWith(
-          { type: "rome:host-navigate", detail: { path: `/chat${search}` } },
-          window.location.origin,
-        ),
-      );
+      expect(await view.findByText("Session not found")).toBeTruthy();
       expect(view.queryByTestId("chat-home")).toBeNull();
+      expect(postMessage).not.toHaveBeenCalled();
     } finally {
       cleanup();
       rs.unstubAllGlobals();

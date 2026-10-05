@@ -1372,16 +1372,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
         if (!sessionResult || !messageResult) {
-          const path = hideSidebar ? "/chat?hideSidebar=1" : "/chat";
-          if (fullMode && window.parent !== window) {
-            // Workspace tiles must navigate the host, or the chat shell nests inside the iframe.
-            window.parent.postMessage(
-              { type: "rome:host-navigate", detail: { path } },
-              window.location.origin,
-            );
-            return;
-          }
-          navigate(path, { replace: true });
+          // A saved workspace tile can outlive its session. It shows not-found in
+          // place, because redirecting would nest chat in the tile or move the parent chat.
+          if (fullMode && window.parent !== window) return;
+          navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
           return;
         }
         setSession(sessionResult);
