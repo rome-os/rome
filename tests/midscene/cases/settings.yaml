@@ -47,7 +47,8 @@ cases:
           Scroll through Advanced settings until the "Developer Settings" disclosure is visible.
           Open it once, then stop.
       - aiAssert: >-
-          The Developer Settings section is expanded and shows its settings below the heading.
+          The Developer Settings section is expanded and shows the "Fable" setting directly below
+          its heading.
       # The section is taller than one screen, so the heading and the switch are
       # checked in separate screenshots.
       - aiAct: >-
