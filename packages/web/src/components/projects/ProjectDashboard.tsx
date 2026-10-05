@@ -344,7 +344,7 @@ function DashboardBody({
     <section className="@container/project-dashboard flex h-full min-h-0 flex-col bg-surface font-sans text-ui text-foreground antialiased [text-rendering:optimizeLegibility]">
       <div
         ref={bodyRef}
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-8 pt-5 pb-6 @max-[640px]/project-dashboard:overflow-y-auto @max-[640px]/project-dashboard:px-6 @max-[640px]/project-dashboard:py-5 @max-[480px]/project-dashboard:p-5"
+        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 pt-5 pb-6 @max-[640px]/project-dashboard:px-6 @max-[640px]/project-dashboard:py-5 @max-[480px]/project-dashboard:p-5"
       >
         {isAllProjects ? (
           <header className={heroClassName}>
@@ -453,7 +453,8 @@ function DashboardBody({
 
         <ProviderUsagePanel dashboard={dashboard} />
 
-        <section className="flex min-h-0 flex-1 flex-col">
+        {/* The panels above can outgrow a short viewport; the body scrolls instead of collapsing the list. */}
+        <section className="flex min-h-[320px] flex-1 flex-col">
           <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className={sectionTitleClassName}>Recent chats</h2>
@@ -628,17 +629,18 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
 
   return (
     <section className="flex shrink-0 flex-col gap-2 rounded-12 border border-border bg-surface p-4">
-      <header className={panelHeaderClassName}>
-        <div>
+      <header className={cn(panelHeaderClassName, "flex-wrap")}>
+        <div className="min-w-0">
           <h2 className={sectionTitleClassName}>By provider</h2>
-          <div className={sectionSubtitleClassName}>Tokens and spend per model provider</div>
+          <div className={cn(sectionSubtitleClassName, "whitespace-normal")}>
+            Tokens and spend per model provider
+          </div>
         </div>
         <SegmentedControl
           size="sm"
           aria-label="Provider usage period"
           value={period}
           onValueChange={(next: string) => setPeriod(next as ProviderUsagePeriod)}
-          className="shrink-0"
           options={(Object.keys(PROVIDER_USAGE_PERIODS) as ProviderUsagePeriod[]).map((value) => ({
             value,
             label: PROVIDER_USAGE_PERIODS[value].label,
