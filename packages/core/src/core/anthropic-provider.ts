@@ -81,7 +81,7 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 // by `turn-span-translator.ts` from the message stream instead.
 // CLAUDE_CODE_ENABLE_TASKS=false keeps TodoWrite, which Rome turns into plan
 // updates. Since Claude Code 2.1.251 the default swaps it for TaskCreate.
-const CLAUDE_AGENT_SDK_ENV = {
+export const CLAUDE_AGENT_SDK_ENV = {
   IS_SANDBOX: "1",
   CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
