@@ -286,18 +286,20 @@ export function buildChatView(
 
 // Whether the floor session is parked on a card the guardian has not answered
 // yet (an ask_question card, a connect-AI card, an app component). Only the
-// floor session's latest turn counts, meaning every assistant message after its
-// last user message: the card is saved mid-turn and the turn's closing text and
-// recap land after it, while a card left open in an earlier turn is no longer
-// what the agent waits on.
+// floor session's latest turn counts, meaning every assistant message that
+// shares the turn id of its last message: the card is saved mid-turn and the
+// turn's closing text and recap land after it under the same id. A card from
+// an earlier turn is no longer what the agent waits on, and a backend-initiated
+// turn (an approval continuation) starts a new id without a user message.
 export function isAwaitingGuardian(
   view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
 ): boolean {
   const { displayMessages, floorSessionId, interactionResults } = view;
-  for (let i = displayMessages.length - 1; i >= 0; i--) {
-    const msg = displayMessages[i];
-    if (msg.sessionId !== floorSessionId) continue;
-    if (msg.role === "user") return false;
+  const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
     if (msg.role !== "assistant") continue;
     const waiting = parseMessageEntries(msg).some(
       (b) =>

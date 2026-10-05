@@ -49,6 +49,7 @@ const claims = new Map<symbol, TabStatus>();
 const BADGE_SIZE = 64;
 let baseHref: string | null = null;
 let baseType: string | null = null;
+let shownBadge: string | null = null;
 let logo: HTMLImageElement | null = null;
 const badgeUrls = new Map<TabStatus, string>();
 
@@ -130,15 +131,20 @@ function render(): void {
   if (typeof document === "undefined") return;
   const link = iconLink();
   if (!link) return;
-  if (baseHref === null) {
+  // Whatever the link holds while no badge of ours is showing is the logo to
+  // restore, type included.
+  if (shownBadge === null || link.getAttribute("href") !== shownBadge) {
     baseHref = link.getAttribute("href");
     baseType = link.getAttribute("type");
+    shownBadge = null;
   }
   if (!baseHref) return;
   const status = topTabStatus(claims.values());
   if (status === "idle") {
     link.setAttribute("href", baseHref);
     if (baseType) link.setAttribute("type", baseType);
+    else link.removeAttribute("type");
+    shownBadge = null;
     return;
   }
   if (!logo) {
@@ -153,6 +159,7 @@ function render(): void {
   // declared type does not match what it loads.
   link.setAttribute("type", "image/png");
   link.setAttribute("href", url);
+  shownBadge = url;
 }
 
 /**
