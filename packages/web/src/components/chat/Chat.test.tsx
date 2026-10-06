@@ -203,6 +203,28 @@ afterEach(() => {
   MockEventSource.instances = [];
 });
 
+describe("Chat read marking", () => {
+  it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {
+    const { markSessionRead } = await import("@/lib/chat-api");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(markSessionRead).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
+});
+
 describe("Chat agent identity", () => {
   it("binds generic canvas consumers to the chat canvas", () => {
     const { container } = renderChat(<Chat sessionId="session-1" />);

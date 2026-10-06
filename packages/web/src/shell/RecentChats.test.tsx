@@ -28,6 +28,8 @@ interface MockSession {
   activityAt: string;
   lastSeenActivityAt: string | null;
   unread: boolean;
+  running?: boolean;
+  lastTurnFailed?: boolean;
   projectName: string;
   projectPath: string;
   archivedAt?: string | null;
@@ -160,40 +162,97 @@ describe("RecentChats", () => {
     expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
   });
 
-  it("names the unread marker for assistive tech without adding a second text weight", async () => {
+  it("marks running, failed and finished chats, and leaves the open chat bare", async () => {
+    const base = {
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T09:00:00.000Z",
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
     mockSessions([
+      { ...base, id: "running-chat", name: "Running chat", unread: true, running: true },
+      { ...base, id: "failed-chat", name: "Failed chat", unread: false, lastTurnFailed: true },
+      { ...base, id: "done-chat", name: "Done chat", unread: true },
+      { ...base, id: "read-chat", name: "Read chat", unread: false },
       {
-        id: "unread-chat",
-        name: "Unread chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-09T09:00:00.000Z",
+        ...base,
+        id: "open-chat",
+        name: "Open chat",
         unread: true,
-        projectName: "alpha",
-        projectPath: "alpha",
-      },
-      {
-        id: "read-chat",
-        name: "Read chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-08T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-08T11:00:00.000Z",
-        unread: false,
-        projectName: "alpha",
-        projectPath: "alpha",
+        running: true,
+        projectName: "beta",
+        projectPath: "beta",
       },
     ]);
 
-    renderRecentChats();
+    renderRecentChats("/chat/open-chat");
 
-    expect(await screen.findByRole("img", { name: "Unread" })).toBeTruthy();
-    expect(screen.getAllByRole("img", { name: "Unread" })).toHaveLength(1);
-    const unreadRow = screen.getByText("Unread chat").closest("[data-chat-row]");
-    const readRow = screen.getByText("Read chat").closest("[data-chat-row]");
-    expect(unreadRow?.className).toContain("text-ui");
-    expect(readRow?.className).toContain("text-ui");
-    expect(unreadRow?.className).toContain("h-8");
-    expect(unreadRow?.className).not.toContain("font-medium");
+    const mark = (name: string) =>
+      within(screen.getByText(name).closest("[data-chat-row]") as HTMLElement).queryByRole("img");
+    await screen.findByText("Running chat");
+    expect(mark("Running chat")?.getAttribute("aria-label")).toBe("Replying now");
+    expect(mark("Failed chat")?.getAttribute("aria-label")).toBe("Stopped with an error");
+    expect(mark("Done chat")?.getAttribute("aria-label")).toBe("Done · new replies");
+    expect(mark("Read chat")).toBeNull();
+    expect(mark("Open chat")).toBeNull();
+    const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
+    expect(doneRow?.className).toContain("text-ui");
+    expect(doneRow?.className).not.toContain("font-medium");
+  });
+
+  it("follows the status stream: spins on start, refetches on stop", async () => {
+    const sources: Array<{ url: string; listeners: Map<string, (event: MessageEvent) => void> }> =
+      [];
+    class FakeEventSource {
+      listeners = new Map<string, (event: MessageEvent) => void>();
+      constructor(public url: string) {
+        sources.push(this);
+      }
+      addEventListener(name: string, listener: (event: MessageEvent) => void) {
+        this.listeners.set(name, listener);
+      }
+      removeEventListener() {}
+      close() {}
+    }
+    rs.stubGlobal("EventSource", FakeEventSource);
+    try {
+      const session = {
+        id: "live-chat",
+        name: "Live chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+      };
+      const fetchSpy = mockSessions([session]);
+      renderRecentChats();
+      await screen.findByText("Live chat");
+      const stream = sources.find((source) => source.url === "/api/chat/status/events");
+      const send = (running: boolean) =>
+        act(() => {
+          stream?.listeners.get("session_running")?.(
+            new MessageEvent("session_running", {
+              data: JSON.stringify({ sessionId: "live-chat", running }),
+            }),
+          );
+        });
+
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+
+      const listCalls = () =>
+        fetchSpy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+          .length;
+      const before = listCalls();
+      send(false);
+      await waitFor(() => expect(listCalls()).toBe(before + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+    } finally {
+      rs.unstubAllGlobals();
+    }
   });
 
   it("sorts project groups and sessions by activity time", async () => {
@@ -227,7 +286,7 @@ describe("RecentChats", () => {
     expect(textIndex(container, "Old but active")).toBeLessThan(
       textIndex(container, "New but inactive"),
     );
-    expect(container.querySelectorAll(".bg-info")).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Done · new replies" })).toHaveLength(1);
   });
 
   it("hides the Projects heading when nothing is pinned", async () => {

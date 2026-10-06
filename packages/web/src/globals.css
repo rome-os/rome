@@ -512,6 +512,10 @@
 }
 
 @theme inline {
+  /* Host-only status colour for a running chat (sidebar spinner). Not part of
+     the app token contract. */
+  --color-running: var(--running);
+
   @keyframes tw-shimmer {
     from {
       background-position: 100% 0;

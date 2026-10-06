@@ -39,7 +39,11 @@
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
-    "unread": "Unread",
+    "rowStatus": {
+      "running": "Replying now",
+      "failed": "Stopped with an error",
+      "done": "Done · new replies"
+    },
     "delete": "Delete",
     "deleteConfirm": "Delete this chat permanently? This can't be undone.",
     "archive": "Archive",

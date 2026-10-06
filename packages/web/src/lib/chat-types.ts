@@ -41,6 +41,10 @@ export interface ChatSession {
   activityAt: string;
   lastSeenActivityAt: string | null;
   unread: boolean;
+  /** Present on `GET /chat/sessions` rows: a turn is running right now. */
+  running?: boolean;
+  /** Present on `GET /chat/sessions` rows: the latest turn ended in an error. */
+  lastTurnFailed?: boolean;
   messageCount: number;
 }
 

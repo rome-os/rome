@@ -691,9 +691,10 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
-  session("mock-chat-1", "Morning brief tweaks", "default"),
-  session("mock-chat-2", "Draft launch email", "website-redesign"),
-  session("mock-chat-3", "Weekly planning"),
+  // One chat per sidebar mark: running, failed, and done with new replies.
+  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
+  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
   session("mock-chat-4", "Plumber for the leak"),
 ];
 
@@ -1021,6 +1022,11 @@ export const handlers = [
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // Held open without events: the fixture's running flags never change.
+  http.get("/api/chat/status/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   http.get("/api/chat/sessions/search", ({ request }) => {
     const query = new URL(request.url).searchParams.get("q") ?? "";
     return HttpResponse.json(searchMatches(query));

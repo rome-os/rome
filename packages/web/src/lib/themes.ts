@@ -318,6 +318,10 @@ const ember: ThemeDefinition = {
     "info-fg": "var(--orange-700)",
     "info-border": "var(--orange-100)",
 
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    // badge; `info` is orange under Ember and Ash.
+    running: "var(--blue-300)",
+
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
   dark: {
@@ -385,6 +389,9 @@ const ember: ThemeDefinition = {
     "info-bg": "var(--orange-900)",
     "info-fg": "var(--orange-200)",
     "info-border": "var(--orange-600)",
+
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    running: "var(--blue-200)",
 
     ...LEGACY_STATUS_LABELS_WARM_DARK,
   },
@@ -505,6 +512,9 @@ const ash: ThemeDefinition = {
     "info-bg": "var(--orange-50)",
     "info-fg": "var(--orange-700)",
     "info-border": "var(--orange-100)",
+
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    running: "var(--blue-300)",
 
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,
   },
@@ -627,6 +637,9 @@ const slate: ThemeDefinition = {
     "info-fg": "var(--blue-500)",
     "info-border": "var(--blue-100)",
 
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    running: "var(--blue-300)",
+
     ...LEGACY_STATUS_LABELS_SLATE_LIGHT,
   },
   dark: {
@@ -691,6 +704,9 @@ const slate: ThemeDefinition = {
     "info-bg": "var(--blue-700)",
     "info-fg": "var(--blue-150)",
     "info-border": "var(--blue-600)",
+
+    // The sidebar's running spinner. Blue in every theme, to match the tab
+    running: "var(--blue-200)",
 
     ...LEGACY_STATUS_LABELS_SLATE_DARK,
   },

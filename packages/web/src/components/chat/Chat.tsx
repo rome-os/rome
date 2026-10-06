@@ -592,8 +592,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     };
   }, []);
 
+  // A chat that changes while its tab is hidden stays unread, so the sidebar
+  // and other devices show it as new until the guardian comes back.
+  const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        hiddenReadsRef.current.add(id);
+        return;
+      }
       try {
         await apiMarkSessionRead(id);
         notifySessionsChanged();
@@ -603,6 +610,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [notifySessionsChanged],
   );
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") return;
+      const ids = [...hiddenReadsRef.current];
+      hiddenReadsRef.current.clear();
+      for (const id of ids) void markSessionRead(id);
+    };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
