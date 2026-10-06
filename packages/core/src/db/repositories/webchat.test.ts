@@ -1117,7 +1117,13 @@ describe("WebChatRepository", () => {
         { type: "pending_interaction", toolUseId: "tu-1", appId: "rome", render: {} },
       ]);
       const answer = JSON.stringify([{ type: "interaction_result", toolUseId: "tu-1" }]);
-      for (const id of ["sess-card", "sess-answered", "sess-mention", "sess-approval"]) {
+      for (const id of [
+        "sess-card",
+        "sess-answered",
+        "sess-mention",
+        "sess-approval",
+        "sess-bad",
+      ]) {
         await repo.createSession(id, id);
       }
       await repo.createSession("sess-approved", "Approved");
@@ -1132,6 +1138,7 @@ describe("WebChatRepository", () => {
         "assistant",
         '[{"type":"text","text":"a \\"pending_interaction\\" part"}]',
       );
+      await repo.addMessage("m-7", "sess-bad", "assistant", "not json");
       const approvals = new ApprovalsRepository(testDb.db);
       const approval = (sessionId: string, status?: "approved") =>
         approvals.create({
@@ -1153,6 +1160,7 @@ describe("WebChatRepository", () => {
       expect(waiting("sess-mention")).toBe(false);
       expect(waiting("sess-approval")).toBe(true);
       expect(waiting("sess-approved")).toBe(false);
+      expect(waiting("sess-bad")).toBe(false);
     });
 
     it("reads pending approvals once per list, not once per chat", () => {
