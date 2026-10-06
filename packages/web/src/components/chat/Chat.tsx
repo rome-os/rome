@@ -898,11 +898,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 segArr.push(seg);
               }
               flushSnapshot();
-              onSessionMessageRef.current?.({
-                sessionId,
-                turnId,
-                segment: seg,
-              });
+              // Only the floor's turn drives the host's workspace follow. A
+              // background turn (e.g. a parent that handed off) keeps its own
+              // trace without retargeting the host.
+              if (sessionId === floorSessionIdRef.current) {
+                onSessionMessageRef.current?.({ sessionId, turnId, segment: seg });
+              }
             } catch {
               // ignore parse errors
             }
@@ -1085,6 +1086,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // while we're polling.
         const turns = await listSessionTurns(reattachSessionId);
         if (!turns || turns.length === 0 || cancelled) return;
+        // A foreground send may have started while the lookup was in flight.
+        // It already follows its turn; a second follower would fight it for
+        // the stream controller.
+        if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
         startSessionStream(reattachSessionId, target.turnId);
