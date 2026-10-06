@@ -319,8 +319,8 @@ const ember: ThemeDefinition = {
     "info-border": "var(--orange-100)",
 
     // The sidebar's running spinner. Blue in every theme, to match the tab
-    // badge; `info` is orange under Ember and Ash. Like every key here it is
-    // part of the app token contract.
+    // badge; `info` is orange under Ember and Ash. Apps receive the variable
+    // with the theme, but it is not in the app token contract.
     running: "var(--blue-300)",
 
     ...LEGACY_STATUS_LABELS_WARM_LIGHT,

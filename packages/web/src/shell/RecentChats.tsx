@@ -242,8 +242,8 @@ const PROJECT_LOAD_MORE_COUNT = 10;
 const SESSION_NAME_MAX_LENGTH = 50;
 
 /**
- * The chat's name, linking to the chat and revealing its full text in a
- * tooltip while the sidebar is too narrow to show it whole.
+ * The chat's name, linking to the chat. Its tooltip shows the full name while
+ * the sidebar is too narrow to show it whole, and the row's status.
  */
 function ChatRowLink({
   id,

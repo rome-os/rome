@@ -512,8 +512,8 @@
 }
 
 @theme inline {
-  /* Status colour for a running chat (the sidebar spinner). Like every theme
-     key, `--running` also reaches apps through the theme. */
+  /* Status colour for a running chat (the sidebar spinner). Only the host
+     gets the utility: `--running` is not in the app token contract. */
   --color-running: var(--running);
 
   @keyframes tw-shimmer {
