@@ -64,11 +64,21 @@ export function chatRowStatus(
   isActive: boolean,
 ): ChatRowStatus | null {
   if (isActive) return null;
-  // The server already reports lastTurnFailed false while a retry runs.
+  // The list hides lastTurnFailed while a retry runs, and a live start
+  // clears it, so a failure never outranks a running retry.
   if (session.lastTurnFailed) return "failed";
   if (session.running) return "running";
   if (session.unread) return "done";
   return null;
+}
+
+function withLiveRunning<T extends Pick<ChatSession, "id" | "running" | "lastTurnFailed">>(
+  session: T,
+  live: ReadonlyMap<string, boolean>,
+): T {
+  const running = live.get(session.id);
+  if (running === undefined) return session;
+  return { ...session, running, lastTurnFailed: running ? false : session.lastTurnFailed };
 }
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
@@ -105,7 +115,7 @@ function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
     return (
       <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-warning" aria-hidden>
         <circle cx="8" cy="8" r="6.5" fill="currentColor" />
-        <g className="text-background">
+        <g className="text-(--warning-foreground)">
           <line
             x1="8"
             y1="4.2"
@@ -320,6 +330,10 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const activeSessionId = activeSessionFromPath(location.pathname);
   const searchShortcut = chatSearchShortcutForPlatform();
 
+  // The newest running state the status stream has reported per chat. A list
+  // response can be older than an event that arrived while it was in flight,
+  // so the stream's word wins over the row's.
+  const liveRunning = useRef(new Map<string, boolean>());
   const loadSessions = useCallback(async () => {
     try {
       const query = statusFilter === "active" ? "" : `?status=${statusFilter}`;
@@ -329,7 +343,11 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
         return;
       }
       const data = (await res.json()) as ChatSession[];
-      setSessions(data.map((s) => ({ ...s, archived: Boolean(s.archivedAt) })));
+      setSessions(
+        data.map((s) =>
+          withLiveRunning({ ...s, archived: Boolean(s.archivedAt) }, liveRunning.current),
+        ),
+      );
       setPhase("ready");
     } catch {
       setPhase("error");
@@ -352,12 +370,22 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       session_running: {
         schema: sessionRunningSchema,
         fn: ({ sessionId, running }) => {
-          setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, running } : s)));
+          liveRunning.current.set(sessionId, running);
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
+          );
           if (!running) void loadSessions();
         },
       },
     },
-    { onReconnect: () => void loadSessions() },
+    {
+      // Events missed while disconnected are gone, so start over from the list
+      // and the snapshot the new connection sends.
+      onReconnect: () => {
+        liveRunning.current.clear();
+        void loadSessions();
+      },
+    },
   );
 
   useEffect(() => {

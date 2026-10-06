@@ -201,7 +201,7 @@ describe("RecentChats", () => {
     expect(doneRow?.className).not.toContain("font-medium");
   });
 
-  it("follows the status stream: spins on start, refetches on stop", async () => {
+  describe("status stream", () => {
     const sources: Array<{ url: string; listeners: Map<string, (event: MessageEvent) => void> }> =
       [];
     class FakeEventSource {
@@ -215,44 +215,77 @@ describe("RecentChats", () => {
       removeEventListener() {}
       close() {}
     }
-    rs.stubGlobal("EventSource", FakeEventSource);
-    try {
-      const session = {
-        id: "live-chat",
-        name: "Live chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
-        unread: false,
-        projectName: "alpha",
-        projectPath: "alpha",
-      };
-      const fetchSpy = mockSessions([session]);
+    const live = {
+      id: "live-chat",
+      name: "Live chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const send = (running: boolean) =>
+      act(() => {
+        sources
+          .find((source) => source.url === "/api/chat/status/events")
+          ?.listeners.get("session_running")?.(
+          new MessageEvent("session_running", {
+            data: JSON.stringify({ sessionId: "live-chat", running }),
+          }),
+        );
+      });
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeAll(() => {
+      rs.stubGlobal("EventSource", FakeEventSource);
+    });
+    afterEach(() => {
+      sources.length = 0;
+    });
+
+    it("spins on start and refetches on stop", async () => {
+      const fetchSpy = mockSessions([live]);
       renderRecentChats();
       await screen.findByText("Live chat");
-      const stream = sources.find((source) => source.url === "/api/chat/status/events");
-      const send = (running: boolean) =>
-        act(() => {
-          stream?.listeners.get("session_running")?.(
-            new MessageEvent("session_running", {
-              data: JSON.stringify({ sessionId: "live-chat", running }),
-            }),
-          );
-        });
 
       send(true);
       expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
 
-      const listCalls = () =>
-        fetchSpy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions"))
-          .length;
-      const before = listCalls();
+      const before = listCalls(fetchSpy);
       send(false);
-      await waitFor(() => expect(listCalls()).toBe(before + 1));
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(before + 1));
       await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
-    } finally {
-      rs.unstubAllGlobals();
-    }
+    });
+
+    it("spins for a retry of a failed chat", async () => {
+      mockSessions([{ ...live, lastTurnFailed: true }]);
+      renderRecentChats();
+      expect(await screen.findByRole("img", { name: "Stopped with an error" })).toBeTruthy();
+
+      send(true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      expect(screen.queryByRole("img", { name: "Stopped with an error" })).toBeNull();
+    });
+
+    it("keeps a start that arrives while the list is loading", async () => {
+      let respond!: () => void;
+      rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+        await new Promise<void>((resolve) => {
+          respond = resolve;
+        });
+        return new Response(JSON.stringify([live]), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }) as typeof fetch);
+      renderRecentChats();
+      await waitFor(() => expect(respond).toBeTypeOf("function"));
+
+      send(true);
+      await act(async () => respond());
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+    });
   });
 
   it("sorts project groups and sessions by activity time", async () => {
