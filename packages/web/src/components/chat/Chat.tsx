@@ -132,6 +132,12 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 // keepalives + margin.
 const STREAM_STALL_TIMEOUT_MS = 50_000;
 
+// A dropped turn stream is retried against the same turnId. Short and capped:
+// the server answers definitively (replayed `done`, or 404 once the turn is
+// gone), so a retry is cheap, and a resumed mobile tab catches up quickly.
+const TURN_RESUME_BASE_DELAY_MS = 1_000;
+const TURN_RESUME_MAX_DELAY_MS = 5_000;
+
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
 // stream is dead — force-release it so Stop visibly takes effect on the tap
@@ -583,8 +589,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }
   }, []);
 
+  const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -772,10 +781,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string) => {
+    // Resolves true once the turn reported a terminal event (`done` or
+    // `stream_error`); false means the transport ended first.
+    async (res: Response, sessionId: string, turnId: string): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
-        return;
+        return false;
       }
 
       const reader = res.body.getReader();
@@ -785,9 +796,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // we upsert by id and replace the summary. Insertion order in segArr
       // matches the server's segment ordinals because the server emits each
       // segment's first upsert in ordinal order.
-      const segArr: TraceSegment[] = [];
-      const segIdx = new Map<string, number>();
-      let summary: TraceSnapshot["summary"] = {
+      // On a resumed stream, start from the trace already on screen; the
+      // server's replay upserts the same segment ids, so nothing regresses.
+      const retained = streamingSessionsRef.current.get(sessionId);
+      const retainedSnapshot = retained?.turnId === turnId ? retained.snapshot : null;
+      const segArr: TraceSegment[] = [...(retainedSnapshot?.segments ?? [])];
+      const segIdx = new Map(segArr.map((segment, index) => [segment.id, index]));
+      let summary: TraceSnapshot["summary"] = retainedSnapshot?.summary ?? {
         distinctApps: [],
         totalSteps: 0,
         invocationCounts: {},
@@ -811,10 +826,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }),
         ]).finally(() => clearTimeout(stallTimer));
         if (result === "stalled") {
-          // Dead connection. Release the reader and fall through to the
-          // final reload; the caller's finally block tears the streaming
-          // entry down and the floor reattach poll re-attaches from
-          // GET /turns if the turn is in fact still running server-side.
+          // Dead connection. Release the reader; followTurn reopens the
+          // same turn's stream.
           void reader.cancel().catch(() => {});
           break;
         }
@@ -969,10 +982,69 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
       }
 
-      // After stream ends, reload messages from DB (gets both trace + assistant)
-      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      return shouldStop;
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
+    [
+      t,
+      updateSessionSnapshot,
+      updateSessionAssistantText,
+      isReadVisibleSession,
+      streamingSessionsRef,
+    ],
+  );
+
+  // Follow one turn to its end. A dropped SSE connection (mobile background,
+  // network swap, stall) is not a turn outcome, so the live entry stays up and
+  // the same turn's stream is reopened. The server replays a turn's stream —
+  // including its terminal `done` for 30 s after it ends — and 404s once the
+  // turn is gone, so each retry gets a definitive answer. Settlement is keyed
+  // to this turnId: if Stop or a newer turn took the entry over, we just leave.
+  // The persisted answer loads before the live preview is released.
+  const followTurn = useCallback(
+    async (sessionId: string, turnId: string): Promise<void> => {
+      const ownsEntry = () =>
+        isMountedRef.current && streamingSessionsRef.current.get(sessionId)?.turnId === turnId;
+      let delayMs = TURN_RESUME_BASE_DELAY_MS;
+      let shownError: string | null = null;
+      for (;;) {
+        const controller = createTurnStreamController(turnId);
+        try {
+          const res = await openTurnStream(turnId, controller.signal);
+          if (res.status === 404) break;
+          if (res.ok && res.body) {
+            if (shownError) {
+              const cleared = shownError;
+              setStreamError((current) => (current === cleared ? null : current));
+              shownError = null;
+            }
+            if (await consumeStream(res, sessionId, turnId)) break;
+            delayMs = TURN_RESUME_BASE_DELAY_MS;
+          } else {
+            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            setStreamError(shownError);
+          }
+        } catch {
+          // Network blip or aborted reader: retry below.
+        } finally {
+          releaseTurnStreamController(turnId, controller);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
+        if (!ownsEntry()) return;
+      }
+      if (!isMountedRef.current) return;
+      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      endSessionStream(sessionId, turnId);
+    },
+    [
+      consumeStream,
+      createTurnStreamController,
+      releaseTurnStreamController,
+      loadMessages,
+      endSessionStream,
+      streamingSessionsRef,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -986,7 +1058,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
-    let streamController: AbortController | null = null;
 
     const schedule = (delayMs: number) => {
       if (cancelled) return;
@@ -1007,7 +1078,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         schedule(2000);
         return;
       }
-      let attachedTurnId: string | null = null;
       try {
         // List in-flight turns by turnId. Reattach to the running
         // one (or the first queued one) — its events stream is keyed by
@@ -1017,34 +1087,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         if (!turns || turns.length === 0 || cancelled) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
-        attachedTurnId = target.turnId;
-        startSessionStream(reattachSessionId, attachedTurnId);
+        startSessionStream(reattachSessionId, target.turnId);
         setStreamError(null);
-
-        streamController = createTurnStreamController(attachedTurnId);
-        const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
-        if (!streamRes.ok) {
-          if (streamRes.status !== 404 && !cancelled) {
-            setStreamError(t("stream.errors.reconnectStatus", { status: streamRes.status }));
-          }
-          return;
-        }
-
-        await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        // Not cancelled with this effect: followTurn ends with its turn (or
+        // on unmount), and the entry it holds keeps this poll from doubling up.
+        await followTurn(reattachSessionId, target.turnId);
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
       } finally {
-        if (attachedTurnId) {
-          if (streamController) {
-            releaseTurnStreamController(attachedTurnId, streamController);
-            streamController = null;
-          }
-          // Turn-guarded: this reattach finalizer must only clear the entry
-          // it installed. If a newer turn (foreground send or fresh reattach)
-          // has replaced it in the meantime, endSessionStream is a no-op.
-          endSessionStream(reattachSessionId, attachedTurnId);
-        }
         if (!cancelled) {
           schedule(2000);
         }
@@ -1055,19 +1106,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     return () => {
       cancelled = true;
-      streamController?.abort();
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [
-    floorSessionId,
-    consumeStream,
-    streamReconnectRevision,
-    startSessionStream,
-    endSessionStream,
-    createTurnStreamController,
-    releaseTurnStreamController,
-    t,
-  ]);
+  }, [floorSessionId, followTurn, streamReconnectRevision, startSessionStream]);
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -1165,28 +1206,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
       startSessionStream(sendingSessionId, pendingTurnId);
 
-      // turn is already submitted, so a failed attach or a mid-stream drop must
-      // never reject this function — that rejection is what used to restore the
-      // already-sent input. On any stream failure we just tear our bookkeeping
-      // down and let the floor reattach effect re-attach from GET /turns; the
-      // turn keeps running server-side.
+      // The turn is already submitted, so a failed attach or a mid-stream drop
+      // must never reject this function — that rejection is what used to
+      // restore the already-sent input. followTurn rides out dropped
+      // connections and settles only when the turn itself ends.
       void (async () => {
-        const streamController = createTurnStreamController(pendingTurnId);
         try {
-          const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
-          if (!streamRes.ok || !streamRes.body) {
-            setStreamError(
-              t("stream.errors.attachStreamStatus", {
-                turnId: pendingTurnId,
-                status: streamRes.status,
-              }),
-            );
-            return;
-          }
-          await consumeStream(streamRes, sendingSessionId, pendingTurnId);
-        } catch {
-          // Mid-stream drop (reader rejected, network blip). Silent like the
-          // reattach poll: bumping the reconnect revision below re-triggers it.
+          await followTurn(sendingSessionId, pendingTurnId);
         } finally {
           const turns = inflightTurnsRef.current.get(sendingSessionId);
           if (turns) {
@@ -1206,20 +1232,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             setStreamReconnectRevision((revision) => revision + 1);
             endSessionStream(sendingSessionId, pendingTurnId);
           }
-          releaseTurnStreamController(pendingTurnId, streamController);
         }
       })();
     },
-    [
-      consumeStream,
-      endSessionStream,
-      startSessionStream,
-      streamingSessionsRef,
-      t,
-      scrollToBottom,
-      createTurnStreamController,
-      releaseTurnStreamController,
-    ],
+    [followTurn, endSessionStream, startSessionStream, streamingSessionsRef, t, scrollToBottom],
   );
 
   // Send a turn into the active session. The composer owns the input state

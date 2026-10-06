@@ -364,7 +364,6 @@
       "sendStatus": "Failed to send message ({{status}}).",
       "sendInvalidResponse": "Failed to send message: invalid response.",
       "sendFallback": "Failed to send message.",
-      "attachStreamStatus": "Failed to attach stream for turn {{turnId}} ({{status}}).",
       "stopFallback": "Failed to stop generation.",
       "stopStatus": "Stop failed ({{status}})."
     }

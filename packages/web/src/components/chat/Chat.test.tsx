@@ -398,6 +398,71 @@ describe("Chat turn stream lifecycle", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  // Regression: a dropped turn SSE (mobile background, network swap) is not a
+  // turn outcome. The chat must stay live and reopen the same turn's stream
+  // instead of flashing Send until the next reattach poll.
+  describe("when the turn stream drops mid-turn", () => {
+    const encoder = new TextEncoder();
+    const doneStream = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('event: done\ndata: {"success":true}\n\n'));
+            controller.close();
+          },
+        }),
+      );
+    const droppingStreams: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const droppingStream = () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            droppingStreams.push(controller);
+          },
+        }),
+      );
+
+    const defaultOpenTurnStream = rs.mocked(openTurnStream).getMockImplementation();
+    beforeEach(() => {
+      droppingStreams.length = 0;
+      rs.mocked(listSessionTurns)
+        .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+        .mockResolvedValue([]);
+    });
+    afterEach(() => {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpenTurnStream!);
+    });
+
+    it.each([
+      ["replays done", () => Promise.resolve(doneStream())],
+      ["404s", () => Promise.resolve(new Response(null, { status: 404 }))],
+    ])("stays live, then settles once the resumed stream %s", async (_label, resume) => {
+      rs.mocked(openTurnStream)
+        .mockImplementationOnce(() => Promise.resolve(droppingStream()))
+        .mockImplementationOnce(resume);
+      renderChat(<Chat sessionId="session-1" />);
+      const composer = () => screen.getByTestId("chat-composer").getAttribute("data-streaming");
+
+      await waitFor(() => expect(composer()).toBe("true"));
+      const reloadsBeforeDrop = rs.mocked(listSessionMessages).mock.calls.length;
+      await act(async () => {
+        droppingStreams[0]!.error(new TypeError("network connection was lost"));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      // Still live: the drop alone neither ends the turn nor reloads.
+      expect(composer()).toBe("true");
+      expect(rs.mocked(listSessionMessages).mock.calls.length).toBe(reloadsBeforeDrop);
+
+      await waitFor(() => expect(composer()).toBe("false"), { timeout: 3_000 });
+      expect(rs.mocked(openTurnStream).mock.calls.map(([turnId]) => turnId)).toEqual([
+        "turn-1",
+        "turn-1",
+      ]);
+      expect(rs.mocked(listSessionMessages).mock.calls.length).toBeGreaterThan(reloadsBeforeDrop);
+    });
+  });
+
   // Regression: on mobile, a backgrounded/locked page silently kills the turn
   // SSE — the streaming entry then outlives the turn, and tapping Stop hit a
   // finished turn (interrupt → 404) that used to be swallowed with no effect

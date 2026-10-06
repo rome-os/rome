@@ -364,7 +364,6 @@
       "sendStatus": "发送消息失败({{status}})。",
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
-      "attachStreamStatus": "附加流失败,轮次 {{turnId}}({{status}})。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。"
     }
