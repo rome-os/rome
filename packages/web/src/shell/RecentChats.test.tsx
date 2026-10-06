@@ -1011,8 +1011,11 @@ describe("RecentChats chat name tooltip", () => {
     expect(tooltip.textContent).toBe(name);
   });
 
-  it("shows no tooltip when the chat name fits in the row", async () => {
-    mockSessions([longNameSession("Short chat")]);
+  it.each([
+    ["", {}],
+    [" and the chat has a status mark", { lastTurnFailed: true }],
+  ])("shows no tooltip when the chat name fits in the row%s", async (_, state) => {
+    mockSessions([{ ...longNameSession("Short chat"), ...state }]);
     const user = userEvent.setup();
 
     renderRecentChats();

@@ -257,19 +257,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole, and the row's status.
  */
-function ChatRowLink({
-  id,
-  name,
-  nested,
-  statusLabel,
-}: {
-  id: string;
-  name: string;
-  nested: boolean;
-  /** The row mark's meaning. The "…" menu takes the mark's slot on hover, so
-   *  the row's tooltip says it instead. */
-  statusLabel: string | null;
-}) {
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -306,12 +294,7 @@ function ChatRowLink({
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
           covering the neighbouring chats it was opened to compare against. */}
-      {nameClipped || statusLabel ? (
-        <TooltipContent side="right">
-          {nameClipped ? <div>{name}</div> : null}
-          {statusLabel ? <div>{statusLabel}</div> : null}
-        </TooltipContent>
-      ) : null}
+      {nameClipped ? <TooltipContent side="right">{name}</TooltipContent> : null}
     </Tooltip>
   );
 }
@@ -694,12 +677,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
             }`}
           />
         ) : (
-          <ChatRowLink
-            id={session.id}
-            name={session.name}
-            nested={nested}
-            statusLabel={statusLabel}
-          />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
