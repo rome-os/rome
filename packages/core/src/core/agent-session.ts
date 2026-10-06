@@ -1766,11 +1766,12 @@ interface TurnSink {
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
   /**
-   * The model session's `lastProviderTurnId` when the turn was sent. A turn
-   * that never reached the provider leaves it unchanged, so an unchanged id
-   * belongs to an earlier turn.
+   * The model session's `lastProviderTurnId` when the turn took the turn
+   * mutex. A turn that never reached the provider leaves it unchanged, so an
+   * unchanged id belongs to an earlier turn. Taking it at queue time instead
+   * would hand a queued turn the id of the turn ahead of it.
    */
-  providerTurnIdAtSend?: string;
+  providerTurnIdAtStart?: string;
   usageRecorded: boolean;
 }
 
@@ -2455,7 +2456,7 @@ class AgentSessionImpl implements AgentSession {
       provider: this.modelSession.providerId,
       model: this.modelSession.model,
       funding: this.modelSession.funding,
-      providerTurnId: providerTurnId !== sink.providerTurnIdAtSend ? providerTurnId : undefined,
+      providerTurnId: providerTurnId !== sink.providerTurnIdAtStart ? providerTurnId : undefined,
       accounting,
       durationMs:
         sink.lifecycleStartedAtMs === undefined
@@ -2933,10 +2934,10 @@ class AgentSessionImpl implements AgentSession {
             outputSchemaSuspended,
           );
           const projectedOut = out as StreamAgentEvent;
-          // Relayed subagent blocks carry the child's agent tag; everything
-          // else is this agent's own output.
-          yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
-          if (isTerminalEvent(out)) {
+          // Settle the outcome before yielding the terminal: a consumer that
+          // stops on it goes straight to `finally`.
+          const terminal = isTerminalEvent(out);
+          if (terminal) {
             terminalAccounting = out.accounting;
             status = isInterruptedAccounting(out.accounting)
               ? "interrupted"
@@ -2944,8 +2945,11 @@ class AgentSessionImpl implements AgentSession {
                 ? "error"
                 : "completed";
             terminalSeen = true;
-            break;
           }
+          // Relayed subagent blocks carry the child's agent tag; everything
+          // else is this agent's own output.
+          yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
+          if (terminal) break;
         }
         if (!terminalSeen) {
           status = "error";
@@ -3133,7 +3137,6 @@ class AgentSessionImpl implements AgentSession {
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
       outputSchemaSuspended: false,
-      providerTurnIdAtSend: this.modelSession.lastProviderTurnId,
       usageRecorded: false,
     };
     const events = this.buildTurnEvents(sink);
@@ -3181,6 +3184,7 @@ class AgentSessionImpl implements AgentSession {
     void this.turnMutex
       .runExclusive(
         async () => {
+          sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
           } catch (err) {

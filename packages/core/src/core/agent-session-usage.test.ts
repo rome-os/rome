@@ -36,6 +36,7 @@ describe("AgentSession turn usage", () => {
   // provider turn id, like Codex does on turn/start.
   let nextRun: () => AsyncIterable<AgentEvent>;
   let providerTurnId: string | undefined;
+  let forkable: boolean;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -56,6 +57,7 @@ describe("AgentSession turn usage", () => {
     testDb = createTestDb();
     recorded = [];
     providerTurnId = undefined;
+    forkable = false;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
@@ -64,6 +66,16 @@ describe("AgentSession turn usage", () => {
         const session = createSessionFromRun("openai", () => nextRun(), params);
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
         Object.defineProperty(session, "funding", { get: () => "byok" });
+        if (forkable) {
+          session.fork = async (fork) => ({
+            providerId: "openai",
+            sessionId: fork.sessionId,
+            sourceSessionId: "source-session",
+            mode: fork.mode ?? "ephemeral",
+            providerThreadId: "fork-thread",
+            open: async () => createSessionFromRun("openai", () => nextRun(), params),
+          });
+        }
         return session;
       },
     };
@@ -149,6 +161,54 @@ describe("AgentSession turn usage", () => {
       ["completed", "provider-turn-1"],
       ["error", undefined],
     ]);
+  });
+
+  it("does not hand a queued turn that never reached the provider the turn ahead's id", async () => {
+    let calls = 0;
+    nextRun = async function* () {
+      calls++;
+      if (calls === 1) {
+        providerTurnId = "provider-turn-1";
+        yield { type: "result", content: "done" };
+        return;
+      }
+      yield { type: "error", error: "rejected before the provider" };
+    };
+    const session = await manager.acquire(key);
+    const first = session.sendTurn({ prompt: "first" });
+    const second = session.sendTurn({ prompt: "second" });
+    await Promise.all([drain(first.events), drain(second.events)]);
+
+    expect(recorded.map((facts) => [facts.status, facts.providerTurnId])).toEqual([
+      ["completed", "provider-turn-1"],
+      ["error", undefined],
+    ]);
+  });
+
+  it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
+    forkable = true;
+    nextRun = async function* () {
+      yield {
+        type: "result",
+        content: "done",
+        accounting: {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+      };
+    };
+    const session = await manager.acquire(key);
+    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+      if (event.type === "result") break;
+    }
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      romeSessionType: "fork",
+      status: "completed",
+      accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
+    });
   });
 
   it("records a forked turn under its fork session", async () => {

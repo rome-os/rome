@@ -28,6 +28,8 @@ const REQUEST_TIMEOUT_MS = 15_000;
 interface ActionRunCursor {
   finishedAt: string;
   id: string;
+  /** Whether the sweep that wrote this cursor was signed in. */
+  reporting?: boolean;
 }
 
 export interface RomeCloudAccess {
@@ -59,6 +61,9 @@ export class UsageReporter {
     if (this.timer) return;
     this.timer = setInterval(() => void this.tick(), this.deps.intervalMs ?? DEFAULT_INTERVAL_MS);
     this.timer.unref?.();
+    // The first pass starts the action-run cursor, so runs that finish before
+    // the first interval are not mistaken for history.
+    void this.tick();
   }
 
   /** Stops the timer and waits for a tick in progress. */
@@ -91,20 +96,24 @@ export class UsageReporter {
     }
   }
 
-  // The cursor advances whether or not the instance is signed in, so signing
-  // in later does not report runs from the signed-out period.
+  // A run is reported only if the sweeps on both sides of it were signed in.
+  // The first sweep, a signed-out sweep, and the first sweep after signing in
+  // move the cursor to now without reporting, because a run in the lag window
+  // or between sweeps may have finished while signed out.
   private async sweepActionRuns(): Promise<void> {
-    const until = new Date(this.now().getTime() - SWEEP_LAG_MS);
+    const now = this.now();
     const stored = await this.deps.settings.get<ActionRunCursor>(ACTION_RUN_CURSOR_KEY);
-    if (!stored) {
+    const reporting = this.deps.access() !== null;
+    if (!stored || !reporting || stored.reporting === false) {
       await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
-        finishedAt: until.toISOString(),
+        finishedAt: now.toISOString(),
         id: "",
+        reporting,
       } satisfies ActionRunCursor);
       return;
     }
+    const until = new Date(now.getTime() - SWEEP_LAG_MS);
     let after = { finishedAt: new Date(stored.finishedAt), id: stored.id };
-    const reporting = this.deps.access() !== null;
     for (let page = 0; page < MAX_SWEEP_PAGES_PER_TICK; page++) {
       const rows = await this.deps.executions.findFinishedTopLevelAfter({
         after,
@@ -112,7 +121,7 @@ export class UsageReporter {
         limit: SWEEP_PAGE_SIZE,
       });
       for (const row of rows) {
-        const attribution = reporting ? this.deps.attribution.forActionRun(row) : null;
+        const attribution = this.deps.attribution.forActionRun(row);
         if (attribution && row.finishedAt) {
           const event: ActionRunUsageEvent = {
             type: "action_run",
@@ -132,6 +141,7 @@ export class UsageReporter {
         await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
           finishedAt: last.finishedAt.toISOString(),
           id: last.id,
+          reporting: true,
         } satisfies ActionRunCursor);
       }
       if (rows.length < SWEEP_PAGE_SIZE) return;

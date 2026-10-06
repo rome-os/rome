@@ -71,7 +71,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn) and on
 - Funding is `rome_credits`, `byok`, `subscription`, or `unknown`, decided by the provider that served the turn.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.
-- Events queue in the instance database and are delivered at least once. Rome Cloud stores each at most once. A turn that ends while the instance is signed out is not recorded, and a queued event older than 30 days is dropped.
+- Events queue in the instance database and are delivered at least once. Rome Cloud stores each at most once. A turn or action run that ends while the instance is signed out is not recorded, and neither is an action run that ends in the first minute after signing in. A queued event older than 30 days is dropped.
 - Usage events never move money. Rome credit charges come only from the gateway's own ledger.
 - The guardian cannot turn reporting off.
 

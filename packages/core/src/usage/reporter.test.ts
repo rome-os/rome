@@ -112,8 +112,9 @@ describe("UsageReporter", () => {
     await reporter().tick();
     expect(requests).toEqual([]);
     expect(await settings.get(ACTION_RUN_CURSOR_KEY)).toEqual({
-      finishedAt: "2026-10-06T11:59:50.000Z",
+      finishedAt: "2026-10-06T12:00:00.000Z",
       id: "",
+      reporting: true,
     });
   });
 
@@ -193,6 +194,44 @@ describe("UsageReporter", () => {
     await r.tick();
     expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
       ["turn-1"],
+    ]);
+  });
+
+  it("does not report a run that finished signed out inside the sweep lag once the instance signs in", async () => {
+    const r = reporter();
+    await r.tick();
+    access = null;
+    await finishedRoot("lagged-run", "news.digest", "app:news", new Date("2026-10-06T12:00:55Z"));
+    now = new Date("2026-10-06T12:01:00.000Z");
+    await r.tick();
+
+    access = ACCESS;
+    now = new Date("2026-10-06T12:02:00.000Z");
+    await r.tick();
+    await finishedRoot(
+      "signed-in-run",
+      "news.digest",
+      "app:news",
+      new Date("2026-10-06T12:02:30Z"),
+    );
+    now = new Date("2026-10-06T12:03:00.000Z");
+    await r.tick();
+
+    expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
+      ["signed-in-run"],
+    ]);
+  });
+
+  it("starts the cursor when the reporter starts, not at the first interval", async () => {
+    const r = reporter();
+    r.start();
+    await r.stop();
+    await finishedRoot("early-run", "news.digest", "app:news", new Date("2026-10-06T12:00:20Z"));
+    now = new Date("2026-10-06T12:01:00.000Z");
+    await r.tick();
+
+    expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
+      ["early-run"],
     ]);
   });
 
