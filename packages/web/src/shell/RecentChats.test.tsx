@@ -174,6 +174,16 @@ describe("RecentChats", () => {
       { ...base, id: "running-chat", name: "Running chat", unread: true, running: true },
       { ...base, id: "failed-chat", name: "Failed chat", unread: false, lastTurnFailed: true },
       { ...base, id: "done-chat", name: "Done chat", unread: true },
+      {
+        ...base,
+        id: "waiting-chat",
+        name: "Waiting chat",
+        unread: true,
+        lastTurnFailed: true,
+        awaitingGuardian: true,
+        projectName: "beta",
+        projectPath: "beta",
+      },
       { ...base, id: "read-chat", name: "Read chat", unread: false },
       {
         ...base,
@@ -193,6 +203,7 @@ describe("RecentChats", () => {
     expect(mark("Running chat")?.getAttribute("aria-label")).toBe("Replying now");
     expect(mark("Failed chat")?.getAttribute("aria-label")).toBe("Stopped with an error");
     expect(mark("Done chat")?.getAttribute("aria-label")).toBe("Done · new replies");
+    expect(mark("Waiting chat")?.getAttribute("aria-label")).toBe("Waiting for you");
     expect(mark("Read chat")).toBeNull();
     expect(mark("Open chat")).toBeNull();
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
@@ -203,6 +214,7 @@ describe("RecentChats", () => {
   it.each([
     ["running", { running: true }, "Replying now"],
     ["failed", { lastTurnFailed: true }, "Stopped with an error"],
+    ["waiting", { awaitingGuardian: true }, "Waiting for you"],
   ])("keeps the %s mark on the open chat", async (_, state, label) => {
     mockSessions([
       {
@@ -281,14 +293,17 @@ describe("RecentChats", () => {
       await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
     });
 
-    it("spins for a retry of a failed chat", async () => {
-      mockSessions([{ ...live, lastTurnFailed: true }]);
+    it.each([
+      ["a failed chat", { lastTurnFailed: true }, "Stopped with an error"],
+      ["a chat waiting on the guardian", { awaitingGuardian: true }, "Waiting for you"],
+    ])("spins for a new turn of %s", async (_, state, label) => {
+      mockSessions([{ ...live, ...state }]);
       renderRecentChats();
-      expect(await screen.findByRole("img", { name: "Stopped with an error" })).toBeTruthy();
+      expect(await screen.findByRole("img", { name: label })).toBeTruthy();
 
       send(true);
       expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
-      expect(screen.queryByRole("img", { name: "Stopped with an error" })).toBeNull();
+      expect(screen.queryByRole("img", { name: label })).toBeNull();
     });
 
     it("keeps a start that arrives while the list is loading", async () => {

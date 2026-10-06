@@ -40,6 +40,7 @@
     "newChat": "新对话",
     "empty": "还没有对话",
     "rowStatus": {
+      "waiting": "等你处理",
       "running": "正在回复",
       "failed": "出错停止了",
       "done": "已完成 · 有新回复"

@@ -1933,6 +1933,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // A new turn's trace is written a moment after it starts, so until
           // then the newest trace is the previous turn's. Running wins.
           lastTurnFailed: session.lastTurnFailed && !running,
+          awaitingGuardian: session.awaitingGuardian && !running,
         };
       }),
     );

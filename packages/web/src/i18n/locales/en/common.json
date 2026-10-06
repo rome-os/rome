@@ -40,6 +40,7 @@
     "newChat": "New chat",
     "empty": "No chats yet",
     "rowStatus": {
+      "waiting": "Waiting for you",
       "running": "Replying now",
       "failed": "Stopped with an error",
       "done": "Done · new replies"

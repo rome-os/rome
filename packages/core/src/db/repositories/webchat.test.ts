@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { ApprovalsRepository } from "./approvals.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
@@ -1107,6 +1108,48 @@ describe("WebChatRepository", () => {
       expect(failed("sess-stopped")).toBe(false);
       expect(failed("sess-running")).toBe(false);
       expect(failed("sess-empty")).toBe(false);
+    });
+
+    it("flags listSessions rows waiting on an open card or a pending approval", async () => {
+      const card = JSON.stringify([
+        { type: "text", text: "Pick one" },
+        { type: "pending_interaction", toolUseId: "tu-1", appId: "rome", render: {} },
+      ]);
+      const answer = JSON.stringify([{ type: "interaction_result", toolUseId: "tu-1" }]);
+      for (const id of ["sess-card", "sess-answered", "sess-mention", "sess-approval"]) {
+        await repo.createSession(id, id);
+      }
+      await repo.createSession("sess-approved", "Approved");
+      await repo.addMessage("m-1", "sess-card", "user", "[]");
+      await repo.addMessage("m-2", "sess-card", "assistant", card);
+      await repo.addMessage("m-3", "sess-card", "assistant", '[{"type":"text","text":"Done"}]');
+      await repo.addMessage("m-4", "sess-answered", "assistant", card);
+      await repo.addMessage("m-5", "sess-answered", "user", answer);
+      await repo.addMessage(
+        "m-6",
+        "sess-mention",
+        "assistant",
+        '[{"type":"text","text":"a \\"pending_interaction\\" part"}]',
+      );
+      const approvals = new ApprovalsRepository(testDb.db);
+      const approval = (sessionId: string, status?: "approved") =>
+        approvals.create({
+          type: "action_execution",
+          requestedBy: "agent",
+          description: "Send the email",
+          payload: { channelContext: { channel: "webchat", threadId: sessionId } },
+          status,
+        });
+      await approval("sess-approval");
+      await approval("sess-approved", "approved");
+
+      const rows = await repo.listSessions();
+      const waiting = (id: string) => rows.find((row) => row.id === id)?.awaitingGuardian;
+      expect(waiting("sess-card")).toBe(true);
+      expect(waiting("sess-answered")).toBe(false);
+      expect(waiting("sess-mention")).toBe(false);
+      expect(waiting("sess-approval")).toBe(true);
+      expect(waiting("sess-approved")).toBe(false);
     });
 
     it("finds each listed session's newest trace through its session index", () => {

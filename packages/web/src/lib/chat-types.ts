@@ -45,6 +45,8 @@ export interface ChatSession {
   running?: boolean;
   /** Present on `GET /chat/sessions` rows: the latest turn ended in an error. */
   lastTurnFailed?: boolean;
+  /** Present on `GET /chat/sessions` rows: an open card or a pending approval waits on the guardian. */
+  awaitingGuardian?: boolean;
   messageCount: number;
 }
 

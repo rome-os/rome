@@ -49,6 +49,7 @@ interface ChatSession {
   unread: boolean;
   running?: boolean;
   lastTurnFailed?: boolean;
+  awaitingGuardian?: boolean;
   projectName: string;
   projectPath: string;
   archivedAt: string | null;
@@ -56,30 +57,31 @@ interface ChatSession {
   pinnedAt: string | null;
 }
 
-/** What a chat row's mark says. Running and failed describe the chat, so they
- *  show even while it is open; done means unseen replies, so the open chat
- *  never shows it. */
-export type ChatRowStatus = "running" | "failed" | "done";
+/** What a chat row's mark says. Waiting, running and failed describe the chat,
+ *  so they show even while it is open; done means unseen replies, so the open
+ *  chat never shows it. */
+export type ChatRowStatus = "waiting" | "running" | "failed" | "done";
 
 export function chatRowStatus(
-  session: Pick<ChatSession, "running" | "lastTurnFailed" | "unread">,
+  session: Pick<ChatSession, "running" | "lastTurnFailed" | "awaitingGuardian" | "unread">,
   isActive: boolean,
 ): ChatRowStatus | null {
-  // The list hides lastTurnFailed while a retry runs, and a live start
-  // clears it, so a failure never outranks a running retry.
+  // The list hides lastTurnFailed and awaitingGuardian while a turn runs, and
+  // a live start clears them, so neither outranks a running turn.
+  if (session.awaitingGuardian) return "waiting";
   if (session.lastTurnFailed) return "failed";
   if (session.running) return "running";
   if (session.unread && !isActive) return "done";
   return null;
 }
 
-function withLiveRunning<T extends Pick<ChatSession, "id" | "running" | "lastTurnFailed">>(
-  session: T,
-  live: ReadonlyMap<string, boolean>,
-): T {
+function withLiveRunning<
+  T extends Pick<ChatSession, "id" | "running" | "lastTurnFailed" | "awaitingGuardian">,
+>(session: T, live: ReadonlyMap<string, boolean>): T {
   const running = live.get(session.id);
   if (running === undefined) return session;
-  return { ...session, running, lastTurnFailed: running ? false : session.lastTurnFailed };
+  if (!running) return { ...session, running };
+  return { ...session, running, lastTurnFailed: false, awaitingGuardian: false };
 }
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
@@ -112,7 +114,7 @@ function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
       </svg>
     );
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "waiting") {
     return (
       <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-warning" aria-hidden>
         <circle cx="8" cy="8" r="6.5" fill="currentColor" />

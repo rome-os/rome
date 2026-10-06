@@ -691,11 +691,11 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
-  // One chat per sidebar mark: running, failed, and done with new replies.
+  // One chat per sidebar mark: running, failed, done with new replies, waiting.
   { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
   { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
-  session("mock-chat-4", "Plumber for the leak"),
+  { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
 ];
 
 const messageText = (message: ChatMessage): string =>
