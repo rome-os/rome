@@ -322,7 +322,10 @@ export default function AppDetailPage() {
     const remixable = canRemixApp(app);
     if (!targetHref && !app.fullHref && !remixable) return null;
     return (
-      <PageActions>
+      // PageActions keeps its intrinsic width so it does not shrink beside the
+      // heading. Capped at the header's width, three actions wrap on a phone
+      // instead of running off the screen.
+      <PageActions className="max-w-full">
         {app.fullHref ? (
           <Button asChild variant="outline">
             <Link to={app.fullHref}>
