@@ -3,6 +3,7 @@ CREATE TABLE `usage_outbox` (
 	`type` text NOT NULL,
 	`event_id` text NOT NULL,
 	`payload` text NOT NULL,
+	`credential` text NOT NULL,
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint

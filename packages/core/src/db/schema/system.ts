@@ -657,6 +657,8 @@ export const usageOutbox = sqliteTable(
     type: text("type").$type<UsageEvent["type"]>().notNull(),
     eventId: text("event_id").notNull(),
     payload: text("payload", { mode: "json" }).$type<UsageEvent>().notNull(),
+    /** Fingerprint of the instance credential the event was recorded under. */
+    credential: text("credential").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [uniqueIndex("idx_usage_outbox_event").on(table.type, table.eventId)],

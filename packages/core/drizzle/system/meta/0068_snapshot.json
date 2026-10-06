@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c67d147d-aa77-45cf-9eb4-775fec9d765c",
+  "id": "b500ea7b-2703-463f-82cd-809fd42eba57",
   "prevId": "5f397e8f-fc3d-482b-9d33-acd239cec9c3",
   "tables": {
     "action_executions": {
@@ -2740,6 +2740,13 @@
         },
         "payload": {
           "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential": {
+          "name": "credential",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

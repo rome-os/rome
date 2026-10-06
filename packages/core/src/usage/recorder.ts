@@ -28,10 +28,13 @@ export interface TurnUsageSink {
 }
 
 export interface UsageRecorderDeps {
-  outbox: { enqueue(event: UsageEvent): Promise<void> };
+  outbox: { enqueue(event: UsageEvent, credential: string): Promise<void> };
   attribution: Pick<UsageAttributionResolver, "forTurn">;
-  /** False while the instance is not signed in to Rome Cloud. */
-  isReporting: () => boolean;
+  /**
+   * Fingerprint of the current instance credential, or null while the
+   * instance is not signed in to Rome Cloud.
+   */
+  credential: () => string | null;
 }
 
 /**
@@ -44,8 +47,11 @@ export class UsageRecorder implements TurnUsageSink {
   constructor(private readonly deps: UsageRecorderDeps) {}
 
   recordTurn(facts: TurnUsageFacts): void {
-    if (!this.deps.isReporting()) return;
-    const write = this.writeTurn(facts).catch((err: unknown) => {
+    // Bound when the turn ends, so a sign-in that changes before the event is
+    // written cannot move it to another enrollment.
+    const credential = this.deps.credential();
+    if (!credential) return;
+    const write = this.writeTurn(facts, credential).catch((err: unknown) => {
       log.warn("failed to queue turn usage", {
         turnId: facts.turnId,
         error: err instanceof Error ? err.message : String(err),
@@ -60,7 +66,7 @@ export class UsageRecorder implements TurnUsageSink {
     await Promise.all(this.pending);
   }
 
-  private async writeTurn(facts: TurnUsageFacts): Promise<void> {
+  private async writeTurn(facts: TurnUsageFacts, credential: string): Promise<void> {
     const attribution = await this.deps.attribution.forTurn({
       romeSessionId: facts.romeSessionId,
       fallbackType: facts.romeSessionType,
@@ -86,7 +92,7 @@ export class UsageRecorder implements TurnUsageSink {
       durationMs: facts.durationMs === undefined ? null : Math.max(0, Math.round(facts.durationMs)),
       occurredAt: facts.finishedAt.toISOString(),
     };
-    await this.deps.outbox.enqueue(event);
+    await this.deps.outbox.enqueue(event, credential);
   }
 }
 

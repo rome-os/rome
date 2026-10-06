@@ -5,9 +5,18 @@ import { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { UsageAttributionResolver } from "./attribution.js";
 import type { UsageEvent } from "./events.js";
-import { ACTION_RUN_CURSOR_KEY, UsageReporter, type RomeCloudAccess } from "./reporter.js";
+import {
+  ACTION_RUN_CURSOR_KEY,
+  credentialFingerprint,
+  UsageReporter,
+  type RomeCloudAccess,
+} from "./reporter.js";
 
 const ACCESS: RomeCloudAccess = { token: "romeinst_test", origin: "https://rome.example" };
+// Signing in again mints a new credential, which Rome Cloud treats as a new
+// instance.
+const REENROLLED: RomeCloudAccess = { ...ACCESS, token: "romeinst_reenrolled" };
+const CREDENTIAL = credentialFingerprint(ACCESS.token);
 const attribution: Pick<UsageAttributionResolver, "forActionRun"> = {
   forActionRun: (row) =>
     row.initiator?.startsWith("routine:")
@@ -166,7 +175,7 @@ describe("UsageReporter", () => {
         occurredAt: "2026-10-06T12:00:40.000Z",
       },
     ]);
-    expect(await outbox.peek(10)).toEqual([]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
 
     now = new Date("2026-10-06T12:02:00.000Z");
     await r.tick();
@@ -177,7 +186,7 @@ describe("UsageReporter", () => {
     const r = reporter();
     await r.tick();
     access = null;
-    await outbox.enqueue(turn("turn-1"));
+    await outbox.enqueue(turn("turn-1"), CREDENTIAL);
     await finishedRoot(
       "signed-out-run",
       "news.digest",
@@ -187,14 +196,12 @@ describe("UsageReporter", () => {
     now = new Date("2026-10-06T12:01:00.000Z");
     await r.tick();
     expect(requests).toEqual([]);
-    expect(await outbox.peek(10)).toHaveLength(1);
+    expect(await outbox.peek(CREDENTIAL, 10)).toHaveLength(1);
 
-    // Signing in again mints a new credential, which Rome Cloud treats as a
-    // new instance.
-    access = { ...ACCESS, token: "romeinst_reenrolled" };
+    access = REENROLLED;
     await r.tick();
     expect(requests).toEqual([]);
-    expect(await outbox.peek(10)).toEqual([]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
   });
 
   it("does not report a run that finished signed out inside the sweep lag once the instance signs in", async () => {
@@ -205,7 +212,7 @@ describe("UsageReporter", () => {
     now = new Date("2026-10-06T12:01:00.000Z");
     await r.tick();
 
-    access = { ...ACCESS, token: "romeinst_reenrolled" };
+    access = REENROLLED;
     now = new Date("2026-10-06T12:02:00.000Z");
     await r.tick();
     await finishedRoot(
@@ -222,13 +229,14 @@ describe("UsageReporter", () => {
     ]);
   });
 
-  it("never ships usage from an earlier enrollment under a new instance credential", async () => {
+  it("ships each event only under the credential it was recorded under", async () => {
     const r = reporter();
     await r.tick();
-    access = null;
-    await outbox.enqueue(turn("old-enrollment"));
-    // Re-enrolled before the next tick, so no sweep saw the sign-out.
-    access = { ...ACCESS, token: "romeinst_reenrolled" };
+    await outbox.enqueue(turn("old-enrollment"), CREDENTIAL);
+    // Re-enrolled between ticks, and a turn ended under the new credential
+    // before the next tick saw the change.
+    access = REENROLLED;
+    await outbox.enqueue(turn("new-enrollment"), credentialFingerprint(REENROLLED.token));
     await finishedRoot(
       "between-ticks",
       "news.digest",
@@ -237,9 +245,6 @@ describe("UsageReporter", () => {
     );
     now = new Date("2026-10-06T12:01:00.000Z");
     await r.tick();
-    expect(requests).toEqual([]);
-
-    await outbox.enqueue(turn("new-enrollment"));
     await finishedRoot(
       "signed-in-run",
       "news.digest",
@@ -248,9 +253,33 @@ describe("UsageReporter", () => {
     );
     now = new Date("2026-10-06T12:02:00.000Z");
     await r.tick();
-    expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
-      ["new-enrollment", "signed-in-run"],
+
+    expect(
+      requests.map((request) => [
+        request.authorization,
+        request.events.map((event) => event.eventId),
+      ]),
+    ).toEqual([
+      ["Bearer romeinst_reenrolled", ["new-enrollment"]],
+      ["Bearer romeinst_reenrolled", ["signed-in-run"]],
     ]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
+  });
+
+  it("does not send the rest of a pass under a credential that changed mid-pass", async () => {
+    const r = reporter();
+    await r.tick();
+    for (let i = 0; i < 201; i++) await outbox.enqueue(turn(`turn-${i}`), CREDENTIAL);
+    respond = () => {
+      access = REENROLLED;
+      return Response.json({ accepted: 200, duplicates: 0, rejected: [] });
+    };
+    await r.tick();
+
+    expect(requests.map((request) => [request.authorization, request.events.length])).toEqual([
+      ["Bearer romeinst_test", 200],
+    ]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
   });
 
   it("starts the cursor when the reporter starts, not at the first interval", async () => {
@@ -268,21 +297,21 @@ describe("UsageReporter", () => {
 
   it("retries after an outage, a rate limit, or a missing route, and drops a refused batch", async () => {
     const r = reporter();
-    await outbox.enqueue(turn("turn-1"));
+    await outbox.enqueue(turn("turn-1"), CREDENTIAL);
     for (const status of [503, 429, 404, 401]) {
       respond = () => new Response("", { status });
       await r.tick();
-      expect(await outbox.peek(10)).toHaveLength(1);
+      expect(await outbox.peek(CREDENTIAL, 10)).toHaveLength(1);
     }
     respond = () => Response.json({ error: "invalid_request" }, { status: 400 });
     await r.tick();
-    expect(await outbox.peek(10)).toEqual([]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
   });
 
   it("treats every event in a 200 response as delivered, rejected ones included", async () => {
     const r = reporter();
-    await outbox.enqueue(turn("turn-1"));
-    await outbox.enqueue(turn("turn-2"));
+    await outbox.enqueue(turn("turn-1"), CREDENTIAL);
+    await outbox.enqueue(turn("turn-2"), CREDENTIAL);
     respond = () =>
       Response.json({
         accepted: 1,
@@ -290,13 +319,13 @@ describe("UsageReporter", () => {
         rejected: [{ index: 1, eventId: "turn-2", error: "kind: invalid" }],
       });
     await r.tick();
-    expect(await outbox.peek(10)).toEqual([]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
   });
 
   it("drops queued events past retention", async () => {
-    await outbox.enqueue(turn("stale"), new Date("2026-08-01T00:00:00Z"));
+    await outbox.enqueue(turn("stale"), CREDENTIAL, new Date("2026-08-01T00:00:00Z"));
     access = null;
     await reporter().tick();
-    expect(await outbox.peek(10)).toEqual([]);
+    expect(await outbox.peek(CREDENTIAL, 10)).toEqual([]);
   });
 });

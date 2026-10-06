@@ -24,7 +24,7 @@ import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
-import { UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
+import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -681,7 +681,10 @@ async function main() {
   const usageRecorder = new UsageRecorder({
     outbox: usageOutboxRepo,
     attribution: usageAttribution,
-    isReporting: () => romeCloudAccess() !== null,
+    credential: () => {
+      const access = romeCloudAccess();
+      return access ? credentialFingerprint(access.token) : null;
+    },
   });
   const agentSessionManager = createAgentSessionManager(
     {

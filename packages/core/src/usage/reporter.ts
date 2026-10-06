@@ -26,6 +26,14 @@ const SWEEP_LAG_MS = 10_000;
 const OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Names the enrollment usage belongs to without storing the token. Signing in
+ * again mints a new credential, which Rome Cloud treats as a new instance.
+ */
+export function credentialFingerprint(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
 interface ActionRunCursor {
   finishedAt: string;
   id: string;
@@ -42,7 +50,10 @@ export interface RomeCloudAccess {
 }
 
 export interface UsageReporterDeps {
-  outbox: Pick<UsageOutboxRepository, "enqueue" | "peek" | "remove" | "pruneBefore" | "clear">;
+  outbox: Pick<
+    UsageOutboxRepository,
+    "enqueue" | "peek" | "remove" | "pruneBefore" | "pruneOtherCredentials"
+  >;
   executions: Pick<ActionExecutionsRepository, "findFinishedTopLevelAfter">;
   settings: Pick<SettingsRepository, "get" | "set">;
   attribution: Pick<UsageAttributionResolver, "forActionRun">;
@@ -104,21 +115,13 @@ export class UsageReporter {
   // same instance credential. The first sweep, a signed-out sweep, and the
   // first sweep under a new credential move the cursor to now without
   // reporting, because a run in the lag window or between sweeps may have
-  // finished while signed out. A new credential is a new instance in Rome
-  // Cloud, so events queued under the old one are dropped rather than
-  // reported as the new instance's.
+  // finished while signed out.
   private async sweepActionRuns(): Promise<void> {
     const now = this.now();
     const stored = await this.deps.settings.get<ActionRunCursor>(ACTION_RUN_CURSOR_KEY);
     const access = this.deps.access();
-    const credential = access ? createHash("sha256").update(access.token).digest("hex") : null;
+    const credential = access ? credentialFingerprint(access.token) : null;
     if (!stored || !credential || stored.credential !== credential) {
-      if (stored && credential) {
-        const dropped = await this.deps.outbox.clear();
-        if (dropped > 0) {
-          log.info("dropped usage events queued under an earlier enrollment", { dropped });
-        }
-      }
       await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
         finishedAt: now.toISOString(),
         id: "",
@@ -146,7 +149,7 @@ export class UsageReporter {
             durationMs: row.durationMs ?? null,
             occurredAt: row.finishedAt.toISOString(),
           };
-          await this.deps.outbox.enqueue(event);
+          await this.deps.outbox.enqueue(event, credential);
         }
       }
       const last = rows.at(-1);
@@ -162,11 +165,19 @@ export class UsageReporter {
     }
   }
 
+  // Each batch carries only events recorded under the credential that sends
+  // it. Events from an earlier enrollment belong to an instance this one no
+  // longer is, so they are dropped rather than reported as the new one's.
   private async ship(): Promise<void> {
     for (let batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
       const access = this.deps.access();
       if (!access) return;
-      const queued = await this.deps.outbox.peek(BATCH_SIZE);
+      const credential = credentialFingerprint(access.token);
+      const dropped = await this.deps.outbox.pruneOtherCredentials(credential);
+      if (dropped > 0) {
+        log.info("dropped usage events queued under an earlier enrollment", { dropped });
+      }
+      const queued = await this.deps.outbox.peek(credential, BATCH_SIZE);
       if (queued.length === 0) return;
       const outcome = await this.post(
         access,

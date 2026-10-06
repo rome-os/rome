@@ -29,10 +29,10 @@ describe("UsageOutboxRepository", () => {
   });
 
   it("keeps the first event queued for a type and id", async () => {
-    await repo.enqueue(run("a", "success"));
-    await repo.enqueue(run("a", "error"));
-    await repo.enqueue(run("b"));
-    const queued = await repo.peek(10);
+    await repo.enqueue(run("a", "success"), "cred-a");
+    await repo.enqueue(run("a", "error"), "cred-a");
+    await repo.enqueue(run("b"), "cred-a");
+    const queued = await repo.peek("cred-a", 10);
     expect(queued.map((entry) => [entry.event.eventId, entry.event.status])).toEqual([
       ["a", "success"],
       ["b", "success"],
@@ -40,18 +40,28 @@ describe("UsageOutboxRepository", () => {
   });
 
   it("peeks in enqueue order without removing, then removes by seq", async () => {
-    for (const id of ["a", "b", "c"]) await repo.enqueue(run(id));
-    const firstTwo = await repo.peek(2);
+    for (const id of ["a", "b", "c"]) await repo.enqueue(run(id), "cred-a");
+    const firstTwo = await repo.peek("cred-a", 2);
     expect(firstTwo.map((entry) => entry.event.eventId)).toEqual(["a", "b"]);
-    expect(await repo.peek(10)).toHaveLength(3);
+    expect(await repo.peek("cred-a", 10)).toHaveLength(3);
     await repo.remove(firstTwo.map((entry) => entry.seq));
-    expect((await repo.peek(10)).map((entry) => entry.event.eventId)).toEqual(["c"]);
+    expect((await repo.peek("cred-a", 10)).map((entry) => entry.event.eventId)).toEqual(["c"]);
+  });
+
+  it("peeks only events queued under the given credential, and prunes the rest", async () => {
+    await repo.enqueue(run("old-enrollment"), "cred-a");
+    await repo.enqueue(run("new-enrollment"), "cred-b");
+    expect((await repo.peek("cred-b", 10)).map((entry) => entry.event.eventId)).toEqual([
+      "new-enrollment",
+    ]);
+    expect(await repo.pruneOtherCredentials("cred-b")).toBe(1);
+    expect(await repo.peek("cred-a", 10)).toEqual([]);
   });
 
   it("prunes events queued before the cutoff", async () => {
-    await repo.enqueue(run("old"), new Date("2026-09-01T00:00:00Z"));
-    await repo.enqueue(run("new"), new Date("2026-10-06T00:00:00Z"));
+    await repo.enqueue(run("old"), "cred-a", new Date("2026-09-01T00:00:00Z"));
+    await repo.enqueue(run("new"), "cred-a", new Date("2026-10-06T00:00:00Z"));
     expect(await repo.pruneBefore(new Date("2026-10-01T00:00:00Z"))).toBe(1);
-    expect((await repo.peek(10)).map((entry) => entry.event.eventId)).toEqual(["new"]);
+    expect((await repo.peek("cred-a", 10)).map((entry) => entry.event.eventId)).toEqual(["new"]);
   });
 });

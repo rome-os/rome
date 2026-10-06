@@ -27,14 +27,20 @@ function facts(overrides: Partial<TurnUsageFacts> = {}): TurnUsageFacts {
   };
 }
 
-function setup(reporting = true) {
+function setup(credential: string | null = "cred-a") {
   const queued: UsageEvent[] = [];
+  const credentials: string[] = [];
   const recorder = new UsageRecorder({
-    outbox: { enqueue: async (event) => void queued.push(event) },
+    outbox: {
+      enqueue: async (event, queuedUnder) => {
+        queued.push(event);
+        credentials.push(queuedUnder);
+      },
+    },
     attribution: { forTurn: async () => ({ kind: "chat", appId: null }) },
-    isReporting: () => reporting,
+    credential: () => credential,
   });
-  return { recorder, queued };
+  return { recorder, queued, credentials };
 }
 
 describe("UsageRecorder", () => {
@@ -86,8 +92,15 @@ describe("UsageRecorder", () => {
     });
   });
 
+  it("queues the turn under the credential current when it ended", async () => {
+    const { recorder, credentials } = setup("cred-a");
+    recorder.recordTurn(facts());
+    await recorder.flush();
+    expect(credentials).toEqual(["cred-a"]);
+  });
+
   it("records nothing while the instance is not signed in", async () => {
-    const { recorder, queued } = setup(false);
+    const { recorder, queued } = setup(null);
     recorder.recordTurn(facts());
     await recorder.flush();
     expect(queued).toEqual([]);
@@ -101,7 +114,7 @@ describe("UsageRecorder", () => {
         },
       },
       attribution: { forTurn: async () => ({ kind: "chat", appId: null }) },
-      isReporting: () => true,
+      credential: () => "cred-a",
     });
     expect(() => recorder.recordTurn(facts())).not.toThrow();
     await recorder.flush();
