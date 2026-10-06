@@ -31,12 +31,19 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
   it("routes a thread to the gateway after a payer replacement", async () => {
     const home = await mkdtemp(join(tmpdir(), "rome-codex-credits-"));
     const authorizations: string[] = [];
+    const gatewayTurnIds: unknown[] = [];
     const gateway = createServer((request, response) => {
       if (request.method !== "POST" || request.url !== "/v1/responses") {
         response.writeHead(404).end();
         return;
       }
       authorizations.push(request.headers.authorization ?? "");
+      const metadata = request.headers["x-codex-turn-metadata"];
+      gatewayTurnIds.push(
+        typeof metadata === "string"
+          ? (JSON.parse(metadata) as { turn_id?: unknown }).turn_id
+          : null,
+      );
       request.resume();
       const message = {
         type: "message",
@@ -107,12 +114,18 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
       historyMode: "paginated",
       dynamicTools: null,
     };
+    const startedTurnIds: unknown[] = [];
     const runTurn = async (manager: CodexAppServerManager, threadId: string) => {
       const completed = new Promise<void>((resolve) => waiters.push(resolve));
-      await manager.requestForThread(threadId, Method.turnStart, {
+      const started = await manager.requestForThread<{ turn?: { id?: unknown } }>(
         threadId,
-        input: [{ type: "text", text: "Reply with ok.", text_elements: [] }],
-      });
+        Method.turnStart,
+        {
+          threadId,
+          input: [{ type: "text", text: "Reply with ok.", text_elements: [] }],
+        },
+      );
+      startedTurnIds.push(started?.turn?.id);
       await completed;
     };
 
@@ -130,6 +143,10 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
         { threadId, status: "completed" },
       ]);
       expect(authorizations).toEqual([`Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
+      // Rome reports the turn/start id on its usage event, and the gateway
+      // records the header's turn_id. Rome Cloud joins credit charges on them.
+      expect(startedTurnIds.every((id) => typeof id === "string")).toBe(true);
+      expect(gatewayTurnIds).toEqual(startedTurnIds);
 
       // command/exec builds its env with the same shell environment policy
       // as the agent's shell tool, so it shows what an agent command sees.

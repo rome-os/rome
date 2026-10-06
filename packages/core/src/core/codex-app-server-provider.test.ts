@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { UsageFunding } from "../usage/events.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
 import type {
   ModelSession,
@@ -2326,6 +2327,38 @@ describe("CodexAppServerProvider", () => {
       code: "usage_limit",
     });
     expect(onQuotaExhausted).toHaveBeenCalledTimes(1);
+    await session.close();
+  });
+
+  it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
+    let funding: UsageFunding = "byok";
+    const provider = new CodexAppServerProvider({ funding: () => funding });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification!("turn/completed", {
+          threadId: "thr-1",
+          turn: { id: "turn-1", status: "failed", error: { message: "upstream failed" } },
+        });
+        return { turn: { id: "turn-1" } };
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    expect(session.lastProviderTurnId).toBeUndefined();
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    expect((await collected).at(-1)).toMatchObject({ type: "error" });
+
+    // A failed turn is no resume checkpoint, but it still reached the provider.
+    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
+    expect(session.lastProviderTurnId).toBe("turn-1");
+    expect(session.funding).toBe("byok");
+    funding = "rome_credits";
+    expect(session.funding).toBe("rome_credits");
     await session.close();
   });
 

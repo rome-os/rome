@@ -88,6 +88,7 @@ import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-r
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
 import type { CodexTurnRuntime } from "./codex/turn-runtime.js";
+import type { UsageFunding } from "../usage/events.js";
 import {
   alignRomeDynamicToolsToInheritedCatalog,
   createRomeDynamicTools,
@@ -369,6 +370,8 @@ interface CodexAppServerProviderOptions {
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
   onQuotaExhausted?: () => void;
+  /** Who pays for a turn that ends now. Read once per turn, at turn end. */
+  funding?: () => UsageFunding;
 }
 
 interface CodexFailureClassification {
@@ -544,7 +547,9 @@ export class CodexAppServerProvider implements ModelProvider {
     let sourceStarted: Promise<void> = Promise.resolve();
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
+    let lastProviderTurnId: string | undefined;
     let appliedReasoningEffort: string | undefined;
+    const funding = this.options.funding;
     const dynamicToolOutputs = new Map<string, FacadeToolResult>();
     const usageByTurnId = new Map<
       string,
@@ -562,6 +567,12 @@ export class CodexAppServerProvider implements ModelProvider {
       },
       get appliedReasoningEffort(): string | undefined {
         return appliedReasoningEffort;
+      },
+      get lastProviderTurnId(): string | undefined {
+        return lastProviderTurnId;
+      },
+      get funding(): UsageFunding | undefined {
+        return funding?.();
       },
     } as ModelSession;
 
@@ -911,6 +922,9 @@ export class CodexAppServerProvider implements ModelProvider {
       imageTracker,
       romeTools,
       isClosed: () => closed,
+      onProviderTurn: (turnId) => {
+        lastProviderTurnId = turnId;
+      },
     };
 
     // The source dispatcher and exact forks share one app-server thread. Keep
@@ -985,6 +999,7 @@ export class CodexAppServerProvider implements ModelProvider {
           ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
         })) as { turn?: { id?: string } } | undefined;
         turn.turnId ??= started?.turn?.id ?? null;
+        if (turn.turnId) runtime.onProviderTurn?.(turn.turnId);
         // turn/start can acknowledge before the native input becomes steerable.
         // Identified chat inputs wait for their user-message confirmation.
         if (runtime === sourceRuntime && !turn.initialInputId) resolveSourceStarted?.();
@@ -1274,6 +1289,7 @@ export class CodexAppServerProvider implements ModelProvider {
                 throw new Error(contaminatedReason);
               },
               interrupt: async (reason) => await interruptOwnerTurn(forkParams.sessionId, reason),
+              funding,
             });
           }
 

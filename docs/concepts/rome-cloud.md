@@ -2,16 +2,17 @@
 
 Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](people.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
 
-It plays four roles:
+It plays five roles:
 
 - **Tenant provisioner** — provisions a Rome instance per paying user, manages domains and certificates.
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
+- **Usage collector** — receives the usage a signed-in instance reports about its own turns and action runs ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
 
-- A Rome instance degrades gracefully without Rome Cloud: only centralized provisioning, third-party OAuth, and app-store installs are lost. Everything local keeps working.
+- A Rome instance degrades gracefully without Rome Cloud: only centralized provisioning, third-party OAuth, app-store installs, and usage delivery are lost. Everything local keeps working.
 - The identity-provider role and the third-party OAuth broker role are distinct trust roots: the former authenticates *who owns this instance*, and never brokers a third-party provider token.
 - App-store listings and versions obey the store contracts (immutability, monotonic SemVer, full retention) stated in [`apps.md`](apps.md#app-store).
 
@@ -57,3 +58,24 @@ The handoff is the last leg of brokered third-party OAuth: a short-lived, single
 
 - **[Instance sign-in](#instance-sign-in)** — the identity trust root. The handoff delivers a provider token and never asserts who owns the instance.
 - **Sign-in links** — Rome Cloud-side records of which external account signs a user in. They hold no token and are independent of provider connections ([decision](../adrs/sign-in-links-separate-from-provider-connections.md)).
+
+## Usage reporting
+
+A signed-in instance reports one usage event per [turn](sessions.md#turn) and one per app or [routine](data.md#routines) action run to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, and where the work came from. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
+
+**Contracts:**
+
+- Every turn the instance runs while signed in yields one turn event keyed by the turn id, failed and interrupted turns included. Subagent and fork turns are their own events.
+- A turn event's kind is `chat`, `channel`, `app`, `routine`, or `other`. A subagent or fork turn takes the kind of its root session, read from session lineage when the event is recorded.
+- An action run event covers a finished top-level action execution that a routine fired, that an app called itself, or that a webhook sent to an app's action. An agent's tool calls are not action runs. Turn events count their model work.
+- Funding is `rome_credits`, `byok`, `subscription`, or `unknown`, decided by the provider that served the turn.
+- A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
+- Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.
+- Events queue in the instance database and are delivered at least once. Rome Cloud stores each at most once. A turn that ends while the instance is signed out is not recorded, and a queued event older than 30 days is dropped.
+- Usage events never move money. Rome credit charges come only from the gateway's own ledger.
+- The guardian cannot turn reporting off.
+
+**Not to be confused with:**
+
+- **Telemetry** — the OTEL traces and metrics in [observability](../architecture/observability.md) are aggregated operational signals with no delivery guarantee. Usage events are per-turn records that are delivered and deduplicated.
+- **Rome credits usage** — the credits balance and recent gateway requests an instance reads from Rome Cloud. That ledger covers only gateway traffic, and usage events cover every funding source.

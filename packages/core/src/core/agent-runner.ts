@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
+import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
@@ -273,6 +274,15 @@ export interface ModelSession {
 
   /** Opaque checkpoint for the most recent successfully completed provider turn. */
   readonly lastCompletedTurnCheckpoint?: string;
+
+  /**
+   * The provider's own id for the most recent turn that reached it, whatever
+   * its outcome. Unset for providers that mint no turn ids of their own.
+   */
+  readonly lastProviderTurnId?: string;
+
+  /** Who pays the model provider for a turn that ends now. Unset when unknown. */
+  readonly funding?: UsageFunding;
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;

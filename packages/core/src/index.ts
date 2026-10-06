@@ -18,7 +18,13 @@ import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
-import { getConfiguredInstanceOrigin } from "./lib/rome-cloud-origin.js";
+import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
+import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
+import { createUsageAppDirectory } from "./usage/app-directory.js";
+import { UsageAttributionResolver } from "./usage/attribution.js";
+import { codexFunding } from "./usage/funding.js";
+import { UsageRecorder } from "./usage/recorder.js";
+import { UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -297,6 +303,7 @@ async function main() {
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
+  const usageOutboxRepo = new UsageOutboxRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
@@ -543,6 +550,14 @@ async function main() {
     appServerManager: codexAppServerManager,
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
+    funding: () => {
+      const account = aiToolState.get().codex;
+      return codexFunding({
+        defaultProvider: codexAppServerManager.getDefaultProvider(),
+        accountType: account.accountType,
+        loggedIn: account.loggedIn,
+      });
+    },
   });
   const modelResolver = createModelResolver({
     aiToolState,
@@ -650,6 +665,24 @@ async function main() {
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
+  const romeCloudAccess = (): RomeCloudAccess | null => {
+    const token = getInstanceToken();
+    const origin = getRomeCloudOrigin();
+    return token && origin ? { token, origin } : null;
+  };
+  const usageAttribution = new UsageAttributionResolver(
+    {
+      getSession: (id) => webchatRepo.getSession(id),
+      getExecutionInitiator: async (id) =>
+        (await actionExecutionsRepo.findById(id))?.initiator ?? null,
+    },
+    createUsageAppDirectory({ agentLoader, actionRegistry, appCatalog }),
+  );
+  const usageRecorder = new UsageRecorder({
+    outbox: usageOutboxRepo,
+    attribution: usageAttribution,
+    isReporting: () => romeCloudAccess() !== null,
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -668,6 +701,7 @@ async function main() {
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
         (await conversationSettings.get(ref)).effective.session.reset,
+      usageRecorder,
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -1494,6 +1528,16 @@ async function main() {
   // to "not enrolled" and routes the dashboard to the connect flow.
   const stopInstanceHeartbeat = startInstanceIdentityHeartbeat({ store: settingsRepo });
 
+  // Report turns and app or routine runs to Rome Cloud while signed in.
+  const usageReporter = new UsageReporter({
+    outbox: usageOutboxRepo,
+    executions: actionExecutionsRepo,
+    settings: settingsRepo,
+    attribution: usageAttribution,
+    access: romeCloudAccess,
+  });
+  usageReporter.start();
+
   // Self-provision the webhook-relay mailbox using the durable instance token
   //: present it to Rome Cloud, store the returned credential, and point
   // the live drainer at it. Fire-and-forget and idempotent — it re-mints a
@@ -1557,6 +1601,14 @@ async function main() {
     stopInstanceHeartbeat();
     await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
+
+    try {
+      await usageRecorder.flush();
+      await usageReporter.stop();
+      shutdownLog.info("usage reporter stopped");
+    } catch (err) {
+      shutdownLog.error("error stopping usage reporter", { error: err });
+    }
 
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");

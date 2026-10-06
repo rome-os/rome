@@ -10,6 +10,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState } from "@rome-os/app-runtime";
 import type { OutboxMessage } from "@rome/api-types/people";
+import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
   APPROVAL_EXECUTION_STATES,
@@ -613,32 +614,53 @@ export const sharedChats = sqliteTable(
   (table) => [index("idx_shared_chats_session_id").on(table.sessionId)],
 );
 
-export const actionExecutions = sqliteTable("action_executions", {
-  id: text("id").primaryKey(),
-  rootExecutionId: text("root_execution_id").notNull(),
-  actionName: text("action_name").notNull(),
-  actionType: text("action_type"), // "system" | "custom"
-  status: text("status", {
-    enum: ["running", "success", "error", "pending_approval", "cancelled"],
-  }).notNull(),
-  args: text("args", { mode: "json" }),
-  error: text("error"),
-  durationMs: integer("duration_ms"),
-  initiator: text("initiator"),
-  // Authenticated session identity accountable for this execution (a
-  // `SessionActor` — guardian / visitor / anonymous), resolved host-side at the
-  // HTTP/WS boundary and inherited down the execution chain. NULL = no
-  // accountable session anywhere in the chain (agent-autonomous, routine,
-  // webhook, startup). Orthogonal to `initiator`, which names the triggering
-  // mechanism.
-  actor: text("actor", { mode: "json" }),
-  parentId: text("parent_id"),
-  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  finishedAt: integer("finished_at", { mode: "timestamp" }),
-  cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
-  cancellationReason: text("cancellation_reason"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+export const actionExecutions = sqliteTable(
+  "action_executions",
+  {
+    id: text("id").primaryKey(),
+    rootExecutionId: text("root_execution_id").notNull(),
+    actionName: text("action_name").notNull(),
+    actionType: text("action_type"), // "system" | "custom"
+    status: text("status", {
+      enum: ["running", "success", "error", "pending_approval", "cancelled"],
+    }).notNull(),
+    args: text("args", { mode: "json" }),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    initiator: text("initiator"),
+    // Authenticated session identity accountable for this execution (a
+    // `SessionActor` — guardian / visitor / anonymous), resolved host-side at the
+    // HTTP/WS boundary and inherited down the execution chain. NULL = no
+    // accountable session anywhere in the chain (agent-autonomous, routine,
+    // webhook, startup). Orthogonal to `initiator`, which names the triggering
+    // mechanism.
+    actor: text("actor", { mode: "json" }),
+    parentId: text("parent_id"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp" }),
+    cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
+    cancellationReason: text("cancellation_reason"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    // The usage reporter pages through finished root executions in this order.
+    index("idx_action_executions_finished").on(table.finishedAt, table.id),
+  ],
+);
+
+// Usage events waiting for delivery to Rome Cloud. A row leaves once Rome
+// Cloud answers for it. Contract: docs/concepts/rome-cloud.md#usage-reporting.
+export const usageOutbox = sqliteTable(
+  "usage_outbox",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    type: text("type").$type<UsageEvent["type"]>().notNull(),
+    eventId: text("event_id").notNull(),
+    payload: text("payload", { mode: "json" }).$type<UsageEvent>().notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_usage_outbox_event").on(table.type, table.eventId)],
+);
 
 export const webhookInvocations = sqliteTable(
   "webhook_invocations",

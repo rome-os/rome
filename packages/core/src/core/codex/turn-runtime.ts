@@ -20,4 +20,6 @@ export interface CodexTurnRuntime {
    * uses this seam to restore source history with thread/revert.
    */
   beforeTerminal?: (turn: { threadId: string; turnId: string }) => Promise<void>;
+  /** Called once a turn on this runtime has a Codex turn id. */
+  onProviderTurn?: (turnId: string) => void;
 }
